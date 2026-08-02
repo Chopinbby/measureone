@@ -535,6 +535,24 @@ function computeConfidence(chunk, piece, currentDay) {
   return computeAutoConfidence(chunk, piece, currentDay);
 }
 
+const PROGRESS_TIER_META = {
+  untouched: { label: "Not touched", color: "var(--ink-faint)" },
+  learned: { label: "Learned", color: "var(--brick)" },
+  comfortable: { label: "Comfortable", color: "var(--brass)" },
+  mastered: { label: "Mastered", color: "var(--teal)" },
+};
+
+// Buckets a chunk by its most recently logged clean-rep count, not a peak
+// ever achieved — same "what's true right now" convention as currentBPM.
+function computeProgressTier(chunk, piece) {
+  const sessions = (piece.progress[chunk.id] || {}).sessions || [];
+  if (sessions.length === 0) return "untouched";
+  const lastReps = sessions[sessions.length - 1].cleanReps || 0;
+  if (lastReps >= 10) return "mastered";
+  if (lastReps >= 5) return "comfortable";
+  return "learned";
+}
+
 function isManualConfidence(chunk, progress) {
   const entry = progress[chunk.id] || {};
   return entry.manualConfidence !== undefined && entry.manualConfidence !== null;
@@ -1234,9 +1252,10 @@ function ScheduleBanner({ piece, practiceChunks, timeline, currentDay, onResched
 function OverviewTab({ piece, practiceChunks, timeline, currentDay, onReschedule, onAddPiece }) {
   const avgPerDay = Math.round(timeline.days.reduce((s, d) => s + d.minutes, 0) / timeline.days.length / 5) * 5;
 
-  const easyMeasures = piece.measureDifficulty.filter((v) => v === 1).length;
-  const mediumMeasures = piece.measureDifficulty.filter((v) => v === 2).length;
-  const hardMeasures = piece.totalMeasures - easyMeasures - mediumMeasures;
+  const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
+  practiceChunks.forEach((c) => {
+    tierMeasures[computeProgressTier(c, piece)] += c.measureCount;
+  });
 
   const totalProgressPct = practiceChunks.length
     ? Math.round(practiceChunks.reduce((s, c) => s + computeConfidence(c, piece, currentDay), 0) / practiceChunks.length)
@@ -1274,16 +1293,19 @@ function OverviewTab({ piece, practiceChunks, timeline, currentDay, onReschedule
       </div>
 
       <div className="panel">
-        <h3>Difficulty balance</h3>
+        <h3>Practice progress</h3>
         <div className="bal-row">
-          <div className="bal-seg" style={{ flex: easyMeasures || 0.001, background: "var(--teal)" }} />
-          <div className="bal-seg" style={{ flex: mediumMeasures || 0.001, background: "var(--brass)" }} />
-          <div className="bal-seg" style={{ flex: hardMeasures || 0.001, background: "var(--brick)" }} />
+          {Object.keys(PROGRESS_TIER_META).map((tier) => (
+            <div key={tier} className="bal-seg" style={{ flex: tierMeasures[tier] || 0.001, background: PROGRESS_TIER_META[tier].color }} />
+          ))}
         </div>
         <div className="diff-summary">
-          <div className="diff-summary-item"><i className="dot" style={{ background: "var(--teal)" }} />Easy measures: <strong>{easyMeasures}</strong></div>
-          <div className="diff-summary-item"><i className="dot" style={{ background: "var(--brass)" }} />Medium measures: <strong>{mediumMeasures}</strong></div>
-          <div className="diff-summary-item"><i className="dot" style={{ background: "var(--brick)" }} />Hard measures: <strong>{hardMeasures}</strong></div>
+          {Object.keys(PROGRESS_TIER_META).map((tier) => (
+            <div key={tier} className="diff-summary-item">
+              <i className="dot" style={{ background: PROGRESS_TIER_META[tier].color }} />
+              {PROGRESS_TIER_META[tier].label}: <strong>{Math.round((tierMeasures[tier] / piece.totalMeasures) * 100)}%</strong>
+            </div>
+          ))}
         </div>
       </div>
 

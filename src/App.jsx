@@ -68,6 +68,20 @@ function formatDuration(totalSeconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function formatHoursMinutes(totalSeconds) {
+  const totalMinutes = Math.round(totalSeconds / 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function sumPracticeSeconds(piece) {
+  return Object.values(piece.progress).reduce(
+    (sum, entry) => sum + (entry.sessions || []).reduce((s, sess) => s + (sess.durationSeconds || 0), 0),
+    0
+  );
+}
+
 function autoChunkSize(totalMeasures) {
   if (totalMeasures <= 32) return 2;
   if (totalMeasures <= 80) return 4;
@@ -261,16 +275,23 @@ function sectionLabel(section, index) {
   return (section.name && section.name.trim()) || `Section ${index + 1}`;
 }
 
+function isSectionLearned(section, piece, bySectionId) {
+  const assigned = bySectionId[section.id] || [];
+  if (!assigned.length) return false;
+  return assigned.every((c) => ((piece.progress[c.id] || {}).sessions || []).length > 0);
+}
+
+function countLearnedSections(piece, practiceChunks) {
+  if (!piece.sections.length) return 0;
+  const bySectionId = chunksBySectionId(piece, practiceChunks);
+  return piece.sections.filter((s) => isSectionLearned(s, piece, bySectionId)).length;
+}
+
 function computeSectionRunThroughs(piece, practiceChunks) {
   if (!piece.sections.length || !practiceChunks.length) return [];
   const bySectionId = chunksBySectionId(piece, practiceChunks);
   const ordered = [...piece.sections].sort((a, b) => a.start - b.start);
-
-  const isLearned = (section) => {
-    const assigned = bySectionId[section.id] || [];
-    if (!assigned.length) return false;
-    return assigned.every((c) => ((piece.progress[c.id] || {}).sessions || []).length > 0);
-  };
+  const isLearned = (section) => isSectionLearned(section, piece, bySectionId);
 
   const runThroughs = [];
   ordered.forEach((section, i) => {
@@ -1251,12 +1272,13 @@ function ScheduleBanner({ piece, practiceChunks, timeline, currentDay, onResched
 /* ------------------------------------------------------------------ */
 
 function OverviewTab({ piece, practiceChunks, timeline, currentDay, onReschedule, onAddPiece }) {
-  const avgPerDay = Math.round(timeline.days.reduce((s, d) => s + d.minutes, 0) / timeline.days.length / 5) * 5;
-
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
     tierMeasures[computeProgressTier(c, piece)] += c.measureCount;
   });
+  const measuresLearned = piece.totalMeasures - tierMeasures.untouched;
+  const sectionsLearned = countLearnedSections(piece, practiceChunks);
+  const totalPracticeSeconds = sumPracticeSeconds(piece);
 
   const totalProgressPct = practiceChunks.length
     ? Math.round(practiceChunks.reduce((s, c) => s + computeConfidence(c, piece, currentDay), 0) / practiceChunks.length)
@@ -1287,9 +1309,9 @@ function OverviewTab({ piece, practiceChunks, timeline, currentDay, onReschedule
       <ManuscriptStrip chunks={practiceChunks} />
 
       <div className="stat-grid">
-        <div className="stat-card"><span className="stat-num mono">{piece.totalMeasures}</span><span className="stat-lbl">Total measures</span></div>
-        <div className="stat-card"><span className="stat-num mono">{piece.sections.length}</span><span className="stat-lbl">Sections</span></div>
-        <div className="stat-card"><span className="stat-num mono">{avgPerDay}</span><span className="stat-lbl">Avg. min / day</span></div>
+        <div className="stat-card"><span className="stat-num mono">{measuresLearned}/{piece.totalMeasures}</span><span className="stat-lbl">Measures learned</span></div>
+        <div className="stat-card"><span className="stat-num mono">{sectionsLearned}/{piece.sections.length}</span><span className="stat-lbl">Sections learned</span></div>
+        <div className="stat-card"><span className="stat-num mono">{formatHoursMinutes(totalPracticeSeconds)}</span><span className="stat-lbl">Time practiced</span></div>
         <div className="stat-card"><span className="stat-num mono">{totalProgressPct}%</span><span className="stat-lbl">Total progress</span></div>
       </div>
 

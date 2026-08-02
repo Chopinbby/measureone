@@ -40,7 +40,14 @@ const DIFFICULTY_META = {
 };
 const LEVEL_LABEL = { 1: "easy", 2: "medium", 3: "hard" };
 const REQUIRED_REPS = { easy: 3, medium: 4, hard: 5 };
-const ROLE_LABEL = { new: "New", review: "Review", transition: "Review", combo: "Focus block" };
+const ROLE_LABEL = {
+  new: "New",
+  review: "Review",
+  transition: "Review",
+  combo: "Focus block",
+  "section-runthrough": "Section run-through",
+  "section-transition": "Sections combined",
+};
 const EFFECTIVENESS_OPTIONS = [
   { value: "low", label: "Needs more work" },
   { value: "good", label: "Good" },
@@ -227,6 +234,91 @@ function generateAllChunks(piece) {
   const transitions = generateTransitionChunks(practiceChunks, piece.measureDifficulty);
   const combos = generateComboChunks(practiceChunks, piece.measureDifficulty);
   return { practiceChunks, transitions, combos, all: [...practiceChunks, ...transitions, ...combos] };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Section run-throughs: unlike chunks/transitions/combos above,     */
+/*  these are NOT part of the precomputed timeline and carry no       */
+/*  scheduled day. A section only becomes eligible once every chunk   */
+/*  assigned to it has an actual logged session (not just "scheduled  */
+/*  to be introduced") — so this is derived fresh from live progress  */
+/*  on every render and surfaced dynamically in Today's Practice,     */
+/*  rather than pinned to a day the way transitions/combos are.       */
+/* ------------------------------------------------------------------ */
+
+function chunksBySectionId(piece, practiceChunks) {
+  const map = {};
+  piece.sections.forEach((s) => { map[s.id] = []; });
+  practiceChunks.forEach((c) => {
+    const mid = (c.start + c.end) / 2;
+    const owner = piece.sections.find((s) => mid >= s.start && mid <= s.end);
+    if (owner) map[owner.id].push(c);
+  });
+  return map;
+}
+
+function sectionLabel(section, index) {
+  return (section.name && section.name.trim()) || `Section ${index + 1}`;
+}
+
+function computeSectionRunThroughs(piece, practiceChunks) {
+  if (!piece.sections.length || !practiceChunks.length) return [];
+  const bySectionId = chunksBySectionId(piece, practiceChunks);
+  const ordered = [...piece.sections].sort((a, b) => a.start - b.start);
+
+  const isLearned = (section) => {
+    const assigned = bySectionId[section.id] || [];
+    if (!assigned.length) return false;
+    return assigned.every((c) => ((piece.progress[c.id] || {}).sessions || []).length > 0);
+  };
+
+  const runThroughs = [];
+  ordered.forEach((section, i) => {
+    if (!isLearned(section)) return;
+    const { avg, label } = weightedDifficultyFromArray(piece.measureDifficulty, section.start, section.end);
+    runThroughs.push({
+      id: `sr_${section.id}`,
+      kind: "section-runthrough",
+      label: `Play through: ${sectionLabel(section, i)}`,
+      start: section.start,
+      end: section.end,
+      measureCount: section.end - section.start + 1,
+      avgDifficulty: avg,
+      difficultyLabel: label,
+      recurring: false,
+      recurringNote: null,
+      linkedIds: [section.id],
+    });
+  });
+
+  // Combined section-pair run-throughs wait until every chunk in the whole
+  // piece has been practiced at least once — these are meant as a late-stage
+  // "play through two sections back to back" drill, not an early one.
+  const allChunksPracticed = practiceChunks.every((c) => ((piece.progress[c.id] || {}).sessions || []).length > 0);
+  const transitions = [];
+  if (allChunksPracticed) {
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const a = ordered[i];
+      const b = ordered[i + 1];
+      if (!isLearned(a) || !isLearned(b)) continue;
+      const { avg, label } = weightedDifficultyFromArray(piece.measureDifficulty, a.start, b.end);
+      transitions.push({
+        id: `st_${a.id}_${b.id}`,
+        kind: "section-transition",
+        label: `Play through: ${sectionLabel(a, i)} → ${sectionLabel(b, i + 1)}`,
+        start: a.start,
+        end: b.end,
+        measureCount: b.end - a.start + 1,
+        avgDifficulty: avg,
+        difficultyLabel: label,
+        recurring: false,
+        recurringNote: null,
+        linkedIds: [a.id, b.id],
+      });
+    }
+  }
+
+  return [...runThroughs, ...transitions];
 }
 
 /* ------------------------------------------------------------------ */
@@ -449,6 +541,8 @@ function isManualConfidence(chunk, progress) {
 }
 
 function suggestMethods(chunk, confidence) {
+  if (chunk.kind === "section-runthrough" || chunk.kind === "section-transition")
+    return ["Full run-through without stopping", "Note where it still catches, fix it separately after"];
   if (chunk.kind === "transition") return ["Slow practice at the seam", "Backward chaining into it"];
   if (chunk.kind === "combo") return ["Start cold at the top of the block", "Slow practice", "Tempo ladder"];
   if (chunk.difficultyLabel === "hard" && confidence < 50)
@@ -1455,6 +1549,7 @@ function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession }
         </button>
         <div className="checklist-body">
           <div className="checklist-row">
+            {chunk.label && <span className="checklist-label">{chunk.label}</span>}
             <span className="mono">{formatRange(chunk.start, chunk.end)}</span>
             <span className={`tag tag-${role}`}>{ROLE_LABEL[role]}</span>
             <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
@@ -1486,6 +1581,7 @@ function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession }
       />
       <div className="checklist-body">
         <div className="checklist-row">
+          {chunk.label && <span className="checklist-label">{chunk.label}</span>}
           <span className="mono">{formatRange(chunk.start, chunk.end)}</span>
           <span className={`tag tag-${role}`}>{ROLE_LABEL[role]}</span>
           <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
@@ -1611,6 +1707,39 @@ function FocusPanel({ piece, chunks, currentDay }) {
   );
 }
 
+function SectionRunThroughPanel({ piece, practiceChunks, currentDay, onLogSession, onUnlogSession }) {
+  const items = useMemo(
+    () => computeSectionRunThroughs(piece, practiceChunks),
+    [piece, practiceChunks]
+  );
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="panel focus-panel">
+      <h3>Section run-throughs</h3>
+      <p className="wizard-hint">
+        Unlocked once every chunk in a section has been practiced at least once — a chance to play
+        through continuously instead of chunk by chunk. Combined section run-throughs unlock once
+        the whole piece has been practiced in chunks.
+      </p>
+      <div className="checklist">
+        {items.map((item) => (
+          <ChecklistItem
+            key={item.id}
+            chunk={item}
+            role={item.kind}
+            piece={piece}
+            day={currentDay}
+            onLogSession={onLogSession}
+            onUnlogSession={onUnlogSession}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ReassessPanel({ piece, todaysRanges, onReassessRange }) {
   const [open, setOpen] = useState(false);
   const [from, setFrom] = useState(1);
@@ -1723,6 +1852,13 @@ function TodayTab({
       </div>
 
       <FocusPanel piece={piece} chunks={chunks} currentDay={currentDay} />
+      <SectionRunThroughPanel
+        piece={piece}
+        practiceChunks={practiceChunks}
+        currentDay={currentDay}
+        onLogSession={onLogSession}
+        onUnlogSession={onUnlogSession}
+      />
 
       {viewMode === "day" ? (
         <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onToggleDone={onToggleDone} />
@@ -2680,11 +2816,14 @@ const CSS = `
 .checklist-check-empty:disabled { cursor: not-allowed; opacity: 0.6; }
 .checklist-body { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .checklist-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.checklist-label { font-weight: 700; }
 .tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
 .tag-new { background: var(--brass); color: var(--white); }
 .tag-review { background: var(--ink-soft); color: var(--white); }
 .tag-transition { background: var(--teal); color: var(--white); }
 .tag-combo { background: var(--brick); color: var(--white); }
+.tag-section-runthrough { background: var(--brass-deep); color: var(--white); }
+.tag-section-transition { background: var(--ink); color: var(--white); }
 .tag.subtle { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); }
 .conf-pill { margin-left: auto; font-size: 12px; color: var(--brass-deep); font-weight: 600; }
 .tip-line { font-size: 12px; color: var(--ink-soft); margin: 0; }

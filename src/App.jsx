@@ -603,6 +603,25 @@ function computeConfidence(chunk, piece, currentDay) {
   return computeAutoConfidence(chunk, piece, currentDay);
 }
 
+// What computeConfidence would have returned if evaluated on a past plan-day:
+// only counts doneDays/sessions that existed by asOfDay, and runs recency
+// decay relative to asOfDay instead of today. Used to measure improvement
+// over a trailing window (e.g. "this week") rather than confidence's usual
+// "right now" reading.
+// Known limitation: manualConfidence has no recorded set-date, so if one is
+// present it applies regardless of asOfDay rather than being excluded for
+// cutoffs before it was actually set.
+function computeConfidenceAsOf(chunk, piece, asOfDay) {
+  const entry = piece.progress[chunk.id] || {};
+  const filteredEntry = {
+    ...entry,
+    doneDays: (entry.doneDays || []).filter((d) => d <= asOfDay),
+    sessions: (entry.sessions || []).filter((s) => s.day <= asOfDay),
+  };
+  const asOfPiece = { ...piece, progress: { ...piece.progress, [chunk.id]: filteredEntry } };
+  return computeConfidence(chunk, asOfPiece, asOfDay);
+}
+
 const PROGRESS_TIER_META = {
   untouched: { label: "Not touched", color: "var(--ink-faint)" },
   learned: { label: "Learned", color: "var(--brick)" },
@@ -2044,44 +2063,113 @@ function TodayTab({
   );
 }
 
+function Sparkline({ values }) {
+  const w = 130;
+  const h = 30;
+  const pad = 3;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const points = values
+    .map((v, i) => {
+      const x = pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
+      const y = h - pad - ((v - min) / span) * (h - pad * 2);
+      return `${x},${y}`;
+    })
+    .join(" ");
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="sparkline">
+      <polyline points={points} fill="none" stroke="var(--brass-deep)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function ProgressTab({ piece, chunks, timeline, currentDay }) {
-  const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const practiceChunks = chunks.filter((c) => c.kind === "section");
 
-  const plannedByDay = {};
-  let cum = 0;
-  timeline.days.forEach((d) => {
-    cum += d.newChunkIds.length;
-    plannedByDay[d.dayNumber] = cum;
+  // #1 Rolling-window consistency — not a streak: a plain fraction of the
+  // last N days with any logged activity, no "best ever" shown alongside it.
+  const practicedDays = new Set();
+  Object.entries(piece.progress).forEach(([id, entry]) => {
+    (entry.sessions || []).forEach((s) => practicedDays.add(s.day));
+    if (id === "__consolidation__") (entry.doneDays || []).forEach((d) => practicedDays.add(d));
   });
-
-  const firstDone = {};
-  practiceChunks.forEach((c) => {
-    const dd = (piece.progress[c.id] || {}).doneDays || [];
-    if (dd.length) firstDone[c.id] = Math.min(...dd);
-  });
-  const actualByDay = {};
-  let acum = 0;
-  for (let d = 1; d <= timeline.days.length; d++) {
-    acum += Object.values(firstDone).filter((fd) => fd === d).length;
-    actualByDay[d] = acum;
+  const consistencyWindow = Math.min(14, currentDay);
+  const consistencyStart = Math.max(1, currentDay - consistencyWindow + 1);
+  let consistencyCount = 0;
+  for (let d = consistencyStart; d <= currentDay; d++) {
+    if (practicedDays.has(d)) consistencyCount++;
   }
 
-  const plannedToday = plannedByDay[currentDay] || 0;
-  const actualToday = actualByDay[currentDay] || 0;
-  const diff = actualToday - plannedToday;
-  const scheduleStatus = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
-  const statusLabel =
-    scheduleStatus.missedCount > 0
-      ? `${scheduleStatus.missedCount} chunk${scheduleStatus.missedCount === 1 ? "" : "s"} behind schedule`
-      : diff > 0
-      ? `${diff} chunk${diff === 1 ? "" : "s"} ahead of schedule`
-      : "Right on schedule";
+  // #6 Most improved this week — biggest positive confidence delta over the
+  // trailing 7 days. Absence of a positive delta is shown neutrally.
+  const asOfDay = Math.max(1, currentDay - 7);
+  const mostImproved = chunks
+    .map((c) => ({ chunk: c, delta: computeConfidence(c, piece, currentDay) - computeConfidenceAsOf(c, piece, asOfDay) }))
+    .filter((x) => x.delta > 0)
+    .sort((a, b) => b.delta - a.delta)[0];
 
-  const confidences = chunks.map((c) => computeConfidence(c, piece, currentDay));
-  const avgConfidence = chunks.length ? Math.round(confidences.reduce((s, v) => s + v, 0) / chunks.length) : 0;
-  const solidCount = confidences.filter((v) => v >= 67).length;
+  // #3 Tempo trend — sparkline of logged BPM per chunk with 2+ sessions and
+  // a resolvable target, across practice chunks, transitions, and combos.
+  const tempoTrends = chunks
+    .map((c) => {
+      const entry = piece.progress[c.id] || {};
+      const sessions = [...(entry.sessions || [])].sort((a, b) => a.day - b.day);
+      const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, c);
+      return { chunk: c, sessions, targetBPM };
+    })
+    .filter((t) => t.sessions.length >= 2 && t.targetBPM);
 
+  // #4 Effectiveness calibration — % distribution of self-reported feel
+  // across every logged session in the piece.
+  const allSessions = Object.values(piece.progress).flatMap((entry) => entry.sessions || []);
+  const effectivenessColors = { low: "var(--brick)", good: "var(--brass)", high: "var(--teal)" };
+  const effectivenessBreakdown = EFFECTIVENESS_OPTIONS.map((opt) => {
+    const count = allSessions.filter((s) => s.effectiveness === opt.value).length;
+    return { ...opt, count, pct: allSessions.length ? Math.round((count / allSessions.length) * 100) : 0 };
+  });
+
+  // Actual vs. planned progress — how many practice chunks were planned to
+  // be introduced by each day vs. how many actually were.
+  const firstDoneDay = {};
+  practiceChunks.forEach((c) => {
+    const dd = (piece.progress[c.id] || {}).doneDays || [];
+    if (dd.length) firstDoneDay[c.id] = Math.min(...dd);
+  });
+  const plannedByDay = {};
+  let cumPlanned = 0;
+  timeline.days.forEach((d) => {
+    cumPlanned += d.newChunkIds.length;
+    plannedByDay[d.dayNumber] = cumPlanned;
+  });
+  const actualByDay = {};
+  let cumActual = 0;
+  for (let d = 1; d <= timeline.days.length; d++) {
+    cumActual += Object.values(firstDoneDay).filter((fd) => fd === d).length;
+    actualByDay[d] = cumActual;
+  }
+  const maxCum = Math.max(plannedByDay[timeline.days.length] || 1, 1);
+  const chartDays = timeline.days.slice(0, Math.min(timeline.days.length, Math.max(currentDay + 3, 14)));
+
+  // #5 Projected finish at current pace — a forward-looking companion to
+  // the chart above, based on recent (not average) velocity.
+  const velocityWindow = Math.min(7, currentDay);
+  const velocityStart = Math.max(1, currentDay - velocityWindow + 1);
+  const recentlyIntroducedCount = Object.values(firstDoneDay).filter((d) => d >= velocityStart && d <= currentDay).length;
+  const recentVelocity = recentlyIntroducedCount / velocityWindow;
+  const remainingChunks = practiceChunks.length - Object.keys(firstDoneDay).length;
+  let projectionText;
+  if (remainingChunks <= 0) {
+    projectionText = "Every chunk has been introduced at least once.";
+  } else if (recentVelocity <= 0) {
+    projectionText = "No recent pace to project from yet — log a few sessions to see a projection.";
+  } else {
+    const projectedDay = currentDay + Math.ceil(remainingChunks / recentVelocity);
+    projectionText = `At your recent pace, full coverage projects to around day ${projectedDay}.`;
+  }
+
+  // Recent practice history — unchanged from before.
+  const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const historyByDay = {};
   Object.entries(piece.progress).forEach(([id, entry]) => {
     (entry.doneDays || []).forEach((d) => {
@@ -2091,22 +2179,37 @@ function ProgressTab({ piece, chunks, timeline, currentDay }) {
   });
   const historyDays = Object.keys(historyByDay).map(Number).sort((a, b) => b - a).slice(0, 10);
 
-  const bpmChunks = chunks.filter((c) => (piece.progress[c.id] || {}).targetBPM);
-  const maxCum = Math.max(plannedByDay[timeline.days.length] || 1, 1);
-  const chartDays = timeline.days.slice(0, Math.min(timeline.days.length, Math.max(currentDay + 3, 14)));
-
   return (
     <div className="tab-pane">
       <div className="tab-header">
         <h1>Progress</h1>
-        <p className="hero-sub">{statusLabel}</p>
       </div>
 
-      <div className="stat-grid">
-        <div className="stat-card"><span className="stat-num mono">{avgConfidence}%</span><span className="stat-lbl">Avg. confidence</span></div>
-        <div className="stat-card"><span className="stat-num mono">{solidCount}/{chunks.length}</span><span className="stat-lbl">Tasks solid</span></div>
-        <div className="stat-card"><span className="stat-num mono">{actualToday}</span><span className="stat-lbl">Chunks introduced</span></div>
-        <div className="stat-card"><span className="stat-num mono">{plannedToday}</span><span className="stat-lbl">Planned by now</span></div>
+      <div className="stat-grid-2">
+        <div className="stat-card">
+          <span className="stat-num mono">{consistencyCount}</span>
+          <span className="stat-lbl">of last {consistencyWindow} day{consistencyWindow === 1 ? "" : "s"} practiced</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-num mono">{mostImproved ? `+${mostImproved.delta}%` : "—"}</span>
+          <span className="stat-lbl">
+            {mostImproved ? `Most improved: ${formatRange(mostImproved.chunk.start, mostImproved.chunk.end)}` : "No standout improvement this week"}
+          </span>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Consistency</h3>
+        <div className="heatmap-row">
+          {timeline.days.map((d) => (
+            <div
+              key={d.dayNumber}
+              className="heatmap-cell"
+              title={`Day ${d.dayNumber}${practicedDays.has(d.dayNumber) ? " — practiced" : ""}`}
+              style={{ background: practicedDays.has(d.dayNumber) ? "var(--teal)" : "var(--paper)" }}
+            />
+          ))}
+        </div>
       </div>
 
       <div className="panel">
@@ -2133,22 +2236,40 @@ function ProgressTab({ piece, chunks, timeline, currentDay }) {
       </div>
 
       <div className="panel">
-        <h3>Tempo progress</h3>
-        {bpmChunks.length === 0 ? (
-          <p className="wizard-hint">Log a session or set a target BPM on any chunk to track tempo here.</p>
+        <h3>Projected finish</h3>
+        <p className="wizard-hint" style={{ margin: 0 }}>{projectionText}</p>
+      </div>
+
+      <div className="panel">
+        <h3>Tempo trend</h3>
+        {tempoTrends.length === 0 ? (
+          <p className="wizard-hint">Log a second session on any chunk with a target BPM to see a tempo trend here.</p>
         ) : (
-          <div className="bpm-list">
-            {bpmChunks.map((c) => {
-              const entry = piece.progress[c.id];
-              const pct = Math.round(clamp((entry.currentBPM || 0) / entry.targetBPM, 0, 1) * 100);
-              return (
-                <div key={c.id} className="bpm-row-item">
-                  <span className="mono">{formatRange(c.start, c.end)}</span>
-                  <div className="bpm-track"><div className="bpm-fill" style={{ width: `${pct}%` }} /></div>
-                  <span className="mono bpm-nums">{entry.currentBPM || 0} / {entry.targetBPM}</span>
-                </div>
-              );
-            })}
+          <div className="tempo-trend-list">
+            {tempoTrends.map(({ chunk, sessions, targetBPM }) => (
+              <div key={chunk.id} className="tempo-trend-row">
+                <span className="mono">{formatRange(chunk.start, chunk.end)}</span>
+                <Sparkline values={sessions.map((s) => s.bpm)} />
+                <span className="mono tempo-trend-nums">{sessions[sessions.length - 1].bpm} / {targetBPM}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Effectiveness calibration</h3>
+        {allSessions.length === 0 ? (
+          <p className="wizard-hint">Nothing logged yet — check items off in Today's Practice.</p>
+        ) : (
+          <div className="analytics-bars">
+            {effectivenessBreakdown.map((e) => (
+              <div key={e.value} className="analytics-bar-row">
+                <span className="analytics-bar-label">{e.label} ({e.count})</span>
+                <div className="analytics-bar-track"><div className="analytics-bar-fill" style={{ width: `${e.pct}%`, background: effectivenessColors[e.value] }} /></div>
+                <span className="mono">{e.pct}%</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -2996,13 +3117,6 @@ const CSS = `
 .detail-stats .lbl { color: var(--ink-soft); }
 .detail-stats .val { font-weight: 600; }
 
-.bpm-track { height: 10px; border-radius: 6px; background: var(--paper); overflow: hidden; flex: 1; }
-.bpm-fill { height: 100%; background: var(--brass); border-radius: 6px; }
-.bpm-list { display: flex; flex-direction: column; gap: 10px; }
-.bpm-row-item { display: flex; align-items: center; gap: 12px; font-size: 12.5px; }
-.bpm-row-item .mono:first-child { width: 90px; flex-shrink: 0; }
-.bpm-nums { width: 90px; flex-shrink: 0; text-align: right; color: var(--ink-soft); }
-
 .checklist { display: flex; flex-direction: column; gap: 10px; }
 .checklist-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
 .checklist-item.checked { background: rgba(46,110,99,0.08); border-color: rgba(46,110,99,0.35); }
@@ -3045,6 +3159,9 @@ const CSS = `
 .reassess-prompt { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .reassess-quickpicks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
 
+.stat-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+@media (max-width: 640px) { .stat-grid-2 { grid-template-columns: 1fr; } }
+
 .progress-chart { display: flex; align-items: flex-end; gap: 6px; height: 140px; padding-top: 10px; }
 .progress-chart-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; gap: 4px; }
 .progress-chart-bars { display: flex; gap: 2px; align-items: flex-end; height: 120px; width: 100%; justify-content: center; }
@@ -3054,6 +3171,15 @@ const CSS = `
 .progress-chart-label { font-size: 9px; color: var(--ink-faint); }
 .chart-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--ink-soft); }
 .chart-legend span { display: flex; align-items: center; }
+
+.heatmap-row { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 6px; }
+.heatmap-cell { flex: 0 0 20px; height: 20px; border-radius: 4px; border: 1px solid var(--line); }
+
+.sparkline { flex-shrink: 0; }
+.tempo-trend-list { display: flex; flex-direction: column; gap: 10px; }
+.tempo-trend-row { display: flex; align-items: center; gap: 12px; font-size: 12.5px; }
+.tempo-trend-row .mono:first-child { width: 90px; flex-shrink: 0; }
+.tempo-trend-nums { width: 90px; flex-shrink: 0; text-align: right; color: var(--ink-soft); }
 
 .history-list { display: flex; flex-direction: column; gap: 8px; }
 .history-row { display: flex; gap: 14px; font-size: 13px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }

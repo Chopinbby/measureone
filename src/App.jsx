@@ -21,6 +21,9 @@ import {
   Download,
   Upload,
   ExternalLink,
+  RefreshCw,
+  Flag,
+  Shuffle,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +56,23 @@ const EFFECTIVENESS_OPTIONS = [
   { value: "low", label: "Needs more work" },
   { value: "good", label: "Good" },
   { value: "high", label: "Too easy" },
+];
+const REVIVAL_PURPOSE_OPTIONS = [
+  { value: "performance", label: "Performance" },
+  { value: "lesson", label: "Lesson" },
+  { value: "enjoyment", label: "Enjoyment" },
+  { value: "checking", label: "Just checking" },
+];
+// Fast-tap presets over the existing 0-100 manualConfidence override — there's
+// no separate persisted 0-4 scale; this just exposes the same field through a
+// quicker few-taps interface for the revival reassessment pass. See
+// Decisions.md#revival.
+const CONFIDENCE_PRESETS = [
+  { value: 0, label: "Shaky" },
+  { value: 25, label: "Rough" },
+  { value: 50, label: "OK" },
+  { value: 75, label: "Solid" },
+  { value: 100, label: "Rock solid" },
 ];
 
 function clamp(n, min, max) {
@@ -551,6 +571,19 @@ function getDefaultTargetBPM(piece, chunk) {
   return piece.targetBPM || null;
 }
 
+// During an active revival, a piece-wide performance tempo (collected at
+// revival entry) takes priority over whatever target was set while first
+// learning the piece — the point of revival is often to land at a real
+// performance tempo that differs from the original learning target, and that
+// intent should win even where a chunk already has its own explicit target.
+function getRevivalTargetBPM(piece, chunk) {
+  const entry = piece.progress[chunk.id] || {};
+  if (piece.revival && piece.revival.active && piece.revival.performanceTempo) {
+    return piece.revival.performanceTempo;
+  }
+  return entry.targetBPM || getDefaultTargetBPM(piece, chunk);
+}
+
 // Auto-computed confidence blends: how many clean reps were actually logged
 // relative to the target (not just that a session happened), how close the
 // achieved tempo was to the goal BPM, recency of last practice, the
@@ -645,6 +678,79 @@ function isManualConfidence(chunk, progress) {
   return entry.manualConfidence !== undefined && entry.manualConfidence !== null;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Revival: recovering a piece that was learned once but has gone     */
+/*  stale. Deliberately reuses the existing chunk/transition/          */
+/*  confidence/progress data model rather than a parallel one — see    */
+/*  Data-Model.md#revival and Algorithms.md#revival.                   */
+/* ------------------------------------------------------------------ */
+
+// A small number of evenly-spaced steps from a conservative starting tempo up
+// to the real target, inclusive of the target itself. Rounding can collapse
+// steps together when the starting fraction is close to 1 — deduped rather
+// than shown as a misleading run of repeated BPM values.
+function computeTempoLadder(targetBPM, startFraction, steps) {
+  if (!targetBPM) return [];
+  const frac = clamp(startFraction ?? 0.6, 0.1, 0.95);
+  const stepCount = Math.max(2, steps || 5);
+  const start = Math.round(targetBPM * frac);
+  const ladder = [];
+  for (let i = 0; i < stepCount - 1; i++) {
+    ladder.push(Math.round(start + (targetBPM - start) * (i / (stepCount - 1))));
+  }
+  ladder.push(targetBPM);
+  return [...new Set(ladder)];
+}
+
+// The revival plan is intentionally a distinct, simpler function rather than
+// an adaptation of computeTimeline: computeTimeline's defining behaviors
+// (spread new-chunk introduction across the first half, defer combos to the
+// back half, adaptive review offsets keyed off introduction day) all exist to
+// manage *first-time introduction* of material, which has no equivalent
+// concept in revival — everything here was already learned once. What's
+// reused instead are the same primitives computeTimeline itself is built on:
+// generateAllChunks's practice chunks/transitions (with their effort scores),
+// EFFORT_TO_MIN, and piece.minutesPerDay, packed greedily the same way
+// ScheduleFields already estimates day counts elsewhere in this file.
+// Combos are intentionally excluded — revival reassessment only covers
+// practice chunks and transitions (seams), per the product scope.
+function computeRevivalPlan(piece, chunkSet, currentDay) {
+  const items = [...chunkSet.practiceChunks, ...chunkSet.transitions].map((c) => ({
+    id: c.id,
+    effort: c.effort,
+    confidence: computeConfidence(c, piece, currentDay),
+    weakSpot: !!(piece.progress[c.id] || {}).weakSpot,
+  }));
+
+  // Weak spots first, then lowest confidence first — the two prioritization
+  // signals the product asks for, in that order.
+  items.sort((a, b) => {
+    if (a.weakSpot !== b.weakSpot) return a.weakSpot ? -1 : 1;
+    return a.confidence - b.confidence;
+  });
+
+  const minutesPerDay = Math.max(5, Number(piece.minutesPerDay) || 30);
+  const dailyBudget = minutesPerDay / EFFORT_TO_MIN;
+
+  const days = [];
+  let current = { itemIds: [], effort: 0 };
+  items.forEach((item) => {
+    if (current.effort > 0 && current.effort + item.effort > dailyBudget) {
+      days.push(current);
+      current = { itemIds: [], effort: 0 };
+    }
+    current.itemIds.push(item.id);
+    current.effort += item.effort;
+  });
+  if (current.itemIds.length) days.push(current);
+
+  return {
+    days: days.map((d, i) => ({ dayNumber: i + 1, itemIds: d.itemIds, minutes: Math.round(d.effort * EFFORT_TO_MIN) })),
+    totalItems: items.length,
+    generatedAt: Date.now(),
+  };
+}
+
 function suggestMethods(chunk, confidence) {
   if (chunk.kind === "section-runthrough" || chunk.kind === "section-transition")
     return ["Full run-through without stopping", "Note where it still catches, fix it separately after"];
@@ -689,6 +795,17 @@ function defaultPiece() {
     createdAt: null,
     progress: {},
     rescheduleMarker: null,
+    lastPlayedDate: null,
+    memoryAnchors: {},
+    revival: {
+      active: false,
+      startedAt: null,
+      purpose: null,
+      performanceTempo: null,
+      tempoLadderStartFraction: 0.6,
+      reassessmentComplete: false,
+      plan: null,
+    },
   };
 }
 
@@ -727,6 +844,28 @@ function NumberInput({ value, onCommit, min, max, style, placeholder }) {
         if (e.key === "Enter") commit(e.target.value);
       }}
     />
+  );
+}
+
+// Same decouple-and-commit-on-blur approach as NumberInput, for the same
+// reason: committing a free-text field straight to piece state on every
+// keystroke would re-render the whole map grid (and write to localStorage)
+// per character. Render with a `key` tied to the item being edited so the
+// local buffer resets when the selected item changes.
+function MemoryAnchorField({ value, onCommit }) {
+  const [text, setText] = useState(value || "");
+
+  return (
+    <label className="field">
+      <span>Memory anchor — optional</span>
+      <textarea
+        placeholder="e.g. descending sequence, same pattern as m.16, watch left-hand leap"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => onCommit(text)}
+        rows={2}
+      />
+    </label>
   );
 }
 
@@ -1260,6 +1399,82 @@ function RecordingsList({ recordings }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Revival entry (collects context before the reassessment pass)     */
+/* ------------------------------------------------------------------ */
+
+function RevivalEntryModal({ piece, onCancel, onStart }) {
+  const [purpose, setPurpose] = useState(null);
+  const [performanceTempo, setPerformanceTempo] = useState(piece.targetBPM || "");
+  const [lastPlayedDate, setLastPlayedDate] = useState(piece.lastPlayedDate || new Date().toISOString().slice(0, 10));
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true">
+      <div className="modal">
+        <div className="modal-head">
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 19 }}>Start a revival</h2>
+          <button className="icon-btn" onClick={onCancel} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <p className="wizard-hint">
+            Bring "{piece.name || "this piece"}" back after time away. A few quick questions, then we'll
+            go through it chunk by chunk to see where things actually stand.
+          </p>
+          <label className="field">
+            <span>When did you last play it?</span>
+            <input
+              type="date"
+              value={lastPlayedDate}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setLastPlayedDate(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Performance tempo — optional, if different from your original target</span>
+            <NumberInput
+              value={performanceTempo}
+              min={20}
+              max={400}
+              placeholder={piece.targetBPM ? String(piece.targetBPM) : "e.g. 96"}
+              onCommit={setPerformanceTempo}
+            />
+          </label>
+          <div className="field">
+            <span>What's this revival for?</span>
+            <div className="segmented">
+              {REVIVAL_PURPOSE_OPTIONS.map((o) => (
+                <button key={o.value} className={purpose === o.value ? "active" : ""} onClick={() => setPurpose(o.value)}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="ghost-btn" onClick={onCancel}>
+            <ChevronLeft size={16} /> Cancel
+          </button>
+          <button
+            className="primary-btn"
+            disabled={!purpose}
+            onClick={() =>
+              onStart({
+                purpose,
+                performanceTempo: performanceTempo ? Number(performanceTempo) : null,
+                lastPlayedDate,
+              })
+            }
+          >
+            <RefreshCw size={16} /> Begin revival
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Setup Wizard (new piece only)                                     */
 /* ------------------------------------------------------------------ */
 
@@ -1397,7 +1612,7 @@ function ScheduleBanner({ piece, practiceChunks, timeline, currentDay, onResched
 /*  Tabs                                                               */
 /* ------------------------------------------------------------------ */
 
-function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDay, onReschedule, onAddPiece }) {
+function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDay, onReschedule, onAddPiece, onStartRevival }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
@@ -1414,6 +1629,9 @@ function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDay, onRe
   return (
     <div className="tab-pane">
       <div className="overview-top-row">
+        <button className="ghost-btn" onClick={onStartRevival}>
+          <RefreshCw size={14} /> {piece.revival && piece.revival.active ? "Continue revival" : "Start revival"}
+        </button>
         <button className="ghost-btn" onClick={onAddPiece}>
           <Plus size={14} /> Add new piece
         </button>
@@ -1429,6 +1647,7 @@ function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDay, onRe
           {piece.composer && <p className="hero-composer">{piece.composer}</p>}
           <p className="hero-sub">
             {piece.totalMeasures} measures, {piece.sections.length} sections, {piece.daysToLearn}-day plan
+            {piece.lastPlayedDate ? ` · last played ${piece.lastPlayedDate}` : ""}
           </p>
           <RecordingsList recordings={piece.recordings} />
         </div>
@@ -1561,18 +1780,34 @@ function TimelineTab({ chunks, timeline, onSelectDay }) {
   );
 }
 
-function PieceMapTab({ piece, chunks, currentDay, onUpdateBPM, onSetManualConfidence }) {
-  const [selected, setSelected] = useState(null);
+function PieceMapTab({
+  piece,
+  chunks,
+  currentDay,
+  onUpdateBPM,
+  onSetManualConfidence,
+  onSetWeakSpot = () => {},
+  onSetMemoryAnchor = () => {},
+  sequentialMode = false,
+  initialSelectedId = null,
+  onFinishSequential,
+  hideHeader = false,
+}) {
+  const [selected, setSelected] = useState(initialSelectedId);
   const selectedChunk = chunks.find((c) => c.id === selected);
   const selectedEntry = selectedChunk ? piece.progress[selectedChunk.id] || {} : {};
   const selectedIsManual = selectedChunk ? isManualConfidence(selectedChunk, piece.progress) : false;
+  const selectedIsWeakSpot = !!selectedEntry.weakSpot;
+  const selectedIdx = selectedChunk ? chunks.findIndex((c) => c.id === selected) : -1;
 
   return (
     <div className="tab-pane">
-      <div className="tab-header">
-        <h1>Piece Map</h1>
-        <p className="hero-sub">Color shows confidence. Includes practice chunks, transitions, and focus blocks.</p>
-      </div>
+      {!hideHeader && (
+        <div className="tab-header">
+          <h1>Piece Map</h1>
+          <p className="hero-sub">Color shows confidence. Includes practice chunks, transitions, and focus blocks.</p>
+        </div>
+      )}
 
       <div className="confidence-legend">
         <span><i className="dot" style={{ background: "var(--brick)" }} /> Needs work</span>
@@ -1584,6 +1819,7 @@ function PieceMapTab({ piece, chunks, currentDay, onUpdateBPM, onSetManualConfid
         {chunks.map((c) => {
           const conf = computeConfidence(c, piece, currentDay);
           const manual = isManualConfidence(c, piece.progress);
+          const weak = !!(piece.progress[c.id] || {}).weakSpot;
           const tier = conf >= 67 ? "teal" : conf >= 34 ? "brass" : "brick";
           return (
             <button
@@ -1598,6 +1834,11 @@ function PieceMapTab({ piece, chunks, currentDay, onUpdateBPM, onSetManualConfid
                 {conf}%{manual && <Pencil size={9} className="manual-mark" title="Set manually" />}
               </span>
               {c.recurring && <span className="map-cell-recurring" title="Recurring material">&#8635;</span>}
+              {weak && (
+                <span className="map-cell-weak" title="Weak spot">
+                  <Flag size={11} />
+                </span>
+              )}
             </button>
           );
         })}
@@ -1625,6 +1866,34 @@ function PieceMapTab({ piece, chunks, currentDay, onUpdateBPM, onSetManualConfid
                 <div><span className="lbl">Sessions logged</span><span className="val mono">{(selectedEntry.doneDays || []).length}</span></div>
                 {selectedChunk.recurringNote && <div><span className="lbl">Repeats</span><span className="val">{selectedChunk.recurringNote}</span></div>}
               </div>
+
+              <div className="field">
+                <span>Weak spot</span>
+                <button
+                  type="button"
+                  className={`weak-toggle ${selectedIsWeakSpot ? "active" : ""}`}
+                  onClick={() => onSetWeakSpot(selectedChunk.id, !selectedIsWeakSpot)}
+                >
+                  <Flag size={14} /> {selectedIsWeakSpot ? "Flagged as weak spot" : "Mark as weak spot"}
+                </button>
+              </div>
+
+              {sequentialMode && (
+                <div className="field">
+                  <span>Quick rate</span>
+                  <div className="segmented">
+                    {CONFIDENCE_PRESETS.map((p) => (
+                      <button
+                        key={p.value}
+                        className={selectedEntry.manualConfidence === p.value ? "active" : ""}
+                        onClick={() => onSetManualConfidence(selectedChunk.id, p.value)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="field">
                 <span>Confidence override</span>
@@ -1686,7 +1955,36 @@ function PieceMapTab({ piece, chunks, currentDay, onUpdateBPM, onSetManualConfid
                   />
                 </div>
               )}
+
+              <MemoryAnchorField
+                key={selectedChunk.id}
+                value={piece.memoryAnchors && piece.memoryAnchors[selectedChunk.id]}
+                onCommit={(text) => onSetMemoryAnchor(selectedChunk.id, text)}
+              />
             </div>
+
+            {sequentialMode && (
+              <div className="modal-foot">
+                <button
+                  className="ghost-btn"
+                  disabled={selectedIdx <= 0}
+                  onClick={() => setSelected(chunks[selectedIdx - 1].id)}
+                >
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <p className="wizard-hint" style={{ margin: 0 }}>
+                  Item {selectedIdx + 1} of {chunks.length}
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="ghost-btn" onClick={onFinishSequential}>Finish reassessment</button>
+                  {selectedIdx < chunks.length - 1 && (
+                    <button className="primary-btn" onClick={() => setSelected(chunks[selectedIdx + 1].id)}>
+                      Next <ChevronRight size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1698,7 +1996,7 @@ function PieceMapTab({ piece, chunks, currentDay, onUpdateBPM, onSetManualConfid
 /*  Today's Practice                                                   */
 /* ------------------------------------------------------------------ */
 
-function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession }) {
+function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession, tempoLadder, memoryAnchor }) {
   const entry = piece.progress[chunk.id] || {};
   const checked = (entry.doneDays || []).includes(day);
   const session = (entry.sessions || []).find((s) => s.day === day);
@@ -1750,6 +2048,10 @@ function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession }
               {feltLabel ? ` — ${feltLabel.label.toLowerCase()}` : ""}
             </p>
           )}
+          {memoryAnchor && <p className="tip-line"><strong>Memory anchor:</strong> {memoryAnchor}</p>}
+          {tempoLadder && tempoLadder.length > 0 && (
+            <p className="tip-line">Tempo ladder: {tempoLadder.join(" → ")} BPM</p>
+          )}
         </div>
       </div>
     );
@@ -1776,6 +2078,10 @@ function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession }
           <span className="conf-pill mono">{conf}%</span>
         </div>
         <p className="tip-line">Try: {tips.join(", ")}</p>
+        {memoryAnchor && <p className="tip-line"><strong>Memory anchor:</strong> {memoryAnchor}</p>}
+        {tempoLadder && tempoLadder.length > 0 && (
+          <p className="tip-line">Tempo ladder: {tempoLadder.join(" → ")} BPM</p>
+        )}
 
         <div className="timer-row">
           <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
@@ -2059,6 +2365,224 @@ function TodayTab({
       )}
 
       <ReassessPanel piece={piece} todaysRanges={todaysRanges} onReassessRange={onReassessRange} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Revival: recover a piece that was learned once but has gone stale */
+/* ------------------------------------------------------------------ */
+
+function RandomStartPanel({ piece, revivalItems, sections }) {
+  const [pick, setPick] = useState(null);
+
+  const pool = useMemo(() => {
+    const fromChunks = revivalItems.map((c) => ({
+      kind: c.kind === "transition" ? "Review" : "Chunk",
+      label: formatRange(c.start, c.end),
+      anchor: piece.memoryAnchors && piece.memoryAnchors[c.id],
+    }));
+    const fromSections = (sections || []).map((s, i) => ({
+      kind: "Section",
+      label: sectionLabel(s, i),
+      anchor: piece.memoryAnchors && piece.memoryAnchors[s.id],
+    }));
+    return [...fromChunks, ...fromSections];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revivalItems, sections, piece.memoryAnchors]);
+
+  const pickRandom = () => {
+    if (!pool.length) return;
+    setPick(pool[Math.floor(Math.random() * pool.length)]);
+  };
+
+  return (
+    <div className="panel">
+      <h3>Random start</h3>
+      <p className="wizard-hint">
+        Jump in somewhere you wouldn't have picked yourself — a good way to catch memory gaps you don't
+        know are there.
+      </p>
+      <button className="ghost-btn" onClick={pickRandom}>
+        <Shuffle size={14} /> {pick ? "Pick another" : "Pick a starting point"}
+      </button>
+      {pick && (
+        <div className="focus-row" style={{ marginTop: 14, paddingBottom: 0, borderBottom: "none" }}>
+          <span className="tag subtle">{pick.kind}</span>
+          <span className="mono">{pick.label}</span>
+          {pick.anchor && <span className="tip-line" style={{ marginLeft: "auto" }}>{pick.anchor}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RevivalTab({
+  piece,
+  chunkSet,
+  currentDay,
+  onUpdateBPM,
+  onSetManualConfidence,
+  onSetWeakSpot,
+  onSetMemoryAnchor,
+  onFinishReassessment,
+  onReopenReassessment,
+  onGeneratePlan,
+  onSetPerformanceTempo,
+  onSetTempoLadderFraction,
+  onLogSession,
+  onUnlogSession,
+  onEndRevival,
+}) {
+  const revival = piece.revival || {};
+  const revivalItems = useMemo(() => [...chunkSet.practiceChunks, ...chunkSet.transitions], [chunkSet]);
+  const chunkById = useMemo(() => Object.fromEntries(revivalItems.map((c) => [c.id, c])), [revivalItems]);
+  const ratedCount = revivalItems.filter((c) => isManualConfidence(c, piece.progress)).length;
+  const weakSpots = revivalItems.filter((c) => (piece.progress[c.id] || {}).weakSpot);
+  const firstUnratedId = (revivalItems.find((c) => !isManualConfidence(c, piece.progress)) || revivalItems[0] || {}).id || null;
+  const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
+
+  return (
+    <div className="tab-pane">
+      <div className="tab-header day-nav">
+        <div>
+          <h1>Revival</h1>
+          <p className="hero-sub">
+            Bringing "{piece.name}" back{purposeLabel ? ` for ${purposeLabel.label.toLowerCase()}` : ""}
+            {piece.lastPlayedDate ? ` · last played ${piece.lastPlayedDate}` : ""}
+          </p>
+        </div>
+        <button className="ghost-btn" onClick={onEndRevival}>End revival</button>
+      </div>
+
+      <div className="panel">
+        <h3>Revival settings</h3>
+        <div className="field-row">
+          <label className="field">
+            <span>Performance tempo override — optional</span>
+            <NumberInput
+              value={revival.performanceTempo || ""}
+              min={20}
+              max={400}
+              placeholder={piece.targetBPM ? String(piece.targetBPM) : "—"}
+              onCommit={onSetPerformanceTempo}
+            />
+          </label>
+          <label className="field">
+            <span>Tempo ladder starting point (% of target)</span>
+            <NumberInput
+              value={Math.round((revival.tempoLadderStartFraction ?? 0.6) * 100)}
+              min={10}
+              max={95}
+              onCommit={(n) => onSetTempoLadderFraction(clamp(n, 10, 95) / 100)}
+            />
+          </label>
+        </div>
+      </div>
+
+      {!revival.reassessmentComplete ? (
+        <div className="panel">
+          <h3>Reassess where things stand</h3>
+          <p className="wizard-hint">
+            Go chunk by chunk (and seam by seam) and rate confidence from memory right now — this sets a
+            fresh baseline for scheduling without touching your original practice history. Flag anything
+            that felt shaky as a weak spot; the plan below will prioritize those first.
+          </p>
+          <p className="derived-stat" style={{ marginBottom: 14 }}>
+            <strong className="mono">{ratedCount}</strong> of <strong className="mono">{revivalItems.length}</strong> rated
+          </p>
+          {revivalItems.length > 0 && (
+            <PieceMapTab
+              piece={piece}
+              chunks={revivalItems}
+              currentDay={currentDay}
+              onUpdateBPM={onUpdateBPM}
+              onSetManualConfidence={onSetManualConfidence}
+              onSetWeakSpot={onSetWeakSpot}
+              onSetMemoryAnchor={onSetMemoryAnchor}
+              sequentialMode
+              initialSelectedId={firstUnratedId}
+              onFinishSequential={onFinishReassessment}
+              hideHeader
+            />
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="panel">
+            <h3>Reassessment complete</h3>
+            <p className="wizard-hint" style={{ marginBottom: 12 }}>
+              {ratedCount} of {revivalItems.length} rated
+              {weakSpots.length > 0 ? `, ${weakSpots.length} flagged as weak spot${weakSpots.length === 1 ? "" : "s"}` : ""}.
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="ghost-btn" onClick={onReopenReassessment}>Redo reassessment</button>
+              <button className="primary-btn" onClick={onGeneratePlan}>
+                <Sparkles size={16} /> {revival.plan ? "Regenerate revival plan" : "Generate revival plan"}
+              </button>
+            </div>
+          </div>
+
+          {weakSpots.length > 0 && (
+            <div className="panel focus-panel">
+              <h3>Flagged weak spots</h3>
+              <div className="focus-list">
+                {weakSpots.map((c) => (
+                  <div key={c.id} className="focus-row">
+                    <span className="mono">{formatRange(c.start, c.end)}</span>
+                    <span className="tag subtle">{c.kind === "transition" ? "Review" : "Chunk"}</span>
+                    {piece.memoryAnchors && piece.memoryAnchors[c.id] && (
+                      <span className="tip-line" style={{ marginLeft: "auto" }}>{piece.memoryAnchors[c.id]}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <RandomStartPanel piece={piece} revivalItems={revivalItems} sections={piece.sections} />
+
+          {revival.plan && (
+            <>
+              <div className="tab-header">
+                <h1 style={{ fontSize: 19 }}>Revival plan</h1>
+                <p className="hero-sub">
+                  Suggested order and pacing, weakest first — everything here is loggable any day, in any
+                  order.
+                </p>
+              </div>
+              <div className="view-all-list">
+                {revival.plan.days.map((d) => (
+                  <div key={d.dayNumber} className="panel">
+                    <h3>Suggested day {d.dayNumber} — {d.minutes} min</h3>
+                    <div className="checklist">
+                      {d.itemIds.map((id) => {
+                        const chunk = chunkById[id];
+                        if (!chunk) return null;
+                        const targetBPM = getRevivalTargetBPM(piece, chunk);
+                        const ladder = computeTempoLadder(targetBPM, revival.tempoLadderStartFraction ?? 0.6, 5);
+                        return (
+                          <ChecklistItem
+                            key={id}
+                            chunk={chunk}
+                            role={chunk.kind === "transition" ? "transition" : "review"}
+                            piece={piece}
+                            day={currentDay}
+                            onLogSession={onLogSession}
+                            onUnlogSession={onUnlogSession}
+                            tempoLadder={ladder}
+                            memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[id]}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -2432,7 +2956,7 @@ function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing
 /*  App shell                                                          */
 /* ------------------------------------------------------------------ */
 
-const NAV = [
+const NAV_BASE = [
   { key: "overview", label: "Overview", icon: LayoutGrid },
   { key: "timeline", label: "Timeline", icon: CalendarDays },
   { key: "map", label: "Piece Map", icon: Music2 },
@@ -2441,6 +2965,7 @@ const NAV = [
   { key: "analytics", label: "Analytics", icon: BarChart3 },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
+const REVIVAL_NAV_ITEM = { key: "revival", label: "Revival", icon: RefreshCw };
 
 export default function App() {
   const [pieces, setPieces] = useState({});
@@ -2452,6 +2977,7 @@ export default function App() {
   const [editDraft, setEditDraftState] = useState(null);
   const [dayOverride, setDayOverride] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [revivalModalOpen, setRevivalModalOpen] = useState(false);
   const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
@@ -2532,6 +3058,13 @@ export default function App() {
     [piece, timeline]
   );
   const currentDay = dayOverride || realCurrentDay;
+
+  const navItems = useMemo(() => {
+    if (!piece || !piece.revival || !piece.revival.active) return NAV_BASE;
+    const items = [...NAV_BASE];
+    items.splice(items.findIndex((n) => n.key === "progress"), 0, REVIVAL_NAV_ITEM);
+    return items;
+  }, [piece && piece.revival && piece.revival.active]);
 
   const switchToPiece = (id) => {
     setActivePieceId(id);
@@ -2704,6 +3237,74 @@ export default function App() {
     });
   };
 
+  const handleSetWeakSpot = (chunkId, value) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const entry = progress[chunkId] ? { ...progress[chunkId] } : { doneDays: [] };
+      entry.weakSpot = value;
+      progress[chunkId] = entry;
+      return { ...p, progress };
+    });
+  };
+
+  const handleSetMemoryAnchor = (id, text) => {
+    updatePiece((p) => {
+      const memoryAnchors = { ...(p.memoryAnchors || {}) };
+      const trimmed = (text || "").trim();
+      if (trimmed) memoryAnchors[id] = trimmed;
+      else delete memoryAnchors[id];
+      return { ...p, memoryAnchors };
+    });
+  };
+
+  const handleUpdateRevival = (patch) => {
+    updatePiece((p) => ({ ...p, revival: { ...(p.revival || {}), ...patch } }));
+  };
+
+  const handleOpenRevival = () => {
+    if (piece.revival && piece.revival.active) setActiveTab("revival");
+    else setRevivalModalOpen(true);
+  };
+
+  const handleStartRevival = ({ purpose, performanceTempo, lastPlayedDate }) => {
+    updatePiece((p) => ({
+      ...p,
+      lastPlayedDate: lastPlayedDate || p.lastPlayedDate || null,
+      revival: {
+        active: true,
+        startedAt: Date.now(),
+        purpose,
+        performanceTempo: performanceTempo || null,
+        tempoLadderStartFraction: 0.6,
+        reassessmentComplete: false,
+        plan: null,
+      },
+    }));
+    setRevivalModalOpen(false);
+    setActiveTab("revival");
+  };
+
+  const handleEndRevival = () => {
+    if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
+    updatePiece((p) => ({
+      ...p,
+      revival: {
+        active: false,
+        startedAt: null,
+        purpose: null,
+        performanceTempo: null,
+        tempoLadderStartFraction: 0.6,
+        reassessmentComplete: false,
+        plan: null,
+      },
+    }));
+    setActiveTab("overview");
+  };
+
+  const handleGenerateRevivalPlan = () => {
+    handleUpdateRevival({ plan: computeRevivalPlan(piece, chunkSet, currentDay) });
+  };
+
   const handleReassessRange = (from, to, level) => {
     const levelNum = level === "easy" ? 1 : level === "medium" ? 2 : 3;
     updatePiece((p) => {
@@ -2817,7 +3418,7 @@ export default function App() {
             )}
 
             <div className="nav-list">
-              {NAV.map((n) => {
+              {navItems.map((n) => {
                 const Icon = n.icon;
                 return (
                   <button
@@ -2840,7 +3441,7 @@ export default function App() {
 
           <main className="main-content">
             {activeTab === "overview" && (
-              <OverviewTab piece={piece} practiceChunks={practiceChunks} chunks={chunks} timeline={timeline} currentDay={currentDay} onReschedule={handleReschedule} onAddPiece={() => setWizardOpen(true)} />
+              <OverviewTab piece={piece} practiceChunks={practiceChunks} chunks={chunks} timeline={timeline} currentDay={currentDay} onReschedule={handleReschedule} onAddPiece={() => setWizardOpen(true)} onStartRevival={handleOpenRevival} />
             )}
             {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
             {activeTab === "map" && (
@@ -2850,6 +3451,27 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
+                onSetWeakSpot={handleSetWeakSpot}
+                onSetMemoryAnchor={handleSetMemoryAnchor}
+              />
+            )}
+            {activeTab === "revival" && piece.revival && piece.revival.active && (
+              <RevivalTab
+                piece={piece}
+                chunkSet={chunkSet}
+                currentDay={currentDay}
+                onUpdateBPM={handleUpdateBPM}
+                onSetManualConfidence={handleSetManualConfidence}
+                onSetWeakSpot={handleSetWeakSpot}
+                onSetMemoryAnchor={handleSetMemoryAnchor}
+                onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
+                onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
+                onGeneratePlan={handleGenerateRevivalPlan}
+                onSetPerformanceTempo={(n) => handleUpdateRevival({ performanceTempo: n || null })}
+                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
+                onLogSession={handleLogSession}
+                onUnlogSession={handleUnlogSession}
+                onEndRevival={handleEndRevival}
               />
             )}
             {activeTab === "today" && (
@@ -2890,6 +3512,9 @@ export default function App() {
       )}
 
       {wizardOpen && <Wizard onCancel={() => setWizardOpen(false)} onComplete={handleComplete} hasPiece={!!piece} />}
+      {revivalModalOpen && piece && (
+        <RevivalEntryModal piece={piece} onCancel={() => setRevivalModalOpen(false)} onStart={handleStartRevival} />
+      )}
     </div>
   );
 }
@@ -3016,7 +3641,7 @@ const CSS = `
 .manuscript-block:nth-last-child(2) .block-tooltip { left: auto; right: 0; transform: translateY(-6px); }
 
 .tab-pane { display: flex; flex-direction: column; gap: 22px; }
-.overview-top-row { display: flex; justify-content: flex-end; margin-bottom: -8px; }
+.overview-top-row { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: -8px; }
 .tab-header { margin-bottom: -4px; }
 .tab-header h1 { font-size: 26px; }
 .day-nav { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
@@ -3107,6 +3732,11 @@ const CSS = `
 .diff-dot-medium { background: var(--brass); }
 .diff-dot-hard { background: var(--brick); }
 .map-cell-recurring { position: absolute; bottom: 10px; right: 10px; font-size: 13px; color: var(--ink-faint); }
+.map-cell-weak { position: absolute; bottom: 10px; left: 10px; color: var(--brick); display: inline-flex; }
+
+.weak-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
+.weak-toggle:hover { border-color: var(--brick); }
+.weak-toggle.active { border-color: var(--brick); background: rgba(181,71,58,0.1); color: var(--brick); }
 
 .detail-panel { border-color: var(--ink); }
 .detail-modal { max-width: 480px; }

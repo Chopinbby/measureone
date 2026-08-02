@@ -1,0 +1,104 @@
+# AI Guidelines
+
+> **Purpose:** How an AI assistant (Claude Code or otherwise) should work
+> within this project — process and judgment, not technical reference.
+> **Audience:** AI assistants, primarily. Written in second person for that
+> reason.
+> **Scope:** Collaboration process: what to read before acting, when to record
+> a decision, when to update docs, how to weigh extending vs. inventing. For
+> *technical* operating instructions (commands, gotchas, code conventions),
+> see `../CLAUDE.md` instead — that file is auto-loaded into Claude Code's
+> context every session; this one is a deliberate read.
+> **Related:** every other document in this directory — this one tells you
+> when to consult them.
+> **Update when:** A recurring pattern of AI mistakes or good judgment calls
+> emerges that future sessions should know about.
+
+## Before proposing a product change
+
+Read [Vision.md](Vision.md) and [Product-Principles.md](Product-Principles.md)
+first. "Does this fit MeasureOne" is usually answerable from those two
+documents alone. In particular:
+
+- If a proposed feature involves streaks, "days since last practiced,"
+  or any mechanic that frames a missed day as a loss — it's already been
+  rejected as permanent policy. Don't re-propose it; point to
+  [Product-Principles.md](Product-Principles.md#no-punishment-mechanics)
+  instead.
+- If it adds a computed/automated value the user might disagree with, it
+  needs a manual override, per
+  [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch).
+
+## Before adding a feature
+
+Check [Roadmap.md](Roadmap.md) — it may already be planned (in which case,
+follow its stated scope rather than inventing your own), explicitly
+deprioritized (in which case, say so rather than building it unprompted),
+or it may touch an area with an open question in
+[Decisions.md](Decisions.md) that should be resolved with the user first.
+
+## Preserve terminology unless intentionally refactoring it project-wide
+
+"Practice chunk" vs. "section" vs. "transition" (shown as "Review") vs.
+"combo" (shown as "Focus block") vs. "section run-through" — these have
+precise, distinct meanings documented in
+[Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs).
+Don't introduce a new casual synonym for an existing concept, and don't use
+an existing term for a new concept that isn't actually the same thing. If a
+term is genuinely wrong (like the `kind: "section"` naming collision), that's
+a tracked refactor item, not license to improvise a new name inline.
+
+## Update documentation alongside implementation
+
+If you change scheduling, confidence, chunking, or the data model, update
+the corresponding section of [Algorithms.md](Algorithms.md) or
+[Data-Model.md](Data-Model.md) in the same change. A code change without a
+doc update is exactly how the drift this documentation set was built to fix
+happens again — the last audit found a scheduler algorithm change, two new
+functions, and an entire feature (section run-throughs) that had shipped
+without any documentation update at all.
+
+## Record significant product decisions
+
+If you make (or the user makes, in conversation with you) a decision with
+lasting rationale — especially one that overturns existing behavior or
+resolves an open question — add it to [Decisions.md](Decisions.md): the
+decision, why, and alternatives considered if any were discussed. Don't wait
+to be asked; this is the mechanism that keeps future sessions from
+re-litigating settled questions.
+
+## Prefer extending existing systems over creating parallel systems
+
+Before adding a new "how good is this" metric, a new scheduling pass, or a
+new persisted field that overlaps with something already in
+[Data-Model.md](Data-Model.md), check whether it can extend what's there.
+This project already has one instance of two parallel, disagreeing scores
+(`computeConfidence` vs. `computeProgressTier` — see
+[Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)).
+That happened because a metric was added for one screen without checking
+whether an existing one already answered the same question. Don't repeat
+it without at least raising the question to the user.
+
+## Avoid duplicate documentation
+
+Each concept has exactly one canonical home in this `docs/` set (see
+[README.md](README.md) for the map). If you need to reference a concept from
+another document, link to its canonical section rather than re-explaining
+it. If you find duplicated explanations while working, that's worth fixing
+opportunistically (see below), not worth preserving "to be safe."
+
+## Improve documentation opportunistically
+
+Whenever you're working in a part of the codebase these docs describe,
+spend a moment checking whether the relevant doc still matches what you just
+read in the code. If it doesn't, fix it — small, in-passing corrections are
+exactly how this documentation set is meant to stay trustworthy rather than
+becoming another stale artifact like the one that prompted the last audit.
+
+## When you're not sure
+
+If a request seems to conflict with something documented here (a principle,
+a past decision, a stated non-goal), say so explicitly and ask, rather than
+either silently complying or silently refusing. The goal is for this
+documentation to make disagreements visible and resolvable, not to be cited
+as an unquestionable authority.

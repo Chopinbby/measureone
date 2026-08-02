@@ -370,7 +370,6 @@ function computeTimeline(piece, chunkSet) {
   const consolidationDays = totalDays >= 5 ? 1 : 0;
   const learningDays = Math.max(1, totalDays - consolidationDays);
   const halfPoint = Math.max(1, Math.min(learningDays, Math.ceil(learningDays * 0.5)));
-  const newBudgetPerDay = (Number(piece.minutesPerDay || 30) * 0.65) / EFFORT_TO_MIN;
 
   const days = Array.from({ length: totalDays }, (_, i) => ({
     dayNumber: i + 1,
@@ -383,10 +382,19 @@ function computeTimeline(piece, chunkSet) {
 
   const introducedDay = {};
 
+  // Spread new-chunk introduction evenly across the full first-half window
+  // (by total effort / halfPoint) instead of greedily filling each day to
+  // piece.minutesPerDay and moving on. Filling-to-budget tends to finish
+  // early, cramming most of the piece into just the first few days — which
+  // then makes their transitions and spaced reviews all land on the same
+  // handful of later days too. Spreading introduction itself out is what
+  // actually prevents that pile-up; it's still fully introduced by halfPoint.
+  const totalNewEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
+  const perDayNewTarget = totalNewEffort / halfPoint;
   let dayIdx = 0;
   let acc = 0;
   practiceChunks.forEach((chunk) => {
-    if (acc + chunk.effort > newBudgetPerDay && acc > 0 && dayIdx < halfPoint - 1) {
+    if (acc + chunk.effort > perDayNewTarget && acc > 0 && dayIdx < halfPoint - 1) {
       dayIdx++;
       acc = 0;
     }
@@ -415,29 +423,67 @@ function computeTimeline(piece, chunkSet) {
     introducedDay[c.id] = day;
   });
 
+  const chunkById = Object.fromEntries(all.map((c) => [c.id, c]));
+  const minutesFor = (d) => {
+    const newMin = d.newChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
+    const specialMin = d.specialChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
+    const reviewMin = d.reviewChunkIds.length * 3;
+    return newMin + specialMin + reviewMin;
+  };
+
+  // Place each spaced-review instance at its normal 1/3/7/14-day (adaptive)
+  // offset, then nudge individual instances up to 2 days earlier/later —
+  // never before the day after introduction, never past learningDays — if
+  // that meaningfully flattens a day sitting well above the plan's average
+  // load. This keeps reviews close to their intended spacing while stopping
+  // every review triggered by one heavy introduction day from all landing
+  // on the exact same later days.
+  const reviewItems = [];
   all.forEach((chunk) => {
     const start = introducedDay[chunk.id];
     if (!start) return;
     adaptiveReviewOffsets(chunk, piece.progress).forEach((off) => {
-      const d = start + off;
-      if (d <= learningDays) days[d - 1].reviewChunkIds.push(chunk.id);
+      const day = start + off;
+      if (day <= learningDays) reviewItems.push({ chunkId: chunk.id, minDay: start + 1, day });
     });
   });
+  reviewItems.forEach((item) => days[item.day - 1].reviewChunkIds.push(item.chunkId));
+
+  const learningDayList = days.filter((d) => d.type === "learning");
+  const avgLoad = learningDayList.length
+    ? learningDayList.reduce((s, d) => s + minutesFor(d), 0) / learningDayList.length
+    : 0;
+
+  for (let pass = 0; pass < 3; pass++) {
+    let movedAny = false;
+    reviewItems
+      .map((_, idx) => idx)
+      .sort((a, b) => minutesFor(days[reviewItems[b].day - 1]) - minutesFor(days[reviewItems[a].day - 1]))
+      .forEach((idx) => {
+        const item = reviewItems[idx];
+        const currentMinutes = minutesFor(days[item.day - 1]);
+        if (currentMinutes <= avgLoad * 1.1) return;
+        const candidates = [item.day - 2, item.day - 1, item.day + 1, item.day + 2].filter(
+          (d) => d >= item.minDay && d <= learningDays && !days[d - 1].reviewChunkIds.includes(item.chunkId)
+        );
+        if (!candidates.length) return;
+        const best = candidates.reduce((a, b) => (minutesFor(days[b - 1]) < minutesFor(days[a - 1]) ? b : a));
+        if (minutesFor(days[best - 1]) + 6 < currentMinutes) {
+          days[item.day - 1].reviewChunkIds.splice(days[item.day - 1].reviewChunkIds.indexOf(item.chunkId), 1);
+          days[best - 1].reviewChunkIds.push(item.chunkId);
+          item.day = best;
+          movedAny = true;
+        }
+      });
+    if (!movedAny) break;
+  }
 
   if (consolidationDays) {
     days[totalDays - 1].reviewChunkIds = practiceChunks.map((c) => c.id);
   }
 
-  const chunkById = Object.fromEntries(all.map((c) => [c.id, c]));
   days.forEach((d) => {
-    if (d.type === "consolidation") {
-      d.minutes = Number(piece.minutesPerDay || 30);
-    } else {
-      const newMin = d.newChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
-      const specialMin = d.specialChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
-      const reviewMin = d.reviewChunkIds.length * 3;
-      d.minutes = Math.round(newMin + specialMin + reviewMin);
-    }
+    d.minutes = d.type === "consolidation" ? Number(piece.minutesPerDay || 30) : Math.round(minutesFor(d));
   });
 
   return { days, learningDays, consolidationDays, halfPoint, introducedDay };

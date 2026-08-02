@@ -691,11 +691,12 @@ function ManuscriptStrip({ chunks, compact }) {
           key={c.id}
           className="manuscript-block"
           style={{ flex: c.measureCount, background: DIFFICULTY_META[c.difficultyLabel].color }}
-          title={`${formatRange(c.start, c.end)} — ${DIFFICULTY_META[c.difficultyLabel].label}${
-            c.recurring ? " — recurring" : ""
-          }`}
         >
           {c.recurring && <span className="recurring-dot" />}
+          <span className="block-tooltip">
+            {formatRange(c.start, c.end)} — {DIFFICULTY_META[c.difficultyLabel].label}
+            {c.recurring ? " — recurring" : ""}
+          </span>
         </div>
       ))}
       <div className="final-barline" />
@@ -2713,12 +2714,32 @@ const CSS = `
 .hero-sub { color: var(--ink-soft); font-size: 14px; margin-top: 8px; }
 .hero-composer { color: var(--ink-soft); font-size: 15px; font-style: italic; margin-top: 2px; }
 
-.manuscript-strip { display: flex; height: 46px; border-radius: 8px; overflow: hidden; margin: 20px 0 4px; border: 1px solid var(--line); position: relative; }
+.manuscript-strip { display: flex; height: 46px; border-radius: 8px; margin: 20px 0 4px; border: 1px solid var(--line); position: relative; }
 .manuscript-strip.compact { height: 28px; }
 .manuscript-block { position: relative; border-right: 2px solid var(--paper); min-width: 3px; }
-.manuscript-block:last-child { border-right: none; }
+.manuscript-block:first-child { border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
 .recurring-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.85); }
-.final-barline { width: 4px; background: var(--ink); }
+.final-barline { width: 4px; background: var(--ink); border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
+.block-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+  line-height: 1.3;
+  padding: 4px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 20;
+}
+.manuscript-block:hover .block-tooltip, .manuscript-block:focus-visible .block-tooltip { opacity: 1; }
+.manuscript-block:first-child .block-tooltip { left: 0; transform: translateY(-6px); }
+.manuscript-block:nth-last-child(2) .block-tooltip { left: auto; right: 0; transform: translateY(-6px); }
 
 .tab-pane { display: flex; flex-direction: column; gap: 22px; }
 .overview-top-row { display: flex; justify-content: flex-end; margin-bottom: -8px; }

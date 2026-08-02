@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   BookOpen,
   LayoutGrid,
@@ -18,6 +18,8 @@ import {
   RotateCcw,
   Sparkles,
   Trash2,
+  Download,
+  Upload,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -468,6 +470,8 @@ function defaultPiece() {
   return {
     id: null,
     name: "",
+    composer: "",
+    notes: "",
     totalMeasures,
     measureDifficulty: Array(totalMeasures).fill(1),
     diffMode: "grid",
@@ -604,6 +608,15 @@ function BasicsFields({ draft, set }) {
         />
       </label>
       <label className="field">
+        <span>Composer</span>
+        <input
+          type="text"
+          placeholder="e.g. Frédéric Chopin"
+          value={draft.composer || ""}
+          onChange={(e) => set({ composer: e.target.value })}
+        />
+      </label>
+      <label className="field">
         <span>Total measures</span>
         <NumberInput
           value={draft.totalMeasures}
@@ -616,6 +629,15 @@ function BasicsFields({ draft, set }) {
               sections: resizeSections(draft.sections, total),
             })
           }
+        />
+      </label>
+      <label className="field">
+        <span>Notes</span>
+        <textarea
+          placeholder="Context, history, teacher notes — anything worth remembering about this piece…"
+          value={draft.notes || ""}
+          onChange={(e) => set({ notes: e.target.value })}
+          rows={4}
         />
       </label>
     </>
@@ -1141,6 +1163,7 @@ function OverviewTab({ piece, practiceChunks, timeline, currentDay, onReschedule
         <div className="hero-content">
           <p className="eyebrow">Now practicing</p>
           <h1>{piece.name}</h1>
+          {piece.composer && <p className="hero-composer">{piece.composer}</p>}
           <p className="hero-sub">
             {piece.totalMeasures} measures, {piece.sections.length} sections, {piece.daysToLearn}-day plan
           </p>
@@ -1891,7 +1914,7 @@ function AnalyticsTab({ piece, chunks, currentDay }) {
   );
 }
 
-function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece }) {
+function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportAll, onImportClick }) {
   if (!editing || !editDraft) {
     return (
       <div className="tab-pane">
@@ -1904,15 +1927,37 @@ function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing
           </button>
         </div>
         <div className="panel">
+          <h3>Backup & restore</h3>
+          <p className="wizard-hint" style={{ marginBottom: 12 }}>
+            Everything is saved only in this browser. Export a backup file now and then, or before
+            switching browsers or devices — you can import it back in later.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="ghost-btn" onClick={onExportAll}>
+              <Download size={14} /> Export all pieces
+            </button>
+            <button className="ghost-btn" onClick={onImportClick}>
+              <Upload size={14} /> Import backup
+            </button>
+          </div>
+        </div>
+        <div className="panel">
           <h3>Piece details</h3>
           <dl className="def-list">
             <div><dt>Name</dt><dd>{piece.name}</dd></div>
+            {piece.composer && <div><dt>Composer</dt><dd>{piece.composer}</dd></div>}
             <div><dt>Measures</dt><dd className="mono">{piece.totalMeasures}</dd></div>
             <div><dt>Sections</dt><dd className="mono">{piece.sections.length}</dd></div>
             <div><dt>Chunk size</dt><dd className="mono">{piece.chunkMode === "auto" ? `${autoChunkSize(piece.totalMeasures)} (auto)` : `${piece.customChunkSize} (custom)`}</dd></div>
             <div><dt>Recurring material</dt><dd>{piece.recurringMode === "none" ? "None" : piece.recurringMode === "basic" ? `${piece.recurringMeasures} measures (quick count)` : `${piece.recurringPairs.length} passage(s) mapped`}</dd></div>
             <div><dt>Schedule</dt><dd className="mono">{piece.daysToLearn} days, {piece.minutesPerDay} min/day</dd></div>
           </dl>
+          {piece.notes && (
+            <div className="piece-notes">
+              <h4>Notes</h4>
+              <p>{piece.notes}</p>
+            </div>
+          )}
           <button className="primary-btn" onClick={onStartEdit}>
             <Pencil size={15} /> Edit piece
           </button>
@@ -1974,6 +2019,7 @@ export default function App() {
   const [editDraft, setEditDraftState] = useState(null);
   const [dayOverride, setDayOverride] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
 
@@ -2096,6 +2142,61 @@ export default function App() {
     setDayOverride(null);
   };
 
+  const handleExportAll = () => {
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      pieces: Object.values(pieces),
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `measureone-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => importInputRef.current?.click();
+
+  const handleImportFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try {
+        data = JSON.parse(reader.result);
+      } catch (e) {
+        window.alert("That file doesn't look like a valid MeasureOne backup.");
+        return;
+      }
+      const importedPieces = Array.isArray(data.pieces) ? data.pieces : Array.isArray(data) ? data : null;
+      if (!importedPieces || importedPieces.length === 0) {
+        window.alert("No pieces found in that backup file.");
+        return;
+      }
+      const next = { ...pieces };
+      let firstNewId = null;
+      importedPieces.forEach((p) => {
+        if (!p || !p.id) return;
+        const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
+        const withId = { ...p, id };
+        next[id] = withId;
+        if (!firstNewId) firstNewId = id;
+        try {
+          localStorage.setItem(PIECE_KEY_PREFIX + id, JSON.stringify(withId));
+        } catch (e) {
+          /* storage unavailable */
+        }
+      });
+      setPieces(next);
+      if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
+      window.alert(`Imported ${importedPieces.length} piece(s).`);
+    };
+    reader.readAsText(file);
+  };
+
   // Editing state lives here, not inside SettingsTab, so switching tabs
   // mid-edit doesn't unmount (and lose) the in-progress draft.
   const startEditing = () => {
@@ -2215,6 +2316,17 @@ export default function App() {
   return (
     <div className="measureone-app">
       <style>{CSS}</style>
+      <input
+        type="file"
+        accept="application/json"
+        ref={importInputRef}
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files[0];
+          if (file) handleImportFile(file);
+          e.target.value = "";
+        }}
+      />
 
       {!loaded ? (
         <div className="empty-state">
@@ -2239,6 +2351,9 @@ export default function App() {
                   Return to Dashboard
                 </button>
               )}
+              <button className="ghost-btn" style={{ marginTop: 16 }} onClick={handleImportClick}>
+                <Upload size={14} /> Import a backup
+              </button>
             </div>
           </div>
         </div>
@@ -2333,6 +2448,8 @@ export default function App() {
                 onStartEdit={startEditing}
                 onDiscard={handleDiscardEdit}
                 onAddPiece={() => setWizardOpen(true)}
+                onExportAll={handleExportAll}
+                onImportClick={handleImportClick}
               />
             )}
           </main>
@@ -2436,6 +2553,7 @@ const CSS = `
 .hero-content { padding: 6px 32px 32px; }
 .hero-content h1 { font-size: clamp(22px, 3vw, 30px); line-height: 1.2; }
 .hero-sub { color: var(--ink-soft); font-size: 14px; margin-top: 8px; }
+.hero-composer { color: var(--ink-soft); font-size: 15px; font-style: italic; margin-top: 2px; }
 
 .manuscript-strip { display: flex; height: 46px; border-radius: 8px; overflow: hidden; margin: 20px 0 4px; border: 1px solid var(--line); position: relative; }
 .manuscript-strip.compact { height: 28px; }
@@ -2479,6 +2597,10 @@ const CSS = `
 .def-list > div { display: flex; justify-content: space-between; font-size: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); gap: 12px; }
 .def-list dt { color: var(--ink-soft); }
 .def-list dd { margin: 0; text-align: right; }
+
+.piece-notes { margin: 0 0 18px; }
+.piece-notes h4 { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin: 0 0 6px; }
+.piece-notes p { margin: 0; font-size: 14px; color: var(--ink); white-space: pre-wrap; line-height: 1.5; }
 .edit-actions { display: flex; justify-content: flex-end; gap: 10px; padding-bottom: 20px; }
 
 .week-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
@@ -2643,6 +2765,7 @@ const CSS = `
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .field > span { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
 .field input[type="text"], .field input[type="number"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
+.field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); font-family: inherit; resize: vertical; }
 .field input:disabled { color: var(--ink-faint); background: var(--paper); }
 .field-row { display: flex; gap: 16px; }
 .field-row .field { flex: 1; }

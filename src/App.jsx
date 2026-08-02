@@ -20,6 +20,7 @@ import {
   Trash2,
   Download,
   Upload,
+  ExternalLink,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -619,6 +620,7 @@ function defaultPiece() {
     customChunkSize: 4,
     targetBPM: null,
     bpmZones: [],
+    recordings: [],
     createdAt: null,
     progress: {},
     rescheduleMarker: null,
@@ -1133,6 +1135,65 @@ function BpmZonesEditor({ draft, set }) {
   );
 }
 
+function RecordingsEditor({ draft, set }) {
+  const addRecording = () =>
+    set({
+      recordings: [...(draft.recordings || []), { id: `rec${Date.now()}`, label: "", url: "" }],
+    });
+  const updateRecording = (i, patch) =>
+    set({ recordings: draft.recordings.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) });
+  const removeRecording = (i) => set({ recordings: draft.recordings.filter((_, idx) => idx !== i) });
+
+  return (
+    <div>
+      <p className="wizard-hint">
+        Link reference recordings — YouTube, Spotify, wherever — so they're one click away while
+        you practice.
+      </p>
+      <div className="pairs-list">
+        {(draft.recordings || []).map((r, i) => (
+          <div key={r.id} className="recording-row">
+            <input
+              type="text"
+              className="name-input"
+              placeholder="e.g. YouTube — Horowitz performance"
+              value={r.label}
+              onChange={(e) => updateRecording(i, { label: e.target.value })}
+            />
+            <input
+              type="text"
+              placeholder="https://…"
+              value={r.url}
+              onChange={(e) => updateRecording(i, { url: e.target.value })}
+            />
+            <button className="icon-btn" onClick={() => removeRecording(i)} aria-label="Remove">
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+        <button className="ghost-btn" onClick={addRecording}>
+          <Plus size={14} /> Add recording
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RecordingsList({ recordings }) {
+  const valid = (recordings || []).filter((r) => r.url && r.url.trim());
+  if (valid.length === 0) return null;
+  return (
+    <div className="recordings-list">
+      {valid.map((r) => (
+        <a key={r.id} className="recording-link" href={r.url} target="_blank" rel="noopener noreferrer">
+          <ExternalLink size={13} />
+          {r.label && r.label.trim() ? r.label : r.url}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Setup Wizard (new piece only)                                     */
 /* ------------------------------------------------------------------ */
@@ -1304,6 +1365,7 @@ function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDay, onRe
           <p className="hero-sub">
             {piece.totalMeasures} measures, {piece.sections.length} sections, {piece.daysToLearn}-day plan
           </p>
+          <RecordingsList recordings={piece.recordings} />
         </div>
       </div>
 
@@ -2155,6 +2217,12 @@ function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing
               <p>{piece.notes}</p>
             </div>
           )}
+          {piece.recordings && piece.recordings.length > 0 && (
+            <div className="piece-notes">
+              <h4>Recordings</h4>
+              <RecordingsList recordings={piece.recordings} />
+            </div>
+          )}
           <button className="primary-btn" onClick={onStartEdit}>
             <Pencil size={15} /> Edit piece
           </button>
@@ -2182,6 +2250,7 @@ function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing
       <div className="panel"><h3>Recurring material</h3><RecurringEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Schedule</h3><ScheduleFields draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Tempo zones</h3><BpmZonesEditor draft={editDraft} set={setEditDraft} /></div>
+      <div className="panel"><h3>Recordings</h3><RecordingsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="edit-actions">
         <button className="ghost-btn" onClick={onDiscard}>Discard changes</button>
         <button className="primary-btn" onClick={() => onSave(editDraft)}>
@@ -3000,6 +3069,13 @@ const CSS = `
 .pair-row input { width: 52px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; font-size: 13px; text-align: center; font-family: 'IBM Plex Mono', monospace; background: var(--white); color: var(--ink); }
 .pair-row input.name-input { width: 120px; text-align: left; font-family: 'Inter', sans-serif; }
 .pair-label { flex-shrink: 0; }
+
+.recording-row { display: flex; align-items: center; gap: 6px; }
+.recording-row input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font-size: 13px; background: var(--white); color: var(--ink); }
+.recording-row input.name-input { flex: 0.8; }
+.recordings-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.recording-link { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--brass-deep); background: rgba(185,138,62,0.08); border: 1px solid var(--line); border-radius: 20px; padding: 5px 12px; text-decoration: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recording-link:hover { background: rgba(185,138,62,0.16); }
 
 .review-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 20px; }
 .review-stat { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 14px; text-align: center; }

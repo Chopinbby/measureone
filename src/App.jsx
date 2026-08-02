@@ -1486,8 +1486,8 @@ function TimelineTab({ chunks, timeline, onSelectDay }) {
       <div className="tab-header">
         <h1>Timeline</h1>
         <p className="hero-sub">
-          Full piece covered by day {timeline.halfPoint}. After that: transitions, focus blocks, and
-          spaced review. Click a day to open its tasks.
+          Touch the whole piece by day {timeline.halfPoint}. Review and master until day{" "}
+          {timeline.learningDays}. Click a day to see your practice agenda.
         </p>
       </div>
 

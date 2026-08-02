@@ -38,8 +38,6 @@ import {
   getCurrentDay,
 } from "./lib/utils";
 import {
-  PIECE_KEY_PREFIX,
-  ACTIVE_KEY,
   EFFORT_TO_MIN,
   LIBERAL_FACTOR,
   DIFFICULTY_META,
@@ -77,6 +75,15 @@ import {
   computeTempoLadder,
   computeRevivalPlan,
 } from "./lib/revival";
+import {
+  loadPiecesFromStorage,
+  loadActivePieceId,
+  savePieceToStorage,
+  saveActivePieceIdToStorage,
+  removePieceFromStorage,
+  downloadBackup,
+  parseBackupPieces,
+} from "./lib/storage";
 
 function defaultPiece() {
   const totalMeasures = 64;
@@ -2292,59 +2299,22 @@ export default function App() {
 
   // Load every saved piece, then whichever one was active last.
   useEffect(() => {
-    const found = {};
-    try {
-      const keys = Object.keys(localStorage).filter((k) => k.startsWith(PIECE_KEY_PREFIX));
-      keys.forEach((key) => {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const p = JSON.parse(raw);
-            found[p.id] = p;
-          }
-        } catch (e) {
-          /* skip unreadable entry */
-        }
-      });
-    } catch (e) {
-      /* storage unavailable (e.g. private browsing) */
-    }
+    const found = loadPiecesFromStorage();
     setPieces(found);
-
-    let active = null;
-    try {
-      const raw = localStorage.getItem(ACTIVE_KEY);
-      if (raw) active = JSON.parse(raw);
-    } catch (e) {
-      /* nothing saved yet */
-    }
-    if (!active || !found[active]) {
-      const ids = Object.keys(found);
-      active = ids.length ? ids[0] : null;
-    }
-    setActivePieceId(active);
+    setActivePieceId(loadActivePieceId(found));
     setLoaded(true);
   }, []);
 
   // Persist only the active piece when it changes.
   useEffect(() => {
     if (!loaded || !activePieceId || !pieces[activePieceId]) return;
-    try {
-      localStorage.setItem(PIECE_KEY_PREFIX + activePieceId, JSON.stringify(pieces[activePieceId]));
-    } catch (e) {
-      /* storage unavailable */
-    }
+    savePieceToStorage(activePieceId, pieces[activePieceId]);
   }, [pieces, activePieceId, loaded]);
 
   // Persist which piece is active.
   useEffect(() => {
     if (!loaded) return;
-    try {
-      if (activePieceId) localStorage.setItem(ACTIVE_KEY, JSON.stringify(activePieceId));
-      else localStorage.removeItem(ACTIVE_KEY);
-    } catch (e) {
-      /* storage unavailable */
-    }
+    saveActivePieceIdToStorage(activePieceId);
   }, [activePieceId, loaded]);
 
   const updatePiece = (updater) => {
@@ -2404,11 +2374,7 @@ export default function App() {
       delete next[idToDelete];
       return next;
     });
-    try {
-      localStorage.removeItem(PIECE_KEY_PREFIX + idToDelete);
-    } catch (e) {
-      /* storage unavailable */
-    }
+    removePieceFromStorage(idToDelete);
     setActivePieceId(remainingIds[0] || null);
     setEditDraftState(null);
     setSettingsEditing(false);
@@ -2416,36 +2382,20 @@ export default function App() {
     setDayOverride(null);
   };
 
-  const handleExportAll = () => {
-    const backup = {
-      exportedAt: new Date().toISOString(),
-      version: 1,
-      pieces: Object.values(pieces),
-    };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `measureone-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+  const handleExportAll = () => downloadBackup(pieces);
 
   const handleImportClick = () => importInputRef.current?.click();
 
   const handleImportFile = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
-      let data;
+      let importedPieces;
       try {
-        data = JSON.parse(reader.result);
+        importedPieces = parseBackupPieces(reader.result);
       } catch (e) {
         window.alert("That file doesn't look like a valid MeasureOne backup.");
         return;
       }
-      const importedPieces = Array.isArray(data.pieces) ? data.pieces : Array.isArray(data) ? data : null;
       if (!importedPieces || importedPieces.length === 0) {
         window.alert("No pieces found in that backup file.");
         return;
@@ -2458,11 +2408,7 @@ export default function App() {
         const withId = { ...p, id };
         next[id] = withId;
         if (!firstNewId) firstNewId = id;
-        try {
-          localStorage.setItem(PIECE_KEY_PREFIX + id, JSON.stringify(withId));
-        } catch (e) {
-          /* storage unavailable */
-        }
+        savePieceToStorage(id, withId);
       });
       setPieces(next);
       if (!activePieceId && firstNewId) setActivePieceId(firstNewId);

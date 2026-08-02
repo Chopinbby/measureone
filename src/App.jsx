@@ -1271,7 +1271,8 @@ function ScheduleBanner({ piece, practiceChunks, timeline, currentDay, onResched
 /*  Tabs                                                               */
 /* ------------------------------------------------------------------ */
 
-function OverviewTab({ piece, practiceChunks, timeline, currentDay, onReschedule, onAddPiece }) {
+function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDay, onReschedule, onAddPiece }) {
+  const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
     tierMeasures[computeProgressTier(c, piece)] += c.measureCount;
@@ -1335,17 +1336,32 @@ function OverviewTab({ piece, practiceChunks, timeline, currentDay, onReschedule
       <div className="panel">
         <h3>The first week</h3>
         <div className="day-preview-list">
-          {timeline.days.slice(0, 7).map((d) => (
-            <div key={d.dayNumber} className="day-preview-row">
-              <span className="day-num mono">Day {d.dayNumber}</span>
-              <span className="day-desc">
-                {d.type === "consolidation"
-                  ? "Full run-through & consolidation"
-                  : `${d.newChunkIds.length} new, ${d.specialChunkIds.length} transition/focus, ${d.reviewChunkIds.length} review`}
-              </span>
-              <span className="day-min mono">{d.minutes} min</span>
-            </div>
-          ))}
+          {timeline.days.slice(0, 7).map((d) => {
+            let desc = "Nothing scheduled";
+            if (d.type === "consolidation") {
+              desc = "Full run-through & consolidation";
+            } else {
+              const newMeasures = d.newChunkIds.reduce((s, id) => s + chunkById[id].measureCount, 0);
+              const reviewMeasures = [...d.specialChunkIds, ...d.reviewChunkIds].reduce(
+                (s, id) => s + chunkById[id].measureCount,
+                0
+              );
+              const parts = [];
+              if (newMeasures > 0) parts.push(`Learn ${newMeasures} new measures`);
+              if (reviewMeasures > 0) parts.push(`review ${reviewMeasures} measures`);
+              if (parts.length) {
+                desc = parts.join(", ");
+                desc = desc[0].toUpperCase() + desc.slice(1);
+              }
+            }
+            return (
+              <div key={d.dayNumber} className="day-preview-row">
+                <span className="day-num mono">Day {d.dayNumber}</span>
+                <span className="day-desc">{desc}</span>
+                <span className="day-min mono">{d.minutes} min</span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -2588,7 +2604,7 @@ export default function App() {
 
           <main className="main-content">
             {activeTab === "overview" && (
-              <OverviewTab piece={piece} practiceChunks={practiceChunks} timeline={timeline} currentDay={currentDay} onReschedule={handleReschedule} onAddPiece={() => setWizardOpen(true)} />
+              <OverviewTab piece={piece} practiceChunks={practiceChunks} chunks={chunks} timeline={timeline} currentDay={currentDay} onReschedule={handleReschedule} onAddPiece={() => setWizardOpen(true)} />
             )}
             {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
             {activeTab === "map" && (

@@ -1,6 +1,43 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
 
 /* ------------------------------------------------------------------ */
+/*  Schema versioning and migration                                   */
+/* ------------------------------------------------------------------ */
+
+const CURRENT_SCHEMA_VERSION = 1;
+
+function validateAndMigratePiece(piece) {
+  if (!piece || typeof piece !== "object") return null;
+
+  // Ensure critical fields exist; missing optional fields are fine
+  if (!piece.id || !piece.name || typeof piece.totalMeasures !== "number") {
+    return null;
+  }
+
+  // Default missing fields to safe values (non-destructive for old data)
+  const migrated = {
+    ...piece,
+    // Ensure nested objects exist even if old data is incomplete
+    progress: piece.progress || {},
+    sections: piece.sections || [{ id: "s1", name: "", start: 1, end: piece.totalMeasures }],
+    bpmZones: piece.bpmZones || [],
+    recordings: piece.recordings || [],
+    revival: piece.revival || {
+      active: false,
+      startedAt: null,
+      purpose: null,
+      performanceTempo: null,
+      tempoLadderStartFraction: 0.6,
+      reassessmentComplete: false,
+      plan: null,
+    },
+    memoryAnchors: piece.memoryAnchors || {},
+  };
+
+  return migrated;
+}
+
+/* ------------------------------------------------------------------ */
 /*  localStorage load/save, extracted into plain functions so the      */
 /*  App component's effects just call these rather than touching       */
 /*  localStorage directly. Every call is wrapped defensively since      */
@@ -16,7 +53,10 @@ export function loadPiecesFromStorage() {
         const raw = localStorage.getItem(key);
         if (raw) {
           const p = JSON.parse(raw);
-          found[p.id] = p;
+          const migrated = validateAndMigratePiece(p);
+          if (migrated) {
+            found[migrated.id] = migrated;
+          }
         }
       } catch (e) {
         /* skip unreadable entry */

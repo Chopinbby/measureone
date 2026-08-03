@@ -427,26 +427,28 @@ export default function App() {
           <nav className="sidebar">
             <div className="brand"><BookOpen size={20} /><span>MeasureOne</span></div>
 
-            <button className="piece-switcher-trigger" onClick={() => setSwitcherOpen((o) => !o)}>
-              <span className="piece-switcher-name">{piece.name || "Untitled piece"}</span>
-              <ChevronDown size={14} className={switcherOpen ? "rotated" : ""} />
-            </button>
-            {switcherOpen && (
-              <div className="piece-switcher-list">
-                {pieceList.map((p) => (
-                  <button
-                    key={p.id}
-                    className={`piece-switcher-item ${p.id === activePieceId ? "active" : ""}`}
-                    onClick={() => switchToPiece(p.id)}
-                  >
-                    {p.name || "Untitled piece"}
+            <div className="piece-switcher">
+              <button className="piece-switcher-trigger" onClick={() => setSwitcherOpen((o) => !o)}>
+                <span className="piece-switcher-name">{piece.name || "Untitled piece"}</span>
+                <ChevronDown size={14} className={switcherOpen ? "rotated" : ""} />
+              </button>
+              {switcherOpen && (
+                <div className="piece-switcher-list">
+                  {pieceList.map((p) => (
+                    <button
+                      key={p.id}
+                      className={`piece-switcher-item ${p.id === activePieceId ? "active" : ""}`}
+                      onClick={() => switchToPiece(p.id)}
+                    >
+                      {p.name || "Untitled piece"}
+                    </button>
+                  ))}
+                  <button className="piece-switcher-add" onClick={() => { setWizardOpen(true); setSwitcherOpen(false); }}>
+                    <Plus size={14} /> Add new piece
                   </button>
-                ))}
-                <button className="piece-switcher-add" onClick={() => { setWizardOpen(true); setSwitcherOpen(false); }}>
-                  <Plus size={14} /> Add new piece
-                </button>
-              </div>
-            )}
+                </div>
+              )}
+            </div>
 
             <div className="nav-list">
               {navItems.map((n) => {
@@ -606,6 +608,7 @@ const CSS = `
 .nav-item.active { background: var(--brass); color: var(--white); }
 .sidebar-foot { padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
 
+.piece-switcher { position: relative; }
 .piece-switcher-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
 .piece-switcher-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .piece-switcher-trigger svg.rotated { transform: rotate(180deg); }
@@ -620,9 +623,12 @@ const CSS = `
 
 @media (max-width: 820px) {
   .app-shell { flex-direction: column; }
-  .sidebar { width: 100%; height: auto; position: static; flex-direction: row; align-items: center; overflow-x: auto; padding: 10px; gap: 10px; }
+  .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px; gap: 10px; }
   .brand { padding: 6px 10px; }
-  .nav-list { flex-direction: row; }
+  .piece-switcher { flex: 1 1 150px; min-width: 120px; max-width: 260px; }
+  .piece-switcher-trigger { margin-bottom: 0; }
+  .piece-switcher-list { position: absolute; top: calc(100% + 4px); left: 0; width: max-content; min-width: 180px; max-width: 260px; margin-bottom: 0; z-index: 30; box-shadow: 0 8px 20px rgba(32,42,51,0.15); }
+  .nav-list { flex-direction: row; flex: 1 1 auto; min-width: 240px; overflow-x: auto; }
   .nav-item span { display: none; }
   .sidebar-foot { display: none; }
   .main-content { padding: 20px; }

@@ -25,7 +25,12 @@ stored under its own `localStorage` key (`measureone-piece:<id>`), and
 ```js
 piece = {
   id,                    // string, e.g. "p_1699999999999"
-  name,                  // string
+  name,                  // string — what this plan is for. For a movement of a
+                         // multi-movement work, this is the movement ("I. Allegro"),
+                         // not the work title. See #works below.
+  workId,                // string | null — groups sibling movements. Derived from
+                         // workName, never entered directly. See #works below.
+  workName,              // string — title of the whole work; "" for a standalone piece
   composer,              // string, optional
   notes,                 // string, optional — free text about the piece itself
                          // (not a per-session practice journal — see Roadmap.md item 1)
@@ -82,9 +87,33 @@ ChunkProgress = {
 }
 ```
 
-`defaultPiece()` in `src/App.jsx` is the literal source of truth for this
-shape and its defaults — read it directly if this table and the code ever
-disagree.
+`defaultPiece()` in `src/components/Wizard.jsx` is the literal source of truth
+for this shape and its defaults — read it directly if this table and the code
+ever disagree.
+
+## Works (multi-movement pieces)
+
+A **work** is a grouping label over ordinary pieces, nothing more. Each
+movement is a complete, self-contained piece: its own chunks, timeline,
+schedule, `progress`, and `revival` state, in its own `localStorage` key.
+Movements are linked only by a shared `workId`, so chunking, scheduling,
+confidence, revival and storage need no awareness that works exist.
+
+- `workName` is the only thing the user types. `workId` is derived from it by
+  `ensureWorkId` in `src/lib/works.js`, called on piece creation and on save
+  from `SettingsTab`. Typing a work title on a standalone piece promotes it
+  into a (single-movement) work; clearing the title drops it back out.
+- `piece.name` stays the movement name, so every screen that already renders
+  `piece.name` keeps working unchanged. Overview shows `workName` in the
+  eyebrow above it; the sidebar switcher groups movements under it.
+- There is deliberately **no** rolled-up "work progress" number. Movements
+  differ enormously in length and difficulty, so a single combined percentage
+  would be misleading; `PartSwitcher` shows each movement's own
+  measures-touched figure side by side instead. See
+  [Decisions.md](Decisions.md#multi-movement-works).
+
+Helpers live in `src/lib/works.js`: `ensureWorkId`, `partsOfWork` (siblings in
+creation order), `groupPiecesByWork` (ordered groups for the switcher).
 
 ## Practice chunks vs. sections vs. transitions vs. combos vs. run-throughs
 

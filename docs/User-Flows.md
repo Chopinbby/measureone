@@ -28,8 +28,23 @@ before the piece is created. Completing the wizard calls
 `generateAllChunks` + `computeTimeline` for the first time and persists the
 new piece to `localStorage`.
 
+Step 1 is also where the user says whether this is a single piece or one
+movement of a larger work, and whether they're learning it fresh or reviving
+it. Both toggles are on the same step as the basics; the multi-movement one
+lives inside `BasicsFields` so Settings gets it too (a standalone piece can be
+promoted into a work later by typing a work title there).
+
 The Wizard is **create-only** — an existing piece is never edited through it;
 editing always goes through Settings instead.
+
+### 1a. Adding a movement to an existing work
+
+"Add a movement" on the Overview `PartSwitcher` reopens the same wizard with a
+`joinWork` prop, so the new movement starts already attached: work title
+preseeded and locked, composer inherited, single-vs-multi toggle hidden. Every
+other step runs normally — a movement is set up exactly like any other piece,
+because that's what it is. See
+[Data-Model.md](Data-Model.md#works-multi-movement-pieces).
 
 ## 2. The daily practice loop
 
@@ -106,6 +121,11 @@ The sidebar's piece-switcher trigger opens a list of every piece in
 `pieces`; selecting one calls `switchToPiece`, which updates `activePieceId`
 (and the persisted `measureone-active_piece_id` key). "Add new piece" is
 reachable from the switcher, the Overview top row, and Settings.
+
+Movements of the same work are grouped under the work title in that list
+(`groupPiecesByWork`), and are additionally switchable from the `PartSwitcher`
+strip on the Overview of any movement — same `switchToPiece` call, just a
+closer-to-hand entry point while working within one work.
 
 ## 7. Backup and restore
 

@@ -20,7 +20,9 @@ Setup wizard, chunking/timeline engine, Piece Map, Today's Practice (timer,
 reps/BPM/effectiveness logging), Progress tab (rolling-window consistency,
 consistency heatmap, actual-vs-planned, projected finish, tempo trend,
 effectiveness calibration), multi-piece support, rescheduling, section
-run-throughs, reference recordings, backup export/import,
+run-throughs, reference recordings, multi-movement works (movements as
+self-contained sibling pieces sharing a `workId` — see
+[Decisions.md](Decisions.md#multi-movement-works)), backup export/import,
 `computeConfidenceAsOf` (used by Progress's "most improved" stat), Revival
 (MVP slice — entry flow, chunk/transition reassessment reusing
 `manualConfidence`, weak-spot flagging, revival plan generation, tempo
@@ -72,8 +74,6 @@ decision (see [Decisions.md](Decisions.md)):
 
 ## Housekeeping (not urgent, but compounding)
 
-- Split `App.jsx` (~3,900 lines and growing) into `lib/`/`components/`
-  modules — see [Architecture.md](Architecture.md#suggested-refactor).
 - Rename practice-chunk `kind: "section"` to avoid the naming collision with
   `piece.sections`.
 - Centralize the `0.65` efficiency constant (currently a magic number

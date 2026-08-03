@@ -1,14 +1,62 @@
+import { useState } from "react";
 import { NumberInput } from "../NumberInput";
 import { resizeDifficulty, resizeSections } from "../../lib/utils";
 
-export function BasicsFields({ draft, set }) {
+// Shared by the Wizard and SettingsTab, so a piece can be declared part of a
+// multi-movement work either at setup or later on.
+//
+// A part is an ordinary piece — `name` always means "what this plan is for",
+// which for a part is the movement. `workName` is the only extra input; the
+// grouping id is derived from it in lib/works.js. `lockWork` is used when
+// adding a part to a work that already exists, so the title can't drift
+// between siblings and the piece can't be pulled back out by accident.
+export function BasicsFields({ draft, set, lockWork = false }) {
+  const [multiPart, setMultiPart] = useState(lockWork || !!(draft.workId || draft.workName));
+
+  const chooseMultiPart = (on) => {
+    setMultiPart(on);
+    if (!on) set({ workName: "" });
+  };
+
   return (
     <>
+      {!lockWork && (
+        <div className="field">
+          <span>Is this one piece, or a work with several movements?</span>
+          <div className="segmented">
+            <button type="button" className={!multiPart ? "active" : ""} onClick={() => chooseMultiPart(false)}>
+              A single piece
+            </button>
+            <button type="button" className={multiPart ? "active" : ""} onClick={() => chooseMultiPart(true)}>
+              Multiple movements
+            </button>
+          </div>
+          {multiPart && (
+            <p className="wizard-hint" style={{ marginTop: 8 }}>
+              Set up one movement now — each gets its own plan, schedule and progress. You can add
+              the rest from the piece overview whenever you're ready to start them.
+            </p>
+          )}
+        </div>
+      )}
+
+      {multiPart && (
+        <label className="field">
+          <span>Work title</span>
+          <input
+            type="text"
+            placeholder="e.g. Brahms – Sonata in F minor, Op. 120 No. 1"
+            value={draft.workName || ""}
+            disabled={lockWork}
+            onChange={(e) => set({ workName: e.target.value })}
+          />
+        </label>
+      )}
       <label className="field">
-        <span>Piece name</span>
+        <span>{multiPart ? "Movement or part name" : "Piece name"}</span>
         <input
           type="text"
-          placeholder="e.g. Chopin – Nocturne in E♭ major, Op. 9 No. 2"
+          placeholder={multiPart ? "e.g. I. Allegro appassionato" : "e.g. Chopin – Nocturne in E♭ major, Op. 9 No. 2"}
           value={draft.name}
           onChange={(e) => set({ name: e.target.value })}
         />
@@ -23,7 +71,7 @@ export function BasicsFields({ draft, set }) {
         />
       </label>
       <label className="field">
-        <span>Total measures</span>
+        <span>{multiPart ? "Measures in this movement" : "Total measures"}</span>
         <NumberInput
           value={draft.totalMeasures}
           min={1}

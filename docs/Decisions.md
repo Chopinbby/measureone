@@ -142,6 +142,40 @@ fixed immediately.**
   swapped during the migration to a real Vite project so the app can run
   anywhere.
 
+## Multi-movement works
+
+**Decision: a multi-movement work is a grouping label over ordinary pieces —
+each movement is a full, self-contained piece sharing a `workId` — not a
+nested structure inside one piece.**
+
+- **Why:** movements differ in length, difficulty, section layout, deadline
+  and readiness; a violin sonata's slow movement may be revival material while
+  the finale is being learned from scratch. Modelling each as a piece means
+  chunking, scheduling, confidence, rescheduling, revival and storage all work
+  on movements for free, with no branching. The alternative — parts nested
+  inside a piece — would have forced every one of those systems to learn about
+  parts, for no gain.
+- **Consequence accepted:** setting up a five-movement work means running the
+  wizard five times. That's real friction, but each run is genuinely different
+  data (measures, sections, difficulty, schedule), so a combined flow would
+  mostly be the same wizard in a loop. "Add a movement" preseeds and locks
+  what actually is shared (work title, composer) to cut the repetition.
+
+**Decision: no rolled-up "work progress" percentage.**
+
+- **Why:** averaging a 300-measure Allegro with a 40-measure Menuetto produces
+  a number that means nothing musically, and inviting comparison between
+  movements at different stages is exactly the kind of pressure
+  [Product-Principles.md](Product-Principles.md#no-punishment-mechanics) rules
+  out. `PartSwitcher` shows each movement's own figure instead.
+
+**Decision: `workId` is derived from `workName`, never entered directly.**
+
+- **Why:** it keeps the user-facing model to one field ("what's the work
+  called?") and makes promotion free — typing a work title on an existing
+  standalone piece in Settings groups it, clearing the title ungroups it, with
+  no separate "convert to work" action to build or explain.
+
 ## Revival
 
 **Decision: revival reassessment reuses `manualConfidence` (via a fast

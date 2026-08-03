@@ -2,11 +2,24 @@ import { Plus, RefreshCw } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { ManuscriptDoodle, ManuscriptStrip } from "../Manuscript";
 import { RecordingsList } from "../fields/RecordingsList";
+import { PartSwitcher } from "../PartSwitcher";
 import { sumPracticeSeconds, formatHoursMinutes } from "../../lib/utils";
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
 
-export function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDay, onReschedule, onAddPiece, onStartRevival }) {
+export function OverviewTab({
+  piece,
+  practiceChunks,
+  chunks,
+  timeline,
+  currentDay,
+  onReschedule,
+  onAddPiece,
+  onStartRevival,
+  workParts,
+  onSelectPart,
+  onAddPart,
+}) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
@@ -36,7 +49,7 @@ export function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDa
           <ManuscriptDoodle />
         </div>
         <div className="hero-content">
-          <p className="eyebrow">Now practicing</p>
+          <p className="eyebrow">{piece.workId && piece.workName ? piece.workName : "Now practicing"}</p>
           <h1>{piece.name}</h1>
           {piece.composer && <p className="hero-composer">{piece.composer}</p>}
           <p className="hero-sub">
@@ -46,6 +59,16 @@ export function OverviewTab({ piece, practiceChunks, chunks, timeline, currentDa
           <RecordingsList recordings={piece.recordings} />
         </div>
       </div>
+
+      {piece.workId && workParts && workParts.length > 0 && (
+        <PartSwitcher
+          parts={workParts}
+          activeId={piece.id}
+          workName={piece.workName || "Untitled work"}
+          onSelectPart={onSelectPart}
+          onAddPart={onAddPart}
+        />
+      )}
 
       <ManuscriptStrip chunks={practiceChunks} />
 

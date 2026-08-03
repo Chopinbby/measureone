@@ -20,6 +20,7 @@ import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
+import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import {
   loadPiecesFromStorage,
   loadActivePieceId,
@@ -69,6 +70,7 @@ export default function App() {
   const [dayOverride, setDayOverride] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [revivalModalOpen, setRevivalModalOpen] = useState(false);
+  const [wizardJoinWork, setWizardJoinWork] = useState(null);
   const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
@@ -131,14 +133,32 @@ export default function App() {
 
   const handleComplete = (finished, options = {}) => {
     const id = `p_${Date.now()}`;
-    const withId = { ...finished, id };
+    const withId = ensureWorkId({ ...finished, id });
     setPieces((prev) => ({ ...prev, [id]: withId }));
     setActivePieceId(id);
     setWizardOpen(false);
+    setWizardJoinWork(null);
     setSwitcherOpen(false);
     setActiveTab("overview");
     setDayOverride(null);
     if (options.startAsRevival) setRevivalModalOpen(true);
+  };
+
+  const openWizard = (joinWork = null) => {
+    setWizardJoinWork(joinWork);
+    setWizardOpen(true);
+    setSwitcherOpen(false);
+  };
+
+  const handleCloseWizard = () => {
+    setWizardOpen(false);
+    setWizardJoinWork(null);
+  };
+
+  // Adding a movement to the work the active piece belongs to.
+  const handleAddPart = () => {
+    if (!piece || !piece.workId) return;
+    openWizard({ workId: piece.workId, workName: piece.workName, composer: piece.composer });
   };
 
   const handleDeletePiece = () => {
@@ -203,7 +223,9 @@ export default function App() {
   };
   const setEditDraft = (patch) => setEditDraftState((d) => ({ ...d, ...patch }));
   const handleSavePiece = (updated) => {
-    updatePiece({ ...updated, rescheduleMarker: null });
+    // Typing a work title on a standalone piece promotes it into a work;
+    // clearing it pulls the piece back out. See lib/works.js.
+    updatePiece(ensureWorkId({ ...updated, rescheduleMarker: null }));
     setEditDraftState(null);
     setSettingsEditing(false);
   };
@@ -377,6 +399,8 @@ export default function App() {
   };
 
   const pieceList = Object.values(pieces).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const pieceGroups = groupPiecesByWork(pieceList);
+  const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
 
   return (
     <div className="measureone-app">
@@ -408,7 +432,7 @@ export default function App() {
                 Tell us the measures, the hard parts, and how long you've got. We'll turn it into
                 a day-by-day plan you can actually follow.
               </p>
-              <button className="primary-btn lg" onClick={() => setWizardOpen(true)}>
+              <button className="primary-btn lg" onClick={() => openWizard()}>
                 <Plus size={18} /> Start a new piece
               </button>
               {pieceList.length > 0 && (
@@ -434,16 +458,21 @@ export default function App() {
               </button>
               {switcherOpen && (
                 <div className="piece-switcher-list">
-                  {pieceList.map((p) => (
-                    <button
-                      key={p.id}
-                      className={`piece-switcher-item ${p.id === activePieceId ? "active" : ""}`}
-                      onClick={() => switchToPiece(p.id)}
-                    >
-                      {p.name || "Untitled piece"}
-                    </button>
+                  {pieceGroups.map((g) => (
+                    <div key={g.workId || g.pieces[0].id} className={g.workId ? "piece-switcher-work" : ""}>
+                      {g.workId && <div className="piece-switcher-work-name">{g.workName}</div>}
+                      {g.pieces.map((p) => (
+                        <button
+                          key={p.id}
+                          className={`piece-switcher-item ${p.id === activePieceId ? "active" : ""}`}
+                          onClick={() => switchToPiece(p.id)}
+                        >
+                          {p.name || (g.workId ? "Untitled movement" : "Untitled piece")}
+                        </button>
+                      ))}
+                    </div>
                   ))}
-                  <button className="piece-switcher-add" onClick={() => { setWizardOpen(true); setSwitcherOpen(false); }}>
+                  <button className="piece-switcher-add" onClick={() => openWizard()}>
                     <Plus size={14} /> Add new piece
                   </button>
                 </div>
@@ -474,7 +503,19 @@ export default function App() {
 
           <main className="main-content">
             {activeTab === "overview" && (
-              <OverviewTab piece={piece} practiceChunks={practiceChunks} chunks={chunks} timeline={timeline} currentDay={currentDay} onReschedule={handleReschedule} onAddPiece={() => setWizardOpen(true)} onStartRevival={handleOpenRevival} />
+              <OverviewTab
+                piece={piece}
+                practiceChunks={practiceChunks}
+                chunks={chunks}
+                timeline={timeline}
+                currentDay={currentDay}
+                onReschedule={handleReschedule}
+                onAddPiece={() => openWizard()}
+                onStartRevival={handleOpenRevival}
+                workParts={workParts}
+                onSelectPart={switchToPiece}
+                onAddPart={handleAddPart}
+              />
             )}
             {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
             {activeTab === "map" && (
@@ -535,7 +576,7 @@ export default function App() {
                 editing={settingsEditing}
                 onStartEdit={startEditing}
                 onDiscard={handleDiscardEdit}
-                onAddPiece={() => setWizardOpen(true)}
+                onAddPiece={() => openWizard()}
                 onExportAll={handleExportAll}
                 onImportClick={handleImportClick}
               />
@@ -544,7 +585,9 @@ export default function App() {
         </div>
       )}
 
-      {wizardOpen && <Wizard onCancel={() => setWizardOpen(false)} onComplete={handleComplete} hasPiece={!!piece} />}
+      {wizardOpen && (
+        <Wizard onCancel={handleCloseWizard} onComplete={handleComplete} hasPiece={!!piece} joinWork={wizardJoinWork} />
+      )}
       {revivalModalOpen && piece && (
         <RevivalEntryModal piece={piece} onCancel={() => setRevivalModalOpen(false)} onStart={handleStartRevival} />
       )}
@@ -618,6 +661,16 @@ const CSS = `
 .piece-switcher-item.active { background: var(--brass); color: var(--white); font-weight: 600; }
 .piece-switcher-add { display: flex; align-items: center; gap: 6px; text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--brass-deep); font-weight: 600; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
 .piece-switcher-add:hover { background: rgba(185,138,62,0.08); }
+.piece-switcher-work { display: flex; flex-direction: column; gap: 2px; }
+.piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piece-switcher-work .piece-switcher-item { margin-left: 8px; }
+.part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
+.part-chip:hover { border-color: var(--brass); color: var(--ink); }
+.part-chip.active { background: var(--brass); border-color: var(--brass); color: var(--white); }
+.part-chip-idx { font-size: 11px; opacity: 0.7; }
+.part-chip-pct { font-size: 11.5px; opacity: 0.8; }
+.part-chip.add { color: var(--brass-deep); border-style: dashed; }
 
 .main-content { flex: 1; padding: 32px 40px 64px; max-width: 940px; }
 

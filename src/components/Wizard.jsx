@@ -14,6 +14,8 @@ export function defaultPiece() {
   return {
     id: null,
     name: "",
+    workId: null,   // set once workName is non-empty — see lib/works.js
+    workName: "",   // title of the whole multi-movement work, "" for a standalone piece
     composer: "",
     notes: "",
     totalMeasures,
@@ -54,9 +56,16 @@ export function defaultPiece() {
 
 const STEPS = ["Piece", "Sections", "Difficulty", "Repeats", "Timeline", "Review"];
 
-export function Wizard({ onCancel, onComplete, hasPiece }) {
+// `joinWork` — {workId, workName, composer} — is set when the wizard was opened
+// via "Add a movement" from an existing work, so the new part starts already
+// attached to it rather than the user having to retype the title.
+export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState(defaultPiece());
+  const [draft, setDraft] = useState(() =>
+    joinWork
+      ? { ...defaultPiece(), workId: joinWork.workId, workName: joinWork.workName, composer: joinWork.composer || "" }
+      : defaultPiece()
+  );
   const [startAsRevival, setStartAsRevival] = useState(false);
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -91,9 +100,13 @@ export function Wizard({ onCancel, onComplete, hasPiece }) {
         <div className="modal-body">
           {step === 0 && (
             <div className="wizard-pane">
-              <h2>What are you learning?</h2>
-              <p className="wizard-hint">Start with the basics of the piece.</p>
-              <BasicsFields draft={draft} set={set} />
+              <h2>{joinWork ? "Add a movement" : "What are you learning?"}</h2>
+              <p className="wizard-hint">
+                {joinWork
+                  ? `A new movement of ${joinWork.workName || "this work"}, with its own plan and schedule.`
+                  : "Start with the basics of the piece."}
+              </p>
+              <BasicsFields draft={draft} set={set} lockWork={!!joinWork} />
 
               <div className="field" style={{ marginTop: 20 }}>
                 <span>Is this fresh, or a piece you're coming back to?</span>

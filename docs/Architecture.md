@@ -56,10 +56,12 @@ MeasureOne.jsx/
     │   ├── scheduling.js             # computeTimeline and friends
     │   ├── confidence.js              # computeConfidence and friends
     │   ├── revival.js                  # computeRevivalPlan and friends
-    │   └── storage.js                   # localStorage load/save/export/import
+    │   ├── works.js                      # multi-movement grouping helpers
+    │   └── storage.js                     # localStorage load/save/export/import
     └── components/
         ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
-        │   ScheduleBanner.jsx, Sparkline.jsx    # small standalone pieces
+        │   ScheduleBanner.jsx, Sparkline.jsx,
+        │   PartSwitcher.jsx                     # small standalone pieces
         ├── Wizard.jsx                            # create-only piece setup
         ├── RevivalEntryModal.jsx
         ├── fields/                                # editors shared by
@@ -90,6 +92,7 @@ single-file Claude.ai artifact.
 | `ManuscriptDoodle` / `ManuscriptStrip` | Decorative SVG staff/clef band and the colored horizontal strip of practice chunks shown on the dashboard and wizard review step. `ManuscriptStrip` uses a custom tooltip, not native `title`. |
 | `BasicsFields`, `SectionsEditor`, `DifficultyEditor`, `RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor` | Shared field-editor components, used in both `Wizard` and Settings — see [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows). Add new piece-level fields to one of these rather than duplicating markup. |
 | `RecordingsList` | Renders `piece.recordings` as clickable links; used on the Overview dashboard. |
+| `PartSwitcher` | Strip of sibling movements on the Overview of any piece belonging to a multi-movement work, plus "Add a movement". Shows each movement's own measures-touched percentage — deliberately not a combined work total, see [Decisions.md](Decisions.md#multi-movement-works). |
 | `Wizard` | Multi-step modal for creating a new piece (create-only — see [User-Flows.md](User-Flows.md#1-setting-up-a-new-piece)). |
 | `ScheduleBanner` | The "N chunks behind schedule" banner (Overview, Today). |
 | `OverviewTab` | The dashboard / landing screen. |

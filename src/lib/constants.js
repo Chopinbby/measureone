@@ -30,7 +30,7 @@ export const ROLE_LABEL = {
 export const EFFECTIVENESS_OPTIONS = [
   { value: "low", label: "Needs more work" },
   { value: "good", label: "Good" },
-  { value: "high", label: "Too easy" },
+  { value: "high", label: "Comfortable" },
 ];
 
 export const REVIVAL_PURPOSE_OPTIONS = [

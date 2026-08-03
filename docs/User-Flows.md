@@ -41,7 +41,8 @@ Entry point: the Today tab, or clicking a day card in Timeline
 2. `FocusPanel` surfaces what most needs attention right now, independent of
    what's scheduled for today.
 3. `DayChecklist` lists today's actual scheduled items (new chunks, reviews,
-   transitions, combos). Each `ChecklistItem` has a start/stop timer and
+   transitions, combos). Each `ChecklistItem` has a start/stop timer (or a
+   manual minutes field, which wins over the timer when filled) and
    reps/BPM/effectiveness inputs; checking it off calls `submitLog()`
    directly once those inputs are valid (see
    [UX-Principles.md](UX-Principles.md#direct-manipulation-over-confirmation-ceremony)).

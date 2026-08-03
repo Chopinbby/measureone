@@ -804,10 +804,12 @@ const CSS = `
 .tag.subtle { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); }
 .conf-pill { margin-left: auto; font-size: 12px; color: var(--brass-deep); font-weight: 600; }
 .tip-line { font-size: 12px; color: var(--ink-soft); margin: 0; }
-.timer-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.timer-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
 .timer-btn { border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 7px; padding: 5px 12px; font-size: 12px; font-weight: 600; }
 .timer-btn.running { background: var(--brick); border-color: var(--brick); color: var(--white); }
 .timer-display { font-size: 13px; color: var(--ink-soft); min-width: 40px; }
+.timer-manual { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); font-weight: 600; }
+.timer-manual input { width: 70px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 13px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
 .log-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .log-row label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-soft); font-weight: 600; }
 .log-row input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }

@@ -15,6 +15,7 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   const [feel, setFeel] = useState("");
   const [timerRunning, setTimerRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [manualMinutes, setManualMinutes] = useState("");
 
   useEffect(() => {
     if (!timerRunning) return;
@@ -24,13 +25,16 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
 
   const canLog = reps !== "" && bpm !== "" && !!feel;
 
+  const duration = manualMinutes !== "" ? Math.round(Number(manualMinutes) * 60) : elapsed;
+
   const submitLog = () => {
     if (!canLog) return;
-    onLogSession(chunk.id, day, Number(reps), Number(bpm), feel, elapsed);
+    onLogSession(chunk.id, day, Number(reps), Number(bpm), feel, duration);
     setReps("");
     setBpm("");
     setFeel("");
     setElapsed(0);
+    setManualMinutes("");
     setTimerRunning(false);
   };
 
@@ -96,6 +100,16 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
             {timerRunning ? "Stop" : "Start"} timer
           </button>
           <span className="timer-display mono">{formatDuration(elapsed)}</span>
+          <label className="timer-manual">
+            <span>or enter minutes</span>
+            <input
+              type="number"
+              min={0}
+              value={manualMinutes}
+              onChange={(e) => setManualMinutes(e.target.value)}
+              placeholder="e.g. 10"
+            />
+          </label>
         </div>
 
         <div className="log-row">

@@ -66,7 +66,8 @@ ChunkProgress = {
   doneDays: number[],       // plan-day numbers this chunk was marked done on
   sessions: [{              // one entry per day it was logged, most recent last
     day, cleanReps, bpm, effectiveness, durationSeconds
-  }],
+  }],                       // durationSeconds comes from the ChecklistItem timer, or from
+                            // the manual minutes field when the user typed one instead.
   currentBPM,               // number | undefined — last logged tempo
   targetBPM,                // number | undefined — explicit per-chunk override;
                              // falls back to piece.targetBPM / bpmZones if unset

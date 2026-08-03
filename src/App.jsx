@@ -33,6 +33,7 @@ import {
 
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
+import { DeletePieceModal } from "./components/DeletePieceModal";
 import { Wizard } from "./components/Wizard";
 
 import { OverviewTab } from "./components/tabs/OverviewTab";
@@ -71,6 +72,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [revivalModalOpen, setRevivalModalOpen] = useState(false);
   const [wizardJoinWork, setWizardJoinWork] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
@@ -163,7 +165,6 @@ export default function App() {
 
   const handleDeletePiece = () => {
     if (!piece) return;
-    if (!window.confirm(`Delete "${piece.name}" and all its practice history? This can't be undone.`)) return;
     const idToDelete = piece.id;
     const remainingIds = Object.keys(pieces).filter((id) => id !== idToDelete);
     setPieces((prev) => {
@@ -177,6 +178,7 @@ export default function App() {
     setSettingsEditing(false);
     setActiveTab("overview");
     setDayOverride(null);
+    setDeleteModalOpen(false);
   };
 
   const handleExportAll = () => downloadBackup(pieces);
@@ -572,7 +574,7 @@ export default function App() {
                 editDraft={editDraft}
                 setEditDraft={setEditDraft}
                 onSave={handleSavePiece}
-                onDelete={handleDeletePiece}
+                onDelete={() => setDeleteModalOpen(true)}
                 editing={settingsEditing}
                 onStartEdit={startEditing}
                 onDiscard={handleDiscardEdit}
@@ -590,6 +592,9 @@ export default function App() {
       )}
       {revivalModalOpen && piece && (
         <RevivalEntryModal piece={piece} onCancel={() => setRevivalModalOpen(false)} onStart={handleStartRevival} />
+      )}
+      {deleteModalOpen && piece && (
+        <DeletePieceModal piece={piece} onCancel={() => setDeleteModalOpen(false)} onConfirm={handleDeletePiece} />
       )}
     </div>
   );
@@ -925,7 +930,8 @@ const CSS = `
 .ghost-btn.full { width: 100%; justify-content: center; }
 
 .danger-btn { display: inline-flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--brick); color: var(--brick); border-radius: 9px; padding: 9px 16px; font-size: 13.5px; font-weight: 600; }
-.danger-btn:hover { background: rgba(181,71,58,0.08); }
+.danger-btn:hover:not(:disabled) { background: rgba(181,71,58,0.08); }
+.danger-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .icon-btn { background: transparent; border: none; color: var(--ink-soft); width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; }
 .icon-btn:hover:not(:disabled) { background: rgba(32,42,51,0.06); color: var(--ink); }

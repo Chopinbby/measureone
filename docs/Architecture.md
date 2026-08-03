@@ -63,7 +63,7 @@ MeasureOne.jsx/
         │   ScheduleBanner.jsx, Sparkline.jsx,
         │   PartSwitcher.jsx                     # small standalone pieces
         ├── Wizard.jsx                            # create-only piece setup
-        ├── RevivalEntryModal.jsx
+        ├── RevivalEntryModal.jsx, DeletePieceModal.jsx
         ├── fields/                                # editors shared by
         │   │                                       # Wizard and SettingsTab
         │   └── BasicsFields.jsx, SectionsEditor.jsx, DifficultyEditor.jsx,
@@ -105,6 +105,7 @@ single-file Claude.ai artifact.
 | `ReassessPanel` | Re-rate difficulty for a measure range; Apply commits and closes in one action. |
 | `TodayTab` | Composes `ScheduleBanner`, `FocusPanel`, `DayChecklist` (or all days in "View all" mode), `SectionRunThroughPanel`, `ReassessPanel`. |
 | `RevivalEntryModal` | Collects `lastPlayedDate`, optional `performanceTempo`, and required `purpose` before a revival cycle starts. Styled like `Wizard`'s modal shell. |
+| `DeletePieceModal` | Confirms permanent deletion by requiring the piece's exact name to be typed back, rather than a single `window.confirm()` — deletion has no undo and takes all practice history with it. |
 | `RandomStartPanel` | Revival-only: picks a uniformly random chunk, transition, or section and displays it (plus its memory anchor, if any) for a cold-start warm-up. |
 | `RevivalTab` | Composes the revival flow end to end: settings (performance tempo, tempo ladder start fraction), the embedded `PieceMapTab` reassessment pass, flagged-weak-spot summary, `RandomStartPanel`, and the generated plan (day-grouped `ChecklistItem`s with tempo ladders/memory anchors). See [Algorithms.md](Algorithms.md#revival). |
 | `ProgressTab` | Trend/diagnosis charts — rolling-window consistency, heatmap, actual-vs-planned, projected finish, tempo trend, effectiveness calibration, recent history. |

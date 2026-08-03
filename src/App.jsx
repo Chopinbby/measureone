@@ -129,7 +129,7 @@ export default function App() {
     setEditDraftState(null);
   };
 
-  const handleComplete = (finished) => {
+  const handleComplete = (finished, options = {}) => {
     const id = `p_${Date.now()}`;
     const withId = { ...finished, id };
     setPieces((prev) => ({ ...prev, [id]: withId }));
@@ -138,6 +138,7 @@ export default function App() {
     setSwitcherOpen(false);
     setActiveTab("overview");
     setDayOverride(null);
+    if (options.startAsRevival) setRevivalModalOpen(true);
   };
 
   const handleDeletePiece = () => {

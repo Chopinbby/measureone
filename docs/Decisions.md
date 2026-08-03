@@ -188,6 +188,21 @@ default.**
   where a chunk already has its own explicit target from that earlier
   phase. See `getRevivalTargetBPM` in [Algorithms.md](Algorithms.md#revival).
 
+**Decision: allow starting a piece directly in revival mode from the Wizard,
+not just from an existing piece via the Overview dashboard.**
+
+- **Why:** Not every piece a musician wants to track was originally learned
+  *through this app* — someone might want to add a piece they learned years
+  ago and haven't touched since, without pretending to "learn it fresh"
+  first. A toggle on the Wizard's final Review step lets Setup run
+  normally (still required — revival planning reuses `generateAllChunks`/
+  `effort`) and then opens the revival entry modal on completion instead of
+  landing on Overview.
+- **Why this didn't need new machinery:** `RevivalTab`'s reassessment flow
+  already only reads `piece.progress`, which is empty for a new piece by
+  default — "zero sessions logged" was already a valid starting state, not
+  a special case to build for.
+
 ## Documentation
 
 **Decision: fold the standalone `measureone-context-summary.md` (previously

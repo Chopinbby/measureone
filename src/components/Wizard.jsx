@@ -57,6 +57,7 @@ const STEPS = ["Piece", "Sections", "Difficulty", "Repeats", "Timeline", "Review
 export function Wizard({ onCancel, onComplete, hasPiece }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(defaultPiece());
+  const [startAsRevival, setStartAsRevival] = useState(false);
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
   const chunkSet = useMemo(() => generateAllChunks(draft), [draft]);
@@ -123,16 +124,36 @@ export function Wizard({ onCancel, onComplete, hasPiece }) {
           {step === 5 && (
             <div className="wizard-pane">
               <h2>Ready for measure one</h2>
-              <p className="wizard-hint">
-                The whole piece gets covered by day {timeline.halfPoint} — the rest of the time is
-                transitions, focus blocks, and review.
-              </p>
+              {!startAsRevival && (
+                <p className="wizard-hint">
+                  The whole piece gets covered by day {timeline.halfPoint} — the rest of the time is
+                  transitions, focus blocks, and review.
+                </p>
+              )}
               <ManuscriptStrip chunks={chunkSet.practiceChunks} />
               <div className="review-grid">
                 <div className="review-stat"><span className="num">{draft.sections.length}</span><span className="lbl">sections</span></div>
                 <div className="review-stat"><span className="num">{draft.daysToLearn}</span><span className="lbl">days</span></div>
                 <div className="review-stat"><span className="num">{avgMinPerDay}</span><span className="lbl">avg min/day</span></div>
                 <div className="review-stat"><span className="num">{chunkSet.transitions.length + chunkSet.combos.length}</span><span className="lbl">transitions + focus blocks</span></div>
+              </div>
+
+              <div className="field" style={{ marginTop: 20 }}>
+                <span>Is this fresh, or a piece you're coming back to?</span>
+                <div className="segmented">
+                  <button className={!startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(false)}>
+                    Learning it fresh
+                  </button>
+                  <button className={startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(true)}>
+                    I already know this piece
+                  </button>
+                </div>
+                {startAsRevival && (
+                  <p className="wizard-hint" style={{ marginTop: 8 }}>
+                    We'll skip the "introduce new material" phase and go straight into a revival —
+                    a quick reassessment of where things actually stand, chunk by chunk.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -147,8 +168,11 @@ export function Wizard({ onCancel, onComplete, hasPiece }) {
               Next <ChevronRight size={16} />
             </button>
           ) : (
-            <button className="primary-btn" onClick={() => onComplete({ ...draft, createdAt: Date.now() })}>
-              <Sparkles size={16} /> Generate my plan
+            <button
+              className="primary-btn"
+              onClick={() => onComplete({ ...draft, createdAt: Date.now() }, { startAsRevival })}
+            >
+              <Sparkles size={16} /> {startAsRevival ? "Set up this revival" : "Generate my plan"}
             </button>
           )}
         </div>

@@ -55,11 +55,22 @@ A recovery workflow for a piece that was learned once and has gone stale —
 see [Decisions.md](Decisions.md#revival) and
 [Algorithms.md](Algorithms.md#revival) for how it's built. Deliberately
 **not** a new lifecycle stage: it doesn't require or set any formal "learned"
-state (which still doesn't exist — see Stage 3 below), it's entered
-manually from the Overview dashboard whenever the user decides a piece needs
-it, and it exits back to whatever informal state the piece was already in.
-Practically, it slots in after Stage 2 has produced *some* practice history
-worth reassessing, but nothing enforces that.
+state (which still doesn't exist — see Stage 3 below), and it exits back to
+whatever informal state the piece was already in. Practically, it slots in
+after Stage 2 has produced *some* practice history worth reassessing, but
+nothing enforces that.
+
+Two entry points, both landing in the same reassessment flow:
+- **Manually from the Overview dashboard**, whenever the user decides an
+  existing piece needs it — the original entry point.
+- **At piece creation**, via a toggle on the Wizard's final step ("Learning
+  it fresh" vs. "I already know this piece"). Covers repertoire the user
+  already knew before ever using the app — Setup still runs in full (a
+  chunk structure is required regardless, since revival planning reuses
+  `generateAllChunks`/`effort`), but completion opens the revival entry
+  modal immediately instead of landing on Overview, so the piece starts in
+  revival mode with zero practice history — reassessment works the same
+  either way, since it only reads `piece.progress` (empty is a valid start).
 
 Scoped deliberately narrow for this pass — explicitly **not** built as part
 of it: Maintenance mode (Stage 4 below), Performance Preparation mode,

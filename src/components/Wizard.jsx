@@ -94,6 +94,24 @@ export function Wizard({ onCancel, onComplete, hasPiece }) {
               <h2>What are you learning?</h2>
               <p className="wizard-hint">Start with the basics of the piece.</p>
               <BasicsFields draft={draft} set={set} />
+
+              <div className="field" style={{ marginTop: 20 }}>
+                <span>Is this fresh, or a piece you're coming back to?</span>
+                <div className="segmented">
+                  <button className={!startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(false)}>
+                    Learning it fresh
+                  </button>
+                  <button className={startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(true)}>
+                    I already know this piece
+                  </button>
+                </div>
+                {startAsRevival && (
+                  <p className="wizard-hint" style={{ marginTop: 8 }}>
+                    We'll skip the "introduce new material" phase and go straight into a revival —
+                    a quick reassessment of where things actually stand, chunk by chunk.
+                  </p>
+                )}
+              </div>
             </div>
           )}
           {step === 1 && (
@@ -132,28 +150,10 @@ export function Wizard({ onCancel, onComplete, hasPiece }) {
               )}
               <ManuscriptStrip chunks={chunkSet.practiceChunks} />
               <div className="review-grid">
+                <div className="review-stat"><span className="num">{draft.totalMeasures}</span><span className="lbl">measures</span></div>
                 <div className="review-stat"><span className="num">{draft.sections.length}</span><span className="lbl">sections</span></div>
                 <div className="review-stat"><span className="num">{draft.daysToLearn}</span><span className="lbl">days</span></div>
                 <div className="review-stat"><span className="num">{avgMinPerDay}</span><span className="lbl">avg min/day</span></div>
-                <div className="review-stat"><span className="num">{chunkSet.transitions.length + chunkSet.combos.length}</span><span className="lbl">transitions + focus blocks</span></div>
-              </div>
-
-              <div className="field" style={{ marginTop: 20 }}>
-                <span>Is this fresh, or a piece you're coming back to?</span>
-                <div className="segmented">
-                  <button className={!startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(false)}>
-                    Learning it fresh
-                  </button>
-                  <button className={startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(true)}>
-                    I already know this piece
-                  </button>
-                </div>
-                {startAsRevival && (
-                  <p className="wizard-hint" style={{ marginTop: 8 }}>
-                    We'll skip the "introduce new material" phase and go straight into a revival —
-                    a quick reassessment of where things actually stand, chunk by chunk.
-                  </p>
-                )}
               </div>
             </div>
           )}

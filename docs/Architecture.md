@@ -1,20 +1,18 @@
 # Architecture
 
-> **Purpose:** How the codebase is organized today, and the concrete plan for
-> splitting it up before it grows further.
+> **Purpose:** How the codebase is organized today — where a given
+> concept's code actually lives.
 > **Audience:** Human developers and future Claude Code sessions who need to
 > find or place code, not just understand product behavior.
 > **Scope:** Tech stack, file/component layout, state management conventions,
-> design tokens, and the refactor plan. Data shapes live in
-> [Data-Model.md](Data-Model.md); computations live in
-> [Algorithms.md](Algorithms.md). For day-to-day coding conventions and
-> gotchas, see `CLAUDE.md` at the repo root — this doc is the reference,
-> `CLAUDE.md` is the fast-orientation version.
+> and design tokens. Data shapes live in [Data-Model.md](Data-Model.md);
+> computations live in [Algorithms.md](Algorithms.md). For day-to-day coding
+> conventions and gotchas, see `CLAUDE.md` at the repo root — this doc is the
+> reference, `CLAUDE.md` is the fast-orientation version.
 > **Related:** [Data-Model.md](Data-Model.md) · [Algorithms.md](Algorithms.md) ·
 > `../CLAUDE.md`
-> **Update when:** A file is added/moved, a major component is added, or the
-> refactor below is (partially) executed — check off what's done rather than
-> rewriting the plan from scratch.
+> **Update when:** A file is added, moved, or renamed — this doc should
+> always match the real file tree, not describe a plan for it.
 
 ## Tech stack
 
@@ -37,22 +35,54 @@ deployable to any static host.
 ```
 MeasureOne.jsx/
 ├── CLAUDE.md
-├── docs/                # this directory
+├── docs/                       # this directory
 ├── index.html
 ├── package.json
 ├── vite.config.js
 └── src/
-    ├── main.jsx          # ReactDOM entry point, just mounts <App />
-    └── App.jsx           # Everything else — ~3,900 lines as of this writing
+    ├── main.jsx                 # ReactDOM entry point, just mounts <App />
+    ├── App.jsx                  # state + layout only — ~900 lines; renders
+    │                            # the sidebar and whichever tab is active,
+    │                            # owns updatePiece and every handler passed
+    │                            # down as props. The CSS string also still
+    │                            # lives here (see "Design tokens" below).
+    ├── lib/                      # pure functions — chunking, scheduling,
+    │   │                         # confidence, revival, storage, shared
+    │   │                         # constants/utils. No JSX, no React state.
+    │   ├── utils.js               # clamp, formatting, resize helpers
+    │   ├── constants.js            # EFFORT_TO_MIN, DIFFICULTY_META, etc. —
+    │   │                           # single source of truth, see Research.md
+    │   ├── chunking.js              # generatePracticeChunks and friends
+    │   ├── scheduling.js             # computeTimeline and friends
+    │   ├── confidence.js              # computeConfidence and friends
+    │   ├── revival.js                  # computeRevivalPlan and friends
+    │   └── storage.js                   # localStorage load/save/export/import
+    └── components/
+        ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
+        │   ScheduleBanner.jsx, Sparkline.jsx    # small standalone pieces
+        ├── Wizard.jsx                            # create-only piece setup
+        ├── RevivalEntryModal.jsx
+        ├── fields/                                # editors shared by
+        │   │                                       # Wizard and SettingsTab
+        │   └── BasicsFields.jsx, SectionsEditor.jsx, DifficultyEditor.jsx,
+        │       RecurringEditor.jsx, ScheduleFields.jsx, BpmZonesEditor.jsx,
+        │       RecordingsEditor.jsx, RecordingsList.jsx
+        └── tabs/
+            ├── OverviewTab.jsx, TimelineTab.jsx, PieceMapTab.jsx,
+            │   ProgressTab.jsx, AnalyticsTab.jsx, SettingsTab.jsx
+            ├── TodayTab.jsx
+            │   └── today/  ChecklistItem.jsx, DayChecklist.jsx,
+            │                FocusPanel.jsx, SectionRunThroughPanel.jsx,
+            │                ReassessPanel.jsx
+            └── RevivalTab.jsx
+                └── revival/  RandomStartPanel.jsx
 ```
 
-`App.jsx` contains all components, all business logic, and all styles. This
-is a holdover from the app's origin as a single-file Claude.ai artifact. It
-works, but see "Suggested refactor" below — this file has grown
-significantly since the project was migrated to a real repo and splitting it
-is more overdue now than it was at migration time.
+This split (see "Module layout" below for the reasoning) replaced the
+original single ~3,900-line `App.jsx` inherited from the app's origin as a
+single-file Claude.ai artifact.
 
-## Main UI components (in `App.jsx`, top to bottom in the file)
+## Main UI components
 
 | Component | Purpose |
 |---|---|
@@ -120,47 +150,40 @@ CSS custom properties on `.measureone-app`: `--paper`, `--paper-card`,
 Plex Mono (numbers). See [UX-Principles.md](UX-Principles.md) for the intent
 behind this system, not just the token names.
 
-## Suggested refactor
+## Module layout (the old "Suggested refactor" — now done)
 
-`App.jsx` is a single file because it started as a Claude.ai artifact, where
-that was a hard constraint. It no longer needs to be. Splitting along these
-lines would help, and can be done incrementally (one module at a time,
-verified against the app still working after each move):
+The single-file `App.jsx` was split into `lib/` (pure functions, no JSX) and
+`components/` (everything with JSX) along the lines this section used to
+propose — see "File structure" above for the resulting tree. It was done
+incrementally, one module at a time, with a build and a manual browser pass
+through the affected screens after each move; the commit history has one
+commit per module for exactly this reason, so `git log -- src/` is a
+reasonable changelog of how the split happened if that's ever useful.
 
-```
-src/
-  lib/
-    chunking.js      # generatePracticeChunks, generateTransitionChunks,
-                      # generateComboChunks, generateAllChunks,
-                      # computeSectionRunThroughs
-    scheduling.js     # computeTimeline, getEffectiveTimeline,
-                       # computeScheduleStatus, adaptiveReviewOffsets
-    confidence.js      # computeAutoConfidence, computeConfidence,
-                        # computeConfidenceAsOf, computeProgressTier,
-                        # isManualConfidence, getDefaultTargetBPM
-    revival.js          # computeTempoLadder, getRevivalTargetBPM,
-                         # computeRevivalPlan — see Algorithms.md#revival
-    storage.js           # the localStorage load/save effects, extracted
-                          # into plain functions, plus export/import
-  components/
-    NumberInput.jsx
-    MemoryAnchorField.jsx
-    fields/              # BasicsFields, SectionsEditor, DifficultyEditor,
-                          # RecurringEditor, ScheduleFields, BpmZonesEditor,
-                          # RecordingsEditor
-    Wizard.jsx
-    RevivalEntryModal.jsx
-    tabs/                 # OverviewTab, TimelineTab, PieceMapTab, TodayTab,
-                           # RevivalTab (+ RandomStartPanel), ProgressTab,
-                           # AnalyticsTab, SettingsTab
-  App.jsx                  # just state + layout, imports everything above
-```
+A few decisions made along the way that weren't spelled out in the original
+plan:
+- Two generic modules were added that the original plan didn't call out:
+  `lib/utils.js` (cross-cutting helpers like `clamp` and formatting, needed
+  by more than one of chunking/scheduling/confidence) and
+  `lib/constants.js` (single source of truth for values like
+  `EFFORT_TO_MIN` and `DIFFICULTY_META` that both `lib/` and `components/`
+  need — centralizing them avoids the exact kind of accidental divergence
+  [Research.md](Research.md) warns about).
+- `ChecklistItem`, `DayChecklist`, `FocusPanel`, `SectionRunThroughPanel`,
+  and `ReassessPanel` — all consumed only by `TodayTab` — live under
+  `components/tabs/today/` rather than flat in `components/tabs/`, to keep
+  that cluster visually grouped. `RandomStartPanel` (consumed only by
+  `RevivalTab`) got the same treatment under `components/tabs/revival/`.
+- The CSS string stays in `App.jsx` — splitting components into files
+  doesn't change that styling is one global stylesheet regardless of where
+  the JSX referencing a class name lives (see
+  [UX-Principles.md](UX-Principles.md)); moving it to its own
+  `src/styles.js` would shrink `App.jsx` further but wasn't done as part of
+  this pass.
 
-Also worth doing while in there: rename practice-chunk `kind: "section"` to
-something like `"chunk"` — it currently collides in name (not in code, just
-in a human's head) with `piece.sections`, and has caused confusion before.
-See [Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs).
-
-This refactor has been suggested since before the current feature set
-(Progress redesign, section run-throughs, recordings) was added — the file
-has only grown since, which raises the cost of continuing to defer it.
+**Still open**, deliberately not part of this refactor: renaming
+practice-chunk `kind: "section"` to something like `"chunk"` — it still
+collides in name (not in code, just in a human's head) with
+`piece.sections`. See
+[Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs)
+and [Roadmap.md](Roadmap.md).

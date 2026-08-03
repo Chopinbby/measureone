@@ -15,7 +15,7 @@ stack, how to run it, where things live in the code, and the handful of
 operational rules that matter every session. It intentionally does **not**
 duplicate the deep reference material in `docs/` — if something here and
 something in `docs/` ever disagree, `docs/` is canonical for product/design
-reasoning, and the actual source code (`src/App.jsx`) is canonical for
+reasoning, and the actual source code under `src/` is canonical for
 implementation fact.
 
 ## What this app is
@@ -60,21 +60,26 @@ MeasureOne.jsx/
 ├── vite.config.js
 └── src/
     ├── main.jsx        # ReactDOM entry point, just mounts <App />
-    └── App.jsx         # everything else — components, algorithms, styles
+    ├── App.jsx         # state + layout only — owns updatePiece and every
+    │                   # handler, renders the sidebar + active tab
+    ├── lib/            # pure functions: chunking, scheduling, confidence,
+    │                   # revival, storage, shared constants/utils — no JSX
+    └── components/     # everything with JSX: NumberInput, Wizard, field
+                         # editors (fields/), and every tab (tabs/)
 ```
 
-`App.jsx` is a single ~3,900-line file containing all components, all
+`App.jsx` used to be a single ~3,900-line file holding every component, all
 business logic, and all styles — a holdover from the app's origin as a
-single-file Claude.ai artifact. It works, but it's overdue for a split; see
-[`docs/Architecture.md`](docs/Architecture.md#suggested-refactor) for the
-concrete plan (which module each function/component should move to) before
-starting any large addition to this file.
+single-file Claude.ai artifact. It's since been split along the lines
+[`docs/Architecture.md`](docs/Architecture.md) describes; that doc has the
+full file tree and the reasoning behind where things landed.
 
 For the full component map and state-management conventions, see
 [`docs/Architecture.md`](docs/Architecture.md). For the complete `piece` /
 `ChunkProgress` schema, see [`docs/Data-Model.md`](docs/Data-Model.md) — the
-literal source of truth for the schema is `defaultPiece()` in `src/App.jsx`.
-For how chunking, scheduling, and confidence are actually computed, see
+literal source of truth for the schema is `defaultPiece()` in
+`src/components/Wizard.jsx` (the only place it's consumed). For how
+chunking, scheduling, and confidence are actually computed, see
 [`docs/Algorithms.md`](docs/Algorithms.md).
 
 ## Rules that matter every session

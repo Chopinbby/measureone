@@ -91,6 +91,17 @@ export default function App() {
     savePieceToStorage(activePieceId, pieces[activePieceId]);
   }, [pieces, activePieceId, loaded]);
 
+  // Self-heal a dangling activePieceId (e.g. it pointed at a piece that's
+  // since been deleted) whenever other pieces still exist, so the empty
+  // "start a new piece" screen — see the render logic below — only ever
+  // shows up when the user truly has none left.
+  useEffect(() => {
+    if (!loaded) return;
+    if (activePieceId && pieces[activePieceId]) return;
+    const ids = Object.keys(pieces);
+    if (ids.length > 0) setActivePieceId(ids[0]);
+  }, [loaded, pieces, activePieceId]);
+
   // Persist which piece is active.
   useEffect(() => {
     if (!loaded) return;
@@ -423,7 +434,7 @@ export default function App() {
         <div className="empty-state">
           <p className="wizard-hint" style={{ margin: 0 }}>Loading your pieces…</p>
         </div>
-      ) : !piece ? (
+      ) : pieceList.length === 0 ? (
         <div className="empty-state">
           <div className="hero-card empty-hero-card">
             <div className="hero-doodle-band"><ManuscriptDoodle /></div>
@@ -437,16 +448,17 @@ export default function App() {
               <button className="primary-btn lg" onClick={() => openWizard()}>
                 <Plus size={18} /> Start a new piece
               </button>
-              {pieceList.length > 0 && (
-                <button className="ghost-btn" style={{ marginTop: 16 }} onClick={() => switchToPiece(pieceList[pieceList.length - 1].id)}>
-                  Return to Dashboard
-                </button>
-              )}
               <button className="ghost-btn" style={{ marginTop: 16 }} onClick={handleImportClick}>
                 <Upload size={14} /> Import a backup
               </button>
             </div>
           </div>
+        </div>
+      ) : !piece ? (
+        // Pieces exist but activePieceId hasn't resolved to one of them yet —
+        // the self-healing effect above will pick one on the next tick.
+        <div className="empty-state">
+          <p className="wizard-hint" style={{ margin: 0 }}>Loading your pieces…</p>
         </div>
       ) : (
         <div className="app-shell">

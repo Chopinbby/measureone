@@ -1,0 +1,217 @@
+import { Sparkline } from "../Sparkline";
+import { formatRange } from "../../lib/utils";
+import { EFFECTIVENESS_OPTIONS } from "../../lib/constants";
+import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM } from "../../lib/confidence";
+
+export function ProgressTab({ piece, chunks, timeline, currentDay }) {
+  const practiceChunks = chunks.filter((c) => c.kind === "section");
+
+  // #1 Rolling-window consistency — not a streak: a plain fraction of the
+  // last N days with any logged activity, no "best ever" shown alongside it.
+  const practicedDays = new Set();
+  Object.entries(piece.progress).forEach(([id, entry]) => {
+    (entry.sessions || []).forEach((s) => practicedDays.add(s.day));
+    if (id === "__consolidation__") (entry.doneDays || []).forEach((d) => practicedDays.add(d));
+  });
+  const consistencyWindow = Math.min(14, currentDay);
+  const consistencyStart = Math.max(1, currentDay - consistencyWindow + 1);
+  let consistencyCount = 0;
+  for (let d = consistencyStart; d <= currentDay; d++) {
+    if (practicedDays.has(d)) consistencyCount++;
+  }
+
+  // #6 Most improved this week — biggest positive confidence delta over the
+  // trailing 7 days. Absence of a positive delta is shown neutrally.
+  const asOfDay = Math.max(1, currentDay - 7);
+  const mostImproved = chunks
+    .map((c) => ({ chunk: c, delta: computeConfidence(c, piece, currentDay) - computeConfidenceAsOf(c, piece, asOfDay) }))
+    .filter((x) => x.delta > 0)
+    .sort((a, b) => b.delta - a.delta)[0];
+
+  // #3 Tempo trend — sparkline of logged BPM per chunk with 2+ sessions and
+  // a resolvable target, across practice chunks, transitions, and combos.
+  const tempoTrends = chunks
+    .map((c) => {
+      const entry = piece.progress[c.id] || {};
+      const sessions = [...(entry.sessions || [])].sort((a, b) => a.day - b.day);
+      const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, c);
+      return { chunk: c, sessions, targetBPM };
+    })
+    .filter((t) => t.sessions.length >= 2 && t.targetBPM);
+
+  // #4 Effectiveness calibration — % distribution of self-reported feel
+  // across every logged session in the piece.
+  const allSessions = Object.values(piece.progress).flatMap((entry) => entry.sessions || []);
+  const effectivenessColors = { low: "var(--brick)", good: "var(--brass)", high: "var(--teal)" };
+  const effectivenessBreakdown = EFFECTIVENESS_OPTIONS.map((opt) => {
+    const count = allSessions.filter((s) => s.effectiveness === opt.value).length;
+    return { ...opt, count, pct: allSessions.length ? Math.round((count / allSessions.length) * 100) : 0 };
+  });
+
+  // Actual vs. planned progress — how many practice chunks were planned to
+  // be introduced by each day vs. how many actually were.
+  const firstDoneDay = {};
+  practiceChunks.forEach((c) => {
+    const dd = (piece.progress[c.id] || {}).doneDays || [];
+    if (dd.length) firstDoneDay[c.id] = Math.min(...dd);
+  });
+  const plannedByDay = {};
+  let cumPlanned = 0;
+  timeline.days.forEach((d) => {
+    cumPlanned += d.newChunkIds.length;
+    plannedByDay[d.dayNumber] = cumPlanned;
+  });
+  const actualByDay = {};
+  let cumActual = 0;
+  for (let d = 1; d <= timeline.days.length; d++) {
+    cumActual += Object.values(firstDoneDay).filter((fd) => fd === d).length;
+    actualByDay[d] = cumActual;
+  }
+  const maxCum = Math.max(plannedByDay[timeline.days.length] || 1, 1);
+  const chartDays = timeline.days.slice(0, Math.min(timeline.days.length, Math.max(currentDay + 3, 14)));
+
+  // #5 Projected finish at current pace — a forward-looking companion to
+  // the chart above, based on recent (not average) velocity.
+  const velocityWindow = Math.min(7, currentDay);
+  const velocityStart = Math.max(1, currentDay - velocityWindow + 1);
+  const recentlyIntroducedCount = Object.values(firstDoneDay).filter((d) => d >= velocityStart && d <= currentDay).length;
+  const recentVelocity = recentlyIntroducedCount / velocityWindow;
+  const remainingChunks = practiceChunks.length - Object.keys(firstDoneDay).length;
+  let projectionText;
+  if (remainingChunks <= 0) {
+    projectionText = "Every chunk has been introduced at least once.";
+  } else if (recentVelocity <= 0) {
+    projectionText = "No recent pace to project from yet — log a few sessions to see a projection.";
+  } else {
+    const projectedDay = currentDay + Math.ceil(remainingChunks / recentVelocity);
+    projectionText = `At your recent pace, full coverage projects to around day ${projectedDay}.`;
+  }
+
+  // Recent practice history — unchanged from before.
+  const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
+  const historyByDay = {};
+  Object.entries(piece.progress).forEach(([id, entry]) => {
+    (entry.doneDays || []).forEach((d) => {
+      if (!historyByDay[d]) historyByDay[d] = [];
+      historyByDay[d].push(id);
+    });
+  });
+  const historyDays = Object.keys(historyByDay).map(Number).sort((a, b) => b - a).slice(0, 10);
+
+  return (
+    <div className="tab-pane">
+      <div className="tab-header">
+        <h1>Progress</h1>
+      </div>
+
+      <div className="stat-grid-2">
+        <div className="stat-card">
+          <span className="stat-num mono">{consistencyCount}</span>
+          <span className="stat-lbl">of last {consistencyWindow} day{consistencyWindow === 1 ? "" : "s"} practiced</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-num mono">{mostImproved ? `+${mostImproved.delta}%` : "—"}</span>
+          <span className="stat-lbl">
+            {mostImproved ? `Most improved: ${formatRange(mostImproved.chunk.start, mostImproved.chunk.end)}` : "No standout improvement this week"}
+          </span>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Consistency</h3>
+        <div className="heatmap-row">
+          {timeline.days.map((d) => (
+            <div
+              key={d.dayNumber}
+              className="heatmap-cell"
+              title={`Day ${d.dayNumber}${practicedDays.has(d.dayNumber) ? " — practiced" : ""}`}
+              style={{ background: practicedDays.has(d.dayNumber) ? "var(--teal)" : "var(--paper)" }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Actual vs. planned progress</h3>
+        <div className="progress-chart">
+          {chartDays.map((d) => {
+            const p = plannedByDay[d.dayNumber];
+            const a = actualByDay[d.dayNumber];
+            return (
+              <div key={d.dayNumber} className="progress-chart-col" title={`Day ${d.dayNumber}: ${a} actual / ${p} planned`}>
+                <div className="progress-chart-bars">
+                  <div className="progress-chart-bar planned" style={{ height: `${(p / maxCum) * 100}%` }} />
+                  <div className="progress-chart-bar actual" style={{ height: `${(a / maxCum) * 100}%` }} />
+                </div>
+                {d.dayNumber % 5 === 0 && <span className="progress-chart-label mono">{d.dayNumber}</span>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="chart-legend">
+          <span><i className="dot" style={{ background: "var(--ink-faint)" }} />Planned</span>
+          <span><i className="dot" style={{ background: "var(--brass)" }} />Actual</span>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Projected finish</h3>
+        <p className="wizard-hint" style={{ margin: 0 }}>{projectionText}</p>
+      </div>
+
+      <div className="panel">
+        <h3>Tempo trend</h3>
+        {tempoTrends.length === 0 ? (
+          <p className="wizard-hint">Log a second session on any chunk with a target BPM to see a tempo trend here.</p>
+        ) : (
+          <div className="tempo-trend-list">
+            {tempoTrends.map(({ chunk, sessions, targetBPM }) => (
+              <div key={chunk.id} className="tempo-trend-row">
+                <span className="mono">{formatRange(chunk.start, chunk.end)}</span>
+                <Sparkline values={sessions.map((s) => s.bpm)} />
+                <span className="mono tempo-trend-nums">{sessions[sessions.length - 1].bpm} / {targetBPM}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Effectiveness calibration</h3>
+        {allSessions.length === 0 ? (
+          <p className="wizard-hint">Nothing logged yet — check items off in Today's Practice.</p>
+        ) : (
+          <div className="analytics-bars">
+            {effectivenessBreakdown.map((e) => (
+              <div key={e.value} className="analytics-bar-row">
+                <span className="analytics-bar-label">{e.label} ({e.count})</span>
+                <div className="analytics-bar-track"><div className="analytics-bar-fill" style={{ width: `${e.pct}%`, background: effectivenessColors[e.value] }} /></div>
+                <span className="mono">{e.pct}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3>Recent practice history</h3>
+        {historyDays.length === 0 ? (
+          <p className="wizard-hint">Nothing logged yet — check items off in Today's Practice.</p>
+        ) : (
+          <div className="history-list">
+            {historyDays.map((d) => (
+              <div key={d} className="history-row">
+                <span className="mono history-day">Day {d}</span>
+                <span className="history-items">
+                  {historyByDay[d]
+                    .map((id) => (id === "__consolidation__" ? "Full run-through" : formatRange(chunkById[id].start, chunkById[id].end)))
+                    .join(", ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -15,7 +15,7 @@ const PRACTICE_DAYS_OPTIONS = Array.from(
   (_, i) => MIN_PRACTICE_DAYS_PER_WEEK + i
 );
 
-export function ScheduleFields({ draft, set }) {
+export function ScheduleFields({ draft, set, isRevival = false }) {
   const chunkSet = useMemo(
     () => generateAllChunks(draft),
     [
@@ -72,7 +72,7 @@ export function ScheduleFields({ draft, set }) {
         <span>Which is fixed?</span>
         <div className="segmented">
           <button className={draft.scheduleMode === "days" ? "active" : ""} onClick={() => set({ scheduleMode: "days" })}>
-            Learn by fixed date
+            {isRevival ? "Review by fixed date" : "Learn by fixed date"}
           </button>
           <button className={draft.scheduleMode === "minutes" ? "active" : ""} onClick={() => set({ scheduleMode: "minutes" })}>
             Minutes per day
@@ -83,7 +83,7 @@ export function ScheduleFields({ draft, set }) {
       {draft.scheduleMode === "days" ? (
         <>
           <label className="field">
-            <span>Learn it by</span>
+            <span>{isRevival ? "Review it by" : "Learn it by"}</span>
             <input
               type="date"
               min={todayISODate()}

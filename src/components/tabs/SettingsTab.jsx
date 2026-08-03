@@ -84,7 +84,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
       <div className="panel"><h3>Sections</h3><SectionsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Difficulty</h3><DifficultyEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Recurring material</h3><RecurringEditor draft={editDraft} set={setEditDraft} /></div>
-      <div className="panel"><h3>Schedule</h3><ScheduleFields draft={editDraft} set={setEditDraft} /></div>
+      <div className="panel"><h3>Schedule</h3><ScheduleFields draft={editDraft} set={setEditDraft} isRevival={!!editDraft.revival?.active} /></div>
       <div className="panel"><h3>Tempo zones</h3><BpmZonesEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Recordings</h3><RecordingsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="edit-actions">

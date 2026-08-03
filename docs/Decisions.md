@@ -127,6 +127,19 @@ plan instead of assuming every calendar day is a practice day.**
   a weekly cadence.
 - See [Algorithms.md](Algorithms.md#timeline--scheduler).
 
+**Decision: `autoChunkSize()` always returns 4 measures, regardless of piece
+length — the previous 2/4/8/12 tiering by `totalMeasures` (≤32/≤80/≤160/>160)
+was removed.**
+
+- **Why:** User-directed simplification after noticing "Determine
+  automatically" gave an 106-measure piece 8-measure chunks instead of the
+  4 they expected everywhere. Explicitly chose the flat-4 option over either
+  leaving the tiering as-is or only changing the wizard's starting value.
+- **Consequence:** existing pieces using `chunkMode: 'auto'` on longer pieces
+  (>80 measures) will regenerate with smaller, more numerous practice chunks
+  than before the next time their timeline recomputes — this is a real
+  change to those pieces' schedule structure, not just new-piece defaults.
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below

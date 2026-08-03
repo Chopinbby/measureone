@@ -175,7 +175,7 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
             <div className="wizard-pane">
               <h2>Set your schedule</h2>
               <p className="wizard-hint">Set a deadline, or commit a set amount of time to spend on this piece per day.</p>
-              <ScheduleFields draft={draft} set={set} />
+              <ScheduleFields draft={draft} set={set} isRevival={startAsRevival} />
             </div>
           )}
           {step === 5 && (

@@ -30,8 +30,9 @@ functions, a specific chunk).
 `generateComboChunks()` / `generateAllChunks(piece)` — pure functions,
 `piece` → chunk arrays.
 
-- Chunk size comes from `autoChunkSize(totalMeasures)` (tiered: 2/4/8/12
-  measures by piece length) or `piece.customChunkSize`.
+- Chunk size comes from `autoChunkSize()` (flat 4 measures, regardless of
+  piece length — previously tiered 2/4/8/12 by piece length, simplified per
+  [Decisions.md](Decisions.md#scheduling)) or `piece.customChunkSize`.
 - Each chunk's difficulty is the average of its measures' difficulty
   ratings (`weightedDifficultyFromArray`), bucketed into easy/medium/hard.
 - Recurring material reduces a chunk's `effort` (the unit the scheduler

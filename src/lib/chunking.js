@@ -8,11 +8,10 @@ import { rangesOverlap, formatRange } from "./utils";
 /*  distinct from the user's own musical "sections" (piece.sections). */
 /* ------------------------------------------------------------------ */
 
-export function autoChunkSize(totalMeasures) {
-  if (totalMeasures <= 32) return 2;
-  if (totalMeasures <= 80) return 4;
-  if (totalMeasures <= 160) return 8;
-  return 12;
+// Was tiered by piece length (2/4/8/12 measures); simplified to a flat
+// default per user decision — see docs/Decisions.md#scheduling.
+export function autoChunkSize() {
+  return 4;
 }
 
 export function weightedDifficultyFromArray(measureDifficulty, start, end) {

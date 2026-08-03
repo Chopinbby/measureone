@@ -403,7 +403,7 @@ export default function App() {
             <div className="hero-doodle-band"><ManuscriptDoodle /></div>
             <div className="hero-content empty-hero-content">
               <p className="eyebrow">MeasureOne</p>
-              <h1>A practice plan for the piece that feels impossible.</h1>
+              <h1>A practice plan for every piece, at any stage.</h1>
               <p className="empty-sub">
                 Tell us the measures, the hard parts, and how long you've got. We'll turn it into
                 a day-by-day plan you can actually follow.

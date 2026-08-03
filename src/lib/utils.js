@@ -33,6 +33,24 @@ export function formatRange(start, end) {
   return start === end ? `m. ${start}` : `mm. ${start}–${end}`;
 }
 
+// Collapses a list of {start,end} measure ranges into the smallest set of
+// contiguous/overlapping spans, sorted ascending. Purely a display helper —
+// never merges ranges that actually have a gap between them, so it never
+// implies coverage of measures that aren't really part of the group.
+export function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged = [];
+  sorted.forEach((r) => {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end + 1) {
+      last.end = Math.max(last.end, r.end);
+    } else {
+      merged.push({ start: r.start, end: r.end });
+    }
+  });
+  return merged;
+}
+
 export function formatDuration(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;

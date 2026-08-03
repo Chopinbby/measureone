@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Pencil,
   RefreshCw,
+  Upload,
 } from "lucide-react";
 
 import { clamp, getCurrentDay } from "./lib/utils";

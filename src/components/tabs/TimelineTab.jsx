@@ -1,7 +1,8 @@
-import { formatRange } from "../../lib/utils";
+import { formatRange, mergeRanges } from "../../lib/utils";
 
 export function TimelineTab({ chunks, timeline, onSelectDay }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
+  const mergedRangesFor = (ids) => mergeRanges(ids.map((id) => chunkById[id]));
   const weeks = [];
   for (let i = 0; i < timeline.days.length; i += 7) weeks.push(timeline.days.slice(i, i + 7));
 
@@ -32,8 +33,8 @@ export function TimelineTab({ chunks, timeline, onSelectDay }) {
                     {d.newChunkIds.length > 0 && (
                       <div className="day-card-group">
                         <span className="day-card-tag new">New</span>
-                        {d.newChunkIds.map((id) => (
-                          <span key={id} className="chip">{formatRange(chunkById[id].start, chunkById[id].end)}</span>
+                        {mergedRangesFor(d.newChunkIds).map((r) => (
+                          <span key={`${r.start}-${r.end}`} className="chip">{formatRange(r.start, r.end)}</span>
                         ))}
                       </div>
                     )}
@@ -42,16 +43,16 @@ export function TimelineTab({ chunks, timeline, onSelectDay }) {
                         <span className="day-card-tag special">
                           {d.specialChunkIds.some((id) => chunkById[id].kind === "combo") ? "Focus" : "Review"}
                         </span>
-                        {d.specialChunkIds.map((id) => (
-                          <span key={id} className="chip transition">{formatRange(chunkById[id].start, chunkById[id].end)}</span>
+                        {mergedRangesFor(d.specialChunkIds).map((r) => (
+                          <span key={`${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
                         ))}
                       </div>
                     )}
                     {d.reviewChunkIds.length > 0 && (
                       <div className="day-card-group">
                         <span className="day-card-tag review">Review</span>
-                        {d.reviewChunkIds.map((id) => (
-                          <span key={id} className="chip subtle">{formatRange(chunkById[id].start, chunkById[id].end)}</span>
+                        {mergedRangesFor(d.reviewChunkIds).map((r) => (
+                          <span key={`${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                         ))}
                       </div>
                     )}

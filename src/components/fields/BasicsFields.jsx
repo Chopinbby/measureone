@@ -10,7 +10,7 @@ import { resizeDifficulty, resizeSections } from "../../lib/utils";
 // grouping id is derived from it in lib/works.js. `lockWork` is used when
 // adding a part to a work that already exists, so the title can't drift
 // between siblings and the piece can't be pulled back out by accident.
-export function BasicsFields({ draft, set, lockWork = false }) {
+export function BasicsFields({ draft, set, lockWork = false, afterWorkMode = null }) {
   const [multiPart, setMultiPart] = useState(lockWork || !!(draft.workId || draft.workName));
 
   const chooseMultiPart = (on) => {
@@ -22,7 +22,7 @@ export function BasicsFields({ draft, set, lockWork = false }) {
     <>
       {!lockWork && (
         <div className="field">
-          <span>Is this one piece, or a work with several movements?</span>
+          <span>Is this a single piece, or a work with several movements?</span>
           <div className="segmented">
             <button type="button" className={!multiPart ? "active" : ""} onClick={() => chooseMultiPart(false)}>
               A single piece
@@ -33,12 +33,15 @@ export function BasicsFields({ draft, set, lockWork = false }) {
           </div>
           {multiPart && (
             <p className="wizard-hint" style={{ marginTop: 8 }}>
-              Set up one movement now — each gets its own plan, schedule and progress. You can add
-              the rest from the piece overview whenever you're ready to start them.
+              Set up the first movement now, then add the rest from the piece overview page
+              whenever you're ready. Each movement will get its own practice plan, schedule, and
+              progress to help you learn.
             </p>
           )}
         </div>
       )}
+
+      {afterWorkMode}
 
       {multiPart && (
         <label className="field">

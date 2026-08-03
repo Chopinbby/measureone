@@ -1,5 +1,29 @@
 import { clamp } from "./utils";
-import { EFFORT_TO_MIN, REVIEW_OFFSETS } from "./constants";
+import { EFFORT_TO_MIN, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
+
+// Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
+// 7-day window of the plan, using the same running-accumulator technique
+// computeTimeline already uses to spread new-chunk introduction by effort —
+// this keeps rest days from clustering instead of landing on a fixed
+// weekday, since the plan's day 1 can start on any real weekday. The final
+// calendar day is always kept a practice/consolidation day so the user's
+// chosen deadline itself is never a forced rest day.
+function computeRestDayFlags(totalDays, practiceDaysPerWeek) {
+  const days = clamp(Math.round(Number(practiceDaysPerWeek)) || MAX_PRACTICE_DAYS_PER_WEEK, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK);
+  const restPerWeek = 7 - days;
+  const flags = Array(totalDays).fill(false);
+  if (restPerWeek <= 0) return flags;
+  let acc = 0;
+  for (let i = 0; i < totalDays; i++) {
+    acc += restPerWeek;
+    if (acc >= 7) {
+      flags[i] = true;
+      acc -= 7;
+    }
+  }
+  if (totalDays > 0) flags[totalDays - 1] = false;
+  return flags;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Timeline engine                                                    */
@@ -25,13 +49,25 @@ export function adaptiveReviewOffsets(chunk, progress) {
 export function computeTimeline(piece, chunkSet) {
   const { practiceChunks, transitions, combos, all } = chunkSet;
   const totalDays = Math.max(1, Number(piece.daysToLearn) || 1);
-  const consolidationDays = totalDays >= 5 ? 1 : 0;
-  const learningDays = Math.max(1, totalDays - consolidationDays);
-  const halfPoint = Math.max(1, Math.min(learningDays, Math.ceil(learningDays * 0.5)));
+  const restFlags = computeRestDayFlags(totalDays, piece.practiceDaysPerWeek);
+
+  // Calendar day numbers (1-based) that are actually available for
+  // practice — everything else in this function walks *this* list instead
+  // of the raw 1..totalDays range, so rest days never get content placed
+  // on them and every "next day"/"spread across" computation automatically
+  // skips over them.
+  const activeDays = [];
+  for (let i = 0; i < totalDays; i++) if (!restFlags[i]) activeDays.push(i + 1);
+  if (!activeDays.length) activeDays.push(totalDays);
+
+  const consolidationDays = activeDays.length >= 5 ? 1 : 0;
+  const consolidationDay = consolidationDays ? activeDays[activeDays.length - 1] : null;
+  const learningDaysCalendar = consolidationDays ? activeDays.slice(0, -1) : activeDays;
+  const learningDays = learningDaysCalendar[learningDaysCalendar.length - 1];
 
   const days = Array.from({ length: totalDays }, (_, i) => ({
     dayNumber: i + 1,
-    type: consolidationDays && i + 1 === totalDays ? "consolidation" : "learning",
+    type: restFlags[i] ? "rest" : i + 1 === consolidationDay ? "consolidation" : "learning",
     newChunkIds: [],
     specialChunkIds: [],
     reviewChunkIds: [],
@@ -40,43 +76,67 @@ export function computeTimeline(piece, chunkSet) {
 
   const introducedDay = {};
 
-  // Spread new-chunk introduction evenly across the full first-half window
-  // (by total effort / halfPoint) instead of greedily filling each day to
-  // piece.minutesPerDay and moving on. Filling-to-budget tends to finish
-  // early, cramming most of the piece into just the first few days — which
-  // then makes their transitions and spaced reviews all land on the same
-  // handful of later days too. Spreading introduction itself out is what
-  // actually prevents that pile-up; it's still fully introduced by halfPoint.
+  const halfPointCount = Math.max(1, Math.min(learningDaysCalendar.length, Math.ceil(learningDaysCalendar.length * 0.5)));
+  const halfPoint = learningDaysCalendar[halfPointCount - 1];
+  const frontDays = learningDaysCalendar.slice(0, halfPointCount);
+  const backDays = learningDaysCalendar.slice(halfPointCount);
+
+  // Snaps a raw calendar-day offset forward to the next actual practice
+  // day, capping at `learningDays` (the last day before consolidation) —
+  // used for transitions/combos, which should still happen even if their
+  // "ideal" day landed on a rest day, just as soon as possible after.
+  const snapCapped = (rawDay) => {
+    for (const d of learningDaysCalendar) if (d >= rawDay) return d;
+    return learningDays;
+  };
+  // Same snap, but drops the item entirely (returns null) once past the
+  // learning window, rather than clamping — matches the original "reviews
+  // past the plan's end just don't happen" behavior.
+  const snapOrDrop = (rawDay) => {
+    for (const d of learningDaysCalendar) if (d >= rawDay) return d;
+    return null;
+  };
+
+  // Spread new-chunk introduction evenly across the front-half *practice*
+  // days (by total effort / halfPointCount) instead of greedily filling
+  // each day to piece.minutesPerDay and moving on. Filling-to-budget tends
+  // to finish early, cramming most of the piece into just the first few
+  // days — which then makes their transitions and spaced reviews all land
+  // on the same handful of later days too. Spreading introduction itself
+  // out is what actually prevents that pile-up; it's still fully
+  // introduced by halfPoint.
   const totalNewEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
-  const perDayNewTarget = totalNewEffort / halfPoint;
+  const perDayNewTarget = totalNewEffort / frontDays.length;
   let dayIdx = 0;
   let acc = 0;
   practiceChunks.forEach((chunk) => {
-    if (acc + chunk.effort > perDayNewTarget && acc > 0 && dayIdx < halfPoint - 1) {
+    if (acc + chunk.effort > perDayNewTarget && acc > 0 && dayIdx < frontDays.length - 1) {
       dayIdx++;
       acc = 0;
     }
-    days[dayIdx].newChunkIds.push(chunk.id);
-    introducedDay[chunk.id] = dayIdx + 1;
+    const day = frontDays[dayIdx];
+    days[day - 1].newChunkIds.push(chunk.id);
+    introducedDay[chunk.id] = day;
     acc += chunk.effort;
   });
-  const sectionsEndDay = Math.min(halfPoint, learningDays);
-  const backSpan = Math.max(1, learningDays - sectionsEndDay);
+  const sectionsEndDay = halfPoint;
 
   transitions.forEach((t) => {
     const readyDay = Math.max(
       introducedDay[t.linkedIds[0]] || sectionsEndDay,
       introducedDay[t.linkedIds[1]] || sectionsEndDay
     );
-    const day = Math.min(learningDays, readyDay + 1);
+    const day = snapCapped(readyDay + 1);
     days[day - 1].specialChunkIds.push(t.id);
     introducedDay[t.id] = day;
   });
 
   combos.forEach((c, i) => {
     const readyDay = introducedDay[c.linkedIds[0]] || sectionsEndDay;
-    const earliest = Math.min(learningDays, Math.max(sectionsEndDay + 1, readyDay + 1));
-    const day = clamp(earliest + (i % backSpan), earliest, learningDays);
+    const earliest = snapCapped(Math.max(sectionsEndDay + 1, readyDay + 1));
+    const pool = backDays.length ? backDays.filter((d) => d >= earliest) : [];
+    const candidates = pool.length ? pool : [learningDays];
+    const day = candidates[i % candidates.length];
     days[day - 1].specialChunkIds.push(c.id);
     introducedDay[c.id] = day;
   });
@@ -90,19 +150,21 @@ export function computeTimeline(piece, chunkSet) {
   };
 
   // Place each spaced-review instance at its normal 1/3/7/14-day (adaptive)
-  // offset, then nudge individual instances up to 2 days earlier/later —
-  // never before the day after introduction, never past learningDays — if
-  // that meaningfully flattens a day sitting well above the plan's average
-  // load. This keeps reviews close to their intended spacing while stopping
-  // every review triggered by one heavy introduction day from all landing
-  // on the exact same later days.
+  // offset — snapped forward off any rest day it happens to land on — then
+  // nudge individual instances up to 2 calendar days earlier/later (again
+  // only ever landing on an actual practice day) if that meaningfully
+  // flattens a day sitting well above the plan's average load. This keeps
+  // reviews close to their intended spacing while stopping every review
+  // triggered by one heavy introduction day from all landing on the exact
+  // same later days.
+  const learningDaySet = new Set(learningDaysCalendar);
   const reviewItems = [];
   all.forEach((chunk) => {
     const start = introducedDay[chunk.id];
     if (!start) return;
     adaptiveReviewOffsets(chunk, piece.progress).forEach((off) => {
-      const day = start + off;
-      if (day <= learningDays) reviewItems.push({ chunkId: chunk.id, minDay: start + 1, day });
+      const day = snapOrDrop(start + off);
+      if (day != null) reviewItems.push({ chunkId: chunk.id, minDay: start + 1, day });
     });
   });
   reviewItems.forEach((item) => days[item.day - 1].reviewChunkIds.push(item.chunkId));
@@ -122,7 +184,7 @@ export function computeTimeline(piece, chunkSet) {
         const currentMinutes = minutesFor(days[item.day - 1]);
         if (currentMinutes <= avgLoad * 1.1) return;
         const candidates = [item.day - 2, item.day - 1, item.day + 1, item.day + 2].filter(
-          (d) => d >= item.minDay && d <= learningDays && !days[d - 1].reviewChunkIds.includes(item.chunkId)
+          (d) => d >= item.minDay && learningDaySet.has(d) && !days[d - 1].reviewChunkIds.includes(item.chunkId)
         );
         if (!candidates.length) return;
         const best = candidates.reduce((a, b) => (minutesFor(days[b - 1]) < minutesFor(days[a - 1]) ? b : a));
@@ -137,11 +199,11 @@ export function computeTimeline(piece, chunkSet) {
   }
 
   if (consolidationDays) {
-    days[totalDays - 1].reviewChunkIds = practiceChunks.map((c) => c.id);
+    days[consolidationDay - 1].reviewChunkIds = practiceChunks.map((c) => c.id);
   }
 
   days.forEach((d) => {
-    d.minutes = d.type === "consolidation" ? Number(piece.minutesPerDay || 30) : Math.round(minutesFor(d));
+    d.minutes = d.type === "consolidation" ? Number(piece.minutesPerDay || 30) : d.type === "rest" ? 0 : Math.round(minutesFor(d));
   });
 
   return { days, learningDays, consolidationDays, halfPoint, introducedDay };

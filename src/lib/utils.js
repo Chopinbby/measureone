@@ -76,3 +76,28 @@ export function getCurrentDay(piece, totalDays) {
   const diff = Math.floor((Date.now() - piece.createdAt) / MS_PER_DAY);
   return clamp(diff + 1, 1, totalDays);
 }
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+export function todayISODate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+export function addDaysISO(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+// Calendar days from today through `dateStr`, inclusive of today — e.g. a
+// target date of today returns 1, tomorrow returns 2. Negative/zero means
+// the date has already passed.
+export function daysUntilInclusive(dateStr) {
+  if (!dateStr) return null;
+  const target = new Date(`${dateStr}T00:00:00`);
+  const today = new Date(`${todayISODate()}T00:00:00`);
+  return Math.round((target - today) / MS_PER_DAY) + 1;
+}

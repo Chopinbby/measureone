@@ -60,8 +60,24 @@ persisted, not part of `generateAllChunks`'s output), used only by
 
 `computeTimeline(piece, chunkSet)` is the scheduler. It runs on every
 `piece` change (see [Architecture.md](Architecture.md#state-management)),
-so it always reflects the latest logged sessions. Key rules, deliberately
-encoded as constraints rather than "just spread everything evenly":
+so it always reflects the latest logged sessions. `piece.daysToLearn` is a
+count of *calendar* days, not practice days — the first thing
+`computeTimeline` does is compute which of those calendar days are rest
+days (`computeRestDayFlags`, based on `piece.practiceDaysPerWeek`) and build
+`learningDaysCalendar`, the ordered list of calendar day numbers that are
+actually available for practice. Every placement step below walks that
+filtered list — via `snapCapped`/`snapOrDrop`, which snap a raw calendar-day
+offset forward to the next real practice day — instead of the raw
+`1..daysToLearn` range, so new-chunk introduction, transitions, combos, and
+spaced review never land content on a rest day. `days[i].type` is `"rest"`
+for those days (0 minutes, nothing scheduled) alongside the existing
+`"learning"`/`"consolidation"` types. See
+[Decisions.md](Decisions.md#scheduling) for why this lives inside
+`computeTimeline` rather than in `getCurrentDay`.
+
+Key scheduling rules, deliberately encoded as constraints rather than "just
+spread everything evenly" (all of them now operate in terms of practice-day
+positions within `learningDaysCalendar`, not raw calendar offsets):
 
 1. **The entire piece is introduced within the first half of the learning
    days** (`halfPoint`). New-chunk introduction is spread **evenly by total
@@ -79,9 +95,12 @@ encoded as constraints rather than "just spread everything evenly":
    reappear on the transitions loop (as opposed to the combos loop, where
    it belongs), that regression is back.**
 3. **Combos are reserved for the back half**, spread across it round-robin
-   (this is where an `i % backSpan`-style offset legitimately belongs).
-4. **Spaced review** uses `REVIEW_OFFSETS = [1, 3, 7, 14]` days after a
-   chunk's introduction, bent per-chunk by `adaptiveReviewOffsets` (below).
+   over the pool of remaining back-half practice days (`i % candidates.length`
+   — this is where an index-based offset legitimately belongs).
+4. **Spaced review** uses `REVIEW_OFFSETS = [1, 3, 7, 14]` calendar days
+   after a chunk's introduction, snapped forward to the next practice day if
+   the raw offset lands on a rest day, bent per-chunk by
+   `adaptiveReviewOffsets` (below).
 5. **Review-load smoothing**: after initial placement, a bounded pass (up to
    3 iterations) looks for learning days sitting more than 10% above the
    plan's average load and, for each such day's most expensive review item,

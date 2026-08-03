@@ -36,17 +36,34 @@ piece = {
                          // (not a per-session practice journal — see Roadmap.md item 1)
   totalMeasures,         // number
   measureDifficulty,     // number[totalMeasures], each 1|2|3 (easy/medium/hard)
-  diffMode,              // 'grid' | 'simple' — remembers which difficulty-editor UI was last used
+  diffMode,              // 'grid' | 'simple' — legacy; 'simple' (the quick-count
+                         // UI) was removed from DifficultyEditor, which now only
+                         // renders the grid, but the field and its old value are
+                         // left as-is on already-saved pieces. See Decisions.md#ux.
   sections,              // [{ id, name, start, end }] — user-defined musical form
                          // (Exposition/Development/etc). Purely descriptive;
                          // NOT the same thing as practice "chunks" below.
-  recurringMode,         // 'none' | 'basic' | 'advanced'
+  recurringMode,         // 'none' | 'basic' | 'advanced' — 'basic' (the quick-count
+                         // UI) was similarly removed from RecurringEditor; only
+                         // 'none'/'advanced' are reachable from the UI now, but
+                         // generatePracticeChunks still honors 'basic' for
+                         // already-saved pieces. See Decisions.md#ux.
   recurringMeasures,     // number, used when recurringMode === 'basic'
   recurringPairs,        // [{ repeatStart, repeatEnd, sourceStart, sourceEnd }]
                          // used when recurringMode === 'advanced'
   scheduleMode,          // 'days' | 'minutes' — which constraint the user fixed
-  daysToLearn,           // number
+  daysToLearn,           // number — total *calendar* days the plan spans (see
+                         // practiceDaysPerWeek below; not every one of these is
+                         // necessarily a practice day)
   minutesPerDay,         // number
+  targetDate,            // string ("YYYY-MM-DD") | null — deadline the user picked
+                         // in 'days' scheduleMode; daysToLearn is derived from
+                         // this (today through targetDate, inclusive)
+  practiceDaysPerWeek,   // number, 3-7 — how many of the 7 days in a week are
+                         // practice days; computeTimeline bakes (7 - this many)
+                         // rest days evenly into the generated plan. Missing on
+                         // pieces created before this field existed, treated as 7
+                         // (no rest days) — see Algorithms.md#timeline--scheduler
   chunkMode,             // 'auto' | 'custom'
   customChunkSize,       // number, measures per chunk when chunkMode === 'custom'
   targetBPM,             // number | null — whole-piece default tempo target
@@ -224,3 +241,6 @@ than a new 0-100 (or 0-4) field. See
   cutoff being reconstructed — see [Algorithms.md](Algorithms.md#confidence).
 - There is no first-class "piece is learned" state — see
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-informally-defined-today).
+- `diffMode: 'simple'` and `recurringMode: 'basic'` are reachable only on
+  pieces saved before their quick-count UI was removed — see
+  [Decisions.md](Decisions.md#ux).

@@ -15,7 +15,7 @@ import {
   Upload,
 } from "lucide-react";
 
-import { clamp, getCurrentDay } from "./lib/utils";
+import { clamp, getCurrentDay, todayISODate, addDaysISO } from "./lib/utils";
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
@@ -219,7 +219,14 @@ export default function App() {
   // Editing state lives here, not inside SettingsTab, so switching tabs
   // mid-edit doesn't unmount (and lose) the in-progress draft.
   const startEditing = () => {
-    setEditDraftState((d) => d || { ...piece });
+    setEditDraftState((d) => {
+      if (d) return d;
+      // Pieces created before the deadline-date field existed only have
+      // daysToLearn as a raw count — backfill an equivalent targetDate so
+      // ScheduleFields' date math has something to work from.
+      const targetDate = piece.targetDate || addDaysISO(todayISODate(), Math.max(0, (piece.daysToLearn || 1) - 1));
+      return { ...piece, targetDate, practiceDaysPerWeek: piece.practiceDaysPerWeek || 7 };
+    });
     setSettingsEditing(true);
     setActiveTab("settings");
   };
@@ -781,6 +788,8 @@ const CSS = `
 .day-card.clickable { cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; }
 .day-card.clickable:hover { border-color: var(--brass); }
 .day-card.consolidation { background: rgba(185,138,62,0.08); }
+.day-card.rest { background: var(--paper); }
+.day-card.rest .day-card-min { color: var(--ink-faint); }
 .day-card-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft); margin-bottom: 8px; }
 .day-card-min { color: var(--brass-deep); }
 .day-card-note { font-size: 12.5px; color: var(--ink-soft); margin: 0; }
@@ -941,9 +950,12 @@ const CSS = `
 .modal { background: var(--paper-card); border-radius: 16px; width: 100%; max-width: 640px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--line); }
 .modal-steps { display: flex; gap: 16px; flex-wrap: wrap; }
-.modal-step { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-faint); font-weight: 500; }
+.modal-step { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-faint); font-weight: 500; background: none; border: none; padding: 0; font-family: inherit; cursor: not-allowed; }
+.modal-step:not(:disabled) { cursor: pointer; }
+.modal-step:not(:disabled):hover { color: var(--brass-deep); }
 .modal-step.active { color: var(--brass-deep); }
 .modal-step.done { color: var(--teal); }
+.modal-step.done:hover { color: var(--brass-deep); }
 .modal-step-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
 .modal-body { padding: 26px 26px 10px; overflow-y: auto; flex: 1; }
 .modal-foot { display: flex; justify-content: space-between; padding: 18px 26px; border-top: 1px solid var(--line); }
@@ -953,7 +965,7 @@ const CSS = `
 
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .field > span { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
-.field input[type="text"], .field input[type="number"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
+.field input[type="text"], .field input[type="number"], .field input[type="date"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
 .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); font-family: inherit; resize: vertical; }
 .field input:disabled { color: var(--ink-faint); background: var(--paper); }
 .field-row { display: flex; gap: 16px; }

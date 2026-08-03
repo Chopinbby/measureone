@@ -16,9 +16,10 @@ export function SectionsEditor({ draft, set }) {
   return (
     <div>
       <p className="wizard-hint">
-        Mark the piece's musical sections (Exposition, Development, a chorus, whatever applies) as
-        measure ranges. This is just how you think about the piece's form — separate from how it
-        gets chunked for practice.
+        Mark the piece's musical sections (Exposition, Development, Subject, Chorus, Section 1–4,
+        whatever applies) as measure ranges. This is just how you think about the piece's form,
+        separate from how it's divided up for practice. You'll occasionally be assigned a section
+        run-through, but practice chunks will generally be just a few measures.
       </p>
       <div className="pairs-list">
         {draft.sections.map((s, i) => (

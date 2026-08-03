@@ -17,36 +17,17 @@ export function RecurringEditor({ draft, set }) {
   return (
     <div>
       <p className="wizard-hint">
-        Even if the material isn't exactly identical, if the practice approach is similar enough,
-        count it as recurring — it still needs less repetition to feel solid.
+        Mark any recurring material. You will still need to practice recurring passages in their
+        unique context, but your plan will assign slightly fewer repetitions.
       </p>
       <div className="segmented" style={{ marginBottom: 14 }}>
         <button className={draft.recurringMode === "none" ? "active" : ""} onClick={() => set({ recurringMode: "none" })}>
           None
         </button>
         <button className={draft.recurringMode === "advanced" ? "active" : ""} onClick={() => set({ recurringMode: "advanced" })}>
-          Map repeats <span className="badge">Recommended</span>
-        </button>
-        <button className={draft.recurringMode === "basic" ? "active" : ""} onClick={() => set({ recurringMode: "basic" })}>
-          Quick count
+          Map repeats
         </button>
       </div>
-
-      {draft.recurringMode === "basic" && (
-        <label className="field">
-          <span>Measures that repeat earlier material</span>
-          <NumberInput
-            value={draft.recurringMeasures}
-            min={0}
-            max={draft.totalMeasures}
-            onCommit={(n) => set({ recurringMeasures: n })}
-          />
-          <p className="wizard-hint" style={{ marginBottom: 0, marginTop: 6 }}>
-            Count only the repeat occurrence, not the original. If a 2-measure phrase appears again
-            later, that's 2 recurring measures, not 4.
-          </p>
-        </label>
-      )}
 
       {draft.recurringMode === "advanced" && (
         <div className="pairs-list">

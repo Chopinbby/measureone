@@ -12,6 +12,10 @@ export const EFFORT_TO_MIN = 2.5; // minutes of practice per "effort point"
 export const REVIEW_OFFSETS = [1, 3, 7, 14];
 export const LIBERAL_FACTOR = 1.2; // pad schedule estimates rather than assume perfect efficiency
 
+export const MIN_PRACTICE_DAYS_PER_WEEK = 3;
+export const MAX_PRACTICE_DAYS_PER_WEEK = 7;
+export const MAX_RECOMMENDED_MINUTES_PER_DAY = 120; // warn in the wizard past this pace
+
 export const DIFFICULTY_META = {
   easy: { label: "Easy", color: "var(--teal)" },
   medium: { label: "Medium", color: "var(--brass)" },

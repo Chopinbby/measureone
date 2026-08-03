@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Check, X, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { generateAllChunks } from "../lib/chunking";
 import { computeTimeline } from "../lib/scheduling";
+import { todayISODate, addDaysISO } from "../lib/utils";
 import { BasicsFields } from "./fields/BasicsFields";
 import { SectionsEditor } from "./fields/SectionsEditor";
 import { DifficultyEditor } from "./fields/DifficultyEditor";
@@ -28,7 +29,9 @@ export function defaultPiece() {
     scheduleMode: "days",
     daysToLearn: 21,
     minutesPerDay: 30,
-    chunkMode: "custom",
+    targetDate: addDaysISO(todayISODate(), 20),
+    practiceDaysPerWeek: 7,
+    chunkMode: "auto",
     customChunkSize: 4,
     targetBPM: null,
     bpmZones: [],
@@ -61,6 +64,13 @@ const STEPS = ["Piece", "Sections", "Difficulty", "Repeats", "Timeline", "Review
 // attached to it rather than the user having to retype the title.
 export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
   const [step, setStep] = useState(0);
+  // Furthest step reached so far — lets the step indicator act as back/forward
+  // navigation without letting the user skip ahead into steps they haven't
+  // gotten to (and validated) yet.
+  const [maxStep, setMaxStep] = useState(0);
+  useEffect(() => {
+    setMaxStep((m) => Math.max(m, step));
+  }, [step]);
   const [draft, setDraft] = useState(() =>
     joinWork
       ? { ...defaultPiece(), workId: joinWork.workId, workName: joinWork.workName, composer: joinWork.composer || "" }
@@ -76,7 +86,10 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
 
   const canAdvance = () => {
     if (step === 0) return draft.name.trim().length > 0 && draft.totalMeasures > 0;
-    if (step === 4) return draft.daysToLearn > 0 && draft.minutesPerDay > 0;
+    if (step === 4) {
+      if (draft.scheduleMode === "days" && !draft.targetDate) return false;
+      return draft.daysToLearn > 0 && draft.minutesPerDay > 0;
+    }
     return true;
   };
 
@@ -86,10 +99,16 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
         <div className="modal-head">
           <div className="modal-steps">
             {STEPS.map((s, i) => (
-              <div key={s} className={`modal-step ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}>
-                <span className="modal-step-dot">{i < step ? <Check size={12} /> : i + 1}</span>
+              <button
+                key={s}
+                type="button"
+                className={`modal-step ${i === step ? "active" : ""} ${i < maxStep ? "done" : ""}`}
+                disabled={i > maxStep}
+                onClick={() => setStep(i)}
+              >
+                <span className="modal-step-dot">{i < maxStep ? <Check size={12} /> : i + 1}</span>
                 {s}
-              </div>
+              </button>
             ))}
           </div>
           <button className="icon-btn" onClick={onCancel} aria-label="Close">
@@ -104,32 +123,39 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
               <p className="wizard-hint">
                 {joinWork
                   ? `A new movement of ${joinWork.workName || "this work"}, with its own plan and schedule.`
-                  : "Start with the basics of the piece."}
+                  : "Start by entering some basic information about the piece."}
               </p>
-              <BasicsFields draft={draft} set={set} lockWork={!!joinWork} />
-
-              <div className="field" style={{ marginTop: 20 }}>
-                <span>Is this fresh, or a piece you're coming back to?</span>
-                <div className="segmented">
-                  <button className={!startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(false)}>
-                    Learning it fresh
-                  </button>
-                  <button className={startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(true)}>
-                    I already know this piece
-                  </button>
-                </div>
-                {startAsRevival && (
-                  <p className="wizard-hint" style={{ marginTop: 8 }}>
-                    We'll skip the "introduce new material" phase and go straight into a revival —
-                    a quick reassessment of where things actually stand, chunk by chunk.
-                  </p>
-                )}
-              </div>
+              <BasicsFields
+                draft={draft}
+                set={set}
+                lockWork={!!joinWork}
+                afterWorkMode={
+                  <div className="field" style={{ marginTop: 20 }}>
+                    <span>Are you learning it for the first time?</span>
+                    <div className="segmented">
+                      <button className={!startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(false)}>
+                        Yes, learning it fresh
+                      </button>
+                      <button className={startAsRevival ? "active" : ""} onClick={() => setStartAsRevival(true)}>
+                        No, I'm reviving an old piece
+                      </button>
+                    </div>
+                    {startAsRevival && (
+                      <p className="wizard-hint" style={{ marginTop: 8 }}>
+                        We'll skip the "introduce new material" phase and go straight into a
+                        revival — a quick reassessment of where things actually stand. You will be
+                        prompted to assess your confidence one chunk at a time after setting up the
+                        piece.
+                      </p>
+                    )}
+                  </div>
+                }
+              />
             </div>
           )}
           {step === 1 && (
             <div className="wizard-pane">
-              <h2>What are the piece's sections?</h2>
+              <h2>How is the piece organized?</h2>
               <SectionsEditor draft={draft} set={set} />
             </div>
           )}
@@ -147,18 +173,18 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
           )}
           {step === 4 && (
             <div className="wizard-pane">
-              <h2>Set the schedule</h2>
-              <p className="wizard-hint">Fix the constraint that matters most — we'll work out the other one.</p>
+              <h2>Set your schedule</h2>
+              <p className="wizard-hint">Set a deadline, or commit a set amount of time to spend on this piece per day.</p>
               <ScheduleFields draft={draft} set={set} />
             </div>
           )}
           {step === 5 && (
             <div className="wizard-pane">
-              <h2>Ready for measure one</h2>
+              <h2>Ready for MeasureOne</h2>
               {!startAsRevival && (
                 <p className="wizard-hint">
-                  The whole piece gets covered by day {timeline.halfPoint} — the rest of the time is
-                  transitions, focus blocks, and review.
+                  Cover the whole piece by day {timeline.halfPoint}, then work on drilling,
+                  consolidation, and review.
                 </p>
               )}
               <ManuscriptStrip chunks={chunkSet.practiceChunks} />

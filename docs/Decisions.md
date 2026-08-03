@@ -94,6 +94,39 @@ day, not a larger tail.**
   run-throughs, which wasted the back half of the plan on repetition instead
   of targeted transitions/combos/review work.
 
+**Decision: the Timeline wizard step fixes a real calendar deadline date
+(`piece.targetDate`) rather than a raw day count, and a separate
+`piece.practiceDaysPerWeek` (3–7) bakes actual rest days into the generated
+plan instead of assuming every calendar day is a practice day.**
+
+- **Why:** Asking for "days to learn it" as a bare number forced the user to
+  do the date math themselves, and silently assumed 7-day-a-week practice —
+  unrealistic for most learners and in tension with
+  [Product-Principles.md](Product-Principles.md#no-punishment-mechanics)'s
+  spirit of not designing around an idealized, uninterrupted practice
+  schedule. This is a separate calendar-date surface from the open question
+  below about Progress's velocity-based projection — see that entry for how
+  the two now relate.
+- **Approach chosen:** `computeTimeline`'s day array still spans
+  `daysToLearn` as a plain 1..N sequence — `daysToLearn` now just means
+  *calendar* days instead of *practice* days. Rest days are computed once
+  (`computeRestDayFlags`, spreading `7 - practiceDaysPerWeek` rest days
+  evenly across every rolling 7-day window via the same running-accumulator
+  technique already used for spreading new-chunk introduction by effort) and
+  every placement step — new-chunk introduction, transitions, combos, spaced
+  review — walks the filtered list of non-rest day indices instead of the
+  raw range. This kept `getCurrentDay` (calendar-day-since-`createdAt`)
+  completely unchanged, since "day N" is still exactly N calendar days after
+  creation; only *what gets scheduled onto* a given day number changed.
+- **Alternative considered:** keeping `daysToLearn` as a practice-day count
+  and giving `getCurrentDay` its own weekly-pattern-aware calendar mapping.
+  Rejected — every UI surface that reads `timeline.days[i].dayNumber`
+  (Timeline, Progress, Today) treats it as an opaque plan index, so pushing
+  the rest-day logic into `computeTimeline` alone touched far less of the
+  app than teaching `getCurrentDay` and every calendar-facing consumer about
+  a weekly cadence.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler).
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -123,6 +156,23 @@ flat 2–4).**
 
 - **Why:** Better matched to per-difficulty repetition needs rather than one
   range for every chunk regardless of difficulty.
+
+**Decision: removed the "quick counts" alternative UI from both
+`DifficultyEditor` (a total easy/medium/hard count, randomly scattered
+across the piece) and `RecurringEditor` (a bare count of recurring
+measures, `recurringMode: "basic"`) — the measure-precise grid / mapped-pairs
+UI is now the only option in the wizard and Settings.**
+
+- **Why:** Difficulty and recurring material are never actually evenly or
+  randomly distributed across a real piece — the quick-count modes existed
+  as a faster-entry shortcut, but the randomized/approximate placement they
+  produced didn't reflect anything true about the piece, undermining the
+  whole point of difficulty-aware and recurring-aware scheduling.
+- **Backward compatibility:** `piece.diffMode` and `recurringMode: "basic"`
+  / `recurringMeasures` remain in the data model and `generatePracticeChunks`
+  still honors them — this only removed the UI to *choose* those modes going
+  forward, so pieces already saved with them keep working unchanged. See
+  [Data-Model.md](Data-Model.md#known-simplifications).
 
 ## Data model
 
@@ -265,7 +315,11 @@ oversight to silently fix; surface it instead.
 - **Exact placement of the Analytics panels once folded into Progress** —
   agreed in general terms ("near effectiveness calibration, somewhere
   unobtrusive") but never pinned down. See [Roadmap.md](Roadmap.md).
-- **Should "projected finish date" ever show a real calendar date** (derived
-  from `piece.createdAt`) instead of staying in day-number terms? Day-number
-  was chosen as the safer default when the Progress redesign shipped, but a
-  calendar date wasn't ruled out as a future option.
+- **Should Progress's velocity-based "projected finish" stat (`ProgressTab`,
+  `projectedDay`) ever show a real calendar date instead of staying in
+  day-number terms?** Still open — day-number was chosen as the safer
+  default when the Progress redesign shipped. Note this is now inconsistent
+  with the Wizard's Timeline step, which *does* work in real calendar dates
+  (`piece.targetDate`, an estimated finish date in "minutes per day" mode —
+  see [Algorithms.md](Algorithms.md#timeline--scheduler)); worth revisiting
+  whether Progress should follow suit for consistency.

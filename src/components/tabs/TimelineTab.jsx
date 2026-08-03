@@ -28,6 +28,8 @@ export function TimelineTab({ chunks, timeline, onSelectDay }) {
                 </div>
                 {d.type === "consolidation" ? (
                   <p className="day-card-note">Full run-through of the piece</p>
+                ) : d.type === "rest" ? (
+                  <p className="day-card-note">Rest day</p>
                 ) : (
                   <>
                     {d.newChunkIds.length > 0 && (

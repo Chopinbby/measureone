@@ -14,6 +14,7 @@ import {
   Pencil,
   RefreshCw,
   Upload,
+  X,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO } from "./lib/utils";
@@ -76,6 +77,9 @@ export default function App() {
   const [revivalModalOpen, setRevivalModalOpen] = useState(false);
   const [wizardJoinWork, setWizardJoinWork] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
+  const [rescheduleMessage, setRescheduleMessage] = useState("");
+  const [rescheduleStatus, setRescheduleStatus] = useState(null);
   const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
@@ -349,6 +353,18 @@ export default function App() {
     setActiveTab("revival");
   };
 
+  const handleConfirmReschedule = () => {
+    if (!rescheduleStatus) return;
+    console.log('Confirming reschedule:', rescheduleStatus);
+    updatePiece((p) => ({
+      ...p,
+      rescheduleMarker: { asOfDay: rescheduleStatus.asOfDay, remainingChunkOrder: rescheduleStatus.remainingChunkIds },
+    }));
+    setRescheduleModalOpen(false);
+    setRescheduleMessage("");
+    setRescheduleStatus(null);
+  };
+
   const handleEndRevival = () => {
     if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
     updatePiece((p) => ({
@@ -403,11 +419,9 @@ export default function App() {
       message = `Heads up: at your current pace (${piece.minutesPerDay} min/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
     }
 
-    if (!window.confirm(message)) return;
-    updatePiece((p) => ({
-      ...p,
-      rescheduleMarker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds },
-    }));
+    setRescheduleMessage(message);
+    setRescheduleStatus({ asOfDay: currentDay, remainingChunkIds: status.remainingChunkIds });
+    setRescheduleModalOpen(true);
   };
 
   const pieceList = Object.values(pieces).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -613,6 +627,31 @@ export default function App() {
       )}
       {deleteModalOpen && piece && (
         <DeletePieceModal piece={piece} onCancel={() => setDeleteModalOpen(false)} onConfirm={handleDeletePiece} />
+      )}
+      {rescheduleModalOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal" style={{ maxWidth: 560 }}>
+            <div className="modal-head">
+              <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 19, margin: 0 }}>
+                Reschedule remaining chunks?
+              </h2>
+              <button className="icon-btn" onClick={() => setRescheduleModalOpen(false)} aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 14, lineHeight: 1.5, margin: 0 }}>{rescheduleMessage}</p>
+            </div>
+            <div className="modal-foot">
+              <button className="ghost-btn" onClick={() => setRescheduleModalOpen(false)}>
+                Cancel
+              </button>
+              <button className="primary-btn" onClick={handleConfirmReschedule}>
+                Reschedule
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

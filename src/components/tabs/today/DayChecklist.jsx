@@ -22,6 +22,10 @@ export function DayChecklist({ piece, chunks, day, onLogSession, onUnlogSession,
     ...day.specialChunkIds.map((id) => ({ id, role: chunkById[id].kind })),
     ...day.reviewChunkIds.map((id) => ({ id, role: "review" })),
   ];
+  // Combos ("Focus block") span several chunks and take longer than a single
+  // chunk's worth of practice — always last, after every atomic task. Sort is
+  // stable, so relative order otherwise is unaffected.
+  items.sort((a, b) => (a.role === "combo" ? 1 : 0) - (b.role === "combo" ? 1 : 0));
 
   if (items.length === 0) {
     return (

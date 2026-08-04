@@ -524,6 +524,7 @@ export default function App() {
                 workParts={workParts}
                 onSelectPart={switchToPiece}
                 onAddPart={handleAddPart}
+                onSelectDay={handleSelectDay}
               />
             )}
             {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
@@ -769,6 +770,9 @@ const CSS = `
 .day-preview-list { display: flex; flex-direction: column; }
 .day-preview-row { display: flex; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .day-preview-row:last-child { border-bottom: none; }
+.day-preview-row.clickable { width: 100%; background: none; border: none; border-bottom: 1px solid var(--line); font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.day-preview-row.clickable:last-child { border-bottom: none; }
+.day-preview-row.clickable:hover .day-desc { color: var(--brass-deep); }
 .day-num { width: 56px; color: var(--brass-deep); flex-shrink: 0; }
 .day-desc { flex: 1; color: var(--ink-soft); }
 .day-min { color: var(--ink-faint); flex-shrink: 0; }

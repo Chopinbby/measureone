@@ -58,13 +58,6 @@ export function TodayTab({
       </div>
 
       <FocusPanel piece={piece} chunks={chunks} currentDay={currentDay} />
-      <SectionRunThroughPanel
-        piece={piece}
-        practiceChunks={practiceChunks}
-        currentDay={currentDay}
-        onLogSession={onLogSession}
-        onUnlogSession={onUnlogSession}
-      />
 
       {viewMode === "day" ? (
         <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onToggleDone={onToggleDone} />
@@ -75,6 +68,17 @@ export function TodayTab({
           ))}
         </div>
       )}
+
+      {/* Section run-throughs are the longest tasks — a full continuous
+          play-through, not a single chunk — so they always sit below the
+          day's regular checklist. */}
+      <SectionRunThroughPanel
+        piece={piece}
+        practiceChunks={practiceChunks}
+        currentDay={currentDay}
+        onLogSession={onLogSession}
+        onUnlogSession={onUnlogSession}
+      />
 
       <ReassessPanel piece={piece} todaysRanges={todaysRanges} onReassessRange={onReassessRange} />
     </div>

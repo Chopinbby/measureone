@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { formatRange, formatDuration } from "../../../lib/utils";
 import { ROLE_LABEL, DIFFICULTY_META, REQUIRED_REPS, EFFECTIVENESS_OPTIONS } from "../../../lib/constants";
 import { computeConfidence, suggestMethods } from "../../../lib/confidence";
+import { NumberInput } from "../../NumberInput";
 
 export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession, tempoLadder, memoryAnchor }) {
   const entry = piece.progress[chunk.id] || {};
@@ -14,27 +15,23 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   const [bpm, setBpm] = useState("");
   const [feel, setFeel] = useState("");
   const [timerRunning, setTimerRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [manualMinutes, setManualMinutes] = useState("");
+  const [durationSeconds, setDurationSeconds] = useState(0);
 
   useEffect(() => {
     if (!timerRunning) return;
-    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    const id = setInterval(() => setDurationSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, [timerRunning]);
 
   const canLog = reps !== "" && bpm !== "" && !!feel;
 
-  const duration = manualMinutes !== "" ? Math.round(Number(manualMinutes) * 60) : elapsed;
-
   const submitLog = () => {
     if (!canLog) return;
-    onLogSession(chunk.id, day, Number(reps), Number(bpm), feel, duration);
+    onLogSession(chunk.id, day, Number(reps), Number(bpm), feel, durationSeconds);
     setReps("");
     setBpm("");
     setFeel("");
-    setElapsed(0);
-    setManualMinutes("");
+    setDurationSeconds(0);
     setTimerRunning(false);
   };
 
@@ -99,17 +96,19 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
           <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
             {timerRunning ? "Stop" : "Start"} timer
           </button>
-          <span className="timer-display mono">{formatDuration(elapsed)}</span>
-          <label className="timer-manual">
-            <span>or enter minutes</span>
-            <input
-              type="number"
-              min={0}
-              value={manualMinutes}
-              onChange={(e) => setManualMinutes(e.target.value)}
-              placeholder="e.g. 10"
-            />
-          </label>
+          {timerRunning ? (
+            <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
+          ) : (
+            <label className="timer-manual">
+              <span>minutes practiced</span>
+              <NumberInput
+                value={durationSeconds ? Math.round(durationSeconds / 60) : ""}
+                min={0}
+                onCommit={(n) => setDurationSeconds(Math.round(n * 60))}
+                placeholder="e.g. 10"
+              />
+            </label>
+          )}
         </div>
 
         <div className="log-row">

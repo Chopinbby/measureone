@@ -19,6 +19,7 @@ export function OverviewTab({
   workParts,
   onSelectPart,
   onAddPart,
+  onSelectDay,
 }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
@@ -118,11 +119,16 @@ export function OverviewTab({
               }
             }
             return (
-              <div key={d.dayNumber} className="day-preview-row">
+              <button
+                key={d.dayNumber}
+                type="button"
+                className="day-preview-row clickable"
+                onClick={() => onSelectDay(d.dayNumber)}
+              >
                 <span className="day-num mono">Day {d.dayNumber}</span>
                 <span className="day-desc">{desc}</span>
                 <span className="day-min mono">{d.minutes} min</span>
-              </div>
+              </button>
             );
           })}
         </div>

@@ -8,6 +8,7 @@ import { BpmZonesEditor } from "../fields/BpmZonesEditor";
 import { RecordingsEditor } from "../fields/RecordingsEditor";
 import { RecordingsList } from "../fields/RecordingsList";
 import { autoChunkSize } from "../../lib/chunking";
+import { formatMinutes } from "../../lib/utils";
 
 export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick }) {
   if (!editing || !editDraft) {
@@ -46,7 +47,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
             <div><dt>Sections</dt><dd className="mono">{piece.sections.length}</dd></div>
             <div><dt>Chunk size</dt><dd className="mono">{piece.chunkMode === "auto" ? `${autoChunkSize(piece.totalMeasures)} (auto)` : `${piece.customChunkSize} (custom)`}</dd></div>
             <div><dt>Recurring material</dt><dd>{piece.recurringMode === "none" ? "None" : piece.recurringMode === "basic" ? `${piece.recurringMeasures} measures (quick count)` : `${piece.recurringPairs.length} passage(s) mapped`}</dd></div>
-            <div><dt>Schedule</dt><dd className="mono">{piece.daysToLearn} days, {piece.minutesPerDay} min/day</dd></div>
+            <div><dt>Schedule</dt><dd className="mono">{piece.daysToLearn} days, {formatMinutes(piece.minutesPerDay)}/day</dd></div>
           </dl>
           {piece.notes && (
             <div className="piece-notes">

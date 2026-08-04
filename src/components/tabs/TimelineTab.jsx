@@ -1,4 +1,4 @@
-import { formatRange, mergeRanges } from "../../lib/utils";
+import { formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 
 export function TimelineTab({ chunks, timeline, onSelectDay }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
@@ -24,7 +24,7 @@ export function TimelineTab({ chunks, timeline, onSelectDay }) {
               <button key={d.dayNumber} className={`day-card clickable ${d.type}`} onClick={() => onSelectDay(d.dayNumber)}>
                 <div className="day-card-head">
                   <span className="mono">Day {d.dayNumber}</span>
-                  <span className="mono day-card-min">{d.minutes}m</span>
+                  <span className="mono day-card-min">{formatMinutes(d.minutes)}</span>
                 </div>
                 {d.type === "consolidation" ? (
                   <p className="day-card-note">Full run-through of the piece</p>

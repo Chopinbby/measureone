@@ -8,7 +8,7 @@ import {
   MAX_PRACTICE_DAYS_PER_WEEK,
   MAX_RECOMMENDED_MINUTES_PER_DAY,
 } from "../../lib/constants";
-import { todayISODate, addDaysISO, daysBetweenInclusive, clamp } from "../../lib/utils";
+import { todayISODate, addDaysISO, daysBetweenInclusive, clamp, formatMinutes } from "../../lib/utils";
 
 const PRACTICE_DAYS_OPTIONS = Array.from(
   { length: MAX_PRACTICE_DAYS_PER_WEEK - MIN_PRACTICE_DAYS_PER_WEEK + 1 },
@@ -107,7 +107,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
             />
           </label>
           <p className="derived-stat">
-            At least <strong className="mono">{draft.minutesPerDay}</strong> minutes/day needed at this pace
+            At least <strong className="mono">{formatMinutes(draft.minutesPerDay)}</strong>/day needed at this pace
           </p>
           {overloaded && (
             <p className="wizard-hint" style={{ color: "var(--brick)" }}>

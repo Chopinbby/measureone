@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 
-import { clamp, getCurrentDay, todayISODate, addDaysISO } from "./lib/utils";
+import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
@@ -472,7 +472,7 @@ export default function App() {
 
     let message = `This will rebalance the ${status.remainingChunkIds.length} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`;
     if (requiredDays > availableDays) {
-      message = `Heads up: at your current pace (${piece.minutesPerDay} min/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
+      message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
     }
 
     setRescheduleMessage(message);

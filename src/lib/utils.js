@@ -57,11 +57,19 @@ export function formatDuration(totalSeconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// Every practice-time display in the app goes through this — schedule
+// minutes (piece.minutesPerDay, day.minutes, agenda totals) as well as
+// logged-session totals below — so an hour-plus duration always reads as
+// "1h 30m" rather than a bare "90m" the user has to do the math on.
+export function formatMinutes(totalMinutes) {
+  const m = Math.round(totalMinutes);
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return h > 0 ? `${h}h ${rem}m` : `${rem}m`;
+}
+
 export function formatHoursMinutes(totalSeconds) {
-  const totalMinutes = Math.round(totalSeconds / 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return formatMinutes(totalSeconds / 60);
 }
 
 export function sumPracticeSeconds(piece) {

@@ -3,7 +3,7 @@ import { ScheduleBanner } from "../ScheduleBanner";
 import { ManuscriptDoodle, ManuscriptStrip } from "../Manuscript";
 import { RecordingsList } from "../fields/RecordingsList";
 import { PartSwitcher } from "../PartSwitcher";
-import { sumPracticeSeconds, formatHoursMinutes } from "../../lib/utils";
+import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib/utils";
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
 
@@ -127,7 +127,7 @@ export function OverviewTab({
               >
                 <span className="day-num mono">Day {d.dayNumber}</span>
                 <span className="day-desc">{desc}</span>
-                <span className="day-min mono">{d.minutes} min</span>
+                <span className="day-min mono">{formatMinutes(d.minutes)}</span>
               </button>
             );
           })}

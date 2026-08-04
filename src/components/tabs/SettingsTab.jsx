@@ -9,7 +9,7 @@ import { RecordingsEditor } from "../fields/RecordingsEditor";
 import { RecordingsList } from "../fields/RecordingsList";
 import { autoChunkSize } from "../../lib/chunking";
 
-export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportAll, onImportClick }) {
+export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick }) {
   if (!editing || !editDraft) {
     return (
       <div className="tab-pane">
@@ -25,11 +25,12 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
           <h3>Backup & restore</h3>
           <p className="wizard-hint" style={{ marginBottom: 12 }}>
             Everything is saved only in this browser. Export a backup file now and then, or before
-            switching browsers or devices — you can import it back in later.
+            switching browsers or devices — you can import it back in later. Both let you choose
+            which pieces to include.
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="ghost-btn" onClick={onExportAll}>
-              <Download size={14} /> Export all pieces
+            <button className="ghost-btn" onClick={onExportClick}>
+              <Download size={14} /> Export pieces
             </button>
             <button className="ghost-btn" onClick={onImportClick}>
               <Upload size={14} /> Import backup

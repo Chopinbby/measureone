@@ -1,5 +1,6 @@
 import { clamp } from "./utils";
-import { EFFORT_TO_MIN, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
+import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
+import { generateAllChunks } from "./chunking";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -23,6 +24,63 @@ function computeRestDayFlags(totalDays, practiceDaysPerWeek) {
   }
   if (totalDays > 0) flags[totalDays - 1] = false;
   return flags;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Fixed-budget day count (scheduleMode: "minutes")                   */
+/* ------------------------------------------------------------------ */
+
+// Given a fixed minutes-per-day budget, how many calendar days does this
+// plan need so no day's worth of chunks/transitions/combos is greedily
+// packed past that budget? The mirror image of "days" scheduleMode, where
+// daysToLearn is the fixed input and minutesPerDay is derived from it — here
+// minutesPerDay is fixed and daysToLearn is what must flex to fit it.
+export function computeDaysNeededForMinutesPerDay(chunkSet, minutesPerDay, practiceDaysPerWeek) {
+  const minutes = Math.max(5, Number(minutesPerDay) || 30);
+  const dayBudget = (minutes * 0.65) / EFFORT_TO_MIN;
+  // Every introduced item also costs up to REVIEW_OFFSETS.length spaced
+  // reviews later at a flat 3 minutes each (see computeTimeline's
+  // minutesFor) — effort alone (the raw introduction cost) undercounts what
+  // a day actually ends up costing once review load lands on top of it.
+  // Folding an estimate of that in here, converted to the same effort-point
+  // units as everything else in this budget, is what keeps this estimate
+  // from landing on a day count that's technically "enough" for
+  // introduction alone but still runs well over budget once review is added.
+  const reviewEffortPerItem = (REVIEW_OFFSETS.length * 3) / EFFORT_TO_MIN;
+  let learningDaysNeeded = 1;
+  let acc = 0;
+  chunkSet.all.forEach((c) => {
+    const itemEffort = c.effort + reviewEffortPerItem;
+    if (acc + itemEffort > dayBudget && acc > 0) {
+      learningDaysNeeded++;
+      acc = 0;
+    }
+    acc += itemEffort;
+  });
+  const practiceDaysNeeded = Math.max(1, Math.ceil((learningDaysNeeded / 0.88) * LIBERAL_FACTOR));
+  const days = clamp(Math.round(Number(practiceDaysPerWeek)) || MAX_PRACTICE_DAYS_PER_WEEK, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK);
+  return Math.max(1, Math.ceil((practiceDaysNeeded * 7) / days));
+}
+
+// Keeps piece.daysToLearn honest against piece.minutesPerDay for a
+// scheduleMode: "minutes" piece. ScheduleFields already performs this same
+// reconciliation live, as a side effect of the Schedule panel being mounted
+// — but that means it only ever runs while a human has that panel open. A
+// piece arriving any other way (loaded from storage, imported from a
+// backup, merged with an existing piece on re-import) never passes through
+// that component, so a stale or simply-wrong daysToLearn — e.g. a backup
+// hand-edited to change minutesPerDay without touching daysToLearn to match
+// — was silently kept as-is, and computeTimeline would cram the piece's
+// full effort into however many days that stale value said, regardless of
+// whether that fit the stated per-day budget. Calling this from
+// storage.js's load path and from the import merge in App.jsx closes that
+// gap without duplicating the derivation itself. "days" scheduleMode is
+// left untouched here — daysToLearn is the fixed input in that mode.
+export function reconcileMinutesPerDaySchedule(piece) {
+  if (piece.scheduleMode !== "minutes") return piece;
+  const chunkSet = generateAllChunks(piece);
+  const needed = computeDaysNeededForMinutesPerDay(chunkSet, piece.minutesPerDay, piece.practiceDaysPerWeek);
+  return needed === piece.daysToLearn ? piece : { ...piece, daysToLearn: needed };
 }
 
 /* ------------------------------------------------------------------ */

@@ -174,6 +174,46 @@ was removed.**
   than before the next time their timeline recomputes — this is a real
   change to those pieces' schedule structure, not just new-piece defaults.
 
+**Decision: `daysToLearn` reconciliation for `scheduleMode: "minutes"` moved
+out of `ScheduleFields`'s `useEffect` into a pure function
+(`reconcileMinutesPerDaySchedule`, `lib/scheduling.js`) called from piece
+load (`validateAndMigratePiece`) and from the backup-import merge, not just
+from the Wizard/Settings UI.**
+
+- **Why:** A user reported importing several pieces set to a fixed
+  `minutesPerDay` (e.g. 15) that instead showed tasks far exceeding that
+  per day, with every piece landing on the same ~14-day plan regardless of
+  its actual size. Root cause: `computeTimeline` treats `daysToLearn` as a
+  given input and never checks it against `minutesPerDay`; the code that
+  derives "how many days does this budget actually need" only existed as a
+  React `useEffect` inside `ScheduleFields`, which is only mounted while a
+  human has the Wizard's or Settings' Schedule panel open. A piece loaded
+  from storage or merged in from an imported backup never passed through
+  that component, so `daysToLearn` just kept whatever value the stored/
+  imported data happened to carry — including a backup hand-edited to
+  change `minutesPerDay` without updating `daysToLearn` to match, a
+  workflow this project's own docs already call out as legitimate (see the
+  import-matching decision above).
+- **Approach chosen:** extracted the derivation as a pure function taking
+  `chunkSet` directly (matching the existing convention of
+  `computeTimeline(piece, chunkSet)` and friends), reused by both the live
+  UI effect and the two non-UI entry points. Also folded an estimate of
+  spaced-review load into the day-count derivation, which the original
+  `ScheduleFields` version didn't account for at all — without it, the
+  derived day count was "enough" for introduction alone but still ran over
+  budget once review load landed on top. See
+  [Algorithms.md](Algorithms.md#deriving-daystolearn-from-minutesperday-scheduleMode-minutes).
+- **Known limitation, not fixed here:** this derivation estimates a day
+  count, it doesn't cap any individual day. `computeTimeline`'s own
+  placement (new-chunk introduction spread only across the first half of
+  learning days, per the rule above) means early days can still run
+  somewhat over `minutesPerDay`, and a piece whose chunk size is large
+  relative to a very tight budget can have a single introduction cost more
+  than the entire daily budget on its own — no number of extra days fixes
+  that specific case; only a smaller chunk size would. Redesigning
+  `computeTimeline`'s placement itself to hard-cap daily minutes was judged
+  out of scope for this fix.
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below

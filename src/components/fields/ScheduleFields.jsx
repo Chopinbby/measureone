@@ -1,6 +1,7 @@
 import { useMemo, useEffect } from "react";
 import { NumberInput } from "../NumberInput";
 import { autoChunkSize, generateAllChunks } from "../../lib/chunking";
+import { computeDaysNeededForMinutesPerDay } from "../../lib/scheduling";
 import {
   EFFORT_TO_MIN,
   LIBERAL_FACTOR,
@@ -47,19 +48,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
       if (calendarDays !== draft.daysToLearn) set({ daysToLearn: calendarDays });
       if (needed !== draft.minutesPerDay) set({ minutesPerDay: needed });
     } else {
-      const minutes = Math.max(5, draft.minutesPerDay || 30);
-      const newBudget = (minutes * 0.65) / EFFORT_TO_MIN;
-      let learningDaysNeeded = 1;
-      let acc = 0;
-      chunkSet.all.forEach((c) => {
-        if (acc + c.effort > newBudget && acc > 0) {
-          learningDaysNeeded++;
-          acc = 0;
-        }
-        acc += c.effort;
-      });
-      const practiceDaysNeeded = Math.max(1, Math.ceil((learningDaysNeeded / 0.88) * LIBERAL_FACTOR));
-      const calendarDaysNeeded = Math.max(1, Math.ceil((practiceDaysNeeded * 7) / practiceDaysPerWeek));
+      const calendarDaysNeeded = computeDaysNeededForMinutesPerDay(chunkSet, draft.minutesPerDay, practiceDaysPerWeek);
       if (calendarDaysNeeded !== draft.daysToLearn) set({ daysToLearn: calendarDaysNeeded });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

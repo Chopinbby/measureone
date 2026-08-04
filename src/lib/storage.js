@@ -1,5 +1,6 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
 import { todayISODate } from "./utils";
+import { reconcileMinutesPerDaySchedule } from "./scheduling";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -41,7 +42,13 @@ function validateAndMigratePiece(piece) {
     startDate: piece.startDate || todayISODate(),
   };
 
-  return migrated;
+  // A "minutes per day" piece's daysToLearn must stay derived from its
+  // minutesPerDay budget, not just whatever value happened to be sitting on
+  // the stored/imported object — see reconcileMinutesPerDaySchedule for why
+  // this can't just live in the Wizard/Settings UI. Runs on every load, not
+  // just once, since editing difficulty/measures/recurring material via
+  // Settings legitimately changes how many days the same budget needs.
+  return reconcileMinutesPerDaySchedule(migrated);
 }
 
 /* ------------------------------------------------------------------ */
@@ -66,7 +73,10 @@ export function loadPiecesFromStorage() {
             // Write the backfilled shape straight back so a piece the user
             // never revisits doesn't keep re-deriving (and drifting) a
             // fresh startDate on every future load — this locks it in once.
-            if (!p.startDate) savePieceToStorage(migrated.id, migrated);
+            // daysToLearn is different: it's re-checked (not just backfilled
+            // once) every load since it's meant to track minutesPerDay, but
+            // still only actually re-saved when reconciliation changed it.
+            if (!p.startDate || migrated.daysToLearn !== p.daysToLearn) savePieceToStorage(migrated.id, migrated);
           }
         }
       } catch (e) {

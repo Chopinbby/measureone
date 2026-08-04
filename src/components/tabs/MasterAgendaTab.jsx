@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
-import { todayISODate, addDaysISO } from "../../lib/utils";
+import { todayISODate, addDaysISO, getCurrentDay } from "../../lib/utils";
 
 export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
@@ -13,6 +13,17 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
       const items = [];
       let totalMinutes = 0;
 
+      // Offset (in days) of the selected date from real "today" — applied on
+      // top of each piece's own current-day anchor below, rather than as an
+      // absolute calendar calculation per piece. A piece's "current day" is
+      // already elapsed-days-since-created clamped into its plan (see
+      // getCurrentDay in lib/utils), the same anchor Today's Practice and
+      // Overview use — so a plan whose window has technically passed still
+      // parks on its last scheduled day instead of vanishing here.
+      const todayMs = new Date(`${todayISODate()}T00:00:00`).getTime();
+      const selectedDateMs = new Date(`${selectedDate}T00:00:00`).getTime();
+      const daysFromToday = Math.round((selectedDateMs - todayMs) / 86400000);
+
       Object.entries(pieces).forEach(([pieceId, piece]) => {
         try {
           if (!piece || !piece.createdAt) return;
@@ -21,13 +32,10 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
           const timeline = getEffectiveTimeline(piece, chunkSet);
           const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
 
-          // Map selectedDate to a day number in this piece's timeline
           if (!timeline || !timeline.days || !timeline.days.length) return;
 
-          const selectedDateMs = new Date(`${selectedDate}T00:00:00`).getTime();
-          const createdDateMs = typeof piece.createdAt === 'number' ? piece.createdAt : new Date(piece.createdAt).getTime();
-          const dayOffset = Math.floor((selectedDateMs - createdDateMs) / 86400000);
-          const dayNumber = dayOffset + 1;
+          const realCurrentDay = getCurrentDay(piece, timeline.days.length);
+          const dayNumber = realCurrentDay + daysFromToday;
 
           if (dayNumber < 1 || dayNumber > timeline.days.length) return;
 

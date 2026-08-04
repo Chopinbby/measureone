@@ -17,12 +17,13 @@ import {
   X,
 } from "lucide-react";
 
-import { clamp, getCurrentDay, todayISODate, addDaysISO } from "./lib/utils";
+import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
+import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
   loadPiecesFromStorage,
   loadActivePieceId,
@@ -31,11 +32,15 @@ import {
   removePieceFromStorage,
   downloadBackup,
   parseBackupPieces,
+  findMatchingPiece,
+  mergeImportedPiece,
 } from "./lib/storage";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
 import { DeletePieceModal } from "./components/DeletePieceModal";
+import { ExportPiecesModal } from "./components/ExportPiecesModal";
+import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { Wizard } from "./components/Wizard";
 
 import { OverviewTab } from "./components/tabs/OverviewTab";
@@ -64,6 +69,13 @@ const NAV_BASE = [
 ];
 const REVIVAL_NAV_ITEM = { key: "revival", label: "Revival", icon: RefreshCw };
 
+// Renders nothing for an active piece — there's no badge for the default
+// state, only for the two that pull a piece off the daily agenda.
+function PieceStatusBadge({ status }) {
+  if (!status || status === "active") return null;
+  return <span className={`badge ${status}`}>{PIECE_STATUS_LABEL[status]}</span>;
+}
+
 export default function App() {
   const [pieces, setPieces] = useState({});
   const [activePieceId, setActivePieceId] = useState(null);
@@ -80,6 +92,8 @@ export default function App() {
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleMessage, setRescheduleMessage] = useState("");
   const [rescheduleStatus, setRescheduleStatus] = useState(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [importCandidates, setImportCandidates] = useState(null);
   const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
@@ -188,10 +202,19 @@ export default function App() {
     setDeleteModalOpen(false);
   };
 
-  const handleExportAll = () => downloadBackup(pieces);
+  const handleExportClick = () => setExportModalOpen(true);
+
+  const handleConfirmExport = (selectedIds) => {
+    const subset = Object.fromEntries(selectedIds.map((id) => [id, pieces[id]]).filter(([, p]) => p));
+    downloadBackup(subset);
+    setExportModalOpen(false);
+  };
 
   const handleImportClick = () => importInputRef.current?.click();
 
+  // Parses the chosen file and hands the found pieces to ImportPiecesModal
+  // for the user to pick from — nothing is actually added/merged until
+  // handleConfirmImport runs.
   const handleImportFile = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -202,33 +225,66 @@ export default function App() {
         window.alert("That file doesn't look like a valid MeasureOne backup.");
         return;
       }
-      if (!importedPieces || importedPieces.length === 0) {
+      const valid = (importedPieces || []).filter((p) => p && p.id);
+      if (valid.length === 0) {
         window.alert("No pieces found in that backup file.");
         return;
       }
-      const next = { ...pieces };
-      let firstNewId = null;
-      // Imported pieces are "created" now, in this browser, regardless of
-      // whatever createdAt the source file carried — createdAt is just
-      // sort-order bookkeeping, never the scheduling anchor (see getCurrentDay
-      // in lib/utils). If the source didn't specify a plan start date, the
-      // plan begins today (the import date); if it did (e.g. restoring your
-      // own backup of an in-progress piece), that start date is honored so
-      // the plan doesn't jump back to day 1.
-      const importedAt = Date.now();
-      importedPieces.forEach((p, index) => {
-        if (!p || !p.id) return;
+      setImportCandidates(valid);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleConfirmImport = (selectedIndices) => {
+    const next = { ...pieces };
+    let firstNewId = null;
+    let updatedCount = 0;
+    let createdCount = 0;
+    // Imported pieces are "created" now, in this browser, regardless of
+    // whatever createdAt the source file carried — createdAt is just
+    // sort-order bookkeeping, never the scheduling anchor (see getCurrentDay
+    // in lib/utils). If the source didn't specify a plan start date, the
+    // plan begins today (the import date); if it did (e.g. restoring your
+    // own backup of an in-progress piece), that start date is honored so
+    // the plan doesn't jump back to day 1.
+    const importedAt = Date.now();
+    selectedIndices.forEach((index) => {
+      const p = importCandidates[index];
+      if (!p) return;
+      // Match by id first, then by song identity (name + composer), so
+      // re-importing a backup — e.g. after hand-editing minutesPerDay in
+      // the exported file — updates the piece it already matches instead
+      // of piling up a second copy of it. Unlike the brand-new-piece path
+      // below, a matched import's startDate is left as-is (no "default to
+      // today" fallback) — mergeImportedPiece already keeps the existing
+      // piece's startDate whenever the import doesn't specify one, and
+      // forcing today here would silently reset an in-progress plan back
+      // to day 1 if the exported file happened to be missing that field.
+      const match = findMatchingPiece(next, p);
+      if (match) {
+        const merged = ensureWorkId({
+          ...mergeImportedPiece(match, p),
+          rescheduleMarker: null,
+        });
+        next[match.id] = merged;
+        savePieceToStorage(match.id, merged);
+        updatedCount++;
+      } else {
         const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
         const withId = { ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() };
         next[id] = withId;
         if (!firstNewId) firstNewId = id;
         savePieceToStorage(id, withId);
-      });
-      setPieces(next);
-      if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
-      window.alert(`Imported ${importedPieces.length} piece(s).`);
-    };
-    reader.readAsText(file);
+        createdCount++;
+      }
+    });
+    setPieces(next);
+    if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
+    setImportCandidates(null);
+    const parts = [];
+    if (createdCount) parts.push(`${createdCount} new piece${createdCount === 1 ? "" : "s"} added`);
+    if (updatedCount) parts.push(`${updatedCount} existing piece${updatedCount === 1 ? "" : "s"} updated`);
+    window.alert(parts.length ? `Import complete: ${parts.join(", ")}.` : "Nothing selected — import cancelled.");
   };
 
   // Editing state lives here, not inside SettingsTab, so switching tabs
@@ -334,6 +390,10 @@ export default function App() {
     });
   };
 
+  const handleSetPieceStatus = (status) => {
+    updatePiece((p) => ({ ...p, status }));
+  };
+
   const handleUpdateRevival = (patch) => {
     updatePiece((p) => ({ ...p, revival: { ...(p.revival || {}), ...patch } }));
   };
@@ -424,7 +484,7 @@ export default function App() {
 
     let message = `This will rebalance the ${status.remainingChunkIds.length} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`;
     if (requiredDays > availableDays) {
-      message = `Heads up: at your current pace (${piece.minutesPerDay} min/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
+      message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
     }
 
     setRescheduleMessage(message);
@@ -487,7 +547,10 @@ export default function App() {
 
             <div className="piece-switcher">
               <button className="piece-switcher-trigger" onClick={() => setSwitcherOpen((o) => !o)}>
-                <span className="piece-switcher-name">{piece.name || "Untitled piece"}</span>
+                <span className="piece-switcher-name">
+                  {piece.name || "Untitled piece"}
+                  <PieceStatusBadge status={piece.status} />
+                </span>
                 <ChevronDown size={14} className={switcherOpen ? "rotated" : ""} />
               </button>
               {switcherOpen && (
@@ -502,6 +565,7 @@ export default function App() {
                           onClick={() => switchToPiece(p.id)}
                         >
                           {p.name || (g.workId ? "Untitled movement" : "Untitled piece")}
+                          <PieceStatusBadge status={p.status} />
                         </button>
                       ))}
                     </div>
@@ -619,8 +683,9 @@ export default function App() {
                 onStartEdit={startEditing}
                 onDiscard={handleDiscardEdit}
                 onAddPiece={() => openWizard()}
-                onExportAll={handleExportAll}
+                onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
+                onSetStatus={handleSetPieceStatus}
               />
             )}
           </main>
@@ -635,6 +700,21 @@ export default function App() {
       )}
       {deleteModalOpen && piece && (
         <DeletePieceModal piece={piece} onCancel={() => setDeleteModalOpen(false)} onConfirm={handleDeletePiece} />
+      )}
+      {exportModalOpen && (
+        <ExportPiecesModal
+          pieceGroups={pieceGroups}
+          onCancel={() => setExportModalOpen(false)}
+          onExport={handleConfirmExport}
+        />
+      )}
+      {importCandidates && (
+        <ImportPiecesModal
+          candidates={importCandidates}
+          existingPieces={pieces}
+          onCancel={() => setImportCandidates(null)}
+          onImport={handleConfirmImport}
+        />
       )}
       {rescheduleModalOpen && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
@@ -738,6 +818,7 @@ const CSS = `
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }
 .part-chip.active { background: var(--brass); border-color: var(--brass); color: var(--white); }
+.part-chip.active .badge { background: rgba(255,255,255,0.3); color: inherit; }
 .part-chip-idx { font-size: 11px; opacity: 0.7; }
 .part-chip-pct { font-size: 11.5px; opacity: 0.8; }
 .part-chip.add { color: var(--brass-deep); border-style: dashed; }
@@ -770,6 +851,8 @@ const CSS = `
 .manuscript-doodle { width: 100%; height: 64px; display: block; opacity: 0.16; }
 .hero-content { padding: 6px 32px 32px; }
 .hero-content h1 { font-size: clamp(22px, 3vw, 30px); line-height: 1.2; }
+.hero-content h1 .badge { font-size: 11px; vertical-align: middle; margin-left: 10px; }
+.status-note { background: var(--paper); }
 .hero-sub { color: var(--ink-soft); font-size: 14px; margin-top: 8px; }
 .hero-composer { color: var(--ink-soft); font-size: 15px; font-style: italic; margin-top: 2px; }
 
@@ -871,6 +954,9 @@ const CSS = `
 
 .badge { display: inline-block; font-size: 9.5px; background: rgba(255,255,255,0.25); padding: 1px 6px; border-radius: 20px; margin-left: 6px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.03em; }
 .badge.dark { background: rgba(185,138,62,0.18); color: var(--brass-deep); }
+.badge.paused { background: rgba(185,138,62,0.18); color: var(--brass-deep); }
+.badge.archived { background: rgba(139,150,160,0.22); color: var(--ink-faint); }
+.piece-switcher-item.active .badge { background: rgba(255,255,255,0.3); color: inherit; }
 .manual-mark { margin-left: 4px; vertical-align: middle; opacity: 0.6; }
 .manual-conf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .manual-conf-row input { width: 80px; flex-shrink: 0; }

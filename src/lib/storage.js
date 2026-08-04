@@ -33,6 +33,8 @@ function validateAndMigratePiece(piece) {
       plan: null,
     },
     memoryAnchors: piece.memoryAnchors || {},
+    // Pieces saved before pause/archive existed default to active.
+    status: piece.status || "active",
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.
@@ -141,4 +143,144 @@ export function downloadBackup(pieces) {
 export function parseBackupPieces(rawText) {
   const data = JSON.parse(rawText);
   return Array.isArray(data.pieces) ? data.pieces : Array.isArray(data) ? data : null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Import matching & merging — re-importing a backup (e.g. after      */
+/*  hand-editing scheduling fields in the exported JSON) should update */
+/*  the piece it already matches, not create a second copy of it, and  */
+/*  should never let an import that's missing/blank on some field      */
+/*  silently erase what's already there — especially practice history. */
+/* ------------------------------------------------------------------ */
+
+function normalizeMatchKey(s) {
+  return (s || "").trim().toLowerCase();
+}
+
+// Finds the existing piece a freshly-imported piece should merge into, if
+// any. Exact id match covers the common case (re-importing your own
+// previously-exported, unedited-by-hand data). Falling back to name+composer
+// ("song identity") covers a piece re-created independently or shared from
+// elsewhere, which would otherwise get a fresh id and show up as a duplicate
+// even though it's clearly the same piece. Composer is only compared when
+// both sides actually have one, so a sparse composer field on either side
+// doesn't block an otherwise-obvious name match.
+export function findMatchingPiece(existingPieces, imported) {
+  if (existingPieces[imported.id]) return existingPieces[imported.id];
+  const name = normalizeMatchKey(imported.name);
+  if (!name) return null;
+  const importedComposer = normalizeMatchKey(imported.composer);
+  return (
+    Object.values(existingPieces).find((p) => {
+      if (normalizeMatchKey(p.name) !== name) return false;
+      const existingComposer = normalizeMatchKey(p.composer);
+      if (importedComposer && existingComposer && importedComposer !== existingComposer) return false;
+      return true;
+    }) || null
+  );
+}
+
+// Shared rule for most piece-level fields: an imported value that's actually
+// populated wins — this is what lets an intentional edit made directly in
+// an exported file (e.g. changing minutesPerDay) take effect on re-import —
+// but a field the import left blank, null, or empty never overwrites
+// something the existing piece already has.
+function preferPresent(importedVal, existingVal) {
+  if (importedVal === undefined || importedVal === null) return existingVal;
+  if (typeof importedVal === "string" && importedVal.trim() === "") return existingVal;
+  if (Array.isArray(importedVal) && importedVal.length === 0 && Array.isArray(existingVal) && existingVal.length > 0) {
+    return existingVal;
+  }
+  return importedVal;
+}
+
+// Additive merge for arrays of {id, ...} records (sections, recordings,
+// bpmZones): existing entries are kept, imported entries are added or
+// overlay an existing entry with the same id. Never drops an existing entry
+// just because the import doesn't happen to repeat it.
+function mergeById(existingList, importedList) {
+  const byId = Object.fromEntries((existingList || []).map((item) => [item.id, item]));
+  (importedList || []).forEach((item) => {
+    if (item && item.id) byId[item.id] = { ...byId[item.id], ...item };
+  });
+  return Object.values(byId);
+}
+
+function mergeSessionArrays(existingSessions, importedSessions) {
+  const combined = [...(existingSessions || []), ...(importedSessions || [])];
+  const seen = new Set();
+  return combined.filter((s) => {
+    const key = JSON.stringify(s);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// Practice history is the one thing that must never silently disappear, so
+// it merges per chunk and per session rather than one side replacing the
+// other outright — e.g. sessions logged in the app after a backup was
+// exported (but before it was hand-edited and re-imported) survive the
+// re-import instead of being wiped by the now-stale exported snapshot.
+function mergeProgress(existingProgress, importedProgress) {
+  const existing = existingProgress || {};
+  const imported = importedProgress || {};
+  const merged = {};
+  new Set([...Object.keys(existing), ...Object.keys(imported)]).forEach((chunkId) => {
+    const e = existing[chunkId];
+    const i = imported[chunkId];
+    if (!e) { merged[chunkId] = i; return; }
+    if (!i) { merged[chunkId] = e; return; }
+    merged[chunkId] = {
+      ...e,
+      ...i,
+      doneDays: [...new Set([...(e.doneDays || []), ...(i.doneDays || [])])].sort((a, b) => a - b),
+      sessions: mergeSessionArrays(e.sessions, i.sessions),
+      currentBPM: preferPresent(i.currentBPM, e.currentBPM),
+      targetBPM: preferPresent(i.targetBPM, e.targetBPM),
+      manualConfidence: preferPresent(i.manualConfidence, e.manualConfidence),
+      weakSpot: i.weakSpot !== undefined ? i.weakSpot : e.weakSpot,
+    };
+  });
+  return merged;
+}
+
+const MERGE_FIELDS_HANDLED_SEPARATELY = [
+  "id", "createdAt", "workId", "progress", "sections", "recordings",
+  "bpmZones", "revival", "memoryAnchors", "measureDifficulty", "totalMeasures",
+];
+
+// Merges a freshly-imported piece into the existing piece it matched,
+// non-destructively — see the field-level helpers above for the reasoning
+// on each piece. Caller is responsible for re-deriving workId (ensureWorkId)
+// and clearing rescheduleMarker afterward, same as any other schedule edit.
+export function mergeImportedPiece(existing, imported) {
+  const merged = { ...existing };
+
+  Object.keys(imported).forEach((key) => {
+    if (MERGE_FIELDS_HANDLED_SEPARATELY.includes(key)) return;
+    merged[key] = preferPresent(imported[key], existing[key]);
+  });
+
+  // totalMeasures and measureDifficulty must move together — mixing sources
+  // would leave measureDifficulty the wrong length for totalMeasures.
+  if (imported.totalMeasures && imported.measureDifficulty && imported.measureDifficulty.length) {
+    merged.totalMeasures = imported.totalMeasures;
+    merged.measureDifficulty = imported.measureDifficulty;
+  }
+
+  merged.sections = mergeById(existing.sections, imported.sections);
+  merged.recordings = mergeById(existing.recordings, imported.recordings);
+  merged.bpmZones = mergeById(existing.bpmZones, imported.bpmZones);
+  merged.memoryAnchors = { ...(existing.memoryAnchors || {}), ...(imported.memoryAnchors || {}) };
+  merged.progress = mergeProgress(existing.progress, imported.progress);
+  // An in-progress revival is live session state — protect it from being
+  // overwritten by a stale import even if the import's revival looks
+  // "present" by the generic rule above.
+  merged.revival = existing.revival && existing.revival.active ? existing.revival : (imported.revival || existing.revival);
+
+  merged.id = existing.id;
+  merged.createdAt = existing.createdAt;
+
+  return merged;
 }

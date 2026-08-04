@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Check, X, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { generateAllChunks } from "../lib/chunking";
 import { computeTimeline } from "../lib/scheduling";
-import { todayISODate, addDaysISO } from "../lib/utils";
+import { todayISODate, addDaysISO, formatMinutes } from "../lib/utils";
 import { BasicsFields } from "./fields/BasicsFields";
 import { SectionsEditor } from "./fields/SectionsEditor";
 import { DifficultyEditor } from "./fields/DifficultyEditor";
@@ -19,6 +19,7 @@ export function defaultPiece() {
     workName: "",   // title of the whole multi-movement work, "" for a standalone piece
     composer: "",
     notes: "",
+    status: "active",   // 'active' | 'paused' | 'archived' — see Repertoire-Lifecycle.md
     totalMeasures,
     measureDifficulty: Array(totalMeasures).fill(1),
     diffMode: "grid",
@@ -193,7 +194,7 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
                 <div className="review-stat"><span className="num">{draft.totalMeasures}</span><span className="lbl">measures</span></div>
                 <div className="review-stat"><span className="num">{draft.sections.length}</span><span className="lbl">sections</span></div>
                 <div className="review-stat"><span className="num">{draft.daysToLearn}</span><span className="lbl">days</span></div>
-                <div className="review-stat"><span className="num">{avgMinPerDay}</span><span className="lbl">avg min/day</span></div>
+                <div className="review-stat"><span className="num">{formatMinutes(avgMinPerDay)}</span><span className="lbl">avg time/day</span></div>
               </div>
             </div>
           )}

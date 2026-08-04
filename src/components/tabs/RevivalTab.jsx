@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { NumberInput } from "../NumberInput";
-import { clamp } from "../../lib/utils";
+import { clamp, formatMinutes } from "../../lib/utils";
 import { REVIVAL_PURPOSE_OPTIONS } from "../../lib/constants";
 import { isManualConfidence } from "../../lib/confidence";
 import { getRevivalTargetBPM, computeTempoLadder } from "../../lib/revival";
@@ -150,7 +150,7 @@ export function RevivalTab({
               <div className="view-all-list">
                 {revival.plan.days.map((d) => (
                   <div key={d.dayNumber} className="panel">
-                    <h3>Suggested day {d.dayNumber} — {d.minutes} min</h3>
+                    <h3>Suggested day {d.dayNumber} — {formatMinutes(d.minutes)}</h3>
                     <div className="checklist">
                       {d.itemIds.map((id) => {
                         const chunk = chunkById[id];

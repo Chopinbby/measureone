@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
-import { todayISODate, addDaysISO, getCurrentDay, formatRange, mergeRanges } from "../../lib/utils";
+import { todayISODate, addDaysISO, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 
 export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
@@ -27,6 +27,12 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
       Object.entries(pieces).forEach(([pieceId, piece]) => {
         try {
           if (!piece) return;
+          // Paused/archived pieces are deliberately off the daily agenda —
+          // that's the entire point of setting a piece aside. Behind-schedule
+          // flagging is separately suppressed for them in
+          // computeScheduleStatus, so this filter is really about visibility
+          // here, not double-guarding the same rule.
+          if ((piece.status || "active") !== "active") return;
 
           const chunkSet = generateAllChunks(piece);
           const timeline = getEffectiveTimeline(piece, chunkSet);
@@ -128,7 +134,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
       <div className="time-summary-banner">
         <div className="time-summary-item">
           <div className="time-summary-label">Total planned</div>
-          <div className="time-summary-num">{agendaData.totalMinutes} min</div>
+          <div className="time-summary-num">{formatMinutes(agendaData.totalMinutes)}</div>
         </div>
         <div className="time-summary-item">
           <div className="time-summary-label">Status</div>
@@ -154,7 +160,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
                 </div>
                 <div className="piece-meta">
                   {missedCount > 0 && <span className="badge busy">{missedCount} behind</span>}
-                  <div className="piece-time">{totalTime} min</div>
+                  <div className="piece-time">{formatMinutes(totalTime)}</div>
                 </div>
               </div>
 

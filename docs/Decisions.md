@@ -239,6 +239,34 @@ fixed immediately.**
   swapped during the migration to a real Vite project so the app can run
   anywhere.
 
+**Decision: importing a backup matches each imported piece against existing
+pieces (by id, then by name+composer) and merges non-destructively into the
+match, instead of always creating a new piece.**
+
+- **Why:** The only edit surface for some fields (before a matching Settings
+  UI exists, or for anyone comfortable hand-editing JSON) is to export,
+  change the file, and re-import — e.g. changing every piece's
+  `minutesPerDay` at once. Re-importing an *unmodified* backup used to append
+  a full second copy of every piece, because id collision was treated as "a
+  different piece that happens to reuse an id" and given a fresh random id
+  rather than as "this is the same piece" — so the single most natural
+  round-trip (export, edit, re-import) reliably produced duplicates of
+  everything.
+- **Approach chosen:** `findMatchingPiece` / `mergeImportedPiece` in
+  `lib/storage.js`. A field the import actually provides wins (so an
+  intentional edit like `minutesPerDay` takes effect), but a field the import
+  leaves blank/missing never erases what the existing piece already has.
+  `progress` (practice history) merges per chunk and per session rather than
+  one side replacing the other, specifically so a *stale* re-import (edited
+  by hand from an older export) can't wipe out sessions logged in the app
+  since that export was taken. `id`/`createdAt` are never touched by a
+  merge — the piece already exists; only `workId` gets re-derived
+  (`ensureWorkId`), same as any other edit.
+- **Alternative considered:** matching by id only. Rejected on its own — the
+  fallback name+composer match matters too, e.g. a piece shared from another
+  device/session that never had the chance to collide on id but is
+  obviously "the same song."
+
 ## Multi-movement works
 
 **Decision: a multi-movement work is a grouping label over ordinary pieces —
@@ -333,6 +361,33 @@ not just from an existing piece via the Overview dashboard.**
   already only reads `piece.progress`, which is empty for a new piece by
   default — "zero sessions logged" was already a valid starting state, not
   a special case to build for.
+
+## Lifecycle
+
+**Decision: pause/archive (`piece.status`) is a manual, user-set toggle with
+no automatic transitions — not a computed "this piece is learned" state.**
+
+- **Why:** [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-informally-defined-today)
+  already flags "what formally defines learned" as unresolved, and
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#when-youre-not-sure) says not to
+  silently resolve an open question while building something adjacent to
+  it. Pause/archive doesn't need that question answered — it's scoped to
+  "take this off my daily agenda," which the user is always in the best
+  position to decide, consistent with
+  [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch).
+- **Alternative considered:** auto-suggesting archive once every chunk hits
+  some confidence threshold. Rejected for the same reason `computeProgressTier`
+  and `computeConfidence` were never unified into one "done" signal — see
+  [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them) —
+  there isn't yet a single trustworthy number to threshold against.
+- **Consequence:** pause and archive behave identically everywhere except
+  their Settings copy and button set — both suppress the schedule banner and
+  drop the piece from the Master Agenda. Confidence decay is untouched by
+  either: `computeAutoConfidence`'s existing recency term already fades an
+  untouched piece whether or not `status` exists, so no second decay
+  mechanism was built. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built) and
+  [Algorithms.md](Algorithms.md#behind-schedule-detection).
 
 ## Documentation
 

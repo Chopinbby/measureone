@@ -1,5 +1,6 @@
 import { Check } from "lucide-react";
 import { ChecklistItem } from "./ChecklistItem";
+import { formatMinutes } from "../../../lib/utils";
 
 export function DayChecklist({ piece, chunks, day, onLogSession, onUnlogSession, onToggleDone }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
@@ -38,7 +39,7 @@ export function DayChecklist({ piece, chunks, day, onLogSession, onUnlogSession,
 
   return (
     <div className="panel">
-      <h3>Day {day.dayNumber} — {day.minutes} min planned</h3>
+      <h3>Day {day.dayNumber} — {formatMinutes(day.minutes)} planned</h3>
       <div className="checklist">
         {items.map(({ id, role }) => (
           <ChecklistItem

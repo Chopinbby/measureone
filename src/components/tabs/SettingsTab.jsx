@@ -1,4 +1,4 @@
-import { Plus, Download, Upload, Pencil, RotateCcw, Check } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore } from "lucide-react";
 import { BasicsFields } from "../fields/BasicsFields";
 import { SectionsEditor } from "../fields/SectionsEditor";
 import { DifficultyEditor } from "../fields/DifficultyEditor";
@@ -8,9 +8,11 @@ import { BpmZonesEditor } from "../fields/BpmZonesEditor";
 import { RecordingsEditor } from "../fields/RecordingsEditor";
 import { RecordingsList } from "../fields/RecordingsList";
 import { autoChunkSize } from "../../lib/chunking";
+import { formatMinutes } from "../../lib/utils";
 
-export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportAll, onImportClick }) {
+export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus }) {
   if (!editing || !editDraft) {
+    const status = piece.status || "active";
     return (
       <div className="tab-pane">
         <div className="tab-header"><h1>Settings</h1></div>
@@ -22,14 +24,52 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
           </button>
         </div>
         <div className="panel">
+          <h3>Practice status</h3>
+          <p className="wizard-hint" style={{ marginBottom: 12 }}>
+            {status === "archived"
+              ? "This piece is archived: it won't appear on your Master Agenda, and its confidence will keep quietly fading the longer it goes untouched — the same recency decay that applies to any chunk you stop practicing."
+              : status === "paused"
+                ? "This piece is paused: it won't appear on your Master Agenda and won't flag chunks as behind schedule. Confidence still fades exactly as it would if the piece were active."
+                : "Active pieces appear on your Master Agenda and can flag chunks as behind schedule. Pause a piece you're setting aside mid-plan, or archive one you're done learning — either way it drops off your daily agenda until you bring it back."}
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {status === "active" && (
+              <>
+                <button className="ghost-btn" onClick={() => onSetStatus("paused")}>
+                  <Pause size={14} /> Pause piece
+                </button>
+                <button className="ghost-btn" onClick={() => onSetStatus("archived")}>
+                  <Archive size={14} /> Archive piece
+                </button>
+              </>
+            )}
+            {status === "paused" && (
+              <>
+                <button className="ghost-btn" onClick={() => onSetStatus("active")}>
+                  <Play size={14} /> Resume piece
+                </button>
+                <button className="ghost-btn" onClick={() => onSetStatus("archived")}>
+                  <Archive size={14} /> Archive piece
+                </button>
+              </>
+            )}
+            {status === "archived" && (
+              <button className="ghost-btn" onClick={() => onSetStatus("active")}>
+                <ArchiveRestore size={14} /> Reactivate piece
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="panel">
           <h3>Backup & restore</h3>
           <p className="wizard-hint" style={{ marginBottom: 12 }}>
             Everything is saved only in this browser. Export a backup file now and then, or before
-            switching browsers or devices — you can import it back in later.
+            switching browsers or devices — you can import it back in later. Both let you choose
+            which pieces to include.
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="ghost-btn" onClick={onExportAll}>
-              <Download size={14} /> Export all pieces
+            <button className="ghost-btn" onClick={onExportClick}>
+              <Download size={14} /> Export pieces
             </button>
             <button className="ghost-btn" onClick={onImportClick}>
               <Upload size={14} /> Import backup
@@ -45,7 +85,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
             <div><dt>Sections</dt><dd className="mono">{piece.sections.length}</dd></div>
             <div><dt>Chunk size</dt><dd className="mono">{piece.chunkMode === "auto" ? `${autoChunkSize(piece.totalMeasures)} (auto)` : `${piece.customChunkSize} (custom)`}</dd></div>
             <div><dt>Recurring material</dt><dd>{piece.recurringMode === "none" ? "None" : piece.recurringMode === "basic" ? `${piece.recurringMeasures} measures (quick count)` : `${piece.recurringPairs.length} passage(s) mapped`}</dd></div>
-            <div><dt>Schedule</dt><dd className="mono">{piece.daysToLearn} days, {piece.minutesPerDay} min/day</dd></div>
+            <div><dt>Schedule</dt><dd className="mono">{piece.daysToLearn} days, {formatMinutes(piece.minutesPerDay)}/day</dd></div>
           </dl>
           {piece.notes && (
             <div className="piece-notes">

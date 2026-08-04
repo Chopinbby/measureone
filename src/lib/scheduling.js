@@ -249,13 +249,23 @@ export function getEffectiveTimeline(piece, chunkSet) {
 // A chunk only counts as "missed" once its scheduled day has actually passed
 // and it still has zero logged sessions — not simply because it hasn't been
 // checked off yet today, and not from a same-day confidence dip.
+//
+// A paused or archived piece never reports missed chunks: pausing is
+// specifically meant to stop the schedule from judging a plan the learner
+// has deliberately stepped away from (confidence itself keeps decaying via
+// the usual recency math in computeAutoConfidence — only this "behind
+// schedule" flag is suppressed). remainingChunkIds is still computed either
+// way since it's also used to feed rescheduling once the piece is active
+// again.
 export function computeScheduleStatus(piece, practiceChunks, timeline, currentDay) {
   const remainingChunkIds = [];
   let missedCount = 0;
+  const scheduleActive = (piece.status || "active") === "active";
   practiceChunks.forEach((c) => {
     const touched = ((piece.progress[c.id] || {}).doneDays || []).length > 0;
     if (touched) return;
     remainingChunkIds.push(c.id);
+    if (!scheduleActive) return;
     const introducedOn = timeline.introducedDay[c.id];
     if (introducedOn && introducedOn < currentDay) missedCount++;
   });

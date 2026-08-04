@@ -181,6 +181,15 @@ flagged "behind schedule" on the very day something was completed, before
 the day was even over. Do not reintroduce same-day cumulative comparison as
 the trigger for the reschedule banner.**
 
+If `piece.status` is anything other than `"active"` (i.e. `"paused"` or
+`"archived"`), `missedCount` is forced to 0 regardless of how many
+introduction days have passed — a paused/archived piece never shows the
+"N chunks behind schedule" banner or the Master Agenda "N behind" badge.
+`remainingChunkIds` is still computed either way, since `handleReschedule`
+needs it once the piece goes active again. See
+[Decisions.md](Decisions.md#lifecycle) and
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built).
+
 ## Rescheduling
 
 `getEffectiveTimeline(piece, chunkSet)`: when the user confirms "Reschedule

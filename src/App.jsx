@@ -31,6 +31,8 @@ import {
   removePieceFromStorage,
   downloadBackup,
   parseBackupPieces,
+  findMatchingPiece,
+  mergeImportedPiece,
 } from "./lib/storage";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
@@ -208,6 +210,8 @@ export default function App() {
       }
       const next = { ...pieces };
       let firstNewId = null;
+      let updatedCount = 0;
+      let createdCount = 0;
       // Imported pieces are "created" now, in this browser, regardless of
       // whatever createdAt the source file carried — createdAt is just
       // sort-order bookkeeping, never the scheduling anchor (see getCurrentDay
@@ -218,15 +222,39 @@ export default function App() {
       const importedAt = Date.now();
       importedPieces.forEach((p, index) => {
         if (!p || !p.id) return;
-        const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
-        const withId = { ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() };
-        next[id] = withId;
-        if (!firstNewId) firstNewId = id;
-        savePieceToStorage(id, withId);
+        // Match by id first, then by song identity (name + composer), so
+        // re-importing a backup — e.g. after hand-editing minutesPerDay in
+        // the exported file — updates the piece it already matches instead
+        // of piling up a second copy of it. Unlike the brand-new-piece path
+        // below, a matched import's startDate is left as-is (no "default to
+        // today" fallback) — mergeImportedPiece already keeps the existing
+        // piece's startDate whenever the import doesn't specify one, and
+        // forcing today here would silently reset an in-progress plan back
+        // to day 1 if the exported file happened to be missing that field.
+        const match = findMatchingPiece(next, p);
+        if (match) {
+          const merged = ensureWorkId({
+            ...mergeImportedPiece(match, p),
+            rescheduleMarker: null,
+          });
+          next[match.id] = merged;
+          savePieceToStorage(match.id, merged);
+          updatedCount++;
+        } else {
+          const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
+          const withId = { ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() };
+          next[id] = withId;
+          if (!firstNewId) firstNewId = id;
+          savePieceToStorage(id, withId);
+          createdCount++;
+        }
       });
       setPieces(next);
       if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
-      window.alert(`Imported ${importedPieces.length} piece(s).`);
+      const parts = [];
+      if (createdCount) parts.push(`${createdCount} new piece${createdCount === 1 ? "" : "s"} added`);
+      if (updatedCount) parts.push(`${updatedCount} existing piece${updatedCount === 1 ? "" : "s"} updated`);
+      window.alert(`Import complete: ${parts.join(", ")}.`);
     };
     reader.readAsText(file);
   };

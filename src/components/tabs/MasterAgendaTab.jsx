@@ -26,7 +26,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
 
       Object.entries(pieces).forEach(([pieceId, piece]) => {
         try {
-          if (!piece || !piece.createdAt) return;
+          if (!piece) return;
 
           const chunkSet = generateAllChunks(piece);
           const timeline = getEffectiveTimeline(piece, chunkSet);

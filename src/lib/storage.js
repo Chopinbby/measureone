@@ -1,4 +1,5 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
+import { todayISODate } from "./utils";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -32,6 +33,10 @@ function validateAndMigratePiece(piece) {
       plan: null,
     },
     memoryAnchors: piece.memoryAnchors || {},
+    // Plans saved before startDate existed (or backups that predate it)
+    // start "today" rather than inheriting createdAt — see getCurrentDay in
+    // lib/utils for why createdAt was never a safe stand-in for day 1.
+    startDate: piece.startDate || todayISODate(),
   };
 
   return migrated;
@@ -56,6 +61,10 @@ export function loadPiecesFromStorage() {
           const migrated = validateAndMigratePiece(p);
           if (migrated) {
             found[migrated.id] = migrated;
+            // Write the backfilled shape straight back so a piece the user
+            // never revisits doesn't keep re-deriving (and drifting) a
+            // fresh startDate on every future load — this locks it in once.
+            if (!p.startDate) savePieceToStorage(migrated.id, migrated);
           }
         }
       } catch (e) {

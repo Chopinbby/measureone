@@ -131,7 +131,9 @@ library.
 - `dayOverride` — lets the user browse other days in Today without changing
   which day is "actually" today; `null` means "follow real time."
   `getCurrentDay(piece, totalDays)` derives the real day from
-  `piece.createdAt` vs. `Date.now()`.
+  `piece.startDate` (day 1, editable on the Schedule tab) vs. today's date —
+  not `piece.createdAt`, which is sort-order bookkeeping only. See
+  Data-Model.md and Decisions.md#scheduling.
 - `wizardOpen`, `switcherOpen`, `settingsEditing`, `activeTab`, `loaded`,
   `revivalModalOpen` — straightforward UI state.
 - `navItems` — `NAV_BASE` with `REVIVAL_NAV_ITEM` spliced in (before

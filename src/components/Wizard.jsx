@@ -26,6 +26,7 @@ export function defaultPiece() {
     recurringMode: "advanced",
     recurringMeasures: 0,
     recurringPairs: [],
+    startDate: todayISODate(),
     scheduleMode: "days",
     daysToLearn: 21,
     minutesPerDay: 30,

@@ -208,10 +208,18 @@ export default function App() {
       }
       const next = { ...pieces };
       let firstNewId = null;
-      importedPieces.forEach((p) => {
+      // Imported pieces are "created" now, in this browser, regardless of
+      // whatever createdAt the source file carried — createdAt is just
+      // sort-order bookkeeping, never the scheduling anchor (see getCurrentDay
+      // in lib/utils). If the source didn't specify a plan start date, the
+      // plan begins today (the import date); if it did (e.g. restoring your
+      // own backup of an in-progress piece), that start date is honored so
+      // the plan doesn't jump back to day 1.
+      const importedAt = Date.now();
+      importedPieces.forEach((p, index) => {
         if (!p || !p.id) return;
         const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
-        const withId = { ...p, id };
+        const withId = { ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() };
         next[id] = withId;
         if (!firstNewId) firstNewId = id;
         savePieceToStorage(id, withId);

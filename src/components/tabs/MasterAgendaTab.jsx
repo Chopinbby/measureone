@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
-import { todayISODate, addDaysISO } from "../../lib/utils";
+import { todayISODate, addDaysISO, getCurrentDay, formatRange, mergeRanges } from "../../lib/utils";
 
 export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
@@ -13,21 +13,29 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
       const items = [];
       let totalMinutes = 0;
 
+      // Offset (in days) of the selected date from real "today" — applied on
+      // top of each piece's own current-day anchor below, rather than as an
+      // absolute calendar calculation per piece. A piece's "current day" is
+      // already elapsed-days-since-created clamped into its plan (see
+      // getCurrentDay in lib/utils), the same anchor Today's Practice and
+      // Overview use — so a plan whose window has technically passed still
+      // parks on its last scheduled day instead of vanishing here.
+      const todayMs = new Date(`${todayISODate()}T00:00:00`).getTime();
+      const selectedDateMs = new Date(`${selectedDate}T00:00:00`).getTime();
+      const daysFromToday = Math.round((selectedDateMs - todayMs) / 86400000);
+
       Object.entries(pieces).forEach(([pieceId, piece]) => {
         try {
-          if (!piece || !piece.createdAt) return;
+          if (!piece) return;
 
           const chunkSet = generateAllChunks(piece);
           const timeline = getEffectiveTimeline(piece, chunkSet);
           const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
 
-          // Map selectedDate to a day number in this piece's timeline
           if (!timeline || !timeline.days || !timeline.days.length) return;
 
-          const selectedDateMs = new Date(`${selectedDate}T00:00:00`).getTime();
-          const createdDateMs = typeof piece.createdAt === 'number' ? piece.createdAt : new Date(piece.createdAt).getTime();
-          const dayOffset = Math.floor((selectedDateMs - createdDateMs) / 86400000);
-          const dayNumber = dayOffset + 1;
+          const realCurrentDay = getCurrentDay(piece, timeline.days.length);
+          const dayNumber = realCurrentDay + daysFromToday;
 
           if (dayNumber < 1 || dayNumber > timeline.days.length) return;
 
@@ -36,39 +44,31 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
 
           totalMinutes += day.minutes;
 
-          // Gather tasks for this piece on this day
-          const tasks = [
-            ...day.newChunkIds.map((id) => ({ id, role: "new" })),
-            ...day.specialChunkIds.map((id) => ({ id, role: chunkById[id]?.kind || "special" })),
-            ...day.reviewChunkIds.map((id) => ({ id, role: "review" })),
-          ].sort((a, b) => (a.role === "combo" ? 1 : 0) - (b.role === "combo" ? 1 : 0));
+          // Combine same-role chunks into contiguous measure ranges, same as
+          // the Timeline tab's day cards — a row per role (new/special/review)
+          // instead of one row per 4-measure chunk.
+          const mergedRangesFor = (ids) => mergeRanges(ids.map((id) => chunkById[id]).filter(Boolean));
+          const newRanges = mergedRangesFor(day.newChunkIds);
+          const specialRanges = mergedRangesFor(day.specialChunkIds);
+          const reviewRanges = mergedRangesFor(day.reviewChunkIds);
+          const specialIsCombo = day.specialChunkIds.some((id) => chunkById[id]?.kind === "combo");
 
-          // Count sessions behind for this piece
-          let sessionsBehind = 0;
-          [...new Set([...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds])].forEach((id) => {
-            const chunk = chunkById[id];
-            if (!chunk) return;
-            const prog = piece.progress[id] || {};
-            const status = computeScheduleStatus(dayNumber, id, piece, timeline);
-            if (status === "behind") {
-              // Count how many sessions behind
-              const requiredSessions = chunk.plannedSessions || 1;
-              const doneSessions = (prog.sessions || []).length;
-              sessionsBehind += Math.max(0, requiredSessions - doneSessions);
-            }
-          });
+          // How many chunks are behind schedule for this piece as of this day —
+          // same computation ScheduleBanner uses, called once per piece (not
+          // per chunk: computeScheduleStatus already walks all practiceChunks).
+          const { missedCount } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, dayNumber);
 
           items.push({
             pieceId,
             piece,
             dayNumber,
             day,
-            tasks: tasks.filter((t) => chunkById[t.id]),
+            newRanges,
+            specialRanges,
+            reviewRanges,
+            specialIsCombo,
             totalTime: day.minutes,
-            sessionsBehind,
-            chunkById,
-            timeline,
-            chunkSet,
+            missedCount,
           });
         } catch (e) {
           console.error(`Error processing piece ${pieceId}:`, e);
@@ -145,7 +145,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
         </div>
       ) : (
         <div className="master-agenda-cards">
-          {agendaData.items.map(({ pieceId, piece, day, tasks, totalTime, sessionsBehind, chunkById }) => (
+          {agendaData.items.map(({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount }) => (
             <div key={pieceId} className="piece-card">
               <div className="piece-card-head">
                 <div>
@@ -153,40 +153,48 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
                   {piece.composer && <p style={{ fontSize: "12px", color: "var(--ink-faint)", margin: "4px 0 0" }}>{piece.composer}</p>}
                 </div>
                 <div className="piece-meta">
-                  {sessionsBehind > 0 && <span className="badge busy">{sessionsBehind} behind</span>}
+                  {missedCount > 0 && <span className="badge busy">{missedCount} behind</span>}
                   <div className="piece-time">{totalTime} min</div>
                 </div>
               </div>
 
               {day.type === "consolidation" ? (
-                <div className="tasks-list">
-                  <div className="task-item">
-                    <span className="task-tag" style={{ background: "var(--brass)" }}>Full</span>
-                    <span>Full run-through (consolidation day)</span>
-                  </div>
-                </div>
+                <p className="day-card-note">Full run-through of the piece</p>
               ) : (
-                <div className="tasks-list">
-                  {tasks.length === 0 ? (
-                    <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
-                  ) : (
-                    tasks.map(({ id, role }) => {
-                      const chunk = chunkById[id];
-                      if (!role) return null;
-                      return (
-                        <div key={id + role} className="task-item">
-                          <span className={`task-tag tag-${role}`}>{role === "combo" ? "Focus" : role}</span>
-                          <span>{chunk.displayName || `${chunk.kind} (m. ${chunk.start}–${chunk.end})`}</span>
-                        </div>
-                      );
-                    })
+                <>
+                  {newRanges.length > 0 && (
+                    <div className="day-card-group">
+                      <span className="day-card-tag new">New</span>
+                      {newRanges.map((r) => (
+                        <span key={`new-${r.start}-${r.end}`} className="chip">{formatRange(r.start, r.end)}</span>
+                      ))}
+                    </div>
                   )}
-                </div>
+                  {specialRanges.length > 0 && (
+                    <div className="day-card-group">
+                      <span className="day-card-tag special">{specialIsCombo ? "Focus" : "Review"}</span>
+                      {specialRanges.map((r) => (
+                        <span key={`special-${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
+                      ))}
+                    </div>
+                  )}
+                  {reviewRanges.length > 0 && (
+                    <div className="day-card-group">
+                      <span className="day-card-tag review">Review</span>
+                      {reviewRanges.map((r) => (
+                        <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
+                      ))}
+                    </div>
+                  )}
+                  {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 && (
+                    <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
+                  )}
+                </>
               )}
 
               <div className="piece-footer">
-                <span style={{ fontSize: "12px", color: sessionsBehind > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
-                  {sessionsBehind > 0 ? `${sessionsBehind} sessions behind schedule` : "On schedule"}
+                <span style={{ fontSize: "12px", color: missedCount > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
+                  {missedCount > 0 ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule` : "On schedule"}
                 </span>
                 <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
                   Log practice →

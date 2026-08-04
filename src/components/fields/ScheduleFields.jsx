@@ -8,7 +8,7 @@ import {
   MAX_PRACTICE_DAYS_PER_WEEK,
   MAX_RECOMMENDED_MINUTES_PER_DAY,
 } from "../../lib/constants";
-import { todayISODate, addDaysISO, daysUntilInclusive, clamp } from "../../lib/utils";
+import { todayISODate, addDaysISO, daysBetweenInclusive, clamp } from "../../lib/utils";
 
 const PRACTICE_DAYS_OPTIONS = Array.from(
   { length: MAX_PRACTICE_DAYS_PER_WEEK - MIN_PRACTICE_DAYS_PER_WEEK + 1 },
@@ -35,9 +35,11 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
 
   const practiceDaysPerWeek = clamp(draft.practiceDaysPerWeek || MAX_PRACTICE_DAYS_PER_WEEK, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK);
 
+  const startDate = draft.startDate || todayISODate();
+
   useEffect(() => {
     if (draft.scheduleMode === "days") {
-      const calendarDays = Math.max(1, daysUntilInclusive(draft.targetDate) || 1);
+      const calendarDays = Math.max(1, daysBetweenInclusive(startDate, draft.targetDate) || 1);
       const practiceDayCount = Math.max(1, Math.round((calendarDays * practiceDaysPerWeek) / 7));
       const consolidationDays = practiceDayCount >= 5 ? 1 : 0;
       const learningDays = Math.max(1, practiceDayCount - consolidationDays);
@@ -61,13 +63,26 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
       if (calendarDaysNeeded !== draft.daysToLearn) set({ daysToLearn: calendarDaysNeeded });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.scheduleMode, draft.targetDate, draft.daysToLearn, draft.minutesPerDay, practiceDaysPerWeek, totalMinutesNeeded, chunkSet.all.length]);
+  }, [draft.scheduleMode, startDate, draft.targetDate, draft.daysToLearn, draft.minutesPerDay, practiceDaysPerWeek, totalMinutesNeeded, chunkSet.all.length]);
 
   const overloaded = draft.scheduleMode === "days" && draft.minutesPerDay > MAX_RECOMMENDED_MINUTES_PER_DAY;
-  const estFinishDate = addDaysISO(todayISODate(), Math.max(0, (draft.daysToLearn || 1) - 1));
+  const estFinishDate = addDaysISO(startDate, Math.max(0, (draft.daysToLearn || 1) - 1));
 
   return (
     <>
+      <label className="field">
+        <span>Start date</span>
+        <input
+          type="date"
+          value={startDate}
+          onChange={(e) => set({ startDate: e.target.value })}
+        />
+      </label>
+      <p className="wizard-hint">
+        Day 1 of this plan. Defaults to today — set it earlier if you're already partway through,
+        or later to start it in the future.
+      </p>
+
       <div className="field">
         <span>Which is fixed?</span>
         <div className="segmented">
@@ -86,7 +101,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
             <span>{isRevival ? "Review it by" : "Learn it by"}</span>
             <input
               type="date"
-              min={todayISODate()}
+              min={startDate}
               value={draft.targetDate || ""}
               onChange={(e) => set({ targetDate: e.target.value })}
             />

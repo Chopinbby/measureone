@@ -71,9 +71,17 @@ export function sumPracticeSeconds(piece) {
   );
 }
 
+// Day 1 of a piece's plan is piece.startDate (an explicit date the user sets
+// on the Schedule tab, or that's set automatically at creation/import time)
+// — never piece.createdAt, which is just record-keeping bookkeeping (sort
+// order in the piece switcher) and, for an imported piece, may predate when
+// the plan should actually start. Falls back to today for pieces saved
+// before startDate existed; that fallback is transient, so storage.js
+// backfills and persists a real startDate on load rather than relying on
+// this recomputing "today" fresh on every call.
 export function getCurrentDay(piece, totalDays) {
-  if (!piece.createdAt) return 1;
-  const diff = Math.floor((Date.now() - piece.createdAt) / MS_PER_DAY);
+  const startDate = piece.startDate || todayISODate();
+  const diff = Math.floor((new Date(`${todayISODate()}T00:00:00`) - new Date(`${startDate}T00:00:00`)) / MS_PER_DAY);
   return clamp(diff + 1, 1, totalDays);
 }
 
@@ -81,23 +89,37 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
-export function todayISODate() {
-  const d = new Date();
+function formatISODate(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+export function todayISODate() {
+  return formatISODate(new Date());
+}
+
+export function isoDateFromEpoch(ms) {
+  return formatISODate(new Date(ms));
 }
 
 export function addDaysISO(dateStr, days) {
   const d = new Date(`${dateStr}T00:00:00`);
   d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  return formatISODate(d);
+}
+
+// Calendar days from `fromDateStr` through `toDateStr`, inclusive of the
+// start — e.g. two equal dates returns 1, the next day returns 2. Negative
+// or zero means `toDateStr` is before `fromDateStr`.
+export function daysBetweenInclusive(fromDateStr, toDateStr) {
+  if (!fromDateStr || !toDateStr) return null;
+  const from = new Date(`${fromDateStr}T00:00:00`);
+  const to = new Date(`${toDateStr}T00:00:00`);
+  return Math.round((to - from) / MS_PER_DAY) + 1;
 }
 
 // Calendar days from today through `dateStr`, inclusive of today — e.g. a
 // target date of today returns 1, tomorrow returns 2. Negative/zero means
 // the date has already passed.
 export function daysUntilInclusive(dateStr) {
-  if (!dateStr) return null;
-  const target = new Date(`${dateStr}T00:00:00`);
-  const today = new Date(`${todayISODate()}T00:00:00`);
-  return Math.round((target - today) / MS_PER_DAY) + 1;
+  return daysBetweenInclusive(todayISODate(), dateStr);
 }

@@ -56,9 +56,20 @@ piece = {
                          // practiceDaysPerWeek below; not every one of these is
                          // necessarily a practice day)
   minutesPerDay,         // number
+  startDate,             // string ("YYYY-MM-DD") — day 1 of the plan; the anchor
+                         // getCurrentDay uses to compute "what day is it in the
+                         // plan today." Editable on the Schedule tab; defaults to
+                         // today at creation. Distinct from createdAt below — an
+                         // imported piece keeps whatever startDate the backup had
+                         // (so an in-progress plan doesn't jump back to day 1),
+                         // but falls back to the import date if the backup didn't
+                         // have one. Pieces saved before this field existed are
+                         // backfilled to today on load (see storage.js) rather
+                         // than inferred from createdAt, which was never a safe
+                         // stand-in for it (see Decisions.md#scheduling).
   targetDate,            // string ("YYYY-MM-DD") | null — deadline the user picked
                          // in 'days' scheduleMode; daysToLearn is derived from
-                         // this (today through targetDate, inclusive)
+                         // this (startDate through targetDate, inclusive)
   practiceDaysPerWeek,   // number, 3-7 — how many of the 7 days in a week are
                          // practice days; computeTimeline bakes (7 - this many)
                          // rest days evenly into the generated plan. Missing on
@@ -70,7 +81,10 @@ piece = {
   bpmZones,              // [{ id, start, end, bpm }] — per-range tempo overrides
   recordings,            // [{ id, label, url }] — reference recordings (YouTube, Spotify, etc.),
                          // shown as links on the dashboard; purely referential, not embedded playback
-  createdAt,             // epoch ms, used to compute "what day is it in the plan"
+  createdAt,             // epoch ms — when this piece record was created in this
+                         // browser/instance. Sort-order bookkeeping only (piece
+                         // switcher, work grouping) — NOT the scheduling anchor;
+                         // see startDate above for that.
   progress,              // { [chunkId]: ChunkProgress } — see below
   rescheduleMarker,      // null | { asOfDay, remainingChunkOrder } — see Algorithms.md#rescheduling
   lastPlayedDate,        // string ("YYYY-MM-DD") | null — collected at revival entry; purely

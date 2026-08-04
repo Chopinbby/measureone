@@ -115,9 +115,10 @@ plan instead of assuming every calendar day is a practice day.**
   technique already used for spreading new-chunk introduction by effort) and
   every placement step — new-chunk introduction, transitions, combos, spaced
   review — walks the filtered list of non-rest day indices instead of the
-  raw range. This kept `getCurrentDay` (calendar-day-since-`createdAt`)
-  completely unchanged, since "day N" is still exactly N calendar days after
-  creation; only *what gets scheduled onto* a given day number changed.
+  raw range. This kept `getCurrentDay` (calendar-day-since-plan-start —
+  originally `createdAt`, now `startDate`, see the entry below) completely
+  unchanged, since "day N" is still exactly N calendar days after the plan
+  began; only *what gets scheduled onto* a given day number changed.
 - **Alternative considered:** keeping `daysToLearn` as a practice-day count
   and giving `getCurrentDay` its own weekly-pattern-aware calendar mapping.
   Rejected — every UI surface that reads `timeline.days[i].dayNumber`
@@ -126,6 +127,39 @@ plan instead of assuming every calendar day is a practice day.**
   app than teaching `getCurrentDay` and every calendar-facing consumer about
   a weekly cadence.
 - See [Algorithms.md](Algorithms.md#timeline--scheduler).
+
+**Decision: `getCurrentDay` anchors on an explicit `piece.startDate`, not
+`piece.createdAt`.**
+
+- **Why:** `createdAt` is set once, at record-creation time, and — critically
+  — an *imported* piece's `createdAt` came from whatever the source backup
+  file had, unmodified. A backup containing pieces set up weeks or months
+  earlier would import with that stale `createdAt` intact, so `getCurrentDay`
+  (calendar-day-since-`createdAt`) immediately computed an elapsed-day count
+  far past the plan's length — the piece landed on its last scheduled day (or
+  the final consolidation/run-through day) the moment it was imported, even
+  though the user hadn't practiced it yet in this app. The Master Agenda tab
+  surfaced this loudly (see below) because it evaluates every piece's current
+  day at once, but the same bug affected the single-piece Today/Overview
+  views too, just less visibly since there was nothing to compare against.
+- **Approach chosen:** added `piece.startDate` (an explicit "YYYY-MM-DD",
+  editable on the Schedule tab, defaulting to today) as the sole scheduling
+  anchor. `createdAt` reverts to pure bookkeeping — sort order in the piece
+  switcher and work grouping, nothing else. On import, `createdAt` is always
+  reset to the import moment (staggered per piece to preserve relative
+  order), while `startDate` is *kept* if the source already had one (so
+  restoring your own backup of an in-progress piece doesn't reset it to day
+  1) and otherwise defaults to the import date. Pieces already saved without
+  `startDate` are backfilled to today and immediately re-persisted at load
+  time (`validateAndMigratePiece` / `loadPiecesFromStorage` in storage.js) —
+  a transient per-render fallback would have meant a never-revisited piece's
+  "day 1" kept drifting forward to whatever day it happened to load on,
+  since there'd be nothing durable to diff against.
+- **Alternative considered:** deriving `startDate` from `createdAt` on
+  legacy/imported pieces instead of defaulting to today. Rejected — that's
+  exactly the bug being fixed; a stale `createdAt` is stale regardless of
+  which field reads it.
+- See [Data-Model.md](Data-Model.md), [Algorithms.md](Algorithms.md#timeline--scheduler).
 
 **Decision: `autoChunkSize()` always returns 4 measures, regardless of piece
 length — the previous 2/4/8/12 tiering by `totalMeasures` (≤32/≤80/≤160/>160)

@@ -43,20 +43,10 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
             ...day.reviewChunkIds.map((id) => ({ id, role: "review" })),
           ].sort((a, b) => (a.role === "combo" ? 1 : 0) - (b.role === "combo" ? 1 : 0));
 
-          // Count sessions behind for this piece
-          let sessionsBehind = 0;
-          [...new Set([...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds])].forEach((id) => {
-            const chunk = chunkById[id];
-            if (!chunk) return;
-            const prog = piece.progress[id] || {};
-            const status = computeScheduleStatus(dayNumber, id, piece, timeline);
-            if (status === "behind") {
-              // Count how many sessions behind
-              const requiredSessions = chunk.plannedSessions || 1;
-              const doneSessions = (prog.sessions || []).length;
-              sessionsBehind += Math.max(0, requiredSessions - doneSessions);
-            }
-          });
+          // How many chunks are behind schedule for this piece as of this day —
+          // same computation ScheduleBanner uses, called once per piece (not
+          // per chunk: computeScheduleStatus already walks all practiceChunks).
+          const { missedCount } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, dayNumber);
 
           items.push({
             pieceId,
@@ -65,7 +55,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
             day,
             tasks: tasks.filter((t) => chunkById[t.id]),
             totalTime: day.minutes,
-            sessionsBehind,
+            missedCount,
             chunkById,
             timeline,
             chunkSet,
@@ -145,7 +135,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
         </div>
       ) : (
         <div className="master-agenda-cards">
-          {agendaData.items.map(({ pieceId, piece, day, tasks, totalTime, sessionsBehind, chunkById }) => (
+          {agendaData.items.map(({ pieceId, piece, day, tasks, totalTime, missedCount, chunkById }) => (
             <div key={pieceId} className="piece-card">
               <div className="piece-card-head">
                 <div>
@@ -153,7 +143,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
                   {piece.composer && <p style={{ fontSize: "12px", color: "var(--ink-faint)", margin: "4px 0 0" }}>{piece.composer}</p>}
                 </div>
                 <div className="piece-meta">
-                  {sessionsBehind > 0 && <span className="badge busy">{sessionsBehind} behind</span>}
+                  {missedCount > 0 && <span className="badge busy">{missedCount} behind</span>}
                   <div className="piece-time">{totalTime} min</div>
                 </div>
               </div>
@@ -185,8 +175,8 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
               )}
 
               <div className="piece-footer">
-                <span style={{ fontSize: "12px", color: sessionsBehind > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
-                  {sessionsBehind > 0 ? `${sessionsBehind} sessions behind schedule` : "On schedule"}
+                <span style={{ fontSize: "12px", color: missedCount > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
+                  {missedCount > 0 ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule` : "On schedule"}
                 </span>
                 <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
                   Log practice →

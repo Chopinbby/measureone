@@ -37,6 +37,13 @@ repertoire health dashboards, and reading/memory/technical diagnosis
 tagging beyond the manual weak-spot flag. See
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md) for where these fit.
 
+Pause/Archive (`piece.status`, set from Settings — pulls a piece off the
+Master Agenda and suppresses "behind schedule," with no change to how
+confidence decays; see
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built)) —
+this is **not** Maintenance mode above, just a manual visibility toggle,
+still blocked on the same "what does learned mean" question.
+
 ## Immediate next action
 
 **Fold Analytics into Progress and remove the Analytics tab.** This was

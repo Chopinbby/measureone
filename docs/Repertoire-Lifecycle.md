@@ -80,6 +80,37 @@ weak-spot flag. Revival's weak-spot flag and memory anchors are the
 lightweight, manual precursor to whatever that deeper tagging might look
 like, not a replacement for it.
 
+## Pause / Archive (built)
+
+A piece can carry `piece.status: 'active' | 'paused' | 'archived'`, set only
+by the user from Settings ("Practice status") — never inferred. Both
+non-active states pull a piece off the Master Agenda and suppress the
+"behind schedule" banner (`computeScheduleStatus` forces `missedCount` to 0
+whenever `status !== 'active'`); the piece and every other tab stay fully
+reachable via the piece switcher, just no longer part of the daily rotation.
+
+- **Paused** — for a piece mid-plan that the learner is deliberately setting
+  aside. Nothing about the schedule or confidence math changes: the plan's
+  days keep ticking by underneath, and `computeAutoConfidence`'s existing
+  recency decay keeps fading untouched chunks exactly as it would for an
+  active piece (there's no separate frozen/paused confidence path — see
+  [Algorithms.md](Algorithms.md#confidence)). Resuming (back to `active`)
+  simply lets the schedule banner reappear if chunks are now genuinely
+  behind; the existing reschedule flow handles that the same way it always
+  has.
+- **Archived** — for a piece past its learning or revival plan that the
+  learner isn't actively working from day to day. Same mechanism as paused
+  (off the agenda, no schedule warning); the "whole piece slowly degrades"
+  behavior described in product conversations about this feature is just
+  that same recency decay compounding over a longer untouched stretch, not
+  a distinct decay curve.
+
+**Deliberately not this feature**: an automatic "learned" detector, or any
+scheduled maintenance-review mechanic. Pause/archive is a manual visibility
+toggle only — it answers "keep this off my daily plate," not "tell me when
+to revisit it." That's still Stage 4 below, and still blocked on the same
+open question it always was.
+
 ## Stage 4 — Maintenance (not built)
 
 Roadmap item 2. Once a piece is "learned," it needs periodic maintenance

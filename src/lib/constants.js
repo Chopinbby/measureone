@@ -37,6 +37,13 @@ export const EFFECTIVENESS_OPTIONS = [
   { value: "high", label: "Comfortable" },
 ];
 
+// Labels for piece.status values other than the default "active" — active
+// pieces show no badge at all, so there's nothing to look up for them.
+export const PIECE_STATUS_LABEL = {
+  paused: "Paused",
+  archived: "Archived",
+};
+
 export const REVIVAL_PURPOSE_OPTIONS = [
   { value: "performance", label: "Performance" },
   { value: "lesson", label: "Lesson" },

@@ -1,4 +1,4 @@
-import { Plus, Download, Upload, Pencil, RotateCcw, Check } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore } from "lucide-react";
 import { BasicsFields } from "../fields/BasicsFields";
 import { SectionsEditor } from "../fields/SectionsEditor";
 import { DifficultyEditor } from "../fields/DifficultyEditor";
@@ -10,8 +10,9 @@ import { RecordingsList } from "../fields/RecordingsList";
 import { autoChunkSize } from "../../lib/chunking";
 import { formatMinutes } from "../../lib/utils";
 
-export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick }) {
+export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus }) {
   if (!editing || !editDraft) {
+    const status = piece.status || "active";
     return (
       <div className="tab-pane">
         <div className="tab-header"><h1>Settings</h1></div>
@@ -21,6 +22,43 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
           <button className="ghost-btn" onClick={onAddPiece}>
             <Plus size={14} /> Add new piece
           </button>
+        </div>
+        <div className="panel">
+          <h3>Practice status</h3>
+          <p className="wizard-hint" style={{ marginBottom: 12 }}>
+            {status === "archived"
+              ? "This piece is archived: it won't appear on your Master Agenda, and its confidence will keep quietly fading the longer it goes untouched — the same recency decay that applies to any chunk you stop practicing."
+              : status === "paused"
+                ? "This piece is paused: it won't appear on your Master Agenda and won't flag chunks as behind schedule. Confidence still fades exactly as it would if the piece were active."
+                : "Active pieces appear on your Master Agenda and can flag chunks as behind schedule. Pause a piece you're setting aside mid-plan, or archive one you're done learning — either way it drops off your daily agenda until you bring it back."}
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {status === "active" && (
+              <>
+                <button className="ghost-btn" onClick={() => onSetStatus("paused")}>
+                  <Pause size={14} /> Pause piece
+                </button>
+                <button className="ghost-btn" onClick={() => onSetStatus("archived")}>
+                  <Archive size={14} /> Archive piece
+                </button>
+              </>
+            )}
+            {status === "paused" && (
+              <>
+                <button className="ghost-btn" onClick={() => onSetStatus("active")}>
+                  <Play size={14} /> Resume piece
+                </button>
+                <button className="ghost-btn" onClick={() => onSetStatus("archived")}>
+                  <Archive size={14} /> Archive piece
+                </button>
+              </>
+            )}
+            {status === "archived" && (
+              <button className="ghost-btn" onClick={() => onSetStatus("active")}>
+                <ArchiveRestore size={14} /> Reactivate piece
+              </button>
+            )}
+          </div>
         </div>
         <div className="panel">
           <h3>Backup & restore</h3>

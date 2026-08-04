@@ -19,6 +19,7 @@ export function defaultPiece() {
     workName: "",   // title of the whole multi-movement work, "" for a standalone piece
     composer: "",
     notes: "",
+    status: "active",   // 'active' | 'paused' | 'archived' — see Repertoire-Lifecycle.md
     totalMeasures,
     measureDifficulty: Array(totalMeasures).fill(1),
     diffMode: "grid",

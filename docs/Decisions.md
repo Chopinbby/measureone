@@ -362,6 +362,33 @@ not just from an existing piece via the Overview dashboard.**
   default — "zero sessions logged" was already a valid starting state, not
   a special case to build for.
 
+## Lifecycle
+
+**Decision: pause/archive (`piece.status`) is a manual, user-set toggle with
+no automatic transitions — not a computed "this piece is learned" state.**
+
+- **Why:** [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-informally-defined-today)
+  already flags "what formally defines learned" as unresolved, and
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#when-youre-not-sure) says not to
+  silently resolve an open question while building something adjacent to
+  it. Pause/archive doesn't need that question answered — it's scoped to
+  "take this off my daily agenda," which the user is always in the best
+  position to decide, consistent with
+  [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch).
+- **Alternative considered:** auto-suggesting archive once every chunk hits
+  some confidence threshold. Rejected for the same reason `computeProgressTier`
+  and `computeConfidence` were never unified into one "done" signal — see
+  [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them) —
+  there isn't yet a single trustworthy number to threshold against.
+- **Consequence:** pause and archive behave identically everywhere except
+  their Settings copy and button set — both suppress the schedule banner and
+  drop the piece from the Master Agenda. Confidence decay is untouched by
+  either: `computeAutoConfidence`'s existing recency term already fades an
+  untouched piece whether or not `status` exists, so no second decay
+  mechanism was built. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built) and
+  [Algorithms.md](Algorithms.md#behind-schedule-detection).
+
 ## Documentation
 
 **Decision: fold the standalone `measureone-context-summary.md` (previously

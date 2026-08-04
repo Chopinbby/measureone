@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Plus } from "lucide-react";
 import { generateAllChunks } from "../lib/chunking";
 import { computeProgressTier } from "../lib/confidence";
+import { PIECE_STATUS_LABEL } from "../lib/constants";
 
 // Strip of sibling movements shown on the Overview of any piece belonging to a
 // multi-movement work. Each part is a self-contained piece, so the percentage
@@ -37,6 +38,9 @@ export function PartSwitcher({ parts, activeId, workName, onSelectPart, onAddPar
           >
             <span className="part-chip-idx mono">{i + 1}</span>
             <span className="part-chip-name">{p.name || "Untitled movement"}</span>
+            {p.status && p.status !== "active" && (
+              <span className={`badge ${p.status}`}>{PIECE_STATUS_LABEL[p.status]}</span>
+            )}
             <span className="part-chip-pct mono">{touchedPct[p.id]}%</span>
           </button>
         ))}

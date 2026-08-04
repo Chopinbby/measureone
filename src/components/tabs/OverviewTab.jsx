@@ -6,6 +6,7 @@ import { PartSwitcher } from "../PartSwitcher";
 import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib/utils";
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
+import { PIECE_STATUS_LABEL } from "../../lib/constants";
 
 export function OverviewTab({
   piece,
@@ -51,7 +52,12 @@ export function OverviewTab({
         </div>
         <div className="hero-content">
           <p className="eyebrow">{piece.workId && piece.workName ? piece.workName : "Now practicing"}</p>
-          <h1>{piece.name}</h1>
+          <h1>
+            {piece.name}
+            {piece.status && piece.status !== "active" && (
+              <span className={`badge ${piece.status}`}>{PIECE_STATUS_LABEL[piece.status]}</span>
+            )}
+          </h1>
           {piece.composer && <p className="hero-composer">{piece.composer}</p>}
           <p className="hero-sub">
             {piece.totalMeasures} measures, {piece.sections.length} sections, {piece.daysToLearn}-day plan
@@ -60,6 +66,16 @@ export function OverviewTab({
           <RecordingsList recordings={piece.recordings} />
         </div>
       </div>
+
+      {piece.status && piece.status !== "active" && (
+        <div className="panel status-note">
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-soft)" }}>
+            {piece.status === "archived"
+              ? "Archived — off your Master Agenda, and confidence will keep quietly fading the longer it goes untouched. Reactivate it any time from Settings."
+              : "Paused — off your Master Agenda and won't flag chunks as behind schedule. Confidence still fades the same as an active piece. Resume it any time from Settings."}
+          </p>
+        </div>
+      )}
 
       {piece.workId && workParts && workParts.length > 0 && (
         <PartSwitcher

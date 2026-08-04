@@ -34,6 +34,14 @@ piece = {
   composer,              // string, optional
   notes,                 // string, optional — free text about the piece itself
                          // (not a per-session practice journal — see Roadmap.md item 1)
+  status,                // 'active' | 'paused' | 'archived' — user-set, never inferred.
+                         // Paused/archived pieces drop off the Master Agenda and stop
+                         // triggering "behind schedule" (computeScheduleStatus short-
+                         // circuits missedCount to 0 for either). Confidence is
+                         // unaffected either way — computeAutoConfidence's existing
+                         // recency decay already makes an untouched piece's confidence
+                         // fade on its own; status doesn't add a second decay path. See
+                         // Repertoire-Lifecycle.md and Decisions.md#lifecycle.
   totalMeasures,         // number
   measureDifficulty,     // number[totalMeasures], each 1|2|3 (easy/medium/hard)
   diffMode,              // 'grid' | 'simple' — legacy; 'simple' (the quick-count

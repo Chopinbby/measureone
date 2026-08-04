@@ -33,6 +33,8 @@ function validateAndMigratePiece(piece) {
       plan: null,
     },
     memoryAnchors: piece.memoryAnchors || {},
+    // Pieces saved before pause/archive existed default to active.
+    status: piece.status || "active",
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.

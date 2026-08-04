@@ -27,6 +27,12 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
       Object.entries(pieces).forEach(([pieceId, piece]) => {
         try {
           if (!piece) return;
+          // Paused/archived pieces are deliberately off the daily agenda —
+          // that's the entire point of setting a piece aside. Behind-schedule
+          // flagging is separately suppressed for them in
+          // computeScheduleStatus, so this filter is really about visibility
+          // here, not double-guarding the same rule.
+          if ((piece.status || "active") !== "active") return;
 
           const chunkSet = generateAllChunks(piece);
           const timeline = getEffectiveTimeline(piece, chunkSet);

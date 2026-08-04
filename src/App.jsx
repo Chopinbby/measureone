@@ -23,6 +23,7 @@ import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
+import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
   loadPiecesFromStorage,
   loadActivePieceId,
@@ -67,6 +68,13 @@ const NAV_BASE = [
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
 const REVIVAL_NAV_ITEM = { key: "revival", label: "Revival", icon: RefreshCw };
+
+// Renders nothing for an active piece — there's no badge for the default
+// state, only for the two that pull a piece off the daily agenda.
+function PieceStatusBadge({ status }) {
+  if (!status || status === "active") return null;
+  return <span className={`badge ${status}`}>{PIECE_STATUS_LABEL[status]}</span>;
+}
 
 export default function App() {
   const [pieces, setPieces] = useState({});
@@ -382,6 +390,10 @@ export default function App() {
     });
   };
 
+  const handleSetPieceStatus = (status) => {
+    updatePiece((p) => ({ ...p, status }));
+  };
+
   const handleUpdateRevival = (patch) => {
     updatePiece((p) => ({ ...p, revival: { ...(p.revival || {}), ...patch } }));
   };
@@ -535,7 +547,10 @@ export default function App() {
 
             <div className="piece-switcher">
               <button className="piece-switcher-trigger" onClick={() => setSwitcherOpen((o) => !o)}>
-                <span className="piece-switcher-name">{piece.name || "Untitled piece"}</span>
+                <span className="piece-switcher-name">
+                  {piece.name || "Untitled piece"}
+                  <PieceStatusBadge status={piece.status} />
+                </span>
                 <ChevronDown size={14} className={switcherOpen ? "rotated" : ""} />
               </button>
               {switcherOpen && (
@@ -550,6 +565,7 @@ export default function App() {
                           onClick={() => switchToPiece(p.id)}
                         >
                           {p.name || (g.workId ? "Untitled movement" : "Untitled piece")}
+                          <PieceStatusBadge status={p.status} />
                         </button>
                       ))}
                     </div>
@@ -669,6 +685,7 @@ export default function App() {
                 onAddPiece={() => openWizard()}
                 onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
+                onSetStatus={handleSetPieceStatus}
               />
             )}
           </main>
@@ -801,6 +818,7 @@ const CSS = `
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }
 .part-chip.active { background: var(--brass); border-color: var(--brass); color: var(--white); }
+.part-chip.active .badge { background: rgba(255,255,255,0.3); color: inherit; }
 .part-chip-idx { font-size: 11px; opacity: 0.7; }
 .part-chip-pct { font-size: 11.5px; opacity: 0.8; }
 .part-chip.add { color: var(--brass-deep); border-style: dashed; }
@@ -833,6 +851,8 @@ const CSS = `
 .manuscript-doodle { width: 100%; height: 64px; display: block; opacity: 0.16; }
 .hero-content { padding: 6px 32px 32px; }
 .hero-content h1 { font-size: clamp(22px, 3vw, 30px); line-height: 1.2; }
+.hero-content h1 .badge { font-size: 11px; vertical-align: middle; margin-left: 10px; }
+.status-note { background: var(--paper); }
 .hero-sub { color: var(--ink-soft); font-size: 14px; margin-top: 8px; }
 .hero-composer { color: var(--ink-soft); font-size: 15px; font-style: italic; margin-top: 2px; }
 
@@ -934,6 +954,9 @@ const CSS = `
 
 .badge { display: inline-block; font-size: 9.5px; background: rgba(255,255,255,0.25); padding: 1px 6px; border-radius: 20px; margin-left: 6px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.03em; }
 .badge.dark { background: rgba(185,138,62,0.18); color: var(--brass-deep); }
+.badge.paused { background: rgba(185,138,62,0.18); color: var(--brass-deep); }
+.badge.archived { background: rgba(139,150,160,0.22); color: var(--ink-faint); }
+.piece-switcher-item.active .badge { background: rgba(255,255,255,0.3); color: inherit; }
 .manual-mark { margin-left: 4px; vertical-align: middle; opacity: 0.6; }
 .manual-conf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .manual-conf-row input { width: 80px; flex-shrink: 0; }

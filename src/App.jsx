@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Music2,
   ListChecks,
+  Layers,
   LineChart,
   BarChart3,
   Settings as SettingsIcon,
@@ -40,6 +41,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { TimelineTab } from "./components/tabs/TimelineTab";
 import { PieceMapTab } from "./components/tabs/PieceMapTab";
 import { TodayTab } from "./components/tabs/TodayTab";
+import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
 import { RevivalTab } from "./components/tabs/RevivalTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
 import { AnalyticsTab } from "./components/tabs/AnalyticsTab";
@@ -51,6 +53,7 @@ import { SettingsTab } from "./components/tabs/SettingsTab";
 
 const NAV_BASE = [
   { key: "overview", label: "Overview", icon: LayoutGrid },
+  { key: "master-agenda", label: "Master Agenda", icon: Layers },
   { key: "timeline", label: "Timeline", icon: CalendarDays },
   { key: "map", label: "Piece Map", icon: Music2 },
   { key: "today", label: "Today's Practice", icon: ListChecks },
@@ -527,6 +530,13 @@ export default function App() {
                 onSelectDay={handleSelectDay}
               />
             )}
+            {activeTab === "master-agenda" && (
+              <MasterAgendaTab
+                pieces={pieces}
+                onSelectPiece={switchToPiece}
+                onSelectDay={handleSelectDay}
+              />
+            )}
             {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
             {activeTab === "map" && (
               <PieceMapTab
@@ -997,4 +1007,28 @@ const CSS = `
 .review-stat { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 14px; text-align: center; }
 .review-stat .num { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; color: var(--brass-deep); }
 .review-stat .lbl { font-size: 11px; color: var(--ink-soft); }
+
+.time-summary-banner { display: flex; align-items: center; justify-content: flex-start; gap: 40px; flex-wrap: wrap; background: var(--paper-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; }
+.time-summary-item { display: flex; flex-direction: column; gap: 2px; }
+.time-summary-label { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+.time-summary-num { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; color: var(--brass-deep); }
+.time-status { font-size: 12px; color: var(--ink-soft); }
+.time-status.busy { color: var(--brick); }
+
+.master-agenda-cards { display: flex; flex-direction: column; gap: 14px; }
+.piece-card { background: var(--paper-card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+.piece-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.piece-title { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 600; color: var(--ink); margin: 0; }
+.piece-meta { display: flex; gap: 12px; align-items: center; }
+.piece-time { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 600; color: var(--brass-deep); }
+.tasks-list { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--ink-soft); }
+.task-item { display: flex; gap: 8px; align-items: center; }
+.task-tag { display: inline-block; font-size: 9.5px; padding: 2px 7px; border-radius: 4px; font-weight: 600; text-transform: uppercase; flex-shrink: 0; color: var(--white); }
+.tag-new { background: var(--brass); }
+.tag-review { background: var(--ink-soft); }
+.tag-transition { background: var(--teal); }
+.tag-combo { background: var(--brick); }
+.piece-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
+.link-btn { background: transparent; border: none; color: var(--brass-deep); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; transition: color 0.15s; padding: 0; font-family: inherit; }
+.link-btn:hover { color: var(--brass); text-decoration: underline; }
 `;

@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
-import { todayISODate, addDaysISO, getCurrentDay } from "../../lib/utils";
+import { todayISODate, addDaysISO, getCurrentDay, formatRange, mergeRanges } from "../../lib/utils";
 
 export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
@@ -44,12 +44,14 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
 
           totalMinutes += day.minutes;
 
-          // Gather tasks for this piece on this day
-          const tasks = [
-            ...day.newChunkIds.map((id) => ({ id, role: "new" })),
-            ...day.specialChunkIds.map((id) => ({ id, role: chunkById[id]?.kind || "special" })),
-            ...day.reviewChunkIds.map((id) => ({ id, role: "review" })),
-          ].sort((a, b) => (a.role === "combo" ? 1 : 0) - (b.role === "combo" ? 1 : 0));
+          // Combine same-role chunks into contiguous measure ranges, same as
+          // the Timeline tab's day cards — a row per role (new/special/review)
+          // instead of one row per 4-measure chunk.
+          const mergedRangesFor = (ids) => mergeRanges(ids.map((id) => chunkById[id]).filter(Boolean));
+          const newRanges = mergedRangesFor(day.newChunkIds);
+          const specialRanges = mergedRangesFor(day.specialChunkIds);
+          const reviewRanges = mergedRangesFor(day.reviewChunkIds);
+          const specialIsCombo = day.specialChunkIds.some((id) => chunkById[id]?.kind === "combo");
 
           // How many chunks are behind schedule for this piece as of this day —
           // same computation ScheduleBanner uses, called once per piece (not
@@ -61,12 +63,12 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
             piece,
             dayNumber,
             day,
-            tasks: tasks.filter((t) => chunkById[t.id]),
+            newRanges,
+            specialRanges,
+            reviewRanges,
+            specialIsCombo,
             totalTime: day.minutes,
             missedCount,
-            chunkById,
-            timeline,
-            chunkSet,
           });
         } catch (e) {
           console.error(`Error processing piece ${pieceId}:`, e);
@@ -143,7 +145,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
         </div>
       ) : (
         <div className="master-agenda-cards">
-          {agendaData.items.map(({ pieceId, piece, day, tasks, totalTime, missedCount, chunkById }) => (
+          {agendaData.items.map(({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount }) => (
             <div key={pieceId} className="piece-card">
               <div className="piece-card-head">
                 <div>
@@ -157,29 +159,37 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
               </div>
 
               {day.type === "consolidation" ? (
-                <div className="tasks-list">
-                  <div className="task-item">
-                    <span className="task-tag" style={{ background: "var(--brass)" }}>Full</span>
-                    <span>Full run-through (consolidation day)</span>
-                  </div>
-                </div>
+                <p className="day-card-note">Full run-through of the piece</p>
               ) : (
-                <div className="tasks-list">
-                  {tasks.length === 0 ? (
-                    <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
-                  ) : (
-                    tasks.map(({ id, role }) => {
-                      const chunk = chunkById[id];
-                      if (!role) return null;
-                      return (
-                        <div key={id + role} className="task-item">
-                          <span className={`task-tag tag-${role}`}>{role === "combo" ? "Focus" : role}</span>
-                          <span>{chunk.displayName || `${chunk.kind} (m. ${chunk.start}–${chunk.end})`}</span>
-                        </div>
-                      );
-                    })
+                <>
+                  {newRanges.length > 0 && (
+                    <div className="day-card-group">
+                      <span className="day-card-tag new">New</span>
+                      {newRanges.map((r) => (
+                        <span key={`new-${r.start}-${r.end}`} className="chip">{formatRange(r.start, r.end)}</span>
+                      ))}
+                    </div>
                   )}
-                </div>
+                  {specialRanges.length > 0 && (
+                    <div className="day-card-group">
+                      <span className="day-card-tag special">{specialIsCombo ? "Focus" : "Review"}</span>
+                      {specialRanges.map((r) => (
+                        <span key={`special-${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
+                      ))}
+                    </div>
+                  )}
+                  {reviewRanges.length > 0 && (
+                    <div className="day-card-group">
+                      <span className="day-card-tag review">Review</span>
+                      {reviewRanges.map((r) => (
+                        <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
+                      ))}
+                    </div>
+                  )}
+                  {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 && (
+                    <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
+                  )}
+                </>
               )}
 
               <div className="piece-footer">

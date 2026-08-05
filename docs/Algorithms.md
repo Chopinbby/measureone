@@ -119,6 +119,65 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
    because it wasted the back half on run-throughs instead of targeted
    work.
 
+## Deriving daysToLearn from minutesPerDay (scheduleMode: "minutes")
+
+`computeTimeline` treats `piece.daysToLearn` purely as an input — it never
+asks "is this actually enough days for this piece's effort at this pace,"
+it just lays the plan out across however many days it's given. For
+`scheduleMode: "days"` that's correct (the user fixed a deadline;
+`daysToLearn` *is* the fixed quantity, and `minutesPerDay` is what's
+derived from it). For `scheduleMode: "minutes"` it's backwards:
+`minutesPerDay` is the fixed quantity the user actually set, and
+`daysToLearn` is supposed to be *derived* from it — expand the plan until
+the piece's effort fits inside that daily budget.
+
+`computeDaysNeededForMinutesPerDay(chunkSet, minutesPerDay, practiceDaysPerWeek)`
+does that derivation: a greedy pass over `chunkSet.all` (practice chunks,
+transitions, combos) accumulating effort until adding the next item would
+exceed the effort-equivalent of one day's budget, at which point a new day
+starts. Each item's accumulated cost includes not just its own introduction
+effort but an estimate of the review load it will generate later
+(`REVIEW_OFFSETS.length` reviews at a flat 3 minutes each, converted to
+effort-point units) — omitting that would under-count what a day actually
+costs once `computeTimeline`'s spaced review lands on top of introduction,
+and the day count would come out "technically sufficient" for introduction
+alone while still running well over budget in practice. The resulting
+day-bucket count is padded the same way the "days" mode's own estimate is
+(`LIBERAL_FACTOR`, an assumed 0.88 practice-day-to-calendar-day ratio, then
+`practiceDaysPerWeek`) to get a calendar-day count.
+
+**This is not a hard per-day cap.** `computeTimeline`'s own placement design
+(new-chunk introduction spread only across the *first half* of learning
+days — see rule 1 above) means early introduction-heavy days can still run
+somewhat over `minutesPerDay`, especially for a piece whose chunk size is
+large relative to a very tight budget (a single chunk's raw introduction
+cost can itself exceed a small `minutesPerDay`, in which case no amount of
+extra days fixes that single day — only a smaller chunk size would). What
+this derivation guarantees is that the *plan length itself* actually
+tracks the stated budget instead of ignoring it, which is what was broken
+before this existed.
+
+`reconcileMinutesPerDaySchedule(piece)` wraps that derivation into a
+piece-level fixup: for a `scheduleMode: "minutes"` piece, replace
+`daysToLearn` with what `computeDaysNeededForMinutesPerDay` says is needed
+(no-op for `scheduleMode: "days"`, and a no-op if the value already
+matches). `ScheduleFields` already performed this same derivation live, as
+a `useEffect` reacting to `draft.minutesPerDay`/`draft.daysToLearn` — but
+that only ever ran while a human had the Schedule panel mounted (Wizard or
+Settings edit mode). A piece arriving any other way — loaded from
+`localStorage`, or merged in from an imported backup — skipped it entirely,
+so `daysToLearn` stayed at whatever value the stored/imported data
+happened to carry, with computeTimeline packing the piece's full effort
+into that count regardless of whether it fit the stated `minutesPerDay`.
+`reconcileMinutesPerDaySchedule` is now called from
+`validateAndMigratePiece` (`lib/storage.js`, so it runs on every load — not
+just once, since editing difficulty/measures/recurring material
+legitimately changes how many days the same budget needs) and from the
+import merge in `App.jsx`'s `handleConfirmImport` (so a same-session import
+doesn't have to wait for a reload to get corrected). See
+[Decisions.md](Decisions.md#scheduling) for why this couldn't just stay a
+UI-only concern.
+
 ## Adaptive review
 
 `adaptiveReviewOffsets(chunk, progress)` — not fully learned/tuned yet (see

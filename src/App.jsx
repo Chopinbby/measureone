@@ -20,7 +20,7 @@ import {
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, reconcileMinutesPerDaySchedule } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
@@ -262,16 +262,22 @@ export default function App() {
       // to day 1 if the exported file happened to be missing that field.
       const match = findMatchingPiece(next, p);
       if (match) {
-        const merged = ensureWorkId({
+        const merged = reconcileMinutesPerDaySchedule(ensureWorkId({
           ...mergeImportedPiece(match, p),
           rescheduleMarker: null,
-        });
+        }));
         next[match.id] = merged;
         savePieceToStorage(match.id, merged);
         updatedCount++;
       } else {
         const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
-        const withId = { ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() };
+        // Re-derive daysToLearn against minutesPerDay for "minutes" mode —
+        // otherwise an imported piece just keeps whatever daysToLearn the
+        // backup happened to carry, which may have nothing to do with its
+        // minutesPerDay (e.g. a backup hand-edited to change the pace
+        // without updating the day count to match). See
+        // reconcileMinutesPerDaySchedule in lib/scheduling.js.
+        const withId = reconcileMinutesPerDaySchedule({ ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() });
         next[id] = withId;
         if (!firstNewId) firstNewId = id;
         savePieceToStorage(id, withId);

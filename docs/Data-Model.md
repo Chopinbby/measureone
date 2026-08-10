@@ -109,11 +109,14 @@ piece = {
                          // like startDate). Data plumbing for the not-yet-built spaced-repetition
                          // maintenance ladder's 60-day staleness auto-trigger — nothing reads this
                          // yet. See Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
-  ladderConfig,          // { stabilizing, settling, holding } — piece-level tunable config for the
-                         // not-yet-built spaced-repetition maintenance ladder (stage lengths,
-                         // graduation pass-counts, tempo floors). Hardcoded defaults set at creation
-                         // (Wizard.jsx) and backfilled on migration (storage.js); no editing UI yet
-                         // and nothing reads it yet. See #ladder-config below and
+  ladderConfig,          // { stabilizing, settling, holding, bpmSteps } — piece-level tunable
+                         // config for the not-yet-wired-in spaced-repetition maintenance ladder
+                         // (stage lengths, graduation pass-counts, tempo floors, practiceBPM
+                         // ratchet step sizes). Hardcoded defaults set at creation (Wizard.jsx)
+                         // and backfilled on migration (storage.js); no editing UI yet. Read by
+                         // the pure stage-math engine in lib/ladder.js (computeLadderAdvance),
+                         // but that engine isn't called from anywhere in the running app yet.
+                         // See #ladder-config below and
                          // Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
   memoryAnchors,         // { [id]: string } — free-text cue ("descending sequence", "watch
                          // left-hand leap") keyed by *either* a practice-chunk/transition id or a
@@ -124,18 +127,32 @@ piece = {
 }
 
 ChunkProgress = {
-  doneDays: number[],       // plan-day numbers this chunk was marked done on
-  sessions: [{              // one entry per day it was logged, most recent last
-    day, cleanReps, bpm, effectiveness, durationSeconds, loggedDate
+  doneDays: number[],       // plan-day numbers this chunk was marked done on at least once —
+                            // a count of distinct DAYS touched, not of sessions logged (see
+                            // sessions below; PieceMapTab's "Sessions logged" reads this field
+                            // and is really showing days-touched, a pre-existing label that
+                            // predates same-day multi-session support and hasn't been
+                            // reworded — a known small inaccuracy, not a bug).
+  sessions: [{              // one entry per LOGGED ATTEMPT, most recent last. Multiple entries
+                            // can now share the same `day` (a Tier 1 touch, a due review, a
+                            // re-attempt) — never overwritten by day alone; see loggedAt below.
+    day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds
   }],                       // durationSeconds comes from the ChecklistItem timer, or from
                             // the manual minutes field when the user typed one instead.
-                            // loggedDate ("YYYY-MM-DD") is the real calendar date the session
-                            // was logged on — new field, distinct from `day` (a plan-day int,
-                            // meaningless once review runs past a piece's fixed-length plan).
-                            // Not yet populated by handleLogSession (App.jsx) directly; backfilled
-                            // on every load instead, from `day` + piece.startDate for sessions
-                            // that predate this field — see storage.js.
-  currentBPM,               // number | undefined — last logged tempo
+                            // loggedAt (epoch ms) is what actually distinguishes same-day
+                            // entries — a precise timestamp, set by handleLogSession
+                            // (App.jsx) at log time. A placeholder keying scheme, not the
+                            // semantic Tier-1/due-review/re-attempt distinction the design
+                            // notes eventually want — that needs Tier 1/Tier 2 scheduling,
+                            // still not built. loggedDate ("YYYY-MM-DD") is the calendar date
+                            // derived from loggedAt for sessions logged going forward, or
+                            // backfilled from `day` + piece.startDate for sessions that
+                            // predate the field — see storage.js. outcome ('pass' | 'soft-miss'
+                            // | 'fail') replaces the old free-standing `effectiveness` field —
+                            // see Decisions.md#spaced-repetition--maintenance. Old sessions
+                            // that only have `effectiveness` are read through
+                            // lib/confidence.js's sessionOutcome(), not migrated in place.
+  currentBPM,               // number | undefined — last logged tempo (what was actually played)
   targetBPM,                // number | undefined — explicit per-chunk override;
                              // falls back to piece.targetBPM / bpmZones if unset
   manualConfidence,         // number | null — user override, wins over the
@@ -147,25 +164,44 @@ ChunkProgress = {
                               // Persists independently of any revival cycle; computeRevivalPlan
                               // prioritizes flagged items first. See #revival below.
   stage,                     // null | 'stabilizing' | 'settling' | 'holding' — this chunk's rung
-                              // on the not-yet-built spaced-repetition maintenance ladder. null
-                              // means "not on the ladder" (every chunk today, and every chunk
-                              // backfilled by migration). See #ladder-config below.
-  consecutivePasses,          // number, default 0 — consecutive full passes at the current stage;
-                               // ladder-only, unused until stage-transition logic is built.
+                              // on the spaced-repetition maintenance ladder. null means "not on
+                              // the ladder" — no entry/Tier-1 mechanic exists yet to move a chunk
+                              // off null, so every chunk starts and stays here until logged.
+                              // Advanced live by handleLogSession (App.jsx) calling
+                              // lib/ladder.js's computeLadderAdvance on every logged session.
+                              // See #ladder-config below.
+  consecutivePasses,          // number, default 0 — consecutive full passes at the current stage
+                               // that cleared that stage's tempo floor. Live, via
+                               // computeLadderAdvance on every logged session (see stage above).
+  consecutiveStabilizingFails, // number, default 0 — fails logged back-to-back while
+                                // stage === 'stabilizing'. Distinct from consecutivePasses, which
+                                // only counts passes and can't tell a 1st fail from a 2nd (a fail
+                                // always resets it to 0). Drives lib/ladder.js's needsRelearning
+                                // signal ("this was never actually consolidated" — two Stabilizing
+                                // fails in a row) — confirmed NOT wired to Revival (chunk-scoped,
+                                // Revival's triggers are piece-wide); currently just a data flag
+                                // nothing reads. See Decisions.md.
   practiceBPM,                // number | null — the tempo the ladder is currently asking for on
-                               // this chunk, distinct from targetBPM (the eventual goal). Starts
-                               // null; ratcheting logic is not built yet.
+                               // this chunk, distinct from targetBPM (the eventual goal). Seeded
+                               // to whatever tempo was first attempted (a placeholder — see
+                               // handleLogSession, App.jsx; there's no designed ladder-entry/
+                               // Tier-1 mechanic yet), then ratchets via ladderConfig.bpmSteps
+                               // (+2 pass / -2 soft-miss / -2 fail) on every logged session.
   nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
-                                // review. null until the ladder actually schedules something.
+                                // review, recomputed on every logged session. Nothing reads this
+                                // to surface "what's due" yet — that's a live query against a
+                                // real calendar date this field enables, not built (see
+                                // Repertoire-Lifecycle.md's "How maintenance surfaces in the UI").
   tier1Done,                   // boolean, default false — whether the one-time first-touch review
                                 // (Repertoire-Lifecycle.md's "Tier 1") has happened for this chunk.
+                                // Read/passed through unchanged by computeLadderAdvance; nothing
+                                // sets it true yet (Tier 1 scheduling isn't built).
 }
 ```
 
 ### Ladder config (`piece.ladderConfig`) {#ladder-config}
 
-Piece-level tunable data for the not-yet-built spaced-repetition maintenance
-ladder — see
+Piece-level tunable data for the spaced-repetition maintenance ladder — see
 [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
 for the full design. Hardcoded defaults for now (no editing UI); stored so a
 later UI pass is additive rather than needing its own migration.
@@ -180,23 +216,33 @@ ladderConfig = {
   // intervalDays: 7. graduationPasses: 4. tempoFloorFraction: 0.7 — a
   // hand-picked point within the doc's ~70–75%-of-target range.
   holding: {
-    startIntervalDays, intervalGrowthFactor, maxIntervalDays,
+    startIntervalDays, maxIntervalDays,
     tempoFloorStartFraction, tempoFloorStepFraction, tempoFloorCapFraction,
   },
-  // startIntervalDays: 14. intervalGrowthFactor: 1.75 — hand-picked point
-  // within the doc's ~1.5–2× per pass range. maxIntervalDays: 70 (10 weeks)
-  // — hand-picked point within the doc's ~8–12-week cap range.
-  // tempoFloorStartFraction: 0.85, tempoFloorStepFraction: 0.05 ("+5 points
-  // per successful pass"), tempoFloorCapFraction: 1.
+  // startIntervalDays: 14. maxIntervalDays: 70 (10 weeks) — hand-picked
+  // point within the doc's ~8–12-week cap range. tempoFloorStartFraction:
+  // 0.85, tempoFloorStepFraction: 0.05 ("+5 points per successful pass"),
+  // tempoFloorCapFraction: 1. No growth-rate field here — Holding's
+  // interval growth is computed entirely from the same 0.6×/1×/1.4×
+  // effectiveness multiplier adaptiveReviewOffsets already uses
+  // (scheduling.js), per the doc's "not a second multiplier system"
+  // instruction — see Decisions.md#spaced-repetition--maintenance.
+  bpmSteps: { pass, softMiss, fail },
+  // pass: 2, softMiss: -2, fail: -2 — how much practiceBPM moves per
+  // outcome. fail matches the other two rather than the doc's original
+  // ~8-10 pullback — a user decision, see Decisions.md.
 }
 ```
 
-All values are hand-picked midpoints of the ranges
-Repertoire-Lifecycle.md describes, not derived from any study — same spirit
-as `EFFORT_TO_MIN`/`LIBERAL_FACTOR` (see
-[Research.md](Research.md)). Nothing reads this yet; stage-transition logic,
-BPM ratcheting, and any scheduler change are explicitly out of scope until a
-later pass.
+All values are hand-picked, not derived from any study — same spirit
+as `EFFORT_TO_MIN`/`LIBERAL_FACTOR` (see [Research.md](Research.md)). The
+stage-transition math and BPM ratcheting that read this config
+(`computeLadderAdvance` in `lib/ladder.js`) are wired into logging:
+`handleLogSession` (`App.jsx`) calls it on every session and persists the
+result. Still not built: Tier 1/Tier 2 review scheduling (so `nextDueDate`
+is computed but nothing surfaces "what's due"), any post-run-through
+flag mode, and any scheduler change. See [Architecture.md](Architecture.md)
+for where the function lives.
 
 `defaultPiece()` in `src/components/Wizard.jsx` is the literal source of truth
 for this shape and its defaults — read it directly if this table and the code
@@ -293,15 +339,19 @@ written for that one widget using the simplest available signal
 confidence. The disagreement isn't drift from a shared design; there
 never was one.
 
-A designed spaced-repetition ladder (per-chunk `stage`/`practiceBPM` state —
-see
+A spaced-repetition ladder (per-chunk `stage`/`practiceBPM` state — see
 [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built))
-would be a related, third signal once built. The schema for it now exists
-(`ChunkProgress.stage` etc., `piece.ladderConfig` — see above) but is
-entirely inert: nothing computes or reads it yet, so this is still purely
-prospective. Whether it replaces one of the two above, becomes the new
-canonical one, or stays separate is explicitly not decided — see
-[Decisions.md](Decisions.md#open-questions).
+would be a related, third signal. The schema exists (`ChunkProgress.stage`
+etc., `piece.ladderConfig` — see above), the stage-math is built
+(`computeLadderAdvance`, `lib/ladder.js`), and it's now live — every logged
+session advances it (`handleLogSession`, `App.jsx`). **Confirmed inert with
+respect to confidence, deliberately**: `computeAutoConfidence` does not read
+`stage`/`consecutivePasses` at all — a decision made explicitly while wiring
+the ladder in, not an oversight. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance). Whether it
+replaces one of the two scores above, becomes a new canonical one, or stays
+separate long-term is still not decided — revisit once Stage 3 ("learned")
+is actually defined against real data, per that same decision.
 
 ## Revival
 
@@ -348,22 +398,35 @@ than a new 0-100 (or 0-4) field. See
   [Research.md](Research.md).
 - `adaptiveReviewOffsets`'s 0.6×/1.4× multipliers and the confidence
   formula's weights are similarly hand-picked, not learned from outcomes.
+  Both now key off `session.outcome` (pass/soft-miss/fail) rather than the
+  old free-standing `effectiveness` self-report — see
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - BPM zones and per-chunk difficulty reassessment both write directly into
   `piece.measureDifficulty` / `piece.bpmZones` — there's no undo history.
+  Same is now true of a logged session's ladder effects: undoing a session
+  (`handleUnlogSession`, `App.jsx`) removes the session record but does not
+  roll back the `stage`/`practiceBPM`/etc. that session's outcome already
+  advanced.
 - `manualConfidence` has no recorded set-date, which is why
   `computeConfidenceAsOf` (used for "most improved this week") can't
   correctly exclude a manual override that was set *after* the historical
   cutoff being reconstructed — see [Algorithms.md](Algorithms.md#confidence).
-- There is no first-class "piece is learned" state yet — a definition is
-  now decided (every chunk's ladder card reaching Holding) and the ladder's
-  schema now exists (`ChunkProgress.stage`, `piece.ladderConfig`), but no
-  logic advances `stage` or evaluates "every chunk at Holding" yet, so
-  "learned" still can't actually be computed — see
+- There is no first-class "piece is learned" state yet. The definition is
+  decided (every chunk's ladder card reaching Holding), and the mechanism
+  that advances `stage` is live (`computeLadderAdvance` called from
+  `handleLogSession` on every logged session) — but nothing yet queries
+  "is every chunk at Holding" to actually compute the piece-level "learned"
+  flag itself. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
 - A new tri-state `flag` field (rough/lost, from planned post-run-through
   logging) would sit alongside the existing `progress[id].weakSpot` above
   once built, and the two haven't been reconciled — see
   [Decisions.md](Decisions.md#open-questions).
+- `piece.progress[id].doneDays.length` (surfaced in PieceMapTab as
+  "Sessions logged") counts distinct days touched, not sessions logged —
+  pre-existing behavior that was a distinction without a difference before
+  same-day multi-session logging existed, but is now a mildly misleading
+  label PieceMapTab.jsx hasn't been updated to reflect.
 - `diffMode: 'simple'` and `recurringMode: 'basic'` are reachable only on
   pieces saved before their quick-count UI was removed — see
   [Decisions.md](Decisions.md#ux).

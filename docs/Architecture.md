@@ -56,6 +56,9 @@ MeasureOne.jsx/
     │   ├── scheduling.js             # computeTimeline and friends
     │   ├── confidence.js              # computeConfidence and friends
     │   ├── revival.js                  # computeRevivalPlan and friends
+    │   ├── ladder.js                     # computeLadderAdvance — spaced-repetition
+    │   │                                  # maintenance stage math; unwired, nothing
+    │   │                                  # calls it yet (Repertoire-Lifecycle.md#stage-4)
     │   ├── works.js                      # multi-movement grouping helpers
     │   └── storage.js                     # localStorage load/save/export/import
     └── components/

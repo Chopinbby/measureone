@@ -302,18 +302,35 @@ showing a misleading run of repeated values.
 
 `computeRevivalPlan(piece, chunkSet, currentDay)` builds the ordered
 day-by-day revival plan: practice chunks and transitions (**not** combos —
-revival reassessment scope is chunks and seams only), sorted weak-spots-first
-then lowest-confidence-first, greedily packed into days against
+a combo relearns through its underlying content, which is already in this
+list as ordinary practice chunks), sorted weak-spots-first then
+lowest-confidence-first, greedily packed into days against
 `piece.minutesPerDay` using each item's existing `effort` and
-`EFFORT_TO_MIN`. **This description matches what's implemented today, but
-the combo exclusion is planned to change to a dynamic, outcome-dependent
-rule** (combos escalate into their own task only if their underlying
-content fails during revival) **that this function doesn't support yet** —
-see [Decisions.md](Decisions.md#spaced-repetition--maintenance) and
+`EFFORT_TO_MIN`. This stays a fixed list, generated once and never mutated
+afterward — turned out not to need dynamic/outcome-dependent restructuring
+after all, contrary to what an earlier draft of this design expected. What
+combos DO get is handled by a separate function sitting alongside this
+one, not inside it:
+
+`computeComboEscalations(piece, chunkSet)` and its helper
+`findComboUnderlyingChunks(combo, practiceChunks)` (also `lib/revival.js`)
+compute, live, which combos should currently show up as their own
+explicit task — a combo whose anchor chunk or an overlapping neighbor
+(found via `rangesOverlap` against the combo's `start`/`end`, since
+`combo.linkedIds` only stores the anchor) has logged a real fail since
+`piece.revival.startedAt`. This is a pure derivation off `piece.progress`,
+recomputed on every render (same pattern as `chunkSet`/`timeline`) rather
+than a task written into and later cleared from `revival.plan` — which is
+exactly what let `computeRevivalPlan` above stay static. `RevivalTab`
+renders any escalated combos as a separate "Needs another look" panel, not
+folded into the day-by-day list. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) and
 [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)
-for the design; it also means this function can no longer stay a
-fixed-list-generated-once shape once built. **This is deliberately a
-distinct, simpler function, not an adaptation of `computeTimeline`.** `computeTimeline`'s defining behaviors —
+for the design and decision record.
+
+**`computeRevivalPlan` is deliberately a distinct, simpler function, not
+an adaptation of `computeTimeline`.** `computeTimeline`'s defining
+behaviors —
 spreading new-chunk introduction across the first half, deferring combos to
 the back half, adaptive review offsets keyed off introduction day — all
 exist to manage *first-time introduction* of material, which has no

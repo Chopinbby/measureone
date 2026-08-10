@@ -171,20 +171,41 @@ function alongside the old one.
 | Settling | every 7 days | 4 consecutive full passes | ~70–75% of target |
 | Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | starts ~85%, +5 points per successful pass, caps 100% |
 
+**Implemented and wired into logging**: `computeLadderAdvance` in
+`src/lib/ladder.js` is called from `handleLogSession` (`App.jsx`) on every
+logged session, and its result is persisted — every chunk's `stage` etc.
+now actually advances as the learner practices. Still not built: Tier 1/
+Tier 2 review scheduling (so nothing surfaces "what's due" from
+`nextDueDate` yet) and any scheduler change. A few points below are noted
+as confirmed, superseding the original sketch, once building this made the
+ambiguity concrete:
+
 - A fail drops a chunk back exactly **one** stage, never to zero.
 - Two consecutive fails specifically while in Stabilizing is a distinct
-  signal ("this was never actually consolidated," not normal decay) and
-  should route toward a short structured re-learning pass rather than
-  cycling indefinitely.
+  signal ("this was never actually consolidated," not normal decay) — now
+  surfaced as a `needsRelearning` flag on the chunk's returned ladder
+  state. **Confirmed with the user: this does not plug into Revival** —
+  Revival's three auto-triggers (below) are all piece-wide, this signal is
+  chunk-scoped, and folding a single-chunk problem into a whole-piece
+  recovery flow was never part of that design. What (if anything) should
+  read this flag, and what "a short structured re-learning pass" concretely
+  means, is still undecided — it's currently just data, not a route to
+  anywhere.
 - Holding's interval expansion reuses the effectiveness multiplier already
   built for `adaptiveReviewOffsets` (0.6×/1×/1.4× —
-  [Algorithms.md#adaptive-review](Algorithms.md#adaptive-review)) rather
-  than introducing a second multiplier system.
-- Stage lengths, graduation pass-counts, and tempo floors are planned as
-  **piece-level tunable data, not hardcoded constants** (a future
-  per-chunk override is explicitly flagged as a want, not built in this
-  pass). No editing UI is planned for this initial build — the values just
-  need to be stored so UI can be additive later.
+  [Algorithms.md#adaptive-review](Algorithms.md#adaptive-review)) as its
+  **only** growth mechanism — no second, independently-tuned growth
+  constant exists alongside it (an early draft of `ladderConfig` briefly
+  had one; removed once redundant). One consequence, confirmed intentional:
+  a "low" effectiveness full pass in Holding can make the *next* interval
+  shorter than the one that just elapsed (0.6× is below 1), not just
+  slower-growing — a technically-passing but shaky review is exactly when
+  the next check-in should come sooner, not later.
+- Stage lengths, graduation pass-counts, tempo floors, **and the
+  practiceBPM ratchet step sizes below** are **piece-level tunable data,
+  not hardcoded constants** (a future per-chunk override is explicitly
+  flagged as a want, not built yet). No editing UI exists yet — the values
+  just need to be stored so UI can be additive later.
 
 ### Introduction-window review scheduling: Tier 1 / Tier 2
 
@@ -252,8 +273,12 @@ Planned as a new field, distinct from the existing `targetBPM`
   fixed target (e.g. an overlearn tempo 10 BPM above performance)
   producing repeated "almost but not quite" sessions that read as failure
   when the target itself was fine, just ungraded incrementally.
-- Step sizes (tunable, defaults): **+2 BPM** on a full pass, **−2 BPM** on
-  a soft miss, **~8–10 BPM** pullback on a real fail.
+- Step sizes (`ladderConfig.bpmSteps`, tunable, defaults): **+2 BPM** on a
+  full pass, **−2 BPM** on a soft miss, **−2 BPM** pullback on a real fail
+  too — not the steeper ~8-10 BPM drop originally sketched here. Confirmed
+  with the user while building the ladder engine (`lib/ladder.js`): a real
+  fail should cost the same as the other two outcomes, not a distinctly
+  larger penalty. See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - The logging UI's primary action becomes "attempt N clean reps at
   `practiceBPM`" → pass/soft-miss/fail, rather than free-text BPM entry by
   default. A lightweight manual override stays available for someone who
@@ -262,7 +287,9 @@ Planned as a new field, distinct from the existing `targetBPM`
 
 ### Session outcomes: three tiers, not two
 
-Replaces the current flat pass/fail:
+**Implemented**: `classifySessionOutcome` in `src/lib/confidence.js`,
+called from `ChecklistItem.jsx` on every log and passed to
+`handleLogSession` already classified. Replaces the old flat pass/fail:
 
 1. **Full pass** — required clean reps hit at/above current `practiceBPM`.
    `practiceBPM` steps up; counts toward stage graduation only once
@@ -283,25 +310,21 @@ by construction now, since tempo increase is built into what a full pass
 means. The residual case — oscillating with no new high-water mark over
 several recent attempts — should surface a note rather than silence.
 
-**Implementation gotcha to resolve before building**: this model treats
-each review as a discrete event, but today's logging
-(`handleLogSession`, `src/App.jsx`) doesn't — it keys a session by
-`(chunkId, day)` and *overwrites* on a repeat: `sessions.filter((s) =>
-s.day !== day)` before pushing the new entry. Logging the same chunk
-twice on the same plan-day silently replaces the first outcome rather
-than recording both. That's fine under the old flat pass/fail model,
-where a same-day re-log is presumably just a correction — but once
-distinct events (a Tier 1 touch, a separate due maintenance review, a
-genuine re-attempt) can legitimately land on the same chunk the same
-day, this needs a deliberate answer, not inherited overwrite behavior.
+**Resolved**: the same-day-overwrite gotcha this section used to flag is
+fixed. `handleLogSession` (`src/App.jsx`) now appends every logged
+session rather than overwriting by `(chunkId, day)`, keyed by a precise
+`loggedAt` timestamp — a placeholder scheme (see the decision record),
+not yet the semantic Tier-1/due-review/re-attempt distinction this
+section originally wanted, since that needs Tier 1/Tier 2 scheduling
+(still not built).
 
-**Open, not decided**: whether the existing "how did it feel" three-tap
-effectiveness input (`EFFECTIVENESS_OPTIONS` in `src/lib/constants.js`)
-survives as a separate input, given how much it now overlaps with the
-pass/soft-miss/fail judgment itself. Leaning toward folding it into a
-single optional override (toward fail only, catching what objective
-numbers can't — memory slips, poor technique despite clean reps) — not
-locked in. See [Decisions.md](Decisions.md#open-questions).
+**Resolved**: the old "how did it feel" three-tap effectiveness input
+(`EFFECTIVENESS_OPTIONS`) is gone, folded into a single "needs more work"
+override — a checkbox in the logging UI that forces the outcome to `fail`
+regardless of clean reps, per the lean this section originally sketched.
+`session.effectiveness` no longer gets written by new sessions;
+`session.outcome` ('pass'/'soft-miss'/'fail') is the new field. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 ### Post-run-through logging
 
@@ -354,43 +377,40 @@ even though it would almost certainly meet them if attempted. Kept as
 three separately-checked conditions, deliberately not unified into one
 formula.
 
-**Combo handling within revival, once triggered** (decided — supersedes
-the current `computeRevivalPlan` code comment, which statically excludes
+**Combo handling within revival, once triggered** (implemented — supersedes
+the old `computeRevivalPlan` code comment, which statically excluded
 combos; see [Decisions.md](Decisions.md#spaced-repetition--maintenance)
 for the full alternatives-considered record): combos don't get their own
 revival task by default. Revival relearns the underlying content
 normally — the anchor hard chunk, plus whichever neighboring chunk(s) the
 combo's range overlaps (a combo spans midpoint-to-midpoint across its
-neighbors, so this is partial territory in both, not just the anchor). If
-any of that underlying content produces a real fail during revival, the
-combo escalates into its own explicit revival task, added to the plan. If
-everything relearns cleanly, the combo's "lost" flag clears automatically
-once its underlying chunks are done, and no combo-specific task is ever
-generated. This is what actually resolves condition 2's "combo flagged
-lost" trigger — without an escalation path, a lost combo flag would have
-no way to clear, risking either a permanently-flagged combo or revival
-re-triggering immediately after it just finished. **Open, not confirmed**:
-whether escalation fires on a single real fail on the underlying content,
-or the two-consecutive-fails threshold the ladder uses elsewhere for
-"this wasn't actually consolidated." Leaning toward a single fail, since
-revival is already "something's wrong" mode by the time it's running —
-unlike ordinary practice, where that dampening exists specifically to
-avoid overreacting to one bad day — but this hasn't been explicitly
-confirmed and shouldn't be assumed silently when built.
+neighbors, so this is partial territory in both, not just the anchor;
+`findComboUnderlyingChunks`, `src/lib/revival.js`, computes this fresh via
+`rangesOverlap` rather than trusting `combo.linkedIds`, which only stores
+the anchor). If any of that underlying content produces a real fail during
+revival, the combo escalates into its own explicit revival task, shown in
+`RevivalTab.jsx` as a "Needs another look" panel. If everything relearns
+cleanly, no combo-specific task is ever generated. **Resolved: escalation
+fires on a single real fail**, not the ladder's two-consecutive-fails
+threshold — confirmed with the user: revival is already "something's
+wrong" mode by the time it's running, unlike ordinary practice, where that
+dampening exists specifically to avoid overreacting to one bad day.
 
-**Architectural implication, not just a combo-handling detail**: this
-means a revival plan cannot be a fixed list generated once upfront the
-way `computeRevivalPlan` builds it today
-([Algorithms.md#revival](Algorithms.md#revival)). It needs a decision
-point mid-revival, after constituent outcomes are known, that can *insert*
-a task that wasn't there at the start. This is the same shape of problem
-as the ladder needing persisted, event-driven state instead of a pure
-derivation (see "The unifying idea" above) — revival's internal
-structure/pacing was already flagged as "not fully specced," and this is
-the first concrete piece of that spec, and it arrives already requiring a
-dynamic, outcome-dependent plan rather than a static one. Whatever
-replaces or extends `computeRevivalPlan` needs to account for this
-generally, not just special-case combos.
+This is also what resolves condition 2's "combo flagged lost" trigger,
+once that flag exists (Pass 6, not built yet) — but not in the way this
+section originally assumed. Escalation (`computeComboEscalations`) is a
+*live derivation* off logged session history, not a task written into
+`piece.revival.plan` and later cleared. That sidesteps the "clearing"
+problem entirely: there's no flag being set that needs unsetting, so
+nothing can get stuck permanently flagged or re-trigger falsely — the
+function simply stops returning a combo once nothing in the qualifying
+history is a fail. One concrete consequence: `computeRevivalPlan` did
+*not* need to become a dynamic, outcome-dependent structure after all —
+its output is still exactly the same fixed list generated once upfront
+that it always was (confirmed by a regression check: identical plan
+output whether or not any fails occurred during the run). The escalated
+task lives entirely outside that stored plan, as a parallel derivation
+computed the same way `chunkSet`/`timeline` already are (CLAUDE.md).
 
 ### Explicitly not designed/built here
 
@@ -400,7 +420,6 @@ generally, not just special-case combos.
 - Manual UI for tuning stage lengths / tempo floors / step sizes — stored
   as tunable data so UI can be additive later, but no editing interface is
   planned for this pass.
-- The "how did it feel" fold-in — flagged open above, not decided.
 - A second Tier 1 rung — not built preemptively; ship the single-touch
   version and monitor per the plan above.
 - **How maintenance surfaces in the UI** — still genuinely undecided. The
@@ -448,12 +467,29 @@ implemented) — kept here for the record rather than deleted:
   pattern (confidence override) and the new rough/lost flag mode as the
   override paths, consistent with
   [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch).
+- ~~Does the two-consecutive-Stabilizing-fails signal plug into Revival?~~
+  No — confirmed with the user while building `lib/ladder.js`. Revival's
+  auto-triggers are piece-wide; this signal is chunk-scoped and stays a
+  standalone flag (`needsRelearning`) with no destination yet.
+- ~~Does the existing "how did it feel" effectiveness input survive
+  alongside pass/soft-miss/fail?~~ No — folded into a single "needs more
+  work" fail override, confirmed with the user while wiring logging in.
+  See Stage 4 → Session outcomes.
+- ~~Does ladder stage feed into confidence?~~ No, deliberately, for now —
+  confirmed with the user. `computeAutoConfidence` doesn't read `stage`/
+  `consecutivePasses`; revisit once Stage 3 ("learned") is actually
+  defined against real data rather than guessing at the weighting now.
+- ~~Does a combo's revival escalation fire on a single real fail, or the
+  ladder's two-consecutive-fails threshold?~~ A single real fail —
+  confirmed with the user while building `computeComboEscalations`
+  (`src/lib/revival.js`). See "Combo handling within revival" above.
 
 **Still open:**
 
-- Whether the existing "how did it feel" effectiveness input survives
-  alongside the new pass/soft-miss/fail judgment — see Stage 4 → Session
-  outcomes.
+- What "a short structured re-learning pass" (the response to two
+  consecutive Stabilizing fails) concretely means, now that it's confirmed
+  *not* to be Revival — nothing else in the app defines this mechanic yet.
+  Currently just a data flag (`needsRelearning`) with nothing reading it.
 - Whether a second Tier 1 rung is needed before a chunk reliably survives
   to Stabilizing's first real review — gated on fail-rate data once built,
   not decided preemptively.
@@ -464,7 +500,3 @@ implemented) — kept here for the record rather than deleted:
   per-piece Today tab, but the data-plumbing implication (a live "what's
   due" query replacing the fixed-length `timeline.days[]` index) isn't
   designed — see Stage 4 → Explicitly not designed/built here.
-- Whether a combo's revival escalation (see Stage 4 → Revival
-  auto-triggers) fires on a single real fail on its underlying content, or
-  the two-consecutive-fails threshold used elsewhere in the ladder. Lean
-  is a single fail, not confirmed.

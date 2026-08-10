@@ -306,13 +306,21 @@ than one unified formula.**
   would hide that a piece can fail this test for a reason none of the
   logged-data conditions can see.
 
-**Decision: combos do not get their own revival task by default. Revival
-relearns the underlying content normally (the anchor hard chunk, plus
-whichever neighboring chunk(s) the combo's midpoint-to-midpoint range
-overlaps); if any of that underlying content produces a real fail, the
-combo escalates into its own explicit revival task; if everything
-relearns cleanly, the combo's "lost" flag clears automatically once its
-underlying chunks are done.**
+**Decision (implemented): combos do not get their own revival task by
+default. Revival relearns the underlying content normally (the anchor hard
+chunk, plus whichever neighboring chunk(s) the combo's midpoint-to-midpoint
+range overlaps); if any of that underlying content produces a real fail,
+the combo escalates into its own explicit revival task; if everything
+relearns cleanly, no task is ever generated.**
+
+`computeComboEscalations` and `findComboUnderlyingChunks`
+(`src/lib/revival.js`) implement this, rendered in `RevivalTab.jsx` as a
+"Needs another look" panel. The "lost" flag mentioned below doesn't exist
+yet (that's Pass 6, per the maintenance-ladder build order) — the
+clearing behavior described was designed around that flag existing, but
+what's built now (escalation itself) doesn't depend on it: escalation is
+computed live from session history, so there's nothing to "clear" in the
+first place — see the consequence note below.
 
 - **Why:** This supersedes the current `computeRevivalPlan` code comment
   (`src/lib/revival.js`), which excludes combos from revival statically
@@ -331,35 +339,197 @@ underlying chunks are done.**
   combos their own dedicated revival task — rejected as likely redundant,
   since a combo isn't independent content, it's composite territory
   already covered by relearning its constituent chunks.
-- **Open sub-question, not yet resolved:** does escalation trigger on a
-  single real fail on the underlying content, or the two-consecutive-fails
-  threshold used elsewhere in the ladder for "this wasn't actually
-  consolidated"? Lean is a single fail — revival is already
+- **Resolved: a single real fail is enough**, confirmed with the user —
+  not the ladder's two-consecutive-fails threshold. Revival is already
   "something's wrong" mode by the time it's running, unlike ordinary
-  practice, where that dampening exists to avoid overreacting to one bad
-  day — but not confirmed; don't assume it silently when building.
-- **Architectural consequence:** a revival plan can no longer be a fixed
-  list generated once upfront, the way `computeRevivalPlan` builds it
-  today ([Algorithms.md#revival](Algorithms.md#revival)). It needs a
-  decision point mid-revival, after constituent outcomes are known, that
-  can insert a task that wasn't there at the start — the same shape of
-  problem as the ladder needing persisted, event-driven state instead of a
-  pure derivation (see the ladder-vs-`computeTimeline` note in
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-unifying-idea)).
-  This is the first concrete piece of revival's "not fully specced"
-  internal structure, and whatever replaces or extends
+  practice, where that dampening exists specifically to avoid overreacting
+  to one bad day.
+- **Resolved: escalation is a live derivation, not a task written into
+  `piece.revival.plan`.** `computeComboEscalations(piece, chunkSet)`
+  recomputes on every render from `piece.progress` session history
+  (filtered to `loggedAt >= revival.startedAt`) — it isn't stored
+  anywhere, and `computeRevivalPlan`'s stored output is never mutated to
+  insert it. Confirmed with the user over the alternative (append a new
+  day to `revival.plan.days`): matches this codebase's existing rule that
+  `chunkSet`/`timeline` are pure, unpersisted derivations off `piece`
+  (CLAUDE.md) — a derivation can't drift out of sync with what actually
+  happened, and automatically stops returning a combo once nothing in the
+  qualifying history is a fail, so "the flag clears automatically" (this
+  decision's original framing, written before the "lost" flag it assumed
+  existed was actually built) falls out for free rather than needing an
+  explicit clear step. Rendered in `RevivalTab.jsx` as a separate "Needs
+  another look" panel, not folded into the day-by-day list — so no
+  fabricated "day N+1" that would misleadingly imply it's genuinely
+  scheduled/ordered rather than an urgent flag.
+- **Architectural note, superseded by the above:** the original write-up
+  of this decision assumed a revival plan couldn't stay a fixed list
+  generated once upfront, the way `computeRevivalPlan` builds it
+  ([Algorithms.md#revival](Algorithms.md#revival)) — expecting a decision
+  point mid-revival that could *insert* a task that wasn't there at the
+  start. What got built sidesteps that entirely: `computeRevivalPlan`'s
+  output is still exactly that fixed, once-generated list (confirmed by a
+  regression check — identical output whether or not any fails occurred),
+  and the escalated task lives entirely outside it as a parallel, live
+  derivation. Worth knowing for [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-unifying-idea)'s
+  broader claim that the ladder and revival share "the same shape of
+  problem" needing persisted, event-driven state instead of a pure
+  derivation — the ladder genuinely does (Pass 2's `computeLadderAdvance`
+  writes real state), but revival's combo-escalation piece of that claim
+  turned out not to, once actually built. This is still the first concrete
+  piece of revival's "not fully specced" internal structure, and whatever
+  replaces or extends
   `computeRevivalPlan` needs to account for it generally, not just for
   combo-handling. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#revival-auto-triggers)
   for the full write-up.
 
-**Decision: stage lengths, graduation pass-counts, and tempo floors are
-stored as piece-level tunable data from the start, with no editing UI
-built in this pass.**
+**Decision: stage lengths, graduation pass-counts, tempo floors, and
+practiceBPM ratchet step sizes (`ladderConfig.bpmSteps`) are all stored as
+piece-level tunable data from the start, with no editing UI built yet.**
 
 - **Why:** Keeps a future tuning UI additive rather than requiring a data
   migration later — same rationale as other tunable-but-hand-picked
-  constants in this codebase (see [Research.md](Research.md)).
+  constants in this codebase (see [Research.md](Research.md)). The step
+  sizes were added to this list after the fact (the ladder engine build,
+  `lib/ladder.js`, initially hardcoded them as local constants, matching
+  the doc's original "hand-picked, not a study" framing) — moved into
+  `ladderConfig` once the user asked for them to be tunable too, same as
+  everything else on this list.
+
+**Decision: a real fail costs `practiceBPM` the same 2 BPM as a soft-miss
+or the step a full pass gains — not the ~8–10 BPM pullback originally
+sketched in [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#per-chunk-tempo-target-practicebpm).**
+
+- **Why:** User call, made while reviewing the ladder engine build. The
+  original range was a placeholder guess, not derived from anything; this
+  simplifies the three outcomes to one consistent step size rather than
+  three differently-scaled ones. `ladderConfig.bpmSteps.fail` defaults to
+  `-2`, `.pass` to `2`, `.softMiss` to `-2`.
+- **Consequence:** since it's stored as tunable data (see decision above),
+  a future per-piece override could still reintroduce a steeper fail
+  penalty without a code change if that turns out to matter in practice.
+
+**Decision: Holding's interval-growth math reuses the existing 0.6×/1×/1.4×
+effectiveness multiplier (the same one `adaptiveReviewOffsets` already
+uses) as its *only* growth mechanism — the piece-level
+`holding.intervalGrowthFactor` field from the config's first draft was
+removed, not just left unused.**
+
+- **Why:** [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+  explicitly says Holding's growth should reuse the existing multiplier
+  "rather than introducing a second multiplier system" — a standalone
+  `intervalGrowthFactor` tunable sitting alongside that reused multiplier
+  would have been exactly the duplication the doc warned against, even
+  though it was harmless (unread) as first drafted. Removed once the
+  ladder engine (`lib/ladder.js`) made the redundancy concrete rather than
+  theoretical.
+
+**Decision: a "low effectiveness" full pass while in Holding can make the
+*next* review interval shorter than the one that just elapsed (the 0.6×
+multiplier applies below 1, same as it does for ordinary review), and this
+is intentional, not a bug to guard against.**
+
+- **Why:** Confirmed with the user: if a review is technically a full pass
+  but felt shaky, that's exactly when the next check-in should come
+  *sooner*, not later — an early-warning signal folded into the existing
+  interval math rather than a separate mechanism. Holding otherwise reads
+  as pure growth in the stage table (["expands ~1.5–2× per pass"](Repertoire-Lifecycle.md#the-ladder-three-stages)),
+  which could easily have been read as "never shrinks" — worth recording
+  explicitly since that reading was the more obvious one.
+
+**Decision: the "two consecutive fails while in Stabilizing" signal
+(`needsRelearning` in `lib/ladder.js`) stays a standalone flag on that one
+chunk's ladder state — it is *not* wired into Revival as a fourth
+auto-trigger condition.**
+
+- **Why:** Confirmed with the user. Revival's three documented auto-trigger
+  conditions ([Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers))
+  are all piece-wide (a run-through's stop count, a lost combo/chunks, 60+
+  days of no logging at all); this signal is chunk-scoped, and folding a
+  single-chunk problem into a whole-piece recovery flow was never part of
+  that design. What (if anything) reads this flag — and what "a short
+  structured re-learning pass" (the doc's original phrasing) concretely
+  means — is still undecided; this only resolves that it isn't Revival.
+- **Consequence:** `ChunkProgress` gained a new field,
+  `consecutiveStabilizingFails`, to make this signal computable at all —
+  `consecutivePasses` alone can't distinguish a first fail from a second,
+  since a fail always resets it to 0. Added to the migration in
+  `storage.js` and `Wizard.jsx`'s `defaultPiece()` alongside the ladder
+  engine build. See [Data-Model.md](Data-Model.md#the-piece-object).
+
+**Decision: the old free-standing "how did it feel" 3-tap effectiveness
+input (`EFFECTIVENESS_OPTIONS`) is removed, folded into a single "needs
+more work" checkbox that overrides the objective pass/soft-miss/fail
+judgment straight to `fail`.**
+
+- **Why:** Matches the lean already recorded in
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two)
+  and the wording of the pass that built this ("...pass/soft-miss/fail,
+  with manual override"). The old input overlapped heavily with the new
+  objective judgment; keeping both would mean logging asks the same
+  question twice in different words.
+- **Consequence:** `session.effectiveness` stops being written by new
+  sessions — `session.outcome` ('pass'/'soft-miss'/'fail') is the field
+  going forward. `computeAutoConfidence` (`confidence.js`) and
+  `adaptiveReviewOffsets` (`scheduling.js`) both read `outcome` now instead,
+  via a shared `sessionOutcome()` helper that falls back to mapping old
+  `effectiveness` values for sessions logged before this change (low→fail,
+  good→soft-miss, high→pass — chosen to preserve each value's old
+  0.6/1/1.4 multiplier effect, not as a claim that "good" truly meant
+  "soft-miss"). Nothing recomputes or migrates old sessions in place; they
+  keep reading correctly through the fallback instead.
+
+**Decision: ProgressTab's effectiveness-distribution panel is updated in
+the same pass, not left stale — renamed "Outcome breakdown," charting
+pass/soft-miss/fail instead of low/good/high.**
+
+- **Why:** It reads `session.effectiveness` directly; leaving it
+  untouched after the decision above would mean it silently stops
+  reflecting anything real for every session logged going forward. Small,
+  contained change (`constants.js` gained `SESSION_OUTCOME_META` in place
+  of `EFFECTIVENESS_OPTIONS`; `ProgressTab.jsx` swapped the field it reads
+  and the labels it shows) — confirmed with the user as worth doing now
+  rather than flagging as a gap, given how cheap it was once the fold-in
+  decision above was made.
+
+**Decision: same-day multi-session logging is keyed by a precise
+timestamp (`session.loggedAt`, epoch ms) — every logged attempt is kept as
+its own record, none overwritten by day alone.**
+
+- **Why:** The design notes wanted a semantic Tier-1/due-review/re-attempt
+  keying scheme, but classifying which of those a given log action *is*
+  needs Tier 1/Tier 2 review scheduling — a later, explicitly deferred
+  pass. Timestamp keying is buildable now without guessing at that
+  classification, and doesn't foreclose adding the semantic scheme later
+  (a `loggedAt`-keyed record can still gain a `kind` tag once that exists).
+- **Consequence:** `ChecklistItem.jsx` had to change beyond just the
+  logging form — its "checked" state used to hide the form entirely once
+  a session existed for the day, which would have made a second same-day
+  log unreachable through the UI even though the data model now supports
+  it. The form now stays visible alongside the "Logged: ..." summary, and
+  the mark-done icon becomes an "undo most recent" control rather than a
+  toggle. Discovered by testing in-browser, not anticipated when scoping
+  the pass — worth remembering that a data-layer fix doesn't automatically
+  mean the UI path to exercise it exists.
+- **Known limitation, not addressed here:** undoing a session
+  (`handleUnlogSession`) removes the record but does not roll back the
+  ladder state (`stage`/`practiceBPM`/etc.) that session's outcome already
+  advanced — same "no undo history" spirit as BPM zones and difficulty
+  reassessment (see Data-Model.md's known simplifications).
+
+**Decision: ladder stage/consecutivePasses do not feed into
+`computeAutoConfidence` — confidence and the ladder stay two independent
+signals, at least for now.**
+
+- **Why:** Confirmed with the user, matching this pass's own stated
+  recommendation. Folding stage into confidence would mean guessing at a
+  weighting before Stage 3 ("learned") is actually defined — premature,
+  and avoidable by just not doing it yet. Keeps `computeAutoConfidence`
+  and `computeLadderAdvance` fully independent: one reads `session.outcome`
+  history for its own purposes, the other is driven by the same outcomes
+  through `handleLogSession`, but neither reads the other's derived state.
+- **Revisit when:** Stage 3 ("learned") is actually implemented — see
+  [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
 
 ## UX
 

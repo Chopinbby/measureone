@@ -42,9 +42,14 @@ Holding — the resting stage of the spaced-repetition ladder described in
 Stage 4 below. This replaces the earlier informal, calendar-based reading
 (implicitly, "the plan's `daysToLearn` ran out") with a consolidation-based
 one: a piece that consolidates fast graduates fast, one that doesn't,
-doesn't, regardless of what `daysToLearn` originally guessed. **Not
-implemented yet** — there is no ladder state in the data model today, so
-this definition has nothing to evaluate against until Stage 4 is built.
+doesn't, regardless of what `daysToLearn` originally guessed. **Per-chunk
+ladder state now exists and advances live** — `computeLadderAdvance`
+(`src/lib/ladder.js`) is called from `handleLogSession` (`App.jsx`) on
+every logged session (Pass 2/3 of the maintenance-ladder build). **What's
+still not implemented** is the piece-level rollup itself: nothing yet
+queries "is every chunk's `stage` at `holding`" to actually compute a
+piece's "learned" flag — see
+[Data-Model.md](Data-Model.md#known-simplifications).
 
 `computeProgressTier` (buckets a chunk by its most recent session's
 clean-rep count) and `computeConfidence` (continuous 0–100 score) are
@@ -128,8 +133,14 @@ practice investment — this is the direct mechanism behind the
 ["time invested should compound"](Product-Principles.md#time-invested-should-compound-over-a-musicians-lifetime)
 principle. The review-interval model is now fully designed (decision
 records: [Decisions.md](Decisions.md#spaced-repetition--maintenance);
-evidence behind several specific choices below:
-[Research.md](Research.md)); none of it is implemented yet.
+evidence behind several specific choices below: [Research.md](Research.md)).
+**The stage-math engine itself is built and wired into logging** (see "The
+ladder: three stages" below); what's *not* built is everything that would let a chunk's
+ladder state actually surface to the learner as "here's what's due today":
+Tier 1/Tier 2 review scheduling, a live "what's due" query, the
+post-run-through rough/lost flag mode, and any change to `computeTimeline`
+itself. See each subsection below for what's actually implemented today
+vs. still just designed.
 
 ### The unifying idea
 
@@ -262,8 +273,9 @@ evidence.
 
 ### Per-chunk tempo target: `practiceBPM`
 
-Planned as a new field, distinct from the existing `targetBPM`
-([Data-Model.md](Data-Model.md)):
+**Implemented.** A field distinct from the existing `targetBPM`
+([Data-Model.md](Data-Model.md)), live in `ChunkProgress` and stepped by
+`computeLadderAdvance` on every logged session:
 
 - `targetBPM` = the eventual goal — performance tempo, or a deliberately
   inflated overlearn tempo chosen on purpose.
@@ -279,11 +291,17 @@ Planned as a new field, distinct from the existing `targetBPM`
   with the user while building the ladder engine (`lib/ladder.js`): a real
   fail should cost the same as the other two outcomes, not a distinctly
   larger penalty. See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
-- The logging UI's primary action becomes "attempt N clean reps at
-  `practiceBPM`" → pass/soft-miss/fail, rather than free-text BPM entry by
-  default. A lightweight manual override stays available for someone who
-  exceeds the recommendation, so Progress's tempo-trend sparkline still
-  gets real data when someone pushes past what was asked.
+- **What actually shipped, different from the original sketch above:**
+  `ChecklistItem.jsx` kept free-text "clean reps" and "BPM achieved"
+  `NumberInput` fields rather than replacing them with a fixed "attempt at
+  `practiceBPM`" action — `practiceBPM` (when set) only shows as the BPM
+  field's placeholder/suggestion, and as a "Practice tempo: N BPM" tip
+  line. `classifySessionOutcome` reads whatever the learner actually typed
+  against `practiceBPM`, so the free-text field already doubles as the
+  "lightweight manual override" this bullet asked for — a separate
+  override control was never needed. Progress's tempo-trend sparkline
+  reads `currentBPM` (last logged tempo) either way, so it gets real data
+  regardless of whether the typed value matched `practiceBPM`.
 
 ### Session outcomes: three tiers, not two
 

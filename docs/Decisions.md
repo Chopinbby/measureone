@@ -286,12 +286,17 @@ full pass, soft miss, real fail — and add `practiceBPM`, a per-chunk
   (e.g. a deliberate overlearn tempo) produced repeated "almost but not
   quite" sessions that read as failure when the target itself was fine,
   just ungraded incrementally — the "plateau via frustration" problem.
-  `practiceBPM` ratchets incrementally (+2 full pass / −2 soft miss / ~−8
-  to −10 real fail) so tempo progress is graded against where the learner
-  actually is, not the eventual goal.
-- **Known open item, not decided:** whether the existing "how did it feel"
-  effectiveness input survives as a separate input alongside the new
-  pass/soft-miss/fail judgment — see Open questions below.
+  `practiceBPM` ratchets incrementally so tempo progress is graded against
+  where the learner actually is, not the eventual goal — originally
+  sketched here as +2 full pass / −2 soft miss / ~−8 to −10 real fail, but
+  the real fail step shipped at −2 as well, the same magnitude as the
+  other two; see the dedicated decision on this later in this section
+  ("a real fail costs `practiceBPM` the same 2 BPM as a soft-miss").
+- **Resolved:** the existing "how did it feel" effectiveness input does
+  not survive as a separate input — folded into a single fail-only
+  override instead. See the dedicated decision on this later in this
+  section ("the old free-standing 'how did it feel' 3-tap effectiveness
+  input... is removed").
 
 **Decision: revival gets three independent, separately-checked auto-trigger
 conditions (stop count > 5 on a run-through; a combo or 2+ regular chunks
@@ -382,6 +387,42 @@ first place — see the consequence note below.
   combo-handling. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#revival-auto-triggers)
   for the full write-up.
+
+**Decision: `computeComboEscalations` judges each underlying chunk strictly
+by its own latest qualifying session, never by a single global
+"most recent session across everything" — took three iterations to land
+correctly, worth recording why.**
+
+- **Why:** the first version pooled every underlying chunk's sessions
+  together with the combo's own dedicated-task sessions and picked one
+  globally-newest session across all of them to decide pass/fail. That's
+  wrong whenever the chunks disagree: if chunk A failed and chunk B was
+  *later* passed, B's unrelated pass incorrectly cleared A's still-standing
+  failure — the combo would stop showing as "Needs another look" even
+  though the content that actually failed was never relearned. A second
+  version (in reaction to that bug) swung to the opposite failure mode:
+  scanning for "any fail ever" during the revival run, with no recency
+  check at all — this fixed the false-clear but introduced a new bug, a
+  combo pinned permanently escalated for the rest of the run even after
+  the chunk that failed was subsequently relearned cleanly, because one
+  early fail could never be outweighed by anything later.
+- **Landed on:** each underlying chunk is judged independently by its own
+  latest qualifying session (`latestQualifyingSession`, filtered to
+  `loggedAt >= revival.startedAt`) — never compared against a different
+  chunk's timestamp. The combo's own dedicated-task sessions get a
+  separate, distinct role rather than being pooled in as just another
+  source: a fail there always (re-)escalates same as any underlying
+  chunk's fail, and a pass there is the *one* thing allowed to override a
+  still-failing underlying chunk — but only if that pass is more recent
+  than every underlying chunk's own latest fail, so a stale combo-task
+  pass logged before a chunk's most recent failure can't paper over it.
+  See `src/lib/revival.js`'s `computeComboEscalations` — the code comment
+  there records this same history in more implementation detail.
+- **Consequence:** this is why `computeComboEscalations` is structured as
+  per-chunk `latestQualifyingSession` lookups plus a distinct combo-task
+  check, rather than one pooled-and-sorted session list — that shape looks
+  more complex than "just check the newest session," but the simpler shape
+  is the one that was tried twice and found wrong.
 
 **Decision: stage lengths, graduation pass-counts, tempo floors, and
 practiceBPM ratchet step sizes (`ladderConfig.bpmSteps`) are all stored as
@@ -624,6 +665,36 @@ match, instead of always creating a new piece.**
   device/session that never had the chance to collide on id but is
   obviously "the same song."
 
+**Decision: on import, a chunk's ladder state (stage, consecutive-pass
+streak, current practice tempo, next review date) always keeps the
+existing piece's value over the imported one, rather than picking
+whichever is actually more advanced.**
+
+- **Why:** `mergeProgress` (`lib/storage.js`) was found silently
+  regressing this exact state — re-importing an older backup rolled a
+  chunk's stage/tempo/etc. back to whatever that old file had, even when
+  the piece had since progressed further in the app, with no warning
+  shown. Unlike `minutesPerDay` or similar fields (where an intentional
+  hand-edit in the export file is expected to win on re-import), there's
+  no legitimate case for hand-editing ladder state directly in an
+  exported JSON file, so protecting it outright — rather than letting an
+  import's value win whenever it's merely "present," the way
+  `preferPresent` treats other fields — was judged the safer default.
+- **Known issue, deliberately deferred: this is a blunt rule, not real
+  conflict resolution.** It fixes the common case (re-importing an older
+  copy of the *same* piece) but "existing always wins" is wrong for the
+  opposite case — restoring a backup that's genuinely more advanced than
+  what's on this device (e.g. importing from a second device practiced on
+  more recently). In that case the import's more-advanced state is
+  silently discarded instead, still with no warning shown either way. The
+  correct fix needs the app to actually know which side is ahead — most
+  likely by rebuilding ladder state from the merged, deduplicated session
+  history (`sessions` already merges correctly today) rather than
+  trusting either side's stored snapshot outright — and/or a real
+  "choose which history to keep" step shown to the user when both sides
+  have genuinely diverged, instead of a silent rule in either direction.
+  Not built; planned for a later pass.
+
 ## Multi-movement works
 
 **Decision: a multi-movement work is a grouping label over ordinary pieces —
@@ -783,16 +854,6 @@ oversight to silently fix; surface it instead.
   (`piece.targetDate`, an estimated finish date in "minutes per day" mode —
   see [Algorithms.md](Algorithms.md#timeline--scheduler)); worth revisiting
   whether Progress should follow suit for consistency.
-- **Does the "how did it feel" effectiveness input survive as a separate
-  input once the spaced-repetition ladder's pass/soft-miss/fail judgment
-  exists?** Leaning toward folding it into a single optional
-  override-toward-fail, not locked in. Worth knowing this is a bigger
-  behavior change than it sounds: today `ChecklistItem`
-  (`src/components/tabs/today/ChecklistItem.jsx`) hard-gates the log
-  button on it — `canLog = reps !== "" && bpm !== "" && !!feel` — so
-  "make it optional" means removing a submit-blocking requirement, not
-  just relabeling a field. See
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two).
 - **Does the ladder's new rough/lost flag merge with the existing
   `progress[id].weakSpot`?** Both are manual "this chunk needs attention"
   flags with real overlap; not reconciled. See
@@ -807,3 +868,13 @@ oversight to silently fix; surface it instead.
   "what's due" query replacing `timeline.days[]` indexing) that isn't
   designed either. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
+- **Import/backup merge conflicts are resolved by a fixed rule, not a real
+  user choice.** When both the existing piece and an imported backup have
+  progress on the same chunk, ladder state (stage, tempo, next review
+  date) always keeps the existing value — correct for the common
+  "re-importing an older copy of the same piece" case, silently wrong for
+  the opposite one (restoring a genuinely more-advanced backup from
+  another device). No warning is shown either way today. Planned fix: a
+  "choose which history to keep" step surfaced to the user when the two
+  sides have actually diverged, rather than a silent rule in either
+  direction — not built yet. See [Data model](#data-model) above.

@@ -5,8 +5,10 @@
 /*  docs/Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built */
 /*  ("The ladder: three stages" / "Session outcomes: three tiers").    */
 /*  This is a sibling to computeConfidenceAsOf (confidence.js): a pure */
-/*  derivation callable in isolation, not wired into handleLogSession, */
-/*  the scheduler, or any UI yet. Nothing in the app calls this file.  */
+/*  derivation, no clock reads or storage access. Called from          */
+/*  handleLogSession (App.jsx) on every logged session, which persists */
+/*  the result — not wired into the scheduler or surfaced in any UI    */
+/*  yet (nothing reads nextDueDate to show "what's due").              */
 /*                                                                     */
 /*  Reads the ladderConfig shape from storage.js's DEFAULT_LADDER_CONFIG —  */
 /*  see that file for the piece-level tunable stage lengths / graduation   */

@@ -70,15 +70,24 @@ decision (see [Decisions.md](Decisions.md)):
    `piece.notes`, which is about the piece as a whole, not a specific
    session).
 2. **Long-term / maintenance scheduling** — what happens after a piece is
-   "learned." **Fully designed, not yet implemented**: a continuous
-   spaced-repetition ladder (Stabilizing → Settling → Holding) every
-   chunk/transition/combo rides after introduction, a Tier 1/Tier 2 split
-   resolving budget contention during the front-loaded introduction
-   window, a three-tier session outcome (full pass/soft miss/real fail)
-   with a per-chunk `practiceBPM` ratchet, redesigned post-run-through
-   logging (stop count + a rough/lost flag), and three independent
-   auto-triggers for offering Revival. This is also what resolves "what
-   does learned mean" (Stage 3) — see
+   "learned." **Fully designed; the stage-math engine is built and live**:
+   a continuous spaced-repetition ladder (Stabilizing → Settling →
+   Holding) that every chunk/transition/combo now actually advances
+   along, driven by a three-tier session outcome (full pass/soft
+   miss/real fail) with a per-chunk `practiceBPM` ratchet
+   (`computeLadderAdvance`, `src/lib/ladder.js`, called from
+   `handleLogSession` on every logged session) — see
+   [Data-Model.md](Data-Model.md#the-piece-object) and
+   [Algorithms.md#session-outcomes--the-maintenance-ladder](Algorithms.md#session-outcomes--the-maintenance-ladder).
+   **Still not implemented**: a Tier 1/Tier 2 split resolving budget
+   contention during the front-loaded introduction window, a live "what's
+   due" query so any of this actually surfaces to the learner, redesigned
+   post-run-through logging (stop count + a rough/lost flag), and the
+   three independent auto-triggers for offering Revival (though combo
+   escalation *within* an already-triggered revival is built — see
+   [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)).
+   This is also what resolves "what does learned mean" (Stage 3), once
+   something queries "is every chunk's stage at Holding" — see
    [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
    for the full design and [Decisions.md](Decisions.md#spaced-repetition--maintenance)
    for the decision records. Repertoire rotation (multiple pieces

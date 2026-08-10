@@ -35,13 +35,15 @@ comments.
 | `REQUIRED_REPS` | easy: 3, medium: 4, hard: 5 | confidence formula | Motor-learning research on repetitions-to-consolidation, likely instrument- and passage-dependent |
 | progress-tier thresholds | ≥5 comfortable, ≥10 mastered | `computeProgressTier` | Same, and also: whether rep-count alone is even the right single signal (see [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)) |
 
-## Spaced-repetition ladder (designed, not yet implemented)
+## Spaced-repetition ladder (stage math built; UI surfacing not yet implemented)
 
 Design: [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
 Decision records: [Decisions.md#spaced-repetition--maintenance](Decisions.md#spaced-repetition--maintenance).
-Not required reading to implement the design, but preserved here since
-it's the actual justification for several specific choices rather than
-pure intuition:
+The stage-transition math (`computeLadderAdvance`, `lib/ladder.js`) is
+built and wired into logging; Tier 1/Tier 2 review scheduling and a live
+"what's due" query are not. Not required reading to implement what's
+left, but preserved here since it's the actual justification for several
+specific choices rather than pure intuition:
 
 - **Why the Tier 1 first-touch review exists at all**: a single
   unreinforced exposure has a short shelf life — general forgetting-curve

@@ -1,7 +1,7 @@
 import { Sparkline } from "../Sparkline";
 import { formatRange } from "../../lib/utils";
-import { EFFECTIVENESS_OPTIONS } from "../../lib/constants";
-import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM } from "../../lib/confidence";
+import { SESSION_OUTCOME_META } from "../../lib/constants";
+import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
 
 export function ProgressTab({ piece, chunks, timeline, currentDay }) {
   const practiceChunks = chunks.filter((c) => c.kind === "section");
@@ -39,13 +39,15 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
     })
     .filter((t) => t.sessions.length >= 2 && t.targetBPM);
 
-  // #4 Effectiveness calibration — % distribution of self-reported feel
-  // across every logged session in the piece.
+  // #4 Outcome breakdown — % distribution of pass/soft-miss/fail across
+  // every logged session in the piece. Replaces the old free-standing
+  // "how did it feel" self-report, folded into this same judgment — see
+  // docs/Decisions.md#spaced-repetition--maintenance. sessionOutcome()
+  // also covers sessions logged before that change.
   const allSessions = Object.values(piece.progress).flatMap((entry) => entry.sessions || []);
-  const effectivenessColors = { low: "var(--brick)", good: "var(--brass)", high: "var(--teal)" };
-  const effectivenessBreakdown = EFFECTIVENESS_OPTIONS.map((opt) => {
-    const count = allSessions.filter((s) => s.effectiveness === opt.value).length;
-    return { ...opt, count, pct: allSessions.length ? Math.round((count / allSessions.length) * 100) : 0 };
+  const outcomeBreakdown = Object.entries(SESSION_OUTCOME_META).map(([value, meta]) => {
+    const count = allSessions.filter((s) => sessionOutcome(s) === value).length;
+    return { value, ...meta, count, pct: allSessions.length ? Math.round((count / allSessions.length) * 100) : 0 };
   });
 
   // Actual vs. planned progress — how many practice chunks were planned to
@@ -177,16 +179,16 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
       </div>
 
       <div className="panel">
-        <h3>Effectiveness calibration</h3>
+        <h3>Outcome breakdown</h3>
         {allSessions.length === 0 ? (
           <p className="wizard-hint">Nothing logged yet — check items off in Today's Practice.</p>
         ) : (
           <div className="analytics-bars">
-            {effectivenessBreakdown.map((e) => (
-              <div key={e.value} className="analytics-bar-row">
-                <span className="analytics-bar-label">{e.label} ({e.count})</span>
-                <div className="analytics-bar-track"><div className="analytics-bar-fill" style={{ width: `${e.pct}%`, background: effectivenessColors[e.value] }} /></div>
-                <span className="mono">{e.pct}%</span>
+            {outcomeBreakdown.map((o) => (
+              <div key={o.value} className="analytics-bar-row">
+                <span className="analytics-bar-label">{o.label} ({o.count})</span>
+                <div className="analytics-bar-track"><div className="analytics-bar-fill" style={{ width: `${o.pct}%`, background: o.color }} /></div>
+                <span className="mono">{o.pct}%</span>
               </div>
             ))}
           </div>

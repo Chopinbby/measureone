@@ -22,6 +22,7 @@ import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
+import { computeLadderAdvance } from "./lib/ladder";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
@@ -340,25 +341,97 @@ export default function App() {
     });
   };
 
-  const handleLogSession = (chunkId, day, cleanReps, bpm, effectiveness, durationSeconds) => {
+  // `sessionInput` = { cleanReps, bpm, outcome, durationSeconds, targetBPM }
+  // — outcome is already classified by the caller (classifySessionOutcome,
+  // lib/confidence.js), since that needs the full chunk (difficultyLabel)
+  // and the piece's bpmZones, neither of which this handler has from just
+  // a chunkId. targetBPM is the caller's already-resolved effective target
+  // (entry.targetBPM || getDefaultTargetBPM(...)), needed here for
+  // lib/ladder.js's tempo-floor gating.
+  //
+  // Sessions are appended, never overwritten by day alone — logging the
+  // same chunk twice on one plan-day (e.g. an early touch, then a later
+  // re-attempt) now produces two distinct records, keyed by `loggedAt` (a
+  // precise timestamp). See PR summary: this is a placeholder scheme, not
+  // the semantic Tier-1/due-review/re-attempt keying the design doc
+  // eventually wants — that needs Tier 1/Tier 2 scheduling, a later,
+  // explicitly deferred pass.
+  const handleLogSession = (chunkId, day, sessionInput) => {
+    const { cleanReps, bpm, outcome, durationSeconds, targetBPM } = sessionInput;
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId] || { doneDays: [] };
       const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
-      const sessions = (prevEntry.sessions || []).filter((s) => s.day !== day);
-      sessions.push({ day, cleanReps, bpm, effectiveness, durationSeconds });
-      progress[chunkId] = { ...prevEntry, doneDays, sessions, currentBPM: bpm };
-      return { ...p, progress };
+      const loggedDate = todayISODate();
+      const loggedAt = Date.now();
+      const sessions = [...(prevEntry.sessions || []), { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds }];
+
+      // Ladder entry/Tier-1 seeding isn't built yet (a later, deferred
+      // pass) — without it practiceBPM would stay null forever, since
+      // computeLadderAdvance has nothing to step from. Seeding it to
+      // whatever tempo was just attempted, the first time only, is a
+      // placeholder minimal enough to keep this pass testable; see PR
+      // summary for why this isn't a designed entry mechanic.
+      const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : bpm;
+
+      // computeLadderAdvance's Holding-stage interval math (lib/ladder.js)
+      // still reads an `effectiveness` tier ('low'/'good'/'high') to modulate
+      // how fast the review gap grows — the reverse of confidence.js's
+      // sessionOutcome() legacy-session fallback (fail<->low, pass<->high,
+      // soft-miss<->good). Without this, effectiveness was always undefined,
+      // the multiplier always landed on the neutral case (1x), and a
+      // chunk's Holding interval could never grow past its 14-day starting
+      // point even after repeated clean passes — a real bug, not the
+      // intentionally-neutral placeholder an earlier version of this
+      // comment described.
+      const effectiveness = outcome === "fail" ? "low" : outcome === "pass" ? "high" : "good";
+
+      const advance = computeLadderAdvance(
+        {
+          stage: prevEntry.stage,
+          consecutivePasses: prevEntry.consecutivePasses,
+          consecutiveStabilizingFails: prevEntry.consecutiveStabilizingFails,
+          practiceBPM: seededPracticeBPM,
+          targetBPM,
+          tier1Done: prevEntry.tier1Done,
+        },
+        { result: outcome, effectiveness, asOfDate: loggedDate },
+        p.ladderConfig
+      );
+
+      progress[chunkId] = {
+        ...prevEntry,
+        doneDays,
+        sessions,
+        currentBPM: bpm,
+        stage: advance.stage,
+        consecutivePasses: advance.consecutivePasses,
+        consecutiveStabilizingFails: advance.consecutiveStabilizingFails,
+        practiceBPM: advance.practiceBPM,
+        nextDueDate: advance.nextDueDate,
+        tier1Done: advance.tier1Done,
+      };
+      return { ...p, progress, lastLoggedAt: loggedDate };
     });
   };
 
+  // Removes only the most recently logged session for `day`, not every
+  // session that day — multiple sessions can now legitimately share a
+  // plan-day (see handleLogSession above). Does not roll back the ladder
+  // state that session's outcome advanced (stage/practiceBPM/etc.) — same
+  // "no undo history" limitation already documented for BPM zones and
+  // difficulty reassessment (Data-Model.md).
   const handleUnlogSession = (chunkId, day) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId];
       if (!prevEntry) return p;
-      const doneDays = (prevEntry.doneDays || []).filter((d) => d !== day);
-      const sessions = (prevEntry.sessions || []).filter((s) => s.day !== day);
+      const sessions = [...(prevEntry.sessions || [])];
+      const lastIdx = sessions.map((s) => s.day).lastIndexOf(day);
+      if (lastIdx === -1) return p;
+      sessions.splice(lastIdx, 1);
+      const stillHasDay = sessions.some((s) => s.day === day);
+      const doneDays = stillHasDay ? prevEntry.doneDays : (prevEntry.doneDays || []).filter((d) => d !== day);
       progress[chunkId] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress };
     });
@@ -1041,7 +1114,7 @@ const CSS = `
 .log-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .log-row label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-soft); font-weight: 600; }
 .log-row input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
-.feel-row { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--ink-soft); font-weight: 600; margin-top: 8px; }
+.fail-override-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-soft); font-weight: 600; margin-top: 8px; }
 .primary-btn.sm { padding: 7px 14px; font-size: 12.5px; }
 
 .view-all-list { display: flex; flex-direction: column; gap: 14px; }

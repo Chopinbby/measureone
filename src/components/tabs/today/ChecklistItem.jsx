@@ -1,19 +1,25 @@
 import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
 import { formatRange, formatDuration } from "../../../lib/utils";
-import { ROLE_LABEL, DIFFICULTY_META, REQUIRED_REPS, EFFECTIVENESS_OPTIONS } from "../../../lib/constants";
-import { computeConfidence, suggestMethods } from "../../../lib/confidence";
+import { ROLE_LABEL, DIFFICULTY_META, REQUIRED_REPS, SESSION_OUTCOME_META } from "../../../lib/constants";
+import { computeConfidence, suggestMethods, classifySessionOutcome, sessionOutcome, getDefaultTargetBPM } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
 
 export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession, tempoLadder, memoryAnchor }) {
   const entry = piece.progress[chunk.id] || {};
   const checked = (entry.doneDays || []).includes(day);
-  const session = (entry.sessions || []).find((s) => s.day === day);
+  // Multiple sessions can now legitimately share a plan-day (a Tier 1
+  // touch, a due review, a re-attempt) — this surface shows/undoes just
+  // the most recent one for `day`, but keeps the log form available even
+  // once something's logged, so a second attempt the same day is actually
+  // reachable rather than gated behind undoing the first.
+  const sessionsToday = (entry.sessions || []).filter((s) => s.day === day);
+  const session = sessionsToday[sessionsToday.length - 1];
   const conf = computeConfidence(chunk, piece, day);
   const tips = suggestMethods(chunk, conf);
   const [reps, setReps] = useState("");
   const [bpm, setBpm] = useState("");
-  const [feel, setFeel] = useState("");
+  const [manualFail, setManualFail] = useState(false);
   const [timerRunning, setTimerRunning] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
 
@@ -23,61 +29,51 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
     return () => clearInterval(id);
   }, [timerRunning]);
 
-  const canLog = reps !== "" && bpm !== "" && !!feel;
+  const canLog = reps !== "" && bpm !== "";
+  const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
+  const practiceBPM = entry.practiceBPM ?? null;
+  const suggestedReps = REQUIRED_REPS[chunk.difficultyLabel];
+  const outcomeMeta = session && SESSION_OUTCOME_META[sessionOutcome(session)];
 
   const submitLog = () => {
     if (!canLog) return;
-    onLogSession(chunk.id, day, Number(reps), Number(bpm), feel, durationSeconds);
+    const requiredReps = REQUIRED_REPS[chunk.difficultyLabel] || 4;
+    const priorSessions = entry.sessions || [];
+    const previousOutcome = priorSessions.length ? sessionOutcome(priorSessions[priorSessions.length - 1]) : null;
+    const cleanReps = Number(reps);
+    const bpmAttempted = Number(bpm);
+    const outcome = classifySessionOutcome({
+      cleanReps,
+      bpm: bpmAttempted,
+      requiredReps,
+      practiceBPM,
+      manualFail,
+      previousOutcome,
+    });
+    onLogSession(chunk.id, day, { cleanReps, bpm: bpmAttempted, outcome, durationSeconds, targetBPM });
     setReps("");
     setBpm("");
-    setFeel("");
+    setManualFail(false);
     setDurationSeconds(0);
     setTimerRunning(false);
   };
 
-  if (checked) {
-    const feltLabel = session && EFFECTIVENESS_OPTIONS.find((o) => o.value === session.effectiveness);
-    return (
-      <div className="checklist-item checked">
-        <button className="checklist-check" onClick={() => onUnlogSession(chunk.id, day)} aria-label="Undo">
+  return (
+    <div className={`checklist-item ${checked ? "checked" : ""}`}>
+      {checked ? (
+        <button className="checklist-check" onClick={() => onUnlogSession(chunk.id, day)} aria-label="Undo most recent log">
           <Check size={13} />
         </button>
-        <div className="checklist-body">
-          <div className="checklist-row">
-            {chunk.label && <span className="checklist-label">{chunk.label}</span>}
-            <span className="mono">{formatRange(chunk.start, chunk.end)}</span>
-            <span className={`tag tag-${role}`}>{ROLE_LABEL[role]}</span>
-            <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
-            <span className="conf-pill mono">{conf}%</span>
-          </div>
-          {session && (
-            <p className="tip-line">
-              Logged: {session.cleanReps} consecutive clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM
-              {session.durationSeconds ? ` in ${formatDuration(session.durationSeconds)}` : ""}
-              {feltLabel ? ` — ${feltLabel.label.toLowerCase()}` : ""}
-            </p>
-          )}
-          {memoryAnchor && <p className="tip-line"><strong>Memory anchor:</strong> {memoryAnchor}</p>}
-          {tempoLadder && tempoLadder.length > 0 && (
-            <p className="tip-line">Tempo ladder: {tempoLadder.join(" → ")} BPM</p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const suggestedReps = REQUIRED_REPS[chunk.difficultyLabel];
-
-  return (
-    <div className="checklist-item">
-      <button
-        type="button"
-        className="checklist-check-empty"
-        disabled={!canLog}
-        aria-label="Mark done"
-        title={canLog ? "Mark done" : "Fill in reps, BPM, and how it felt first"}
-        onClick={submitLog}
-      />
+      ) : (
+        <button
+          type="button"
+          className="checklist-check-empty"
+          disabled={!canLog}
+          aria-label="Mark done"
+          title={canLog ? "Mark done" : "Fill in reps and BPM first"}
+          onClick={submitLog}
+        />
+      )}
       <div className="checklist-body">
         <div className="checklist-row">
           {chunk.label && <span className="checklist-label">{chunk.label}</span>}
@@ -86,8 +82,21 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
           <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
           <span className="conf-pill mono">{conf}%</span>
         </div>
-        <p className="tip-line">Try: {tips.join(", ")}</p>
+        {session && (
+          <p className="tip-line">
+            Logged: {session.cleanReps} consecutive clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM
+            {session.durationSeconds ? ` in ${formatDuration(session.durationSeconds)}` : ""}
+            {outcomeMeta ? ` — ${outcomeMeta.label}` : ""}
+            {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
+          </p>
+        )}
+        {!session && <p className="tip-line">Try: {tips.join(", ")}</p>}
         {memoryAnchor && <p className="tip-line"><strong>Memory anchor:</strong> {memoryAnchor}</p>}
+        {practiceBPM != null ? (
+          <p className="tip-line">Practice tempo: {practiceBPM} BPM</p>
+        ) : targetBPM ? (
+          <p className="tip-line">Target tempo: {targetBPM} BPM</p>
+        ) : null}
         {tempoLadder && tempoLadder.length > 0 && (
           <p className="tip-line">Tempo ladder: {tempoLadder.join(" → ")} BPM</p>
         )}
@@ -114,25 +123,24 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
         <div className="log-row">
           <label>
             <span>Clean reps (aim {suggestedReps})</span>
-            <input type="number" min={0} value={reps} onChange={(e) => setReps(e.target.value)} placeholder={String(suggestedReps)} />
+            <NumberInput value={reps} min={0} onCommit={(n) => setReps(n)} placeholder={String(suggestedReps)} />
           </label>
           <label>
             <span>BPM achieved</span>
-            <input type="number" min={20} value={bpm} onChange={(e) => setBpm(e.target.value)} placeholder="e.g. 88" />
+            <NumberInput
+              value={bpm}
+              min={20}
+              onCommit={(n) => setBpm(n)}
+              placeholder={practiceBPM != null ? String(practiceBPM) : targetBPM ? String(targetBPM) : "e.g. 88"}
+            />
           </label>
         </div>
-        <div className="feel-row">
-          <span>How did it feel?</span>
-          <div className="segmented">
-            {EFFECTIVENESS_OPTIONS.map((o) => (
-              <button key={o.value} className={feel === o.value ? "active" : ""} onClick={() => setFeel(o.value)}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <label className="fail-override-row">
+          <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />
+          <span>Needs more work (mark as a fail regardless of reps)</span>
+        </label>
         <button className="primary-btn sm" disabled={!canLog} style={{ marginTop: 8, alignSelf: "flex-start" }} onClick={submitLog}>
-          Log practice
+          {checked ? "Log another attempt" : "Log practice"}
         </button>
       </div>
     </div>

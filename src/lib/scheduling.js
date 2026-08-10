@@ -1,6 +1,7 @@
 import { clamp } from "./utils";
 import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
 import { generateAllChunks } from "./chunking";
+import { sessionOutcome } from "./confidence";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -88,14 +89,17 @@ export function reconcileMinutesPerDaySchedule(piece) {
 /* ------------------------------------------------------------------ */
 
 // Spaced review defaults to [1,3,7,14] days after a chunk is introduced, but
-// bends based on the learner's own feedback on their most recent session:
-// "needs more work" pulls the next review closer, "too easy" pushes it out.
-// This is the first step toward the interval engine adapting on its own.
+// bends based on the outcome of the most recent logged session: a real fail
+// pulls the next review closer, a full pass pushes it out. Was keyed off the
+// old free-standing "how did it feel" self-report (low/good/high); now reads
+// the objective pass/soft-miss/fail outcome instead (sessionOutcome() also
+// covers sessions logged before that change). This is the first step toward
+// the interval engine adapting on its own.
 export function adaptiveReviewOffsets(chunk, progress) {
   const sessions = ((progress || {})[chunk.id] || {}).sessions || [];
   if (!sessions.length) return REVIEW_OFFSETS;
-  const last = sessions[sessions.length - 1];
-  const factor = last.effectiveness === "low" ? 0.6 : last.effectiveness === "high" ? 1.4 : 1;
+  const outcome = sessionOutcome(sessions[sessions.length - 1]);
+  const factor = outcome === "fail" ? 0.6 : outcome === "pass" ? 1.4 : 1;
   return REVIEW_OFFSETS.map((o) => Math.max(1, Math.round(o * factor)));
 }
 

@@ -10,6 +10,44 @@ export function getDefaultTargetBPM(piece, chunk) {
   return piece.targetBPM || null;
 }
 
+// Classifies one logged attempt into the three-tier outcome model
+// (Repertoire-Lifecycle.md's "Session outcomes: three tiers, not two"):
+// - full pass: required clean reps hit, at/above the tempo currently asked
+//   for (practiceBPM). manualFail always wins regardless.
+// - real fail: zero clean reps (a genuine miss, not "some but not enough"),
+//   OR a manual "needs more work" override (self-report escape hatch — the
+//   folded-in replacement for the old separate "how did it feel" input,
+//   catching what the numbers alone can't: memory slips, poor technique
+//   despite clean reps), OR a repeat soft-miss right after the previous one
+//   (repeated soft-misses even after backing off — see the doc).
+// - soft-miss: some clean reps, just not enough (or not at the asked
+//   tempo) to count as a full pass — the default middle case.
+// `practiceBPM` may be null (chunk not yet seeded onto the ladder); a null
+// floor is treated as already cleared, same convention as lib/ladder.js.
+export function classifySessionOutcome({ cleanReps, bpm, requiredReps, practiceBPM, manualFail, previousOutcome }) {
+  if (manualFail) return "fail";
+  if (!cleanReps || cleanReps <= 0) return "fail";
+  const clearsTempo = practiceBPM == null || bpm >= practiceBPM;
+  if (cleanReps >= requiredReps && clearsTempo) return "pass";
+  if (previousOutcome === "soft-miss") return "fail";
+  return "soft-miss";
+}
+
+// Sessions logged before the pass/soft-miss/fail model only carry
+// `effectiveness` ('low'/'good'/'high'), not `outcome` — this maps between
+// them so history logged before this model shipped keeps contributing real
+// signal to confidence/scheduling/classification instead of reading as
+// silently neutral. Not a semantic claim that "good" truly meant
+// "soft-miss" — just the mapping that preserves each value's old 0.6/1/1.4
+// multiplier effect (see adaptiveReviewOffsets, scheduling.js).
+export function sessionOutcome(session) {
+  if (session.outcome) return session.outcome;
+  if (session.effectiveness === "low") return "fail";
+  if (session.effectiveness === "high") return "pass";
+  if (session.effectiveness === "good") return "soft-miss";
+  return null;
+}
+
 // Auto-computed confidence blends: how many clean reps were actually logged
 // relative to the target (not just that a session happened), how close the
 // achieved tempo was to the goal BPM, recency of last practice, the
@@ -44,9 +82,9 @@ export function computeAutoConfidence(chunk, piece, currentDay) {
   let score = repsScore + recencyScore + tempoScore;
 
   if (sessions.length) {
-    const last = sessions[sessions.length - 1];
-    if (last.effectiveness === "low") score *= 0.8;
-    else if (last.effectiveness === "high") score *= 1.15;
+    const outcome = sessionOutcome(sessions[sessions.length - 1]);
+    if (outcome === "fail") score *= 0.8;
+    else if (outcome === "pass") score *= 1.15;
   }
 
   if (chunk.difficultyLabel === "hard") score *= 0.9;

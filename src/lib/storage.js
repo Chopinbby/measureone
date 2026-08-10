@@ -1,5 +1,5 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
-import { todayISODate } from "./utils";
+import { todayISODate, addDaysISO } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
 
 /* ------------------------------------------------------------------ */
@@ -8,7 +8,86 @@ import { reconcileMinutesPerDaySchedule } from "./scheduling";
 
 const CURRENT_SCHEMA_VERSION = 1;
 
-function validateAndMigratePiece(piece) {
+// Default tunable config for the spaced-repetition maintenance ladder
+// (Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built) —
+// stage lengths, graduation pass-counts, and tempo floors. Hand-picked
+// midpoints of the ranges that doc describes, same spirit as EFFORT_TO_MIN
+// / LIBERAL_FACTOR (see docs/Research.md). No editing UI reads or writes
+// this yet; stored now purely so a later pass's UI is additive. Written as
+// a literal default here and in Wizard.jsx's defaultPiece(), matching the
+// existing pattern for `revival`'s default object rather than a shared
+// constants.js export.
+const DEFAULT_LADDER_CONFIG = {
+  stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
+  settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
+  holding: {
+    startIntervalDays: 14,
+    intervalGrowthFactor: 1.75,
+    maxIntervalDays: 70,
+    tempoFloorStartFraction: 0.85,
+    tempoFloorStepFraction: 0.05,
+    tempoFloorCapFraction: 1,
+  },
+};
+
+// Backfills a single logged session with a real calendar date. Old sessions
+// only carry `day` (a plan-day int, App.jsx:335-345), which stops being a
+// stable reference frame once maintenance review runs past a piece's fixed-
+// length plan (see Repertoire-Lifecycle.md's "How maintenance surfaces in
+// the UI"). `startDate` anchors day 1, so a pre-existing session's date is
+// reconstructed as `startDate + (day - 1)` — an approximation (doesn't
+// account for non-practice/rest days), but the only data available to
+// backfill from for sessions logged before this field existed.
+function backfillSessionDate(session, startDate) {
+  if (session.loggedDate) return session;
+  const loggedDate = typeof session.day === "number" ? addDaysISO(startDate, session.day - 1) : null;
+  return { ...session, loggedDate };
+}
+
+// Backfills per-chunk ladder state (stage/consecutivePasses/practiceBPM/
+// nextDueDate/tier1Done — Repertoire-Lifecycle.md's "The ladder: three
+// stages") onto every existing progress entry, and each entry's sessions
+// with a real calendar date. Every already-saved piece has no ladder state
+// to backfill from, so defaults are the ladder's "not on the ladder yet"
+// values, not derived from session history — same non-destructive spirit as
+// the rest of this migration. Skips the synthetic "__consolidation__" key
+// (Data-Model.md#the-piece-object) since it isn't a real chunk.
+function backfillProgressLadderState(progress, startDate) {
+  const result = {};
+  Object.entries(progress || {}).forEach(([key, entry]) => {
+    if (key === "__consolidation__") {
+      result[key] = entry;
+      return;
+    }
+    result[key] = {
+      ...entry,
+      sessions: (entry.sessions || []).map((s) => backfillSessionDate(s, startDate)),
+      stage: entry.stage !== undefined ? entry.stage : null,
+      consecutivePasses: entry.consecutivePasses !== undefined ? entry.consecutivePasses : 0,
+      practiceBPM: entry.practiceBPM !== undefined ? entry.practiceBPM : null,
+      nextDueDate: entry.nextDueDate !== undefined ? entry.nextDueDate : null,
+      tier1Done: entry.tier1Done !== undefined ? entry.tier1Done : false,
+    };
+  });
+  return result;
+}
+
+// Most recent session date across every chunk, or null if nothing's ever
+// been logged. Recomputed fresh on every load (like daysToLearn
+// reconciliation below), not backfilled-and-locked-in like startDate,
+// since new sessions keep changing what "most recent" means.
+function computeLastLoggedAt(progress) {
+  let latest = null;
+  Object.entries(progress).forEach(([key, entry]) => {
+    if (key === "__consolidation__") return;
+    (entry.sessions || []).forEach((s) => {
+      if (s.loggedDate && (!latest || s.loggedDate > latest)) latest = s.loggedDate;
+    });
+  });
+  return latest;
+}
+
+export function validateAndMigratePiece(piece) {
   if (!piece || typeof piece !== "object") return null;
 
   // Ensure critical fields exist; missing optional fields are fine
@@ -16,11 +95,16 @@ function validateAndMigratePiece(piece) {
     return null;
   }
 
+  const startDate = piece.startDate || todayISODate();
+  const progress = backfillProgressLadderState(piece.progress || {}, startDate);
+
   // Default missing fields to safe values (non-destructive for old data)
   const migrated = {
     ...piece,
     // Ensure nested objects exist even if old data is incomplete
-    progress: piece.progress || {},
+    progress,
+    ladderConfig: piece.ladderConfig || DEFAULT_LADDER_CONFIG,
+    lastLoggedAt: computeLastLoggedAt(progress),
     sections: piece.sections || [{ id: "s1", name: "", start: 1, end: piece.totalMeasures }],
     bpmZones: piece.bpmZones || [],
     recordings: piece.recordings || [],
@@ -39,7 +123,7 @@ function validateAndMigratePiece(piece) {
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.
-    startDate: piece.startDate || todayISODate(),
+    startDate,
   };
 
   // A "minutes per day" piece's daysToLearn must stay derived from its
@@ -76,7 +160,12 @@ export function loadPiecesFromStorage() {
             // daysToLearn is different: it's re-checked (not just backfilled
             // once) every load since it's meant to track minutesPerDay, but
             // still only actually re-saved when reconciliation changed it.
-            if (!p.startDate || migrated.daysToLearn !== p.daysToLearn) savePieceToStorage(migrated.id, migrated);
+            // !p.ladderConfig catches a piece with no ladder state yet (every
+            // piece saved before this migration existed) so the one-time
+            // backfill of ladderConfig/lastLoggedAt/per-chunk ladder fields
+            // and session loggedDates actually gets persisted, not just
+            // recomputed in memory and discarded on the next load.
+            if (!p.startDate || !p.ladderConfig || migrated.daysToLearn !== p.daysToLearn) savePieceToStorage(migrated.id, migrated);
           }
         }
       } catch (e) {

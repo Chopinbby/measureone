@@ -93,11 +93,28 @@ piece = {
                          // browser/instance. Sort-order bookkeeping only (piece
                          // switcher, work grouping) — NOT the scheduling anchor;
                          // see startDate above for that.
-  progress,              // { [chunkId]: ChunkProgress } — see below
+  progress,              // { [chunkId]: ChunkProgress } — see below. One key isn't
+                         // a real chunk id: "__consolidation__" holds the
+                         // whole-piece consolidation-day run-through's completion
+                         // (just `doneDays` today — see DayChecklist.jsx and
+                         // ProgressTab.jsx, the two places that key off this
+                         // literal string). A synthetic entry in the same map,
+                         // not a documented exception until now.
   rescheduleMarker,      // null | { asOfDay, remainingChunkOrder } — see Algorithms.md#rescheduling
   lastPlayedDate,        // string ("YYYY-MM-DD") | null — collected at revival entry; purely
                          // informational (displayed on Overview), not used by any automatic
                          // staleness detection — see Repertoire-Lifecycle.md and #revival below.
+  lastLoggedAt,          // string ("YYYY-MM-DD") | null — most recent session.loggedDate across
+                         // every chunk, recomputed on every load (not backfilled-and-locked-in
+                         // like startDate). Data plumbing for the not-yet-built spaced-repetition
+                         // maintenance ladder's 60-day staleness auto-trigger — nothing reads this
+                         // yet. See Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
+  ladderConfig,          // { stabilizing, settling, holding } — piece-level tunable config for the
+                         // not-yet-built spaced-repetition maintenance ladder (stage lengths,
+                         // graduation pass-counts, tempo floors). Hardcoded defaults set at creation
+                         // (Wizard.jsx) and backfilled on migration (storage.js); no editing UI yet
+                         // and nothing reads it yet. See #ladder-config below and
+                         // Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
   memoryAnchors,         // { [id]: string } — free-text cue ("descending sequence", "watch
                          // left-hand leap") keyed by *either* a practice-chunk/transition id or a
                          // piece.sections id. One flat map because chunk ids (`c…`/`t_…`) and
@@ -109,9 +126,15 @@ piece = {
 ChunkProgress = {
   doneDays: number[],       // plan-day numbers this chunk was marked done on
   sessions: [{              // one entry per day it was logged, most recent last
-    day, cleanReps, bpm, effectiveness, durationSeconds
+    day, cleanReps, bpm, effectiveness, durationSeconds, loggedDate
   }],                       // durationSeconds comes from the ChecklistItem timer, or from
                             // the manual minutes field when the user typed one instead.
+                            // loggedDate ("YYYY-MM-DD") is the real calendar date the session
+                            // was logged on — new field, distinct from `day` (a plan-day int,
+                            // meaningless once review runs past a piece's fixed-length plan).
+                            // Not yet populated by handleLogSession (App.jsx) directly; backfilled
+                            // on every load instead, from `day` + piece.startDate for sessions
+                            // that predate this field — see storage.js.
   currentBPM,               // number | undefined — last logged tempo
   targetBPM,                // number | undefined — explicit per-chunk override;
                              // falls back to piece.targetBPM / bpmZones if unset
@@ -123,8 +146,57 @@ ChunkProgress = {
                               // reassessment (or from the regular Piece Map modal at any time).
                               // Persists independently of any revival cycle; computeRevivalPlan
                               // prioritizes flagged items first. See #revival below.
+  stage,                     // null | 'stabilizing' | 'settling' | 'holding' — this chunk's rung
+                              // on the not-yet-built spaced-repetition maintenance ladder. null
+                              // means "not on the ladder" (every chunk today, and every chunk
+                              // backfilled by migration). See #ladder-config below.
+  consecutivePasses,          // number, default 0 — consecutive full passes at the current stage;
+                               // ladder-only, unused until stage-transition logic is built.
+  practiceBPM,                // number | null — the tempo the ladder is currently asking for on
+                               // this chunk, distinct from targetBPM (the eventual goal). Starts
+                               // null; ratcheting logic is not built yet.
+  nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
+                                // review. null until the ladder actually schedules something.
+  tier1Done,                   // boolean, default false — whether the one-time first-touch review
+                                // (Repertoire-Lifecycle.md's "Tier 1") has happened for this chunk.
 }
 ```
+
+### Ladder config (`piece.ladderConfig`) {#ladder-config}
+
+Piece-level tunable data for the not-yet-built spaced-repetition maintenance
+ladder — see
+[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+for the full design. Hardcoded defaults for now (no editing UI); stored so a
+later UI pass is additive rather than needing its own migration.
+
+```js
+ladderConfig = {
+  stabilizing: { intervalDays, graduationPasses, tempoFloorFraction },
+  // intervalDays: 4 — review cadence. graduationPasses: 4 — consecutive
+  // full passes needed to graduate. tempoFloorFraction: null — Stabilizing
+  // has no tempo floor.
+  settling: { intervalDays, graduationPasses, tempoFloorFraction },
+  // intervalDays: 7. graduationPasses: 4. tempoFloorFraction: 0.7 — a
+  // hand-picked point within the doc's ~70–75%-of-target range.
+  holding: {
+    startIntervalDays, intervalGrowthFactor, maxIntervalDays,
+    tempoFloorStartFraction, tempoFloorStepFraction, tempoFloorCapFraction,
+  },
+  // startIntervalDays: 14. intervalGrowthFactor: 1.75 — hand-picked point
+  // within the doc's ~1.5–2× per pass range. maxIntervalDays: 70 (10 weeks)
+  // — hand-picked point within the doc's ~8–12-week cap range.
+  // tempoFloorStartFraction: 0.85, tempoFloorStepFraction: 0.05 ("+5 points
+  // per successful pass"), tempoFloorCapFraction: 1.
+}
+```
+
+All values are hand-picked midpoints of the ranges
+Repertoire-Lifecycle.md describes, not derived from any study — same spirit
+as `EFFORT_TO_MIN`/`LIBERAL_FACTOR` (see
+[Research.md](Research.md)). Nothing reads this yet; stage-transition logic,
+BPM ratcheting, and any scheduler change are explicitly out of scope until a
+later pass.
 
 `defaultPiece()` in `src/components/Wizard.jsx` is the literal source of truth
 for this shape and its defaults — read it directly if this table and the code
@@ -210,6 +282,27 @@ This is a real open question, not a documented design decision — see
 "how confident is the learner in this chunk" surface, check both before
 assuming which one is canonical.
 
+Worth knowing why they disagree at all: they were never designed
+together. `computeConfidence` has existed since the app's very first
+commit. `computeProgressTier` was added much later (commit `45414ea`,
+*"Replace difficulty balance with practice progress bar on dashboard"*)
+to replace an unrelated, purely static Overview panel — the piece's fixed
+easy/medium/hard measure split — with a practice-progress bar, and was
+written for that one widget using the simplest available signal
+(most-recent clean-rep count), not to complement or check against
+confidence. The disagreement isn't drift from a shared design; there
+never was one.
+
+A designed spaced-repetition ladder (per-chunk `stage`/`practiceBPM` state —
+see
+[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built))
+would be a related, third signal once built. The schema for it now exists
+(`ChunkProgress.stage` etc., `piece.ladderConfig` — see above) but is
+entirely inert: nothing computes or reads it yet, so this is still purely
+prospective. Whether it replaces one of the two above, becomes the new
+canonical one, or stays separate is explicitly not decided — see
+[Decisions.md](Decisions.md#open-questions).
+
 ## Revival
 
 Revival (recovering a piece that was learned once but has gone stale — see
@@ -261,8 +354,16 @@ than a new 0-100 (or 0-4) field. See
   `computeConfidenceAsOf` (used for "most improved this week") can't
   correctly exclude a manual override that was set *after* the historical
   cutoff being reconstructed — see [Algorithms.md](Algorithms.md#confidence).
-- There is no first-class "piece is learned" state — see
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-informally-defined-today).
+- There is no first-class "piece is learned" state yet — a definition is
+  now decided (every chunk's ladder card reaching Holding) and the ladder's
+  schema now exists (`ChunkProgress.stage`, `piece.ladderConfig`), but no
+  logic advances `stage` or evaluates "every chunk at Holding" yet, so
+  "learned" still can't actually be computed — see
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
+- A new tri-state `flag` field (rough/lost, from planned post-run-through
+  logging) would sit alongside the existing `progress[id].weakSpot` above
+  once built, and the two haven't been reconciled — see
+  [Decisions.md](Decisions.md#open-questions).
 - `diffMode: 'simple'` and `recurringMode: 'basic'` are reachable only on
   pieces saved before their quick-count UI was removed — see
   [Decisions.md](Decisions.md#ux).

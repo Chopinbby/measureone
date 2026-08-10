@@ -10,25 +10,58 @@ const CURRENT_SCHEMA_VERSION = 1;
 
 // Default tunable config for the spaced-repetition maintenance ladder
 // (Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built) —
-// stage lengths, graduation pass-counts, and tempo floors. Hand-picked
-// midpoints of the ranges that doc describes, same spirit as EFFORT_TO_MIN
-// / LIBERAL_FACTOR (see docs/Research.md). No editing UI reads or writes
+// stage lengths, graduation pass-counts, tempo floors, and practiceBPM
+// ratchet step sizes. Hand-picked defaults, same spirit as EFFORT_TO_MIN /
+// LIBERAL_FACTOR (see docs/Research.md). No editing UI reads or writes
 // this yet; stored now purely so a later pass's UI is additive. Written as
 // a literal default here and in Wizard.jsx's defaultPiece(), matching the
 // existing pattern for `revival`'s default object rather than a shared
 // constants.js export.
+//
+// bpmSteps.fail is -2, not the ~8-10 pullback Repertoire-Lifecycle.md
+// originally sketched — overridden in conversation with the user while
+// building the ladder engine (lib/ladder.js): a real fail should cost the
+// same 2 BPM as a soft-miss/pass step, not a steep drop. See
+// Decisions.md#spaced-repetition--maintenance.
+//
+// holding.intervalGrowthFactor from the original draft of this config was
+// removed (not just left unused) — Holding's interval growth is driven
+// entirely by the reused pass/soft-miss/fail effectiveness multiplier
+// (lib/ladder.js), and a second, independent growth constant would be
+// exactly the "second multiplier system" the source design doc says not
+// to build. See Decisions.md#spaced-repetition--maintenance.
 const DEFAULT_LADDER_CONFIG = {
   stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
   settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
   holding: {
     startIntervalDays: 14,
-    intervalGrowthFactor: 1.75,
     maxIntervalDays: 70,
     tempoFloorStartFraction: 0.85,
     tempoFloorStepFraction: 0.05,
     tempoFloorCapFraction: 1,
   },
+  bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
 };
+
+// Merges DEFAULT_LADDER_CONFIG into whatever a piece already has, field by
+// field, rather than only defaulting when `ladderConfig` is missing
+// entirely. A piece migrated once while `bpmSteps` didn't exist yet (saved
+// back to storage with a `ladderConfig` that has stabilizing/settling/
+// holding but no bpmSteps) would otherwise keep that incomplete shape
+// forever — `piece.ladderConfig || DEFAULT_LADDER_CONFIG` only helps when
+// the whole object is absent. computeLadderAdvance (lib/ladder.js) reads
+// `ladderConfig.bpmSteps.pass/softMiss/fail` unconditionally, so a missing
+// `bpmSteps` throws on the very next logged session — a real crash on
+// real already-saved data, not just a theoretical gap.
+export function mergeLadderConfig(existing) {
+  if (!existing) return DEFAULT_LADDER_CONFIG;
+  return {
+    stabilizing: { ...DEFAULT_LADDER_CONFIG.stabilizing, ...existing.stabilizing },
+    settling: { ...DEFAULT_LADDER_CONFIG.settling, ...existing.settling },
+    holding: { ...DEFAULT_LADDER_CONFIG.holding, ...existing.holding },
+    bpmSteps: { ...DEFAULT_LADDER_CONFIG.bpmSteps, ...existing.bpmSteps },
+  };
+}
 
 // Backfills a single logged session with a real calendar date. Old sessions
 // only carry `day` (a plan-day int, App.jsx:335-345), which stops being a
@@ -64,6 +97,11 @@ function backfillProgressLadderState(progress, startDate) {
       sessions: (entry.sessions || []).map((s) => backfillSessionDate(s, startDate)),
       stage: entry.stage !== undefined ? entry.stage : null,
       consecutivePasses: entry.consecutivePasses !== undefined ? entry.consecutivePasses : 0,
+      // Tracks fails logged back-to-back while stage === 'stabilizing', the
+      // "this was never actually consolidated" signal (ladder.js's
+      // needsRelearning) — distinct from consecutivePasses, which only
+      // counts passes and can't tell a 1st fail from a 2nd.
+      consecutiveStabilizingFails: entry.consecutiveStabilizingFails !== undefined ? entry.consecutiveStabilizingFails : 0,
       practiceBPM: entry.practiceBPM !== undefined ? entry.practiceBPM : null,
       nextDueDate: entry.nextDueDate !== undefined ? entry.nextDueDate : null,
       tier1Done: entry.tier1Done !== undefined ? entry.tier1Done : false,
@@ -103,7 +141,7 @@ export function validateAndMigratePiece(piece) {
     ...piece,
     // Ensure nested objects exist even if old data is incomplete
     progress,
-    ladderConfig: piece.ladderConfig || DEFAULT_LADDER_CONFIG,
+    ladderConfig: mergeLadderConfig(piece.ladderConfig),
     lastLoggedAt: computeLastLoggedAt(progress),
     sections: piece.sections || [{ id: "s1", name: "", start: 1, end: piece.totalMeasures }],
     bpmZones: piece.bpmZones || [],
@@ -161,11 +199,16 @@ export function loadPiecesFromStorage() {
             // once) every load since it's meant to track minutesPerDay, but
             // still only actually re-saved when reconciliation changed it.
             // !p.ladderConfig catches a piece with no ladder state yet (every
-            // piece saved before this migration existed) so the one-time
-            // backfill of ladderConfig/lastLoggedAt/per-chunk ladder fields
-            // and session loggedDates actually gets persisted, not just
-            // recomputed in memory and discarded on the next load.
-            if (!p.startDate || !p.ladderConfig || migrated.daysToLearn !== p.daysToLearn) savePieceToStorage(migrated.id, migrated);
+            // piece saved before this migration existed); !p.ladderConfig
+            // ?.bpmSteps additionally catches a piece that already has a
+            // ladderConfig but from before bpmSteps existed on it (see
+            // mergeLadderConfig above) — either way the one-time backfill of
+            // ladderConfig/lastLoggedAt/per-chunk ladder fields and session
+            // loggedDates actually gets persisted, not just recomputed in
+            // memory and discarded on the next load.
+            if (!p.startDate || !p.ladderConfig || !p.ladderConfig.bpmSteps || migrated.daysToLearn !== p.daysToLearn) {
+              savePieceToStorage(migrated.id, migrated);
+            }
           }
         }
       } catch (e) {

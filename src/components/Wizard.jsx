@@ -47,18 +47,21 @@ export function defaultPiece() {
     // Tunable config for the spaced-repetition maintenance ladder — see
     // Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
     // Hardcoded defaults, no editing UI yet; mirrored in storage.js's
-    // DEFAULT_LADDER_CONFIG for pieces migrated from before this existed.
+    // DEFAULT_LADDER_CONFIG (see that file for why bpmSteps.fail is -2, not
+    // the doc's original ~8-10 pullback, and why there's no
+    // holding.intervalGrowthFactor here) for pieces migrated from before
+    // this existed.
     ladderConfig: {
       stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
       settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
       holding: {
         startIntervalDays: 14,
-        intervalGrowthFactor: 1.75,
         maxIntervalDays: 70,
         tempoFloorStartFraction: 0.85,
         tempoFloorStepFraction: 0.05,
         tempoFloorCapFraction: 1,
       },
+      bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
     },
     revival: {
       active: false,

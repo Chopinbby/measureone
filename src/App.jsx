@@ -20,7 +20,7 @@ import {
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, reconcileMinutesPerDaySchedule } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
@@ -34,6 +34,7 @@ import {
   parseBackupPieces,
   findMatchingPiece,
   mergeImportedPiece,
+  validateAndMigratePiece,
 } from "./lib/storage";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
@@ -262,7 +263,13 @@ export default function App() {
       // to day 1 if the exported file happened to be missing that field.
       const match = findMatchingPiece(next, p);
       if (match) {
-        const merged = reconcileMinutesPerDaySchedule(ensureWorkId({
+        // validateAndMigratePiece (not just reconcileMinutesPerDaySchedule)
+        // so an imported piece gets the same full backfill a stored piece
+        // gets on load — most importantly here, a ladderConfig missing
+        // bpmSteps (an old export, or one that predates it entirely) gets
+        // merged with defaults rather than reaching computeLadderAdvance
+        // incomplete and throwing on the next logged session. See storage.js.
+        const merged = validateAndMigratePiece(ensureWorkId({
           ...mergeImportedPiece(match, p),
           rescheduleMarker: null,
         }));
@@ -271,13 +278,14 @@ export default function App() {
         updatedCount++;
       } else {
         const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
-        // Re-derive daysToLearn against minutesPerDay for "minutes" mode —
-        // otherwise an imported piece just keeps whatever daysToLearn the
-        // backup happened to carry, which may have nothing to do with its
-        // minutesPerDay (e.g. a backup hand-edited to change the pace
-        // without updating the day count to match). See
-        // reconcileMinutesPerDaySchedule in lib/scheduling.js.
-        const withId = reconcileMinutesPerDaySchedule({ ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() });
+        // validateAndMigratePiece re-derives daysToLearn against
+        // minutesPerDay for "minutes" mode (otherwise an imported piece
+        // just keeps whatever daysToLearn the backup happened to carry,
+        // which may have nothing to do with its minutesPerDay — e.g. a
+        // backup hand-edited to change the pace without updating the day
+        // count to match) and backfills everything else a stored piece
+        // gets on load, same reasoning as the matched branch above.
+        const withId = validateAndMigratePiece({ ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() });
         next[id] = withId;
         if (!firstNewId) firstNewId = id;
         savePieceToStorage(id, withId);

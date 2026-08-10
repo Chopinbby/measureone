@@ -105,7 +105,10 @@ several pieces in flight, not one at a time in isolation. This principle is
 also the reason "what happens after a piece is learned" (maintenance review,
 repertoire rotation) is a real roadmap item and not an afterthought — see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md) and
-[Roadmap.md](Roadmap.md).
+[Roadmap.md](Roadmap.md). The maintenance mechanism itself is now designed
+(a continuous spaced-repetition ladder, not a separate mode) — see
+[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built) —
+though not yet implemented.
 
 ## No punishment mechanics
 

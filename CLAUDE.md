@@ -137,9 +137,21 @@ are hand-picked, not derived from any study — see
 [`docs/Research.md`](docs/Research.md) for the full inventory and what
 would need to be true to replace them. There's also no undo history for BPM
 zones or difficulty reassessment, and no first-class "this piece is
-learned" state — see [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md).
+learned" state yet — a definition is decided but not implemented, see
+[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md).
 
 ## Roadmap
 
 See [`docs/Roadmap.md`](docs/Roadmap.md) — the immediate next item is
-folding the Analytics tab into Progress (agreed, not yet implemented).
+folding the Analytics tab into Progress (agreed, not yet implemented). The
+biggest designed-but-unbuilt item is a spaced-repetition ladder that
+replaces today's fixed `REVIEW_OFFSETS` review with a continuous
+Stabilizing/Settling/Holding cadence and redefines "learned" as every
+chunk reaching Holding — fully designed, not started. If you're about to
+touch scheduling, confidence, or the practice-logging UI, check
+[`docs/Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+first — you may be about to build on top of a mechanism that's already
+slated for replacement. One invariant from that design worth internalizing
+early: **a review arriving late is schedule slack, never a failure** —
+only the logged outcome (pass/soft-miss/fail) may ever affect the ladder,
+not timing.

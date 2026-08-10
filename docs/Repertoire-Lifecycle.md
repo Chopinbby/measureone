@@ -34,20 +34,26 @@ Confidence per chunk rises and falls with logged practice throughout this
 stage; there is no single moment the *piece* transitions out of "active
 learning" — see the gap noted below.
 
-## Stage 3 — "Learned" (informally defined today)
+## Stage 3 — "Learned" (defined; not yet implemented)
 
-**There is currently no first-class "this piece is learned" state in the
-data model.** What exists instead:
+**Decided** (see [Decisions.md](Decisions.md#spaced-repetition--maintenance)):
+a piece is "learned" once every practice chunk's ladder card has reached
+Holding — the resting stage of the spaced-repetition ladder described in
+Stage 4 below. This replaces the earlier informal, calendar-based reading
+(implicitly, "the plan's `daysToLearn` ran out") with a consolidation-based
+one: a piece that consolidates fast graduates fast, one that doesn't,
+doesn't, regardless of what `daysToLearn` originally guessed. **Not
+implemented yet** — there is no ladder state in the data model today, so
+this definition has nothing to evaluate against until Stage 4 is built.
 
-- `computeProgressTier` buckets individual chunks into
-  `untouched → learned → comfortable → mastered` based on the most recent
-  session's clean-rep count.
-- `computeConfidence` gives each chunk a continuous 0–100 score.
-
-Nothing rolls these up into a piece-level "done" milestone, and nothing
-triggers when a piece crosses into it. This is a real gap — see
-[Decisions.md](Decisions.md) for the open question, and treat any
-maintenance-scheduling work (Stage 4) as blocked on deciding this first.
+`computeProgressTier` (buckets a chunk by its most recent session's
+clean-rep count) and `computeConfidence` (continuous 0–100 score) are
+unaffected by this decision and continue to answer their own separate
+questions — see
+[Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
+Whether ladder stage becomes a third such signal, replaces one of the
+existing two, or stays deliberately separate is **not decided** — flagged
+there, not resolved here.
 
 ## Revival (built, MVP)
 
@@ -80,6 +86,10 @@ weak-spot flag. Revival's weak-spot flag and memory anchors are the
 lightweight, manual precursor to whatever that deeper tagging might look
 like, not a replacement for it.
 
+Automatic entry triggers (rather than manual-only, as today) are now
+designed — see [Stage 4 → Revival auto-triggers](#revival-auto-triggers)
+below.
+
 ## Pause / Archive (built)
 
 A piece can carry `piece.status: 'active' | 'paused' | 'archived'`, set only
@@ -108,18 +118,311 @@ reachable via the piece switcher, just no longer part of the daily rotation.
 **Deliberately not this feature**: an automatic "learned" detector, or any
 scheduled maintenance-review mechanic. Pause/archive is a manual visibility
 toggle only — it answers "keep this off my daily plate," not "tell me when
-to revisit it." That's still Stage 4 below, and still blocked on the same
-open question it always was.
+to revisit it." That's still Stage 4 below — now designed, still not built.
 
-## Stage 4 — Maintenance (not built)
+## Stage 4 — Maintenance (designed, not built)
 
-Roadmap item 2. Once a piece is "learned," it needs periodic maintenance
-review to avoid the memory decay that would otherwise erase the practice
-investment — this is the direct mechanism behind the
+Roadmap item 2. Once a piece is "learned" (Stage 3), it needs periodic
+maintenance review to avoid the memory decay that would otherwise erase the
+practice investment — this is the direct mechanism behind the
 ["time invested should compound"](Product-Principles.md#time-invested-should-compound-over-a-musicians-lifetime)
-principle. Not yet designed: the review-interval model, whether it reuses
-`adaptiveReviewOffsets`-style logic or needs something with much longer
-horizons, and how it surfaces in the UI (a new tab? folded into Today?).
+principle. The review-interval model is now fully designed (decision
+records: [Decisions.md](Decisions.md#spaced-repetition--maintenance);
+evidence behind several specific choices below:
+[Research.md](Research.md)); none of it is implemented yet.
+
+### The unifying idea
+
+Learning-review and maintenance are **not two separate systems** — they're
+one continuous card-based ladder that every practice chunk, transition, and
+combo rides after its initial introduction. What changes between "a piece
+in learning" and "a piece in maintenance" is just how many of its cards
+have reached the top of the ladder, not a different mechanism. Introduction
+itself (first exposure — front-loaded, effort-budgeted, tied to
+`daysToLearn`) stays exactly as it works today
+([Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler))
+and is not part of the ladder. Maintenance mode, for a piece where every
+chunk already holds, is just what the ladder looks like once nothing needs
+graduating anymore — a live "what's due" view, not a fixed calendar plan.
+
+This is a bigger architectural shift than a formula change. Today's
+post-introduction review (`computeTimeline` /
+`adaptiveReviewOffsets`,
+[Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler))
+is a **pure, stateless derivation** — recomputed from scratch on every
+render from `introducedDay` and the single most-recent session's
+`effectiveness`, consistent with `chunkSet`/`timeline` being `useMemo`'d
+off `piece` and never persisted (see `CLAUDE.md`). There's no persisted
+"stage" or "consecutive pass count" anywhere in the data model today. The
+ladder can't be bolted onto that pattern — it needs genuinely persisted,
+event-driven state per chunk (stage, consecutive passes, `practiceBPM`,
+next-due date), advanced by explicit logged outcomes. That makes it
+structurally closer to the existing append-only `progress[id].sessions`
+log than to how `timeline` is computed, and it means real new
+`ChunkProgress` fields plus a migration path for every already-saved
+piece (which has no ladder state to backfill from), not just a new
+function alongside the old one.
+
+### The ladder: three stages
+
+| Stage | Interval | Graduates after | Tempo floor |
+|---|---|---|---|
+| Stabilizing | every 4 days | 4 consecutive full passes | none |
+| Settling | every 7 days | 4 consecutive full passes | ~70–75% of target |
+| Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | starts ~85%, +5 points per successful pass, caps 100% |
+
+- A fail drops a chunk back exactly **one** stage, never to zero.
+- Two consecutive fails specifically while in Stabilizing is a distinct
+  signal ("this was never actually consolidated," not normal decay) and
+  should route toward a short structured re-learning pass rather than
+  cycling indefinitely.
+- Holding's interval expansion reuses the effectiveness multiplier already
+  built for `adaptiveReviewOffsets` (0.6×/1×/1.4× —
+  [Algorithms.md#adaptive-review](Algorithms.md#adaptive-review)) rather
+  than introducing a second multiplier system.
+- Stage lengths, graduation pass-counts, and tempo floors are planned as
+  **piece-level tunable data, not hardcoded constants** (a future
+  per-chunk override is explicitly flagged as a want, not built in this
+  pass). No editing UI is planned for this initial build — the values just
+  need to be stored so UI can be additive later.
+
+### Introduction-window review scheduling: Tier 1 / Tier 2
+
+A chunk introduced on day 1 has its first due review on day 4 under the
+ladder — while the app is still trying to introduce every other chunk
+across those same days to hit the "whole piece touched by the halfway
+point" rule ([Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler),
+rule 1). Every day in that window has to fund both new introductions and a
+growing queue of due reviews out of the same daily budget. If reviews
+always won that contention, introduction would slow and coverage targets
+would get missed; if introduction always won, reviews would get skipped or
+crammed, and earlier-introduced chunks would get worse odds of cleanly
+stabilizing than later ones — undermining the point of a
+consolidation-driven ladder.
+
+**Resolution, scoped specifically to the front-loaded introduction window**
+(once nothing new is being introduced, this stops applying and due reviews
+simply compete oldest-due-first): new-chunk introduction gets first claim
+on the day's budget; due reviews are slotted in after, and anything that
+doesn't fit rolls to the next day rather than counting as missed. **A late
+review is schedule slack, not a scheduling failure — lateness never fails a
+review or affects the ladder; only the actual outcome (pass/soft-miss/fail),
+whenever the review happens, does.** The ladder's stage math is untouched
+by this; a chunk's due-date doesn't move because of budget pressure, it's
+just reached on a different day than originally targeted.
+
+Within that resolution, reviews split into two tiers with different flex:
+
+- **Tier 1 — the first-touch review.** A one-time event per chunk,
+  inserted immediately after introduction (around day 1), before
+  Stabilizing's normal 4-day cadence begins. Near-mandatory — cheap enough
+  that it should almost always happen regardless of that day's
+  introduction pressure, because a single unreinforced exposure has a
+  short shelf life (see [Research.md](Research.md)) and skipping it risks
+  losing the chunk before Stabilizing's first real review would otherwise
+  catch it. Each chunk passes through Tier 1 exactly once, then moves into
+  Tier 2 for the rest of its life on the ladder.
+- **Tier 2 — the standard ladder stages**, mechanically unchanged
+  (Stabilizing's 4-day cadence onward through Settling and Holding), but
+  allowed to **flex** during the introduction window — rolling to the next
+  day under budget pressure, no penalty. This is where schedule pressure
+  gets absorbed; Tier 1 is where it explicitly does not, per the asymmetry
+  in [Research.md](Research.md) (reviewing late costs gradually more,
+  reviewing early costs almost nothing).
+
+**Open, monitored rather than assumed**: whether a single Tier 1 touch is
+sufficient, or a chunk needs a second short rung (day 1, then day 3, before
+the normal 4-day cadence) before it reliably survives to Stabilizing's
+first real review. Plan: track the fail rate specifically on each chunk's
+*second* ladder review (the first real Stabilizing check, right after Tier
+1) — if that fails disproportionately versus later reviews, that's the
+signal a second rung is needed. Not being built preemptively without that
+evidence.
+
+### Per-chunk tempo target: `practiceBPM`
+
+Planned as a new field, distinct from the existing `targetBPM`
+([Data-Model.md](Data-Model.md)):
+
+- `targetBPM` = the eventual goal — performance tempo, or a deliberately
+  inflated overlearn tempo chosen on purpose.
+- `practiceBPM` = the tempo the app is *currently* asking the learner to
+  attempt for that specific chunk. Starts low, ratchets toward `targetBPM`
+  over sessions — the fix for grading every session against a distant
+  fixed target (e.g. an overlearn tempo 10 BPM above performance)
+  producing repeated "almost but not quite" sessions that read as failure
+  when the target itself was fine, just ungraded incrementally.
+- Step sizes (tunable, defaults): **+2 BPM** on a full pass, **−2 BPM** on
+  a soft miss, **~8–10 BPM** pullback on a real fail.
+- The logging UI's primary action becomes "attempt N clean reps at
+  `practiceBPM`" → pass/soft-miss/fail, rather than free-text BPM entry by
+  default. A lightweight manual override stays available for someone who
+  exceeds the recommendation, so Progress's tempo-trend sparkline still
+  gets real data when someone pushes past what was asked.
+
+### Session outcomes: three tiers, not two
+
+Replaces the current flat pass/fail:
+
+1. **Full pass** — required clean reps hit at/above current `practiceBPM`.
+   `practiceBPM` steps up; counts toward stage graduation only once
+   `practiceBPM` has cleared that stage's tempo floor (the floor gates
+   `practiceBPM`, not the per-session pass/fail itself).
+2. **Soft miss** — some clean reps, not enough in a row at that tempo.
+   `practiceBPM` steps down, consecutive-pass count resets, **stage does
+   not change**. New tier — the fix for "plateau via frustration": no
+   honest way existed to log "close, but not quite" without it reading as
+   failure against a fixed distant number.
+3. **Real fail** — self-report override ("needs more work"), failing reps
+   at a tempo previously cleared (genuine regression), or repeated
+   soft-misses even after `practiceBPM` has already backed off. One-stage
+   demotion, per the ladder rules above.
+
+Plateau (reps consistently met, `practiceBPM` not climbing) should be rare
+by construction now, since tempo increase is built into what a full pass
+means. The residual case — oscillating with no new high-water mark over
+several recent attempts — should surface a note rather than silence.
+
+**Implementation gotcha to resolve before building**: this model treats
+each review as a discrete event, but today's logging
+(`handleLogSession`, `src/App.jsx`) doesn't — it keys a session by
+`(chunkId, day)` and *overwrites* on a repeat: `sessions.filter((s) =>
+s.day !== day)` before pushing the new entry. Logging the same chunk
+twice on the same plan-day silently replaces the first outcome rather
+than recording both. That's fine under the old flat pass/fail model,
+where a same-day re-log is presumably just a correction — but once
+distinct events (a Tier 1 touch, a separate due maintenance review, a
+genuine re-attempt) can legitimately land on the same chunk the same
+day, this needs a deliberate answer, not inherited overwrite behavior.
+
+**Open, not decided**: whether the existing "how did it feel" three-tap
+effectiveness input (`EFFECTIVENESS_OPTIONS` in `src/lib/constants.js`)
+survives as a separate input, given how much it now overlaps with the
+pass/soft-miss/fail judgment itself. Leaning toward folding it into a
+single optional override (toward fail only, catching what objective
+numbers can't — memory slips, poor technique despite clean reps) — not
+locked in. See [Decisions.md](Decisions.md#open-questions).
+
+### Post-run-through logging
+
+Today's consolidation-day UI
+([Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler),
+rule 6) is a bare "mark complete" checkbox with no data captured, stored
+today under the synthetic `piece.progress["__consolidation__"]` entry
+(see [Data-Model.md](Data-Model.md) — this convention predates this
+design and isn't itself part of it, but whatever replaces the checkbox
+touches this exact storage location). Planned replacement, shared by both
+learning-phase consolidation days and maintenance run-throughs (one
+mechanism, not two):
+
+- **Stop count** — numeric input: how many times did the run-through get
+  stopped and restarted.
+- **Flag mode on the Piece Map** — a 3-state cycle per chunk, reusing the
+  existing grid rather than new UI: `untouched` (default) → **rough**
+  (demotes one stage, pins the next review to imminent regardless of what
+  the demoted stage's normal cadence would produce) → **lost** (demotes
+  fully to Stabilizing, same imminent pin) → back to `untouched`.
+  Untouched implicitly means "held fine" — no need to positively confirm
+  every unflagged chunk. Rough/lost flags must immediately affect
+  displayed confidence everywhere it shows (Overview, Progress, Piece
+  Map) — a chunk just flagged "lost" showing an unchanged confidence
+  number elsewhere would be a visible contradiction. This is a **new
+  field**, separate from the existing `progress[id].weakSpot`
+  ([Data-Model.md#revival](Data-Model.md#revival)) — the two are not
+  merged in this design, though they cover adjacent territory (both are
+  manual "this chunk needs attention" flags) and that overlap has not been
+  resolved. Worth deciding before implementation, not silently conflating
+  the two.
+
+### Revival auto-triggers
+
+[Revival](#revival-built-mvp) above is entry-only manual today. Planned:
+three independent conditions, any one of which offers a revival rather
+than requiring the learner to remember to start one themselves:
+
+1. Stop count > 5 on a single logged run-through.
+2. "Large chunks lost": any `combo`-kind chunk flagged lost in a
+   run-through, or 2+ regular practice chunks flagged lost in the same
+   run-through (reuses the existing `combo` kind as the "large chunk"
+   concept rather than a separate size threshold).
+3. 60+ days since anything was logged on the piece at all.
+
+Condition 3 is a **distinct fallback**, not a diluted version of 1/2 — 1
+and 2 can only fire if a run-through was actually attempted and logged, so
+a piece nobody has touched in two months has no data to trip the other two
+even though it would almost certainly meet them if attempted. Kept as
+three separately-checked conditions, deliberately not unified into one
+formula.
+
+**Combo handling within revival, once triggered** (decided — supersedes
+the current `computeRevivalPlan` code comment, which statically excludes
+combos; see [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+for the full alternatives-considered record): combos don't get their own
+revival task by default. Revival relearns the underlying content
+normally — the anchor hard chunk, plus whichever neighboring chunk(s) the
+combo's range overlaps (a combo spans midpoint-to-midpoint across its
+neighbors, so this is partial territory in both, not just the anchor). If
+any of that underlying content produces a real fail during revival, the
+combo escalates into its own explicit revival task, added to the plan. If
+everything relearns cleanly, the combo's "lost" flag clears automatically
+once its underlying chunks are done, and no combo-specific task is ever
+generated. This is what actually resolves condition 2's "combo flagged
+lost" trigger — without an escalation path, a lost combo flag would have
+no way to clear, risking either a permanently-flagged combo or revival
+re-triggering immediately after it just finished. **Open, not confirmed**:
+whether escalation fires on a single real fail on the underlying content,
+or the two-consecutive-fails threshold the ladder uses elsewhere for
+"this wasn't actually consolidated." Leaning toward a single fail, since
+revival is already "something's wrong" mode by the time it's running —
+unlike ordinary practice, where that dampening exists specifically to
+avoid overreacting to one bad day — but this hasn't been explicitly
+confirmed and shouldn't be assumed silently when built.
+
+**Architectural implication, not just a combo-handling detail**: this
+means a revival plan cannot be a fixed list generated once upfront the
+way `computeRevivalPlan` builds it today
+([Algorithms.md#revival](Algorithms.md#revival)). It needs a decision
+point mid-revival, after constituent outcomes are known, that can *insert*
+a task that wasn't there at the start. This is the same shape of problem
+as the ladder needing persisted, event-driven state instead of a pure
+derivation (see "The unifying idea" above) — revival's internal
+structure/pacing was already flagged as "not fully specced," and this is
+the first concrete piece of that spec, and it arrives already requiring a
+dynamic, outcome-dependent plan rather than a static one. Whatever
+replaces or extends `computeRevivalPlan` needs to account for this
+generally, not just special-case combos.
+
+### Explicitly not designed/built here
+
+- Revival's internal structure/pacing beyond the trigger conditions and
+  combo-handling above — those are the first concrete pieces of that spec,
+  not the whole of it.
+- Manual UI for tuning stage lengths / tempo floors / step sizes — stored
+  as tunable data so UI can be additive later, but no editing interface is
+  planned for this pass.
+- The "how did it feel" fold-in — flagged open above, not decided.
+- A second Tier 1 rung — not built preemptively; ship the single-touch
+  version and monitor per the plan above.
+- **How maintenance surfaces in the UI** — still genuinely undecided. The
+  most likely shape is folding "what's due" into the existing Master
+  Agenda ([Architecture.md](Architecture.md)) and per-piece Today tab
+  rather than a new tab, since both already render day-shaped chunk lists
+  — but both currently source their data by indexing a fixed-length,
+  `daysToLearn`-bounded `timeline.days[]` array
+  ([Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)),
+  and that's a sharper problem than it first looks: `getCurrentDay`
+  (`src/lib/utils.js`) doesn't just happen to be array-bounded, it
+  explicitly `clamp`s to `[1, totalDays]` — day-numbering itself has no
+  unbounded concept anywhere in the app today, not just an
+  indexing convenience. A chunk's ladder due-date can't be expressed as
+  "a bigger plan-day number" once a piece runs past its plan (which
+  happens well before the whole piece reaches Holding — Holding's
+  interval alone runs 8–12 weeks); it needs an actual reference frame
+  outside plan-day numbers entirely, e.g. a real calendar date. Surfacing
+  maintenance in either tab needs a live "what's due" query keyed off
+  each chunk's own due-date in that frame, not an index into
+  `timeline.days[]` — a new function operating in different units, not a
+  bigger loop over the existing one.
 
 ## Stage 5 — Repertoire rotation (not built)
 
@@ -132,11 +435,36 @@ need to decide how to allocate limited practice time across several
 
 ## Open questions
 
-- What formally defines "learned"? A confidence threshold across all
-  practice chunks? A user-initiated "mark as learned" action? Something
-  else?
-- Does maintenance scheduling belong on the existing `piece` object, or does
-  it need its own lifecycle-stage field (e.g. `piece.stage: 'learning' |
-  'maintenance'`)?
-- Should transitioning stages be automatic (computed) or user-confirmed
-  (matching the [manual-escape-hatch principle](Product-Principles.md#always-provide-a-manual-escape-hatch))?
+**Resolved by the spaced-repetition ladder design** (Stage 4 above; not yet
+implemented) — kept here for the record rather than deleted:
+
+- ~~What formally defines "learned"?~~ Every chunk's ladder card reaching
+  Holding — see Stage 3.
+- ~~Does maintenance scheduling need its own lifecycle-stage field?~~ No —
+  it's derived (every chunk at Holding), not stored as a separate
+  `piece.stage` field.
+- ~~Should stage transitions be automatic or user-confirmed?~~ Automatic,
+  driven by logged session outcomes — with the existing manual-escape-hatch
+  pattern (confidence override) and the new rough/lost flag mode as the
+  override paths, consistent with
+  [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch).
+
+**Still open:**
+
+- Whether the existing "how did it feel" effectiveness input survives
+  alongside the new pass/soft-miss/fail judgment — see Stage 4 → Session
+  outcomes.
+- Whether a second Tier 1 rung is needed before a chunk reliably survives
+  to Stabilizing's first real review — gated on fail-rate data once built,
+  not decided preemptively.
+- Whether the new rough/lost flag field should merge with the existing
+  `progress[id].weakSpot`, given both are manual "needs attention" flags —
+  not resolved, see Stage 4 → Post-run-through logging.
+- How maintenance surfaces in the UI — most likely Master Agenda and the
+  per-piece Today tab, but the data-plumbing implication (a live "what's
+  due" query replacing the fixed-length `timeline.days[]` index) isn't
+  designed — see Stage 4 → Explicitly not designed/built here.
+- Whether a combo's revival escalation (see Stage 4 → Revival
+  auto-triggers) fires on a single real fail on its underlying content, or
+  the two-consecutive-fails threshold used elsewhere in the ladder. Lean
+  is a single fail, not confirmed.

@@ -101,7 +101,14 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
 4. **Spaced review** uses `REVIEW_OFFSETS = [1, 3, 7, 14]` calendar days
    after a chunk's introduction, snapped forward to the next practice day if
    the raw offset lands on a rest day, bent per-chunk by
-   `adaptiveReviewOffsets` (below).
+   `adaptiveReviewOffsets` (below). **This fixed-offset mechanism is
+   designed to be superseded by a spaced-repetition ladder** (continuous
+   Stabilizing/Settling/Holding stages, replacing this rule's one-shot
+   four-review burst with an indefinite per-chunk cadence) — not yet
+   implemented; see
+   [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+   for the design and [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+   for why. This section describes what's actually implemented today.
 5. **Review-load smoothing**: after initial placement, a bounded pass (up to
    3 iterations) looks for learning days sitting more than 10% above the
    plan's average load and, for each such day's most expensive review item,
@@ -186,6 +193,12 @@ UI-only concern.
 session had `effectiveness: "low"`, or 1.4 if `"high"` — struggling sessions
 pull the next review closer, easy ones push it out. Recomputed on every
 `computeTimeline` run; it never touches days that have already passed.
+
+The 0.6×/1×/1.4× multiplier here is planned to be reused (not replaced) by
+the designed-but-unimplemented spaced-repetition ladder's Holding-stage
+interval expansion, per
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) — deliberately
+avoiding a second, parallel multiplier system for the same job.
 
 ## Confidence
 
@@ -292,8 +305,15 @@ day-by-day revival plan: practice chunks and transitions (**not** combos —
 revival reassessment scope is chunks and seams only), sorted weak-spots-first
 then lowest-confidence-first, greedily packed into days against
 `piece.minutesPerDay` using each item's existing `effort` and
-`EFFORT_TO_MIN`. **This is deliberately a distinct, simpler function, not an
-adaptation of `computeTimeline`.** `computeTimeline`'s defining behaviors —
+`EFFORT_TO_MIN`. **This description matches what's implemented today, but
+the combo exclusion is planned to change to a dynamic, outcome-dependent
+rule** (combos escalate into their own task only if their underlying
+content fails during revival) **that this function doesn't support yet** —
+see [Decisions.md](Decisions.md#spaced-repetition--maintenance) and
+[Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)
+for the design; it also means this function can no longer stay a
+fixed-list-generated-once shape once built. **This is deliberately a
+distinct, simpler function, not an adaptation of `computeTimeline`.** `computeTimeline`'s defining behaviors —
 spreading new-chunk introduction across the first half, deferring combos to
 the back half, adaptive review offsets keyed off introduction day — all
 exist to manage *first-time introduction* of material, which has no

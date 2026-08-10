@@ -71,7 +71,8 @@ MeasureOne.jsx/
         │       RecordingsEditor.jsx, RecordingsList.jsx
         └── tabs/
             ├── OverviewTab.jsx, TimelineTab.jsx, PieceMapTab.jsx,
-            │   ProgressTab.jsx, AnalyticsTab.jsx, SettingsTab.jsx
+            │   ProgressTab.jsx, AnalyticsTab.jsx, SettingsTab.jsx,
+            │   MasterAgendaTab.jsx
             ├── TodayTab.jsx
             │   └── today/  ChecklistItem.jsx, DayChecklist.jsx,
             │                FocusPanel.jsx, SectionRunThroughPanel.jsx,
@@ -110,6 +111,7 @@ single-file Claude.ai artifact.
 | `RevivalTab` | Composes the revival flow end to end: settings (performance tempo, tempo ladder start fraction), the embedded `PieceMapTab` reassessment pass, flagged-weak-spot summary, `RandomStartPanel`, and the generated plan (day-grouped `ChecklistItem`s with tempo ladders/memory anchors). See [Algorithms.md](Algorithms.md#revival). |
 | `ProgressTab` | Trend/diagnosis charts — rolling-window consistency, heatmap, actual-vs-planned, projected finish, tempo trend, effectiveness calibration, recent history. |
 | `AnalyticsTab` | Confidence-by-difficulty, recurring-material payoff. **Slated to be folded into `ProgressTab` and removed** — not yet done; see [Roadmap.md](Roadmap.md). Check the sidebar `NAV` array for current truth before assuming either state. |
+| `MasterAgendaTab` | Cross-piece daily view — aggregates every *active* piece's scheduled tasks for a selected date (date-navigable, not locked to today) into one list, so a multi-piece user isn't switching between pieces to see the whole day. Reads each piece's `getEffectiveTimeline(...).days[dayNumber - 1]` directly, so it inherits the same fixed-length, `daysToLearn`-bounded indexing `TodayTab` uses — see [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built) for why that matters for the planned maintenance-ladder work. |
 | `SettingsTab` | View mode: read-only summary + Edit/Delete/Add-new-piece/Export/Import. Edit mode reuses the shared field-editor components. |
 | `App` | Root component. Owns all state and renders the sidebar + active tab, or the empty-state/loading screens. |
 

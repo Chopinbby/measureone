@@ -214,6 +214,153 @@ from the Wizard/Settings UI.**
   `computeTimeline`'s placement itself to hard-cap daily minutes was judged
   out of scope for this fix.
 
+## Spaced repetition & maintenance
+
+**Status: designed, not yet implemented.** Full design:
+[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+Evidence behind several choices below: [Research.md](Research.md).
+
+**Decision: "learned" is redefined as every practice chunk's
+spaced-repetition ladder card reaching Holding, not a calendar date
+(`daysToLearn` running out).**
+
+- **Why:** Closes the long-standing gap flagged in
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented) —
+  nothing previously rolled per-chunk state up into a piece-level "done"
+  milestone. A piece that consolidates fast now genuinely graduates fast;
+  one that doesn't, doesn't, regardless of what the original plan guessed.
+- **Consequence:** `computeProgressTier` and `computeConfidence` are
+  unaffected — this doesn't resolve which of the app's "how good is this
+  chunk" signals is canonical, it just defines a separate, piece-level
+  "done" condition on top of whichever chunk-level signal(s) end up
+  mattering.
+
+**Decision: learning-review and maintenance are one continuous ladder
+mechanism, not two separate systems.**
+
+- **Why:** Avoids exactly the "parallel systems" pitfall
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems)
+  warns about — a piece doesn't switch into a differently-built
+  "maintenance mode," it just has more of its cards sitting at the top of
+  the same ladder every chunk has ridden since introduction.
+
+**Decision: during the front-loaded introduction window, reviews split
+into a near-mandatory Tier 1 (one-time, ~day 1) and a flexible Tier 2 (the
+normal ladder cadence, allowed to roll later under budget pressure) —
+lateness is schedule slack, never a review failure.**
+
+- **Why:** New-chunk introduction and due reviews compete for the same
+  daily budget while the piece is still being introduced. Letting reviews
+  always win risks missing the "whole piece touched by the halfway point"
+  coverage rule; letting introduction always win risks losing
+  freshly-introduced material before it's ever reinforced. The two-tier
+  split resolves the contention asymmetrically instead of picking one
+  side outright: Tier 1 protects the fast, steep early-forgetting window
+  (near-mandatory); Tier 2 absorbs the actual schedule pressure (flexible),
+  because research on spacing found reviewing late costs gradually more
+  while reviewing early costs almost nothing — see
+  [Research.md](Research.md).
+- **Alternatives considered:** reviews always take priority over
+  introduction (rejected — breaks the coverage guarantee); introduction
+  always takes priority (rejected — risks losing freshly-introduced chunks
+  before Stabilizing's first real review).
+- **Scope:** only applies during the front-loaded introduction window.
+  Once nothing new is being introduced, due reviews simply compete
+  oldest-due-first.
+
+**Decision: Holding's interval expansion reuses `adaptiveReviewOffsets`'s
+existing 0.6×/1×/1.4× effectiveness multiplier rather than a new
+multiplier system.**
+
+- **Why:** Same reasoning as the Tier 1/2 split above — a second,
+  independently-tuned multiplier system doing essentially the same job
+  would be exactly the kind of duplication
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems)
+  flags.
+
+**Decision: replace the flat pass/fail session outcome with three tiers —
+full pass, soft miss, real fail — and add `practiceBPM`, a per-chunk
+"currently being asked for" tempo distinct from `targetBPM`.**
+
+- **Why:** Grading every session against a distant fixed `targetBPM`
+  (e.g. a deliberate overlearn tempo) produced repeated "almost but not
+  quite" sessions that read as failure when the target itself was fine,
+  just ungraded incrementally — the "plateau via frustration" problem.
+  `practiceBPM` ratchets incrementally (+2 full pass / −2 soft miss / ~−8
+  to −10 real fail) so tempo progress is graded against where the learner
+  actually is, not the eventual goal.
+- **Known open item, not decided:** whether the existing "how did it feel"
+  effectiveness input survives as a separate input alongside the new
+  pass/soft-miss/fail judgment — see Open questions below.
+
+**Decision: revival gets three independent, separately-checked auto-trigger
+conditions (stop count > 5 on a run-through; a combo or 2+ regular chunks
+flagged lost in one run-through; 60+ days since anything logged) rather
+than one unified formula.**
+
+- **Why:** Conditions 1 and 2 can only fire if a run-through was actually
+  attempted and logged. A piece nobody's touched in two months has no data
+  to trip those even though it would almost certainly meet them if
+  attempted — condition 3 is a distinct fallback for exactly that case,
+  not a diluted version of the other two. Unifying them into one formula
+  would hide that a piece can fail this test for a reason none of the
+  logged-data conditions can see.
+
+**Decision: combos do not get their own revival task by default. Revival
+relearns the underlying content normally (the anchor hard chunk, plus
+whichever neighboring chunk(s) the combo's midpoint-to-midpoint range
+overlaps); if any of that underlying content produces a real fail, the
+combo escalates into its own explicit revival task; if everything
+relearns cleanly, the combo's "lost" flag clears automatically once its
+underlying chunks are done.**
+
+- **Why:** This supersedes the current `computeRevivalPlan` code comment
+  (`src/lib/revival.js`), which excludes combos from revival statically
+  and unconditionally — investigated directly: that comment was written
+  confidently, alongside the code, in the commit that first built Revival,
+  but has no trace anywhere (this doc included) of the exclusion
+  specifically being surfaced and confirmed, unlike every other
+  genuinely-discussed revival scoping call below, which lists alternatives
+  considered. Treated as an unreviewed assumption, not a settled decision,
+  and now superseded by the dynamic behavior above.
+- **Alternatives considered:** (a) exclude combos entirely, as the current
+  code does — rejected because it leaves a "lost" flag with no path to
+  clearing, risking either a permanently-flagged combo or revival
+  re-triggering immediately after it just finished, since the condition
+  that caused the trigger is never actually resolved. (b) always give
+  combos their own dedicated revival task — rejected as likely redundant,
+  since a combo isn't independent content, it's composite territory
+  already covered by relearning its constituent chunks.
+- **Open sub-question, not yet resolved:** does escalation trigger on a
+  single real fail on the underlying content, or the two-consecutive-fails
+  threshold used elsewhere in the ladder for "this wasn't actually
+  consolidated"? Lean is a single fail — revival is already
+  "something's wrong" mode by the time it's running, unlike ordinary
+  practice, where that dampening exists to avoid overreacting to one bad
+  day — but not confirmed; don't assume it silently when building.
+- **Architectural consequence:** a revival plan can no longer be a fixed
+  list generated once upfront, the way `computeRevivalPlan` builds it
+  today ([Algorithms.md#revival](Algorithms.md#revival)). It needs a
+  decision point mid-revival, after constituent outcomes are known, that
+  can insert a task that wasn't there at the start — the same shape of
+  problem as the ladder needing persisted, event-driven state instead of a
+  pure derivation (see the ladder-vs-`computeTimeline` note in
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-unifying-idea)).
+  This is the first concrete piece of revival's "not fully specced"
+  internal structure, and whatever replaces or extends
+  `computeRevivalPlan` needs to account for it generally, not just for
+  combo-handling. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#revival-auto-triggers)
+  for the full write-up.
+
+**Decision: stage lengths, graduation pass-counts, and tempo floors are
+stored as piece-level tunable data from the start, with no editing UI
+built in this pass.**
+
+- **Why:** Keeps a future tuning UI additive rather than requiring a data
+  migration later — same rationale as other tunable-but-hand-picked
+  constants in this codebase (see [Research.md](Research.md)).
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -407,8 +554,11 @@ not just from an existing piece via the Overview dashboard.**
 **Decision: pause/archive (`piece.status`) is a manual, user-set toggle with
 no automatic transitions — not a computed "this piece is learned" state.**
 
-- **Why:** [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-informally-defined-today)
-  already flags "what formally defines learned" as unresolved, and
+- **Why:** at the time, [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
+  flagged "what formally defines learned" as unresolved (since resolved in
+  design, not yet implemented — see
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance) above),
+  and
   [AI-GUIDELINES.md](AI-GUIDELINES.md#when-youre-not-sure) says not to
   silently resolve an open question while building something adjacent to
   it. Pause/archive doesn't need that question answered — it's scoped to
@@ -452,8 +602,6 @@ oversight to silently fix; surface it instead.
   whether that's intentional (Overview wants something coarser) or drift
   that should be resolved. See
   [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
-- **What formally defines a piece as "learned"?** No such state exists
-  today. See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-informally-defined-today).
 - **Exact placement of the Analytics panels once folded into Progress** —
   agreed in general terms ("near effectiveness calibration, somewhere
   unobtrusive") but never pinned down. See [Roadmap.md](Roadmap.md).
@@ -465,3 +613,27 @@ oversight to silently fix; surface it instead.
   (`piece.targetDate`, an estimated finish date in "minutes per day" mode —
   see [Algorithms.md](Algorithms.md#timeline--scheduler)); worth revisiting
   whether Progress should follow suit for consistency.
+- **Does the "how did it feel" effectiveness input survive as a separate
+  input once the spaced-repetition ladder's pass/soft-miss/fail judgment
+  exists?** Leaning toward folding it into a single optional
+  override-toward-fail, not locked in. Worth knowing this is a bigger
+  behavior change than it sounds: today `ChecklistItem`
+  (`src/components/tabs/today/ChecklistItem.jsx`) hard-gates the log
+  button on it — `canLog = reps !== "" && bpm !== "" && !!feel` — so
+  "make it optional" means removing a submit-blocking requirement, not
+  just relabeling a field. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two).
+- **Does the ladder's new rough/lost flag merge with the existing
+  `progress[id].weakSpot`?** Both are manual "this chunk needs attention"
+  flags with real overlap; not reconciled. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging).
+- **Is a single Tier 1 touch enough**, or does a chunk need a second short
+  rung before Stabilizing's first real review reliably survives? Gated on
+  fail-rate data once built, not decided preemptively. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2).
+- **How does maintenance surface in the UI** — folded into Master Agenda
+  and the per-piece Today tab (most likely), a new tab, or something else?
+  Not designed; also has a real data-plumbing consequence (a live
+  "what's due" query replacing `timeline.days[]` indexing) that isn't
+  designed either. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).

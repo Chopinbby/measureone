@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { NumberInput } from "../NumberInput";
-import { clamp, formatMinutes } from "../../lib/utils";
+import { clamp, formatMinutes, formatRange } from "../../lib/utils";
 import { REVIVAL_PURPOSE_OPTIONS } from "../../lib/constants";
 import { isManualConfidence } from "../../lib/confidence";
-import { getRevivalTargetBPM, computeTempoLadder } from "../../lib/revival";
+import { getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
 import { PieceMapTab } from "./PieceMapTab";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { RandomStartPanel } from "./revival/RandomStartPanel";
@@ -32,11 +32,23 @@ export function RevivalTab({
 }) {
   const revival = piece.revival || {};
   const revivalItems = useMemo(() => [...chunkSet.practiceChunks, ...chunkSet.transitions], [chunkSet]);
-  const chunkById = useMemo(() => Object.fromEntries(revivalItems.map((c) => [c.id, c])), [revivalItems]);
+  // Combos aren't part of revivalItems (they're not reassessed/rated or
+  // given their own base-plan task — see computeRevivalPlan), but an
+  // escalated combo still needs to be look-up-able by id to render as a
+  // ChecklistItem below.
+  const chunkById = useMemo(
+    () => Object.fromEntries([...revivalItems, ...(chunkSet.combos || [])].map((c) => [c.id, c])),
+    [revivalItems, chunkSet.combos]
+  );
   const ratedCount = revivalItems.filter((c) => isManualConfidence(c, piece.progress)).length;
   const weakSpots = revivalItems.filter((c) => (piece.progress[c.id] || {}).weakSpot);
   const firstUnratedId = (revivalItems.find((c) => !isManualConfidence(c, piece.progress)) || revivalItems[0] || {}).id || null;
   const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
+  // Combos whose underlying content (anchor chunk, or an overlapping
+  // neighbor) has produced a real fail since this revival run started —
+  // see computeComboEscalations for why this is computed live rather than
+  // written into revival.plan.
+  const comboEscalations = useMemo(() => computeComboEscalations(piece, chunkSet), [piece, chunkSet]);
 
   return (
     <div className="tab-pane">
@@ -137,6 +149,35 @@ export function RevivalTab({
           )}
 
           <RandomStartPanel piece={piece} revivalItems={revivalItems} sections={piece.sections} />
+
+          {revival.plan && comboEscalations.length > 0 && (
+            <div className="panel focus-panel">
+              <h3>Needs another look</h3>
+              <p className="wizard-hint">
+                A focus block below had a real fail somewhere in its underlying content this run —
+                worth its own dedicated pass rather than assuming it'll resolve on its own.
+              </p>
+              <div className="checklist">
+                {comboEscalations.map((combo) => {
+                  const targetBPM = getRevivalTargetBPM(piece, combo);
+                  const ladder = computeTempoLadder(targetBPM, revival.tempoLadderStartFraction ?? 0.6, 5);
+                  return (
+                    <ChecklistItem
+                      key={combo.id}
+                      chunk={combo}
+                      role="combo"
+                      piece={piece}
+                      day={currentDay}
+                      onLogSession={onLogSession}
+                      onUnlogSession={onUnlogSession}
+                      tempoLadder={ladder}
+                      memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[combo.id]}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {revival.plan && (
             <>

@@ -41,7 +41,7 @@ MeasureOne.jsx/
 ├── vite.config.js
 └── src/
     ├── main.jsx                 # ReactDOM entry point, just mounts <App />
-    ├── App.jsx                  # state + layout only — ~900 lines; renders
+    ├── App.jsx                  # state + layout only — ~1,250 lines; renders
     │                            # the sidebar and whichever tab is active,
     │                            # owns updatePiece and every handler passed
     │                            # down as props. The CSS string also still
@@ -57,8 +57,9 @@ MeasureOne.jsx/
     │   ├── confidence.js              # computeConfidence and friends
     │   ├── revival.js                  # computeRevivalPlan and friends
     │   ├── ladder.js                     # computeLadderAdvance — spaced-repetition
-    │   │                                  # maintenance stage math; unwired, nothing
-    │   │                                  # calls it yet (Repertoire-Lifecycle.md#stage-4)
+    │   │                                  # maintenance stage math; called from
+    │   │                                  # App.jsx's handleLogSession on every
+    │   │                                  # logged session (see Algorithms.md#ladder)
     │   ├── works.js                      # multi-movement grouping helpers
     │   └── storage.js                     # localStorage load/save/export/import
     └── components/
@@ -67,6 +68,8 @@ MeasureOne.jsx/
         │   PartSwitcher.jsx                     # small standalone pieces
         ├── Wizard.jsx                            # create-only piece setup
         ├── RevivalEntryModal.jsx, DeletePieceModal.jsx
+        ├── ExportPiecesModal.jsx, ImportPiecesModal.jsx,
+        │   PieceCheckRow.jsx                       # per-piece export/import picker
         ├── fields/                                # editors shared by
         │   │                                       # Wizard and SettingsTab
         │   └── BasicsFields.jsx, SectionsEditor.jsx, DifficultyEditor.jsx,
@@ -103,13 +106,14 @@ single-file Claude.ai artifact.
 | `TimelineTab` | Full day-by-day schedule, grouped by week; day cards jump to that day in Today. |
 | `PieceMapTab` | Grid of every chunk colored by confidence. Clicking a tile opens a **modal** (not inline — see [UX-Principles.md](UX-Principles.md#detail-on-demand-uses-a-real-modal-not-inline-expansion)) with BPM inputs, manual-confidence override, a weak-spot toggle, and a memory-anchor field. Also used embedded (with `hideHeader`/`sequentialMode`/`initialSelectedId`/`onFinishSequential`) by `RevivalTab` for the fast reassessment pass — see [Algorithms.md](Algorithms.md#revival) — rather than a second grid component. |
 | `MemoryAnchorField` | Small commit-on-blur textarea, same decouple-from-render pattern as `NumberInput`, for the modal's memory-anchor field. |
-| `ChecklistItem` / `DayChecklist` | The practice-logging UI: timer, reps/BPM/effectiveness inputs, checkbox that submits directly (`submitLog()`). `ChecklistItem` also accepts optional `tempoLadder`/`memoryAnchor` props (rendered as extra tip lines when present) — used by revival plan items, absent everywhere else. |
+| `ChecklistItem` / `DayChecklist` | The practice-logging UI: timer, reps/BPM inputs, a "needs more work" fail override, checkbox that submits directly (`submitLog()`). Reps/BPM are auto-classified into a pass/soft-miss/fail outcome — see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder) — not a free-standing effectiveness rating. Stays visible (relabeled "Log another attempt") even once something's logged for the day, so a same-day re-attempt is reachable, not just supported by the data model. `ChecklistItem` also accepts optional `tempoLadder`/`memoryAnchor` props (rendered as extra tip lines when present) — used by revival plan items, absent everywhere else. |
 | `FocusPanel` | Ranks everything touched so far by confidence, independent of today's schedule. |
 | `SectionRunThroughPanel` | Surfaces unlocked section run-throughs/combined run-throughs — see [Algorithms.md](Algorithms.md#section-run-throughs). |
 | `ReassessPanel` | Re-rate difficulty for a measure range; Apply commits and closes in one action. |
 | `TodayTab` | Composes `ScheduleBanner`, `FocusPanel`, `DayChecklist` (or all days in "View all" mode), `SectionRunThroughPanel`, `ReassessPanel`. |
 | `RevivalEntryModal` | Collects `lastPlayedDate`, optional `performanceTempo`, and required `purpose` before a revival cycle starts. Styled like `Wizard`'s modal shell. |
 | `DeletePieceModal` | Confirms permanent deletion by requiring the piece's exact name to be typed back, rather than a single `window.confirm()` — deletion has no undo and takes all practice history with it. |
+| `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. `PieceCheckRow` is the shared checkbox-row list item both modals render. |
 | `RandomStartPanel` | Revival-only: picks a uniformly random chunk, transition, or section and displays it (plus its memory anchor, if any) for a cold-start warm-up. |
 | `RevivalTab` | Composes the revival flow end to end: settings (performance tempo, tempo ladder start fraction), the embedded `PieceMapTab` reassessment pass, flagged-weak-spot summary, `RandomStartPanel`, and the generated plan (day-grouped `ChecklistItem`s with tempo ladders/memory anchors). See [Algorithms.md](Algorithms.md#revival). |
 | `ProgressTab` | Trend/diagnosis charts — rolling-window consistency, heatmap, actual-vs-planned, projected finish, tempo trend, effectiveness calibration, recent history. |
@@ -144,8 +148,12 @@ library.
 - `navItems` — `NAV_BASE` with `REVIVAL_NAV_ITEM` spliced in (before
   Progress) only while `piece.revival.active` is true; the sidebar renders
   this instead of `NAV_BASE` directly.
-- Backup: `handleExportAll` downloads every piece as one JSON file;
-  `handleImportClick`/`handleImportFile` restore from one.
+- Backup: `handleExportClick` opens `ExportPiecesModal` (pick which pieces
+  to include, then `downloadBackup` on that subset — not an all-or-nothing
+  export); `handleImportClick`/`handleImportFile` open `ImportPiecesModal`,
+  and `handleConfirmImport` restores the selected pieces, matching by id or
+  by name+composer so re-importing a backup updates an existing piece
+  instead of duplicating it.
 
 `chunkSet` and `timeline` are `useMemo`'d off `piece` — pure derivations,
 never stored in `piece` itself. Schedule-related state that must persist

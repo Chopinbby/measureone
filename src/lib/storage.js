@@ -382,6 +382,27 @@ function mergeProgress(existingProgress, importedProgress) {
       targetBPM: preferPresent(i.targetBPM, e.targetBPM),
       manualConfidence: preferPresent(i.manualConfidence, e.manualConfidence),
       weakSpot: i.weakSpot !== undefined ? i.weakSpot : e.weakSpot,
+      // Ladder state is *derived* from practice history (computeLadderAdvance,
+      // lib/ladder.js), not something anyone hand-edits in an exported file
+      // the way minutesPerDay might be — there's no legitimate "intentional
+      // edit in the export should win" case for it the way there is for the
+      // fields above. So unlike those, the import never overwrites it: the
+      // existing piece's ladder progress always wins over whatever snapshot
+      // happened to be sitting in the imported file, the same "must never
+      // silently disappear" treatment doneDays/sessions already get above.
+      // Known limitation: this means restoring a backup from a genuinely
+      // more-advanced *other* device/browser (rather than re-importing an
+      // older copy of the same piece) would keep this device's less-advanced
+      // state instead of the more-advanced import — correctly recovering
+      // that case would mean recomputing ladder state from the merged
+      // session history instead of preferring either snapshot outright,
+      // which is a bigger change than this fix; flagging, not building now.
+      stage: e.stage,
+      consecutivePasses: e.consecutivePasses,
+      consecutiveStabilizingFails: e.consecutiveStabilizingFails,
+      practiceBPM: e.practiceBPM,
+      nextDueDate: e.nextDueDate,
+      tier1Done: e.tier1Done,
     };
   });
   return merged;

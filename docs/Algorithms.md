@@ -20,9 +20,12 @@
 > bug that this doc already warns about, that's a signal the doc did its job;
 > update it to describe the fix, don't just delete the warning.
 
-All of the functions below live near the top of `src/App.jsx`, before any
-component definitions, as pure functions of `piece` (and, for chunk-level
-functions, a specific chunk).
+All of the functions below live in `src/lib/*.js` (chunking.js,
+scheduling.js, confidence.js, revival.js, ladder.js, storage.js) as pure
+functions of `piece` (and, for chunk-level functions, a specific chunk) —
+see [Architecture.md](Architecture.md#file-structure-current) for the
+current file layout. `App.jsx` calls these from its state handlers; it
+doesn't define them.
 
 ## Chunking
 
@@ -189,16 +192,23 @@ UI-only concern.
 
 `adaptiveReviewOffsets(chunk, progress)` — not fully learned/tuned yet (see
 [Research.md](Research.md)), but the mechanism is in place: the fixed
-`[1,3,7,14]` offsets are multiplied by 0.6 if the chunk's most recent logged
-session had `effectiveness: "low"`, or 1.4 if `"high"` — struggling sessions
-pull the next review closer, easy ones push it out. Recomputed on every
+`[1,3,7,14]` offsets are multiplied by 0.6 if the chunk's most recent
+logged session's outcome (see
+[Session outcomes & the maintenance ladder](#session-outcomes--the-maintenance-ladder)
+below) was a real fail, or 1.4 if it was a full pass — struggling sessions
+pull the next review closer, easy ones push it out. Was keyed off a
+free-standing self-reported `effectiveness` field ("how did it feel");
+that field was folded into the pass/soft-miss/fail judgment, and this now
+reads the classified outcome instead (`sessionOutcome()`, `lib/confidence.js`,
+which also maps old sessions that only have `effectiveness` so history
+predating the change keeps contributing real signal). Recomputed on every
 `computeTimeline` run; it never touches days that have already passed.
 
-The 0.6×/1×/1.4× multiplier here is planned to be reused (not replaced) by
-the designed-but-unimplemented spaced-repetition ladder's Holding-stage
-interval expansion, per
-[Decisions.md](Decisions.md#spaced-repetition--maintenance) — deliberately
-avoiding a second, parallel multiplier system for the same job.
+The 0.6×/1×/1.4× multiplier here is reused (not duplicated) by the ladder
+engine's Holding-stage interval expansion — see
+[Session outcomes & the maintenance ladder](#session-outcomes--the-maintenance-ladder)
+below — deliberately avoiding a second, parallel multiplier system for the
+same job.
 
 ## Confidence
 
@@ -212,8 +222,12 @@ avoiding a second, parallel multiplier system for the same job.
   lower tempo must genuinely score lower — this was a specific bug fix; do
   not let this regress into "any session = full credit."**
 - Recency decays the score if it's been several days since last practiced.
-- The learner's self-reported `effectiveness` on their most recent session
-  applies a final multiplier (0.8× / 1× / 1.15×).
+- The most recent session's classified outcome (pass/soft-miss/fail — see
+  [Session outcomes & the maintenance ladder](#session-outcomes--the-maintenance-ladder)
+  below) applies a final multiplier: 0.8× on a real fail, 1.15× on a full
+  pass, unchanged on a soft-miss. Was keyed off a free-standing
+  self-reported `effectiveness` field; folded into the outcome judgment,
+  same change as Adaptive review above.
 - Hard chunks get a small penalty (need more to feel "solid"); recurring
   chunks get a small boost (already-familiar material).
 
@@ -232,6 +246,87 @@ actually set.
 `getDefaultTargetBPM(piece, chunk)` resolves the effective tempo target for
 a chunk with no explicit per-chunk target: checks `piece.bpmZones` for a
 measure-range match first, then falls back to `piece.targetBPM`.
+
+## Session outcomes & the maintenance ladder
+
+Data shapes: [Data-Model.md](Data-Model.md#the-piece-object) (`ChunkProgress.stage`
+etc., `piece.ladderConfig`). Design: [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+Replaces the old flat pass/fail and free-standing "how did it feel"
+self-report with an objective three-tier judgment, and advances a
+per-chunk spaced-repetition ladder on every logged session.
+
+`classifySessionOutcome({ cleanReps, bpm, requiredReps, practiceBPM,
+manualFail, previousOutcome })` (`lib/confidence.js`) — called from
+`ChecklistItem` before logging, not from `handleLogSession` itself (it
+needs the full chunk's `difficultyLabel` and the piece's `bpmZones` to
+resolve `requiredReps`/the effective target, neither of which the handler
+has from just a chunk id):
+- `manualFail` (the UI's "needs more work" checkbox — the folded-in
+  replacement for the old effectiveness input) always wins as `"fail"`.
+- Zero clean reps is always `"fail"`.
+- Required reps hit **and** at/above `practiceBPM` is `"pass"`.
+- A repeat `"soft-miss"` right after the previous one (some reps, but not
+  enough, twice in a row) escalates to `"fail"`.
+- Anything else with at least one clean rep is `"soft-miss"`.
+
+`sessionOutcome(session)` (`lib/confidence.js`) reads `session.outcome` if
+present, or maps an old session's `effectiveness` value if not (`"low"` →
+`"fail"`, `"high"` → `"pass"`, `"good"` → `"soft-miss"`) — the shared
+read path `computeAutoConfidence`, `adaptiveReviewOffsets`, and
+`computeComboEscalations` (see [Revival](#revival) below) all go through,
+so history logged before this model shipped still contributes real
+signal instead of reading as neutral.
+
+`computeLadderAdvance(chunkLadderState, outcome, ladderConfig)`
+(`lib/ladder.js`) — a pure function, called from `handleLogSession`
+(`App.jsx`) on every logged session, implementing the Stabilizing →
+Settling → Holding stages:
+- **Full pass:** `practiceBPM` steps up (`ladderConfig.bpmSteps.pass`,
+  default +2); counts toward graduation only once `practiceBPM` clears
+  the current stage's tempo floor (Stabilizing has none; Settling/Holding
+  gate on a fraction of `targetBPM`) — the floor gates progress, not the
+  pass/fail judgment itself. Graduating resets the pass counter and moves
+  to the next stage (Holding has no ceiling — it just keeps accruing
+  passes, which drives its own escalating tempo floor and interval
+  growth, below).
+- **Soft miss:** `practiceBPM` steps down (default −2), the pass counter
+  resets, stage does not change.
+- **Real fail:** `practiceBPM` steps down (default −2 — deliberately the
+  same magnitude as the other two steps, not the steeper pullback an
+  earlier design sketch had), demotes exactly one stage (never below
+  Stabilizing), and — specifically for a *second consecutive* fail while
+  still in Stabilizing — sets `needsRelearning: true` on the result. That
+  flag is not read anywhere yet; see
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages).
+- **Holding's review interval** starts at `startIntervalDays` (default
+  14) and grows by the same 0.6×/1×/1.4× effectiveness multiplier
+  [Adaptive review](#adaptive-review) uses, raised to the power of the
+  accrued pass count — reused deliberately, not a second multiplier
+  system. A "low" effectiveness pass can make the *next* interval
+  shorter than the last one, on purpose: a technically-passing but shaky
+  review is exactly when the next check-in should come sooner.
+  `effectiveness` here is derived in `App.jsx` from the classified
+  outcome (fail→low, pass→high, soft-miss→good), not collected as its
+  own input.
+
+None of `stage`/`consecutivePasses`/`nextDueDate` are surfaced anywhere in
+the UI yet, and nothing queries "what's due" from `nextDueDate` — only
+`practiceBPM` (shown as "Practice tempo" in `ChecklistItem`) has a visible
+effect today. Tier 1/Tier 2 review scheduling and a live "what's due"
+query are separate, not-yet-built pieces of this design — see
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+
+`handleLogSession` also seeds `practiceBPM` from whatever tempo was first
+attempted, the first time a chunk is logged (since there's no designed
+ladder-entry/Tier-1 mechanic yet to do this deliberately), and appends
+sessions keyed by a precise `loggedAt` timestamp rather than overwriting
+by plan-day — so logging the same chunk twice in one day (e.g. an early
+touch, then a later re-attempt) produces two distinct records instead of
+one silently replacing the other. `handleUnlogSession` removes only the
+most recently logged session for a day, not every session that day, and
+does not roll back the ladder state that session's outcome already
+advanced (same "no undo history" spirit as BPM zones and difficulty
+reassessment — see [Data-Model.md](Data-Model.md#known-simplifications)).
 
 `computeProgressTier(chunk, piece)` is a **separate, simpler** score from
 confidence — see [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)

@@ -1232,6 +1232,36 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **`getCurrentDay` undercounts by a day across a DST boundary — a real
+  correctness bug, not a rounding nitpick, and it is not fixed.**
+  `elapsedDay`/`getCurrentDay` (`lib/utils.js`) compute
+  `Math.floor((today − startDate) / MS_PER_DAY) + 1` on two *local*
+  midnights. After a spring-forward the interval is `n × 24 − 1` hours, so
+  the floor lands a day short; the general-purpose `daysBetweenInclusive`
+  uses `Math.round` and doesn't have this problem. **This is not a
+  changeover-day glitch — it persists for the whole ~8 months between the
+  March and November transitions**, then self-corrects. Measured in
+  `America/Denver` on 2026-08-11: a piece started 2026-02-01 reads day 191
+  where it should read 192; started 2025-12-01, day 253 instead of 254. A
+  piece started after the March transition is unaffected. Consequence: for
+  most of the year, a piece begun in winter shows the learner *yesterday's*
+  practice tasks — `getCurrentDay` drives "Day N of N", which day's
+  checklist renders, and behind-schedule detection.
+  - **Why it's not just fixed:** the change is one word (`Math.floor` →
+    `Math.round`), but it shifts day numbering by one for every affected
+    piece the moment it lands, which reads to the user as their plan
+    jumping forward a day. That deserves a deliberate pass — including a
+    check of whether anything keys off the old numbering (`doneDays`
+    entries and `sessions[].day` are stored plan-day ints) — not a silent
+    tweak folded into unrelated work.
+  - **Found** while verifying the `elapsedDay` extraction, not by a report.
+    Pre-dates that commit and pre-dates Pass 8: it has been in
+    `getCurrentDay` since the app was written. The extraction *did* newly
+    subject past-plan detection to the same skew (those two surfaces
+    previously used `daysBetweenInclusive`) — accepted deliberately, since
+    the alternative was the app disagreeing with itself about what day it
+    is. See
+    [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
 - **Should `computeConfidence` and `computeProgressTier` be unified?** They
   currently measure different things (weighted session history vs. the
   spaced-repetition ladder's `stage`, as of Pass 6 — see

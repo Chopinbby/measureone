@@ -7,7 +7,7 @@ import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
-import { daysBetweenInclusive, todayISODate, formatMinutes } from "../../lib/utils";
+import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes } from "../../lib/utils";
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
 // N" left to show — the plan grid is exhausted, but the maintenance ladder
@@ -92,9 +92,8 @@ export function TodayTab({
 
   // getCurrentDay (lib/utils) clamps into the plan, so `currentDay` can
   // never report a day past the end — the unclamped elapsed day is what
-  // tells us the plan has actually run out. Same day-1-is-startDate
-  // arithmetic getCurrentDay uses, just without the clamp.
-  const elapsedDay = daysBetweenInclusive(piece.startDate || todayISODate(), todayISODate()) || 1;
+  // tells us the plan has actually run out.
+  const elapsedDay = computeElapsedDay(piece);
   // Only when actually parked on real "today". A day explicitly picked
   // from the Timeline tab still renders that day's plan grid, past-plan or
   // not — otherwise a past-plan piece's plan would become unreachable.

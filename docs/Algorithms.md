@@ -458,23 +458,31 @@ the same result. See
 Both surfaces need to know "is this piece past its plan?" before they can
 switch to the due list, and **`getCurrentDay` cannot answer it** — it
 `clamp`s to `[1, totalDays]`, so a 10-day plan that started three months
-ago still reports day 10. Both therefore derive an *unclamped* elapsed day
-from `piece.startDate` (`daysBetweenInclusive(startDate, today)`, same
-day-1-is-`startDate` arithmetic, just without the clamp) and compare that
-against `timeline.days.length`.
+ago still reports day 10.
+
+`elapsedDay(piece)` (`lib/utils.js`) is the unclamped form: the same
+day-1-is-`startDate` arithmetic, floored at 1 (so a future `startDate`
+reads as "day 1, not started" rather than a negative day) but with no
+upper bound. Both surfaces call it and compare against
+`timeline.days.length`. **`getCurrentDay` is now derived from it**
+(`clamp(elapsedDay(piece), 1, totalDays)`) rather than repeating the date
+arithmetic, so the clamped and unclamped forms cannot drift apart.
 
 This clamp is also why Master Agenda's pre-Pass-8 `dayNumber >
 timeline.days.length` guard **never fired for today**: a piece past its
 plan silently re-rendered its last scheduled day, every day, indefinitely.
 Fixing the detection fixed that too.
 
-> **Known duplication:** the elapsed-day derivation currently lives
-> inline in both `TodayTab.jsx` and `MasterAgendaTab.jsx` rather than as a
-> shared helper in `lib/utils.js`, and the two copies differ slightly
-> (Master Agenda floors at 1 for a future `startDate`, TodayTab doesn't —
-> no visible difference today, since both resolve to "not past plan"). A
-> shared `elapsedDay(piece)` helper is the obvious cleanup; it was left out
-> because `lib/utils.js` was outside Pass 8's stated scope.
+> **Rounding note:** `elapsedDay` uses `Math.floor` on the millisecond
+> difference, inherited from `getCurrentDay`. The general-purpose
+> `daysBetweenInclusive` helper uses `Math.round` instead, which is the
+> more DST-robust of the two (a spring-forward day is 23 hours, so a floor
+> can undercount by one). The two surfaces originally used
+> `daysBetweenInclusive` and now use `elapsedDay`, which makes past-plan
+> detection agree with the app's day numbering everywhere else — the right
+> trade, but it means **any DST skew in `getCurrentDay` is inherited, not
+> fixed**. Changing the arithmetic would shift day numbering for every
+> existing piece, so it's deliberately left alone.
 
 ## Behind-schedule detection
 

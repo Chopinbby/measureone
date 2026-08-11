@@ -946,14 +946,21 @@ unclamped elapsed-day derivation in each surface, not by `getCurrentDay`
   indefinitely (in testing, a stale "Full run-through of the piece" as
   today's task). Correcting the detection removed that as a side effect,
   so Pass 8 is a bug fix as well as a feature.
-- **Known duplication, accepted for now:** the derivation lives inline in
-  both `TodayTab.jsx` and `MasterAgendaTab.jsx` rather than as a shared
-  `elapsedDay(piece)` helper in `lib/utils.js`, and the two copies differ
-  slightly (Master Agenda floors at 1 for a future `startDate`, TodayTab
-  doesn't — no visible difference today, since both resolve to "not past
-  plan" either way). Left as-is because `lib/utils.js` was outside the
-  pass's stated scope, and flagged rather than folded in. **This is the
-  known drift risk to clean up first if you're touching either file.**
+- **Resolved (follow-up commit):** Pass 8 shipped this derivation inline in
+  both `TodayTab.jsx` and `MasterAgendaTab.jsx`, with the two copies
+  differing slightly (Master Agenda floored at 1 for a future `startDate`,
+  TodayTab didn't) — flagged rather than folded in, since `lib/utils.js`
+  was outside the pass's stated scope. It's since been extracted to
+  `elapsedDay(piece)` in `lib/utils.js`, and **`getCurrentDay` is now
+  derived from it** (`clamp(elapsedDay(piece), 1, totalDays)`) rather than
+  repeating the same date arithmetic a third time — so the clamped and
+  unclamped forms can't drift. Behaviour verified unchanged on both
+  surfaces, in-plan and past-plan. One knock-on worth knowing: the surfaces
+  previously computed elapsed days via `daysBetweenInclusive` (`Math.round`)
+  and now inherit `getCurrentDay`'s `Math.floor`, so past-plan detection
+  agrees with the app's day numbering everywhere else — but also inherits
+  any DST skew that numbering already has. See
+  [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
 - **Related, unchanged:** `ScheduleBanner` still runs off the clamped
   `currentDay`, so a piece past its plan can show "N chunks behind
   schedule" above its maintenance due list. Pre-existing, not a Pass 8

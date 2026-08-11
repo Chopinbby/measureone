@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
-import { todayISODate, addDaysISO, daysBetweenInclusive, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
+import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 
 export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
@@ -43,10 +43,8 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
           // a piece whose plan ran out weeks ago would park on its last
           // scheduled day forever and re-show already-finished work. The
           // unclamped elapsed day is what lets us tell "past the plan" from
-          // "on the last day of the plan". The low-end clamp is kept so a
-          // piece with a future startDate behaves exactly as before.
-          const elapsedDay = Math.max(1, daysBetweenInclusive(piece.startDate || todayISODate(), todayISODate()) || 1);
-          const dayNumber = elapsedDay + daysFromToday;
+          // "on the last day of the plan".
+          const dayNumber = computeElapsedDay(piece) + daysFromToday;
 
           if (dayNumber < 1) return;
 

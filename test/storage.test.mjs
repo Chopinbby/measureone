@@ -131,6 +131,49 @@ describe("validateAndMigratePiece — representative old piece shapes", () => {
     assert.equal(m.lastLoggedAt, "2026-06-05");
   });
 
+  test("[regression, Pass 7 fix] a piece whose only logged activity is a run-through (__consolidation__) still gets a real lastLoggedAt, not null", () => {
+    // Before the fix, computeLastLoggedAt explicitly skipped the
+    // "__consolidation__" key, so a piece practiced only via full
+    // run-throughs (Pass 6's stop-count logging) would look never-touched
+    // to anything reading lastLoggedAt — including Revival's 60+-days
+    // auto-trigger (Pass 7, lib/revival.js#computeRevivalTriggers).
+    const consolidationOnly = {
+      id: "p_consolidation_only",
+      name: "Consolidation Only",
+      totalMeasures: 32,
+      startDate: "2026-05-01",
+      progress: {
+        __consolidation__: { doneDays: [1], sessions: [{ day: 1, stopCount: 2, loggedDate: "2026-06-01" }] },
+      },
+    };
+    const m = validateAndMigratePiece(consolidationOnly);
+    assert.equal(m.lastLoggedAt, "2026-06-01");
+  });
+
+  test("[regression, Pass 7 fix] a run-through logged more recently than any real chunk session wins as lastLoggedAt", () => {
+    const withRecentRunThrough = {
+      ...midPlan,
+      progress: {
+        ...midPlan.progress,
+        __consolidation__: { doneDays: [3], sessions: [{ day: 3, stopCount: 1, loggedDate: "2026-07-01" }] },
+      },
+    };
+    const m = validateAndMigratePiece(withRecentRunThrough);
+    assert.equal(m.lastLoggedAt, "2026-07-01", "the run-through (2026-07-01) postdates c1's last real session (2026-06-05)");
+  });
+
+  test("[regression, Pass 7 fix] a run-through logged BEFORE the most recent real chunk session does not override it", () => {
+    const withStaleRunThrough = {
+      ...midPlan,
+      progress: {
+        ...midPlan.progress,
+        __consolidation__: { doneDays: [3], sessions: [{ day: 3, stopCount: 1, loggedDate: "2026-06-02" }] },
+      },
+    };
+    const m = validateAndMigratePiece(withStaleRunThrough);
+    assert.equal(m.lastLoggedAt, "2026-06-05", "c1's real session is still the most recent overall");
+  });
+
   test("revival-entered piece keeps revival state and manualConfidence intact, and old weakSpot converts to the new 'rough' flag", () => {
     const m = validateAndMigratePiece(revivalEntered);
     assert.equal(m.revival.active, true);

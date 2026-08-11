@@ -4,7 +4,8 @@
 // cases below are as important as the "happy path" ones.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeComboEscalations, findComboUnderlyingChunks } from "../src/lib/revival.js";
+import { computeComboEscalations, findComboUnderlyingChunks, computeRevivalTriggers } from "../src/lib/revival.js";
+import { addDaysISO, todayISODate } from "../src/lib/utils.js";
 
 // chunks c1(1-4), c5(5-8, hard, the anchor), c9(9-12) — combo spans
 // midpoint-to-midpoint: start=ceil((1+4)/2)=3, end=floor((9+12)/2)=10.
@@ -175,5 +176,115 @@ describe("[regression, fix round 3] per-chunk independence — one chunk's fix c
       },
     };
     assert.deepEqual(computeComboEscalations(piece, chunkSet).map((c) => c.id), ["x_c5"]);
+  });
+});
+
+// computeRevivalTriggers (Pass 7) — the three independent auto-trigger
+// conditions from docs/Repertoire-Lifecycle.md#revival-auto-triggers /
+// docs/Decisions.md#spaced-repetition--maintenance. Condition 3 reads real
+// calendar dates (todayISODate/addDaysISO), not the REVIVAL_START epoch
+// numbers the combo-escalation tests above use, since it has nothing to do
+// with an active revival run.
+describe("computeRevivalTriggers", () => {
+  test("nothing logged, nothing flagged, no lastLoggedAt: no trigger fires", () => {
+    const piece = { progress: {} };
+    assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+  });
+
+  test("[regression] piece.progress itself missing (not just empty) does not throw, on any condition", () => {
+    const piece = {};
+    assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+  });
+
+  describe("condition 1 — stop count > 5 on a single logged run-through", () => {
+    test("a stop count of 6 triggers", () => {
+      const piece = { progress: { __consolidation__: { sessions: [{ day: 1, stopCount: 6 }] } } };
+      const result = computeRevivalTriggers(piece, chunkSet);
+      assert.equal(result.triggered, true);
+      assert.deepEqual(result.reasons.map((r) => r.key), ["stopCount"]);
+    });
+
+    test("a stop count of exactly 5 does not trigger — the condition is strictly greater than 5", () => {
+      const piece = { progress: { __consolidation__: { sessions: [{ day: 1, stopCount: 5 }] } } };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+
+    test("across multiple run-throughs, only one needs to exceed 5", () => {
+      const piece = {
+        progress: { __consolidation__: { sessions: [{ day: 1, stopCount: 1 }, { day: 2, stopCount: 9 }] } },
+      };
+      assert.equal(computeRevivalTriggers(piece, chunkSet).triggered, true);
+    });
+
+    test("no __consolidation__ entry at all does not throw and does not trigger", () => {
+      const piece = { progress: { c1: { sessions: [] } } };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+  });
+
+  describe("condition 2 — a combo, or 2+ regular practice chunks, currently flagged lost", () => {
+    test("a combo-kind chunk flagged lost triggers on its own", () => {
+      const piece = { progress: { x_c5: { flag: "lost" } } };
+      const result = computeRevivalTriggers(piece, chunkSet);
+      assert.deepEqual(result.reasons.map((r) => r.key), ["largeChunksLost"]);
+    });
+
+    test("2 regular practice chunks flagged lost triggers", () => {
+      const piece = { progress: { c1: { flag: "lost" }, c5: { flag: "lost" } } };
+      assert.equal(computeRevivalTriggers(piece, chunkSet).triggered, true);
+    });
+
+    test("only 1 practice chunk flagged lost does not trigger — the threshold is 2+", () => {
+      const piece = { progress: { c1: { flag: "lost" } } };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+
+    test("chunks flagged 'rough' (not 'lost') never count toward this condition, even 2+ of them", () => {
+      const piece = { progress: { c1: { flag: "rough" }, c5: { flag: "rough" }, x_c5: { flag: "rough" } } };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+
+    test("a transition flagged lost does not count — only practiceChunks/combos are 'regular'/'large' chunks, not transitions", () => {
+      const piece = { progress: { t_c1_c5: { flag: "lost" } } };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+  });
+
+  describe("condition 3 — 60+ days since anything was logged on the piece at all", () => {
+    test("lastLoggedAt exactly 60 days ago triggers", () => {
+      const piece = { progress: {}, lastLoggedAt: addDaysISO(todayISODate(), -60) };
+      const result = computeRevivalTriggers(piece, chunkSet);
+      assert.deepEqual(result.reasons.map((r) => r.key), ["staleness"]);
+      assert.equal(result.reasons[0].label, "It's been 60 days since anything was logged");
+    });
+
+    test("lastLoggedAt 59 days ago does not trigger — the threshold is 60+", () => {
+      const piece = { progress: {}, lastLoggedAt: addDaysISO(todayISODate(), -59) };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+
+    test("lastLoggedAt today does not trigger", () => {
+      const piece = { progress: {}, lastLoggedAt: todayISODate() };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+
+    test("lastLoggedAt null (never logged at all) does NOT trigger — this is a distinct fallback for a piece with real but old activity, not a catch-all for zero data", () => {
+      const piece = { progress: {}, lastLoggedAt: null };
+      assert.deepEqual(computeRevivalTriggers(piece, chunkSet), { triggered: false, reasons: [] });
+    });
+  });
+
+  test("multiple independent conditions firing at once each produce their own reason, not just the first match", () => {
+    const piece = {
+      progress: {
+        __consolidation__: { sessions: [{ day: 1, stopCount: 8 }] },
+        c1: { flag: "lost" },
+        c5: { flag: "lost" },
+      },
+      lastLoggedAt: addDaysISO(todayISODate(), -100),
+    };
+    const result = computeRevivalTriggers(piece, chunkSet);
+    assert.equal(result.triggered, true);
+    assert.deepEqual(result.reasons.map((r) => r.key).sort(), ["largeChunksLost", "staleness", "stopCount"]);
   });
 });

@@ -6,12 +6,14 @@ import { PartSwitcher } from "../PartSwitcher";
 import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib/utils";
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
+import { computeRevivalTriggers } from "../../lib/revival";
 import { PIECE_STATUS_LABEL } from "../../lib/constants";
 
 export function OverviewTab({
   piece,
   practiceChunks,
   chunks,
+  chunkSet,
   timeline,
   currentDay,
   onReschedule,
@@ -22,6 +24,8 @@ export function OverviewTab({
   onAddPart,
   onSelectDay,
 }) {
+  const revivalActive = !!(piece.revival && piece.revival.active);
+  const revivalTriggers = !revivalActive && chunkSet ? computeRevivalTriggers(piece, chunkSet) : { triggered: false, reasons: [] };
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
@@ -46,6 +50,21 @@ export function OverviewTab({
         </button>
       </div>
       <ScheduleBanner piece={piece} practiceChunks={practiceChunks} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
+      {revivalTriggers.triggered && (
+        <div className="revival-banner">
+          <div>
+            <p className="revival-banner-title">This piece might be due for a revival</p>
+            <ul className="revival-banner-reasons">
+              {revivalTriggers.reasons.map((r) => (
+                <li key={r.key}>{r.label}</li>
+              ))}
+            </ul>
+          </div>
+          <button className="primary-btn" onClick={onStartRevival}>
+            <RefreshCw size={15} /> Start revival
+          </button>
+        </div>
+      )}
       <div className="hero-card">
         <div className="hero-doodle-band">
           <ManuscriptDoodle />

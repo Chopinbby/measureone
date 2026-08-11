@@ -123,11 +123,15 @@ function backfillProgressLadderState(progress, startDate) {
 // Most recent session date across every chunk, or null if nothing's ever
 // been logged. Recomputed fresh on every load (like daysToLearn
 // reconciliation below), not backfilled-and-locked-in like startDate,
-// since new sessions keep changing what "most recent" means.
+// since new sessions keep changing what "most recent" means. Includes
+// "__consolidation__" (full run-through sessions, Pass 6) — a run-through
+// is a real touch on the piece, and Revival's 60+-days-untouched auto-
+// trigger (Pass 7, lib/revival.js) reads this value, so excluding
+// run-throughs here would make a piece practiced only via run-throughs
+// look falsely stale after every reload.
 function computeLastLoggedAt(progress) {
   let latest = null;
-  Object.entries(progress).forEach(([key, entry]) => {
-    if (key === "__consolidation__") return;
+  Object.values(progress).forEach((entry) => {
     (entry.sessions || []).forEach((s) => {
       if (s.loggedDate && (!latest || s.loggedDate > latest)) latest = s.loggedDate;
     });

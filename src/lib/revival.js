@@ -1,4 +1,4 @@
-import { clamp, rangesOverlap } from "./utils";
+import { clamp, rangesOverlap, daysBetweenInclusive, todayISODate } from "./utils";
 import { EFFORT_TO_MIN } from "./constants";
 import { computeConfidence, getDefaultTargetBPM, sessionOutcome } from "./confidence";
 
@@ -158,6 +158,60 @@ function latestQualifyingSession(sessions, startedAt) {
 // relearned cleanly; a derivation just stops returning it once nothing
 // currently qualifies, so "the flag clears automatically" (the doc's own
 // phrasing for this) falls out for free rather than needing to be built.
+// Revival's three documented auto-trigger conditions (Repertoire-
+// Lifecycle.md#revival-auto-triggers), each checked independently — any
+// one firing is enough to offer a revival. Deliberately not unified into
+// one formula: condition 3 is a distinct fallback for a piece nobody has
+// touched, not a diluted version of 1/2, which can only fire off data a
+// logged run-through actually produced.
+//
+// 1. Stop count > 5 on a single logged run-through — reads the
+//    section-run-through sessions Pass 6 logs onto the synthetic
+//    "__consolidation__" progress entry (handleLogRunThrough, App.jsx).
+// 2. "Large chunks lost" — any combo-kind chunk currently flagged 'lost',
+//    or 2+ regular practice chunks currently flagged 'lost'. Flags are a
+//    persistent current-state field (progress[id].flag), not a per-
+//    run-through log, so this reads the live flag state across the piece
+//    rather than a specific run-through event.
+// 3. 60+ days since anything was logged on the piece at all — reads
+//    piece.lastLoggedAt (an ISO calendar date, stamped by every logged
+//    session/run-through), not a plan-day number, since a stale piece may
+//    be well past its plan's bounded day range.
+//
+// Returns { triggered, reasons } — reasons is a list of { key, label }
+// for every condition that independently fired, for display.
+export function computeRevivalTriggers(piece, chunkSet) {
+  const reasons = [];
+  const progress = piece.progress || {};
+
+  const runThroughSessions = (progress["__consolidation__"] || {}).sessions || [];
+  if (runThroughSessions.some((s) => (s.stopCount || 0) > 5)) {
+    reasons.push({ key: "stopCount", label: "A recent run-through needed more than 5 stops" });
+  }
+
+  const comboLost = (chunkSet.combos || []).some((c) => (progress[c.id] || {}).flag === "lost");
+  const lostPracticeChunkCount = (chunkSet.practiceChunks || []).filter(
+    (c) => (progress[c.id] || {}).flag === "lost"
+  ).length;
+  if (comboLost || lostPracticeChunkCount >= 2) {
+    reasons.push({
+      key: "largeChunksLost",
+      label: comboLost
+        ? "A large section was flagged lost in a run-through"
+        : "Multiple chunks were flagged lost in a run-through",
+    });
+  }
+
+  if (piece.lastLoggedAt) {
+    const daysSinceLogged = daysBetweenInclusive(piece.lastLoggedAt, todayISODate()) - 1;
+    if (daysSinceLogged >= 60) {
+      reasons.push({ key: "staleness", label: `It's been ${daysSinceLogged} days since anything was logged` });
+    }
+  }
+
+  return { triggered: reasons.length > 0, reasons };
+}
+
 export function computeComboEscalations(piece, chunkSet) {
   const startedAt = (piece.revival || {}).startedAt;
   if (!startedAt) return [];

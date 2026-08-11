@@ -20,8 +20,9 @@ import {
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, reconcileMinutesPerDaySchedule } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
+import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
@@ -34,6 +35,7 @@ import {
   parseBackupPieces,
   findMatchingPiece,
   mergeImportedPiece,
+  validateAndMigratePiece,
 } from "./lib/storage";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
@@ -262,7 +264,13 @@ export default function App() {
       // to day 1 if the exported file happened to be missing that field.
       const match = findMatchingPiece(next, p);
       if (match) {
-        const merged = reconcileMinutesPerDaySchedule(ensureWorkId({
+        // validateAndMigratePiece (not just reconcileMinutesPerDaySchedule)
+        // so an imported piece gets the same full backfill a stored piece
+        // gets on load — most importantly here, a ladderConfig missing
+        // bpmSteps (an old export, or one that predates it entirely) gets
+        // merged with defaults rather than reaching computeLadderAdvance
+        // incomplete and throwing on the next logged session. See storage.js.
+        const merged = validateAndMigratePiece(ensureWorkId({
           ...mergeImportedPiece(match, p),
           rescheduleMarker: null,
         }));
@@ -271,13 +279,14 @@ export default function App() {
         updatedCount++;
       } else {
         const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
-        // Re-derive daysToLearn against minutesPerDay for "minutes" mode —
-        // otherwise an imported piece just keeps whatever daysToLearn the
-        // backup happened to carry, which may have nothing to do with its
-        // minutesPerDay (e.g. a backup hand-edited to change the pace
-        // without updating the day count to match). See
-        // reconcileMinutesPerDaySchedule in lib/scheduling.js.
-        const withId = reconcileMinutesPerDaySchedule({ ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() });
+        // validateAndMigratePiece re-derives daysToLearn against
+        // minutesPerDay for "minutes" mode (otherwise an imported piece
+        // just keeps whatever daysToLearn the backup happened to carry,
+        // which may have nothing to do with its minutesPerDay — e.g. a
+        // backup hand-edited to change the pace without updating the day
+        // count to match) and backfills everything else a stored piece
+        // gets on load, same reasoning as the matched branch above.
+        const withId = validateAndMigratePiece({ ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() });
         next[id] = withId;
         if (!firstNewId) firstNewId = id;
         savePieceToStorage(id, withId);
@@ -320,37 +329,139 @@ export default function App() {
     setSettingsEditing(false);
   };
 
-  const handleToggleDone = (chunkId, day) => {
+  // Consolidation-day logging — stop count replaces the old bare "mark
+  // complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
+  // logging"). Mirrors handleLogSession/handleUnlogSession's shape
+  // (doneDays append-if-missing, sessions appended and keyed by loggedAt,
+  // multiple same-day attempts allowed) against the synthetic
+  // "__consolidation__" progress key rather than a real chunk id.
+  const handleLogRunThrough = (day, stopCount) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
-      const entry = progress[chunkId] ? { ...progress[chunkId], doneDays: [...progress[chunkId].doneDays] } : { doneDays: [] };
-      const idx = entry.doneDays.indexOf(day);
-      if (idx >= 0) entry.doneDays.splice(idx, 1);
-      else entry.doneDays.push(day);
-      progress[chunkId] = entry;
+      const prevEntry = progress["__consolidation__"] || { doneDays: [] };
+      const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
+      const loggedDate = todayISODate();
+      const sessions = [...(prevEntry.sessions || []), { day, stopCount, loggedAt: Date.now(), loggedDate }];
+      progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
+      return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
+  // Removes only the most recently logged run-through for `day` — same
+  // "undo the last attempt, not the whole day" convention as
+  // handleUnlogSession.
+  const handleUnlogRunThrough = (day) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress["__consolidation__"];
+      if (!prevEntry) return p;
+      const sessions = [...(prevEntry.sessions || [])];
+      const lastIdx = sessions.map((s) => s.day).lastIndexOf(day);
+      if (lastIdx === -1) return p;
+      sessions.splice(lastIdx, 1);
+      const stillHasDay = sessions.some((s) => s.day === day);
+      const doneDays = stillHasDay ? prevEntry.doneDays : (prevEntry.doneDays || []).filter((d) => d !== day);
+      progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress };
     });
   };
 
-  const handleLogSession = (chunkId, day, cleanReps, bpm, effectiveness, durationSeconds) => {
+  // `sessionInput` = { cleanReps, bpm, outcome, durationSeconds, targetBPM }
+  // — outcome is already classified by the caller (classifySessionOutcome,
+  // lib/confidence.js), since that needs the full chunk (difficultyLabel)
+  // and the piece's bpmZones, neither of which this handler has from just
+  // a chunkId. targetBPM is the caller's already-resolved effective target
+  // (entry.targetBPM || getDefaultTargetBPM(...)), needed here for
+  // lib/ladder.js's tempo-floor gating.
+  //
+  // Sessions are appended, never overwritten by day alone — logging the
+  // same chunk twice on one plan-day (e.g. an early touch, then a later
+  // re-attempt) now produces two distinct records, keyed by `loggedAt` (a
+  // precise timestamp). See PR summary: this is a placeholder scheme, not
+  // the semantic Tier-1/due-review/re-attempt keying the design doc
+  // eventually wants — that needs Tier 1/Tier 2 scheduling, a later,
+  // explicitly deferred pass.
+  const handleLogSession = (chunkId, day, sessionInput) => {
+    const { cleanReps, bpm, outcome, durationSeconds, targetBPM } = sessionInput;
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId] || { doneDays: [] };
       const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
-      const sessions = (prevEntry.sessions || []).filter((s) => s.day !== day);
-      sessions.push({ day, cleanReps, bpm, effectiveness, durationSeconds });
-      progress[chunkId] = { ...prevEntry, doneDays, sessions, currentBPM: bpm };
-      return { ...p, progress };
+      const loggedDate = todayISODate();
+      const loggedAt = Date.now();
+      const sessions = [...(prevEntry.sessions || []), { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds }];
+
+      // Ladder entry/Tier-1 seeding isn't built yet (a later, deferred
+      // pass) — without it practiceBPM would stay null forever, since
+      // computeLadderAdvance has nothing to step from. Seeding it to
+      // whatever tempo was just attempted, the first time only, is a
+      // placeholder minimal enough to keep this pass testable; see PR
+      // summary for why this isn't a designed entry mechanic.
+      const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : bpm;
+
+      // computeLadderAdvance's Holding-stage interval math (lib/ladder.js)
+      // still reads an `effectiveness` tier ('low'/'good'/'high') to modulate
+      // how fast the review gap grows — the reverse of confidence.js's
+      // sessionOutcome() legacy-session fallback (fail<->low, pass<->high,
+      // soft-miss<->good). Without this, effectiveness was always undefined,
+      // the multiplier always landed on the neutral case (1x), and a
+      // chunk's Holding interval could never grow past its 14-day starting
+      // point even after repeated clean passes — a real bug, not the
+      // intentionally-neutral placeholder an earlier version of this
+      // comment described.
+      const effectiveness = outcome === "fail" ? "low" : outcome === "pass" ? "high" : "good";
+
+      const advance = computeLadderAdvance(
+        {
+          stage: prevEntry.stage,
+          consecutivePasses: prevEntry.consecutivePasses,
+          consecutiveStabilizingFails: prevEntry.consecutiveStabilizingFails,
+          practiceBPM: seededPracticeBPM,
+          targetBPM,
+          tier1Done: prevEntry.tier1Done,
+        },
+        { result: outcome, effectiveness, asOfDate: loggedDate },
+        p.ladderConfig
+      );
+
+      progress[chunkId] = {
+        ...prevEntry,
+        doneDays,
+        sessions,
+        currentBPM: bpm,
+        stage: advance.stage,
+        consecutivePasses: advance.consecutivePasses,
+        consecutiveStabilizingFails: advance.consecutiveStabilizingFails,
+        practiceBPM: advance.practiceBPM,
+        nextDueDate: advance.nextDueDate,
+        tier1Done: advance.tier1Done,
+        // A real logged session moves the ladder forward for real —
+        // clears any pending flagSnapshot (see handleSetFlag below) so
+        // later clearing a rough/lost flag can't discard this genuine
+        // progress by reverting to the state from before the flag.
+        flagSnapshot: undefined,
+      };
+      return { ...p, progress, lastLoggedAt: loggedDate };
     });
   };
 
+  // Removes only the most recently logged session for `day`, not every
+  // session that day — multiple sessions can now legitimately share a
+  // plan-day (see handleLogSession above). Does not roll back the ladder
+  // state that session's outcome advanced (stage/practiceBPM/etc.) — same
+  // "no undo history" limitation already documented for BPM zones and
+  // difficulty reassessment (Data-Model.md).
   const handleUnlogSession = (chunkId, day) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId];
       if (!prevEntry) return p;
-      const doneDays = (prevEntry.doneDays || []).filter((d) => d !== day);
-      const sessions = (prevEntry.sessions || []).filter((s) => s.day !== day);
+      const sessions = [...(prevEntry.sessions || [])];
+      const lastIdx = sessions.map((s) => s.day).lastIndexOf(day);
+      if (lastIdx === -1) return p;
+      sessions.splice(lastIdx, 1);
+      const stillHasDay = sessions.some((s) => s.day === day);
+      const doneDays = stillHasDay ? prevEntry.doneDays : (prevEntry.doneDays || []).filter((d) => d !== day);
       progress[chunkId] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress };
     });
@@ -376,11 +487,64 @@ export default function App() {
     });
   };
 
-  const handleSetWeakSpot = (chunkId, value) => {
+  // Replaces the old boolean-only handleSetWeakSpot: `flag` is
+  // undefined | 'rough' | 'lost', cycled by PieceMapTab (untouched → rough
+  // → lost → untouched). Landing on 'rough' or 'lost' also applies the
+  // forced-demote-and-pin-due-date ladder operation (lib/ladder.js) — every
+  // transition into one of those states is a fresh judgment call about
+  // this run-through, so it reapplies each time, not just once.
+  //
+  // Clearing back to 'untouched' reverts stage/consecutivePasses/
+  // nextDueDate to exactly what they were the moment the flag was first
+  // set — undoes the schedule change the flag caused, rather than just
+  // leaving the demotion in place. Captured once, in `flagSnapshot`, on
+  // the untouched->rough transition only (not re-captured on rough->lost,
+  // so it always reflects the state from *before any* flag in this
+  // cycle). If a real session gets logged while flagged, handleLogSession
+  // above clears the snapshot — so a subsequent "clear the flag" can't
+  // discard genuinely-earned progress by reverting past it.
+  //
+  // Restore is guarded against a malformed/partial snapshot (missing one
+  // of the three fields) rather than trusting it blindly — this is the
+  // only place `flagSnapshot` is ever written today, but a future write
+  // path with a different shape should not silently blank out a chunk's
+  // stage/nextDueDate. On a bad shape, skip the restore (leave the
+  // ladder state exactly where the flag's demotion last set it) and warn,
+  // same "don't guess, say so" spirit as the stage check in
+  // computeProgressTier (lib/confidence.js).
+  const handleSetFlag = (chunkId, flag) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
-      const entry = progress[chunkId] ? { ...progress[chunkId] } : { doneDays: [] };
-      entry.weakSpot = value;
+      const prevEntry = progress[chunkId] ? { ...progress[chunkId] } : { doneDays: [] };
+      const entry = { ...prevEntry, flag };
+      if (flag === "rough" || flag === "lost") {
+        if (!prevEntry.flag) {
+          entry.flagSnapshot = {
+            stage: prevEntry.stage ?? null,
+            consecutivePasses: prevEntry.consecutivePasses ?? 0,
+            nextDueDate: prevEntry.nextDueDate ?? null,
+          };
+        }
+        const advance = applyRunThroughFlag(
+          { stage: prevEntry.stage, consecutivePasses: prevEntry.consecutivePasses },
+          flag,
+          todayISODate()
+        );
+        entry.stage = advance.stage;
+        entry.consecutivePasses = advance.consecutivePasses;
+        entry.nextDueDate = advance.nextDueDate;
+      } else if (prevEntry.flagSnapshot) {
+        const snap = prevEntry.flagSnapshot;
+        const isValidSnapshot = snap && "stage" in snap && "consecutivePasses" in snap && "nextDueDate" in snap;
+        if (isValidSnapshot) {
+          entry.stage = snap.stage;
+          entry.consecutivePasses = snap.consecutivePasses;
+          entry.nextDueDate = snap.nextDueDate;
+        } else {
+          console.warn(`handleSetFlag: malformed flagSnapshot for chunk ${chunkId}, skipping restore (leaving current ladder state as-is)`, snap);
+        }
+        entry.flagSnapshot = undefined;
+      }
       progress[chunkId] = entry;
       return { ...p, progress };
     });
@@ -637,7 +801,7 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
-                onSetWeakSpot={handleSetWeakSpot}
+                onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
               />
             )}
@@ -648,7 +812,7 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
-                onSetWeakSpot={handleSetWeakSpot}
+                onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
@@ -671,7 +835,8 @@ export default function App() {
                 onJumpToday={() => setDayOverride(null)}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
-                onToggleDone={handleToggleDone}
+                onLogRunThrough={handleLogRunThrough}
+                onUnlogRunThrough={handleUnlogRunThrough}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
               />
@@ -989,11 +1154,14 @@ const CSS = `
 .diff-dot-medium { background: var(--brass); }
 .diff-dot-hard { background: var(--brick); }
 .map-cell-recurring { position: absolute; bottom: 10px; right: 10px; font-size: 13px; color: var(--ink-faint); }
-.map-cell-weak { position: absolute; bottom: 10px; left: 10px; color: var(--brick); display: inline-flex; }
+.map-cell-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; }
+.map-cell-flag.flag-rough { color: var(--brass); }
+.map-cell-flag.flag-lost { color: var(--brick); }
 
-.weak-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
-.weak-toggle:hover { border-color: var(--brick); }
-.weak-toggle.active { border-color: var(--brick); background: rgba(181,71,58,0.1); color: var(--brick); }
+.flag-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
+.flag-toggle:hover { border-color: var(--brass); }
+.flag-toggle.flag-rough { border-color: var(--brass); background: rgba(185,138,62,0.1); color: var(--brass); }
+.flag-toggle.flag-lost { border-color: var(--brick); background: rgba(181,71,58,0.1); color: var(--brick); }
 
 .detail-panel { border-color: var(--ink); }
 .detail-modal { max-width: 480px; }
@@ -1033,7 +1201,7 @@ const CSS = `
 .log-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .log-row label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-soft); font-weight: 600; }
 .log-row input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
-.feel-row { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--ink-soft); font-weight: 600; margin-top: 8px; }
+.fail-override-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-soft); font-weight: 600; margin-top: 8px; }
 .primary-btn.sm { padding: 7px 14px; font-size: 12.5px; }
 
 .view-all-list { display: flex; flex-direction: column; gap: 14px; }

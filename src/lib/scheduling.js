@@ -1,6 +1,7 @@
-import { clamp } from "./utils";
+import { clamp, daysBetweenInclusive, addDaysISO, todayISODate } from "./utils";
 import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
 import { generateAllChunks } from "./chunking";
+import { sessionOutcome } from "./confidence";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -38,15 +39,28 @@ function computeRestDayFlags(totalDays, practiceDaysPerWeek) {
 export function computeDaysNeededForMinutesPerDay(chunkSet, minutesPerDay, practiceDaysPerWeek) {
   const minutes = Math.max(5, Number(minutesPerDay) || 30);
   const dayBudget = (minutes * 0.65) / EFFORT_TO_MIN;
-  // Every introduced item also costs up to REVIEW_OFFSETS.length spaced
-  // reviews later at a flat 3 minutes each (see computeTimeline's
-  // minutesFor) — effort alone (the raw introduction cost) undercounts what
-  // a day actually ends up costing once review load lands on top of it.
-  // Folding an estimate of that in here, converted to the same effort-point
-  // units as everything else in this budget, is what keeps this estimate
-  // from landing on a day count that's technically "enough" for
-  // introduction alone but still runs well over budget once review is added.
-  const reviewEffortPerItem = (REVIEW_OFFSETS.length * 3) / EFFORT_TO_MIN;
+  // Every introduced item also costs some spaced-review load later at a
+  // flat 3 minutes per touch (see computeTimeline's minutesFor) — effort
+  // alone (the raw introduction cost) undercounts what a day actually ends
+  // up costing once review load lands on top of it. Folding an estimate of
+  // that in here, converted to the same effort-point units as everything
+  // else in this budget, is what keeps this estimate from landing on a day
+  // count that's technically "enough" for introduction alone but still
+  // runs well over budget once review is added.
+  //
+  // Budgets for 2 touches per item, not REVIEW_OFFSETS.length (4) — that
+  // fixed four-touch assumption predates the ladder scheduler
+  // (computeTimeline no longer places a guaranteed fixed number of
+  // reviews per item; each recompute shows at most one upcoming review per
+  // chunk, driven by its live ladder due-date, not a schedule fixed at
+  // introduction time — confirmed stale by Codex review). 2 is a
+  // deliberately rough, conservative stand-in for "at least the first
+  // couple of ladder touches a chunk will pick up during a normal plan" —
+  // not a precise count, since that actually depends on how the plan gets
+  // used (how many times a chunk is logged, how it performs), which this
+  // function has no visibility into. Same "known limitation, not a hard
+  // cap" spirit as the rest of this estimate — see the comment below.
+  const reviewEffortPerItem = (2 * 3) / EFFORT_TO_MIN;
   let learningDaysNeeded = 1;
   let acc = 0;
   chunkSet.all.forEach((c) => {
@@ -88,14 +102,17 @@ export function reconcileMinutesPerDaySchedule(piece) {
 /* ------------------------------------------------------------------ */
 
 // Spaced review defaults to [1,3,7,14] days after a chunk is introduced, but
-// bends based on the learner's own feedback on their most recent session:
-// "needs more work" pulls the next review closer, "too easy" pushes it out.
-// This is the first step toward the interval engine adapting on its own.
+// bends based on the outcome of the most recent logged session: a real fail
+// pulls the next review closer, a full pass pushes it out. Was keyed off the
+// old free-standing "how did it feel" self-report (low/good/high); now reads
+// the objective pass/soft-miss/fail outcome instead (sessionOutcome() also
+// covers sessions logged before that change). This is the first step toward
+// the interval engine adapting on its own.
 export function adaptiveReviewOffsets(chunk, progress) {
   const sessions = ((progress || {})[chunk.id] || {}).sessions || [];
   if (!sessions.length) return REVIEW_OFFSETS;
-  const last = sessions[sessions.length - 1];
-  const factor = last.effectiveness === "low" ? 0.6 : last.effectiveness === "high" ? 1.4 : 1;
+  const outcome = sessionOutcome(sessions[sessions.length - 1]);
+  const factor = outcome === "fail" ? 0.6 : outcome === "pass" ? 1.4 : 1;
   return REVIEW_OFFSETS.map((o) => Math.max(1, Math.round(o * factor)));
 }
 
@@ -207,25 +224,84 @@ export function computeTimeline(piece, chunkSet) {
     return newMin + specialMin + reviewMin;
   };
 
-  // Place each spaced-review instance at its normal 1/3/7/14-day (adaptive)
-  // offset — snapped forward off any rest day it happens to land on — then
-  // nudge individual instances up to 2 calendar days earlier/later (again
-  // only ever landing on an actual practice day) if that meaningfully
-  // flattens a day sitting well above the plan's average load. This keeps
-  // reviews close to their intended spacing while stopping every review
-  // triggered by one heavy introduction day from all landing on the exact
-  // same later days.
+  // Tier 1 / Tier 2 review placement — Repertoire-Lifecycle.md's
+  // "Introduction-window review scheduling: Tier 1 / Tier 2". Replaces the
+  // old fixed REVIEW_OFFSETS/adaptiveReviewOffsets placement: each chunk's
+  // *next* review is now driven by the maintenance ladder
+  // (computeLadderAdvance, lib/ladder.js) instead of a fixed 1/3/7/14-day
+  // schedule computed once at introduction, so at most one upcoming review
+  // per chunk comes out of a given recompute (the ladder only ever knows
+  // its *next* due date, not a whole future schedule) — this function is
+  // already rerun on every piece change (see Architecture.md), so that's
+  // sufficient to keep it current as sessions get logged.
   const learningDaySet = new Set(learningDaysCalendar);
-  const reviewItems = [];
+
+  // Tier 1 — a one-time, near-mandatory first-touch review for a chunk
+  // that's genuinely never been logged (ChunkProgress.stage still null —
+  // Data-Model.md — AND no session history at all). Placed immediately
+  // after introduction (day + 1), snapped forward off a rest day via
+  // snapCapped, which — unlike snapOrDrop below — clamps into the plan
+  // rather than dropping, so Tier 1 always lands somewhere. Deliberately
+  // NOT part of the smoothing pass below: per the design, Tier 1 is where
+  // schedule pressure does *not* get absorbed, so once placed it never
+  // moves, unlike Tier 2.
+  //
+  // stage:null alone is NOT enough to mean "never touched": migration
+  // (backfillProgressLadderState, storage.js) sets stage:null on every
+  // pre-existing progress entry that predates the ladder, including a
+  // chunk with a long, real session history logged before this feature
+  // existed. Without the sessions-history check, a heavily-practiced
+  // legacy chunk would be told to do a "first touch" review as if it had
+  // never been played — confirmed as a real bug (Codex review) on any
+  // already-in-use piece the first time this scheduling model runs. A
+  // chunk in that state simply gets no review placed until it's next
+  // logged, at which point handleLogSession (App.jsx) gives it real
+  // ladder state and it starts taking the Tier 2 path below like any
+  // other chunk on the ladder.
   all.forEach((chunk) => {
     const start = introducedDay[chunk.id];
     if (!start) return;
-    adaptiveReviewOffsets(chunk, piece.progress).forEach((off) => {
-      const day = snapOrDrop(start + off);
-      if (day != null) reviewItems.push({ chunkId: chunk.id, minDay: start + 1, day });
-    });
+    const entry = piece.progress[chunk.id] || {};
+    const everLogged = entry.stage != null || (entry.sessions && entry.sessions.length > 0);
+    if (everLogged) return;
+    const day = snapCapped(start + 1);
+    days[day - 1].reviewChunkIds.push(chunk.id);
   });
-  reviewItems.forEach((item) => days[item.day - 1].reviewChunkIds.push(item.chunkId));
+
+  // Tier 2 — the standard ladder cadence for a chunk already on the ladder
+  // (at least one session logged, so ChunkProgress.nextDueDate is set by
+  // computeLadderAdvance/handleLogSession — App.jsx). nextDueDate is a
+  // real calendar date, not a plan-day int — converted to a day number
+  // here via piece.startDate rather than trusted as one, since a
+  // Holding-stage interval (8–12 weeks) routinely lands well past this
+  // plan's daysToLearn. A due date beyond this plan's own days[] simply
+  // isn't placed here at all (snapOrDrop returns null, dropping it from
+  // *this* bounded view only, same as it always has for reviews past the
+  // plan's end) — surfacing it is a live "what's due" query outside
+  // timeline.days[]'s fixed length, not built here (see
+  // Repertoire-Lifecycle.md's "Explicitly not designed/built here").
+  // Allowed to flex under budget pressure — included in the smoothing
+  // pass below (adapted from the mechanism previously used for
+  // REVIEW_OFFSETS-based items, but forward-only here — see the comment
+  // on its candidates array), nudging up to 2 calendar days *later* (only
+  // ever onto an actual practice day) if that meaningfully flattens a day
+  // sitting well above the plan's average load. A review nudged later is
+  // exactly the "rolls to the next day under budget contention, no
+  // penalty" the design calls for — it never becomes a missed review (see
+  // computeScheduleStatus below, which only ever judges a chunk's
+  // *introduction*, never a review's timing).
+  const tier2Items = [];
+  all.forEach((chunk) => {
+    const start = introducedDay[chunk.id];
+    if (!start) return;
+    const entry = piece.progress[chunk.id] || {};
+    if (entry.stage == null || !entry.nextDueDate) return;
+    const rawDay = daysBetweenInclusive(piece.startDate, entry.nextDueDate);
+    if (rawDay == null) return;
+    const day = snapOrDrop(Math.max(rawDay, start + 1));
+    if (day != null) tier2Items.push({ chunkId: chunk.id, minDay: start + 1, day });
+  });
+  tier2Items.forEach((item) => days[item.day - 1].reviewChunkIds.push(item.chunkId));
 
   const learningDayList = days.filter((d) => d.type === "learning");
   const avgLoad = learningDayList.length
@@ -234,14 +310,22 @@ export function computeTimeline(piece, chunkSet) {
 
   for (let pass = 0; pass < 3; pass++) {
     let movedAny = false;
-    reviewItems
+    tier2Items
       .map((_, idx) => idx)
-      .sort((a, b) => minutesFor(days[reviewItems[b].day - 1]) - minutesFor(days[reviewItems[a].day - 1]))
+      .sort((a, b) => minutesFor(days[tier2Items[b].day - 1]) - minutesFor(days[tier2Items[a].day - 1]))
       .forEach((idx) => {
-        const item = reviewItems[idx];
+        const item = tier2Items[idx];
         const currentMinutes = minutesFor(days[item.day - 1]);
         if (currentMinutes <= avgLoad * 1.1) return;
-        const candidates = [item.day - 2, item.day - 1, item.day + 1, item.day + 2].filter(
+        // Forward-only, unlike the REVIEW_OFFSETS-era version of this pass
+        // (which nudged ±1/±2 days, since it was smoothing a fixed schedule
+        // computed once, with no notion of a review being "due" on a
+        // specific date). Tier 2's due date is a real ladder date — nudging
+        // it *earlier* than that isn't "smoothing," it's reviewing before
+        // it's actually due, which the design frames specifically as
+        // "rolls to the next day under budget contention" (Repertoire-
+        // Lifecycle.md), not bidirectional flex.
+        const candidates = [item.day + 1, item.day + 2].filter(
           (d) => d >= item.minDay && learningDaySet.has(d) && !days[d - 1].reviewChunkIds.includes(item.chunkId)
         );
         if (!candidates.length) return;
@@ -281,7 +365,18 @@ export function getEffectiveTimeline(piece, chunkSet) {
 
   const asOfDay = clamp(marker.asOfDay, 1, original.days.length);
   const remainingDayCount = Math.max(1, original.days.length - asOfDay + 1);
-  const subPiece = { ...piece, daysToLearn: remainingDayCount };
+  // Tier 2 placement inside the nested computeTimeline call below converts
+  // each chunk's nextDueDate (a real calendar date) into a plan-day-int
+  // relative to *that* call's own day 1 — which, for this rescheduled
+  // remainder, is asOfDay's calendar date, not the original plan's day 1.
+  // Without this override, subPiece would keep the original piece.startDate
+  // while sub.days[] is only remainingDayCount long, so a nextDueDate
+  // computed against the wrong (too-early) day-1 anchor would resolve to a
+  // day number far past sub.days[]'s actual bounds and get silently
+  // dropped by snapOrDrop — not a crash, but a real review quietly
+  // vanishing from the rescheduled plan.
+  const originalStartDate = piece.startDate || todayISODate();
+  const subPiece = { ...piece, daysToLearn: remainingDayCount, startDate: addDaysISO(originalStartDate, asOfDay - 1) };
   const subChunkSet = {
     practiceChunks: remainingChunks,
     transitions: remainingTransitions,

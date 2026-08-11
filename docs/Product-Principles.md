@@ -105,7 +105,13 @@ several pieces in flight, not one at a time in isolation. This principle is
 also the reason "what happens after a piece is learned" (maintenance review,
 repertoire rotation) is a real roadmap item and not an afterthought — see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md) and
-[Roadmap.md](Roadmap.md).
+[Roadmap.md](Roadmap.md). The maintenance mechanism itself is now designed
+(a continuous spaced-repetition ladder, not a separate mode) — see
+[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+The stage-math engine is built and live (every logged session advances a
+chunk's ladder card); what's not yet built is anything that surfaces that
+state back to the learner as "here's what's due" — see that section for
+the current implemented/not-implemented split.
 
 ## No punishment mechanics
 

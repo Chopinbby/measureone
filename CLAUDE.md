@@ -137,9 +137,25 @@ are hand-picked, not derived from any study — see
 [`docs/Research.md`](docs/Research.md) for the full inventory and what
 would need to be true to replace them. There's also no undo history for BPM
 zones or difficulty reassessment, and no first-class "this piece is
-learned" state — see [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md).
+learned" state yet — a definition is decided but not implemented, see
+[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md).
 
 ## Roadmap
 
 See [`docs/Roadmap.md`](docs/Roadmap.md) — the immediate next item is
-folding the Analytics tab into Progress (agreed, not yet implemented).
+folding the Analytics tab into Progress (agreed, not yet implemented). The
+biggest maintenance-ladder item is now **substantially built, not just
+designed**: a continuous Stabilizing/Settling/Holding cadence has replaced
+the old fixed `REVIEW_OFFSETS` review (`computeTimeline` now schedules
+reviews straight off each chunk's live ladder due-date), and "learned" is
+defined as every chunk reaching Holding, though nothing yet queries that
+roll-up. Still not built: a live "what's due" query that works beyond the
+current plan's bounded length, and post-run-through logging (stop
+count/rough-lost flag). If you're about to touch scheduling, confidence,
+or the practice-logging UI, check
+[`docs/Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+first — this mechanism is now live, not a future replacement to design
+around. One invariant from that design worth internalizing early: **a
+review arriving late is schedule slack, never a failure** — only the
+logged outcome (pass/soft-miss/fail) may ever affect the ladder, not
+timing.

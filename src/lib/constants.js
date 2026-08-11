@@ -31,11 +31,16 @@ export const ROLE_LABEL = {
   "section-runthrough": "Section run-through",
   "section-transition": "Sections combined",
 };
-export const EFFECTIVENESS_OPTIONS = [
-  { value: "low", label: "Needs more work" },
-  { value: "good", label: "Good" },
-  { value: "high", label: "Comfortable" },
-];
+// Replaces the old free-standing "how did it feel" 3-tap input
+// (EFFECTIVENESS_OPTIONS) — folded into the pass/soft-miss/fail judgment
+// itself per Decisions.md#spaced-repetition--maintenance. Labels/colors for
+// `session.outcome` (lib/confidence.js's classifySessionOutcome), reused by
+// both the logging UI (ChecklistItem) and Progress's outcome breakdown.
+export const SESSION_OUTCOME_META = {
+  pass: { label: "Full pass", color: "var(--teal)" },
+  "soft-miss": { label: "Soft miss", color: "var(--brass)" },
+  fail: { label: "Real fail", color: "var(--brick)" },
+};
 
 // Labels for piece.status values other than the default "active" — active
 // pieces show no badge at all, so there's nothing to look up for them.

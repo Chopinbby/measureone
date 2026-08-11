@@ -16,7 +16,8 @@ export function TodayTab({
   onJumpToday,
   onLogSession,
   onUnlogSession,
-  onToggleDone,
+  onLogRunThrough,
+  onUnlogRunThrough,
   onReschedule,
   onReassessRange,
 }) {
@@ -60,11 +61,11 @@ export function TodayTab({
       <FocusPanel piece={piece} chunks={chunks} currentDay={currentDay} />
 
       {viewMode === "day" ? (
-        <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onToggleDone={onToggleDone} />
+        <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
       ) : (
         <div className="view-all-list">
           {timeline.days.map((d) => (
-            <DayChecklist key={d.dayNumber} piece={piece} chunks={chunks} day={d} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onToggleDone={onToggleDone} />
+            <DayChecklist key={d.dayNumber} piece={piece} chunks={chunks} day={d} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
           ))}
         </div>
       )}

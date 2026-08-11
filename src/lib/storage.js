@@ -1,5 +1,5 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
-import { todayISODate } from "./utils";
+import { todayISODate, addDaysISO } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
 
 /* ------------------------------------------------------------------ */
@@ -8,7 +8,134 @@ import { reconcileMinutesPerDaySchedule } from "./scheduling";
 
 const CURRENT_SCHEMA_VERSION = 1;
 
-function validateAndMigratePiece(piece) {
+// Default tunable config for the spaced-repetition maintenance ladder
+// (Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built) —
+// stage lengths, graduation pass-counts, tempo floors, and practiceBPM
+// ratchet step sizes. Hand-picked defaults, same spirit as EFFORT_TO_MIN /
+// LIBERAL_FACTOR (see docs/Research.md). No editing UI reads or writes
+// this yet; stored now purely so a later pass's UI is additive. Written as
+// a literal default here and in Wizard.jsx's defaultPiece(), matching the
+// existing pattern for `revival`'s default object rather than a shared
+// constants.js export.
+//
+// bpmSteps.fail is -2, not the ~8-10 pullback Repertoire-Lifecycle.md
+// originally sketched — overridden in conversation with the user while
+// building the ladder engine (lib/ladder.js): a real fail should cost the
+// same 2 BPM as a soft-miss/pass step, not a steep drop. See
+// Decisions.md#spaced-repetition--maintenance.
+//
+// holding.intervalGrowthFactor from the original draft of this config was
+// removed (not just left unused) — Holding's interval growth is driven
+// entirely by the reused pass/soft-miss/fail effectiveness multiplier
+// (lib/ladder.js), and a second, independent growth constant would be
+// exactly the "second multiplier system" the source design doc says not
+// to build. See Decisions.md#spaced-repetition--maintenance.
+const DEFAULT_LADDER_CONFIG = {
+  stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
+  settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
+  holding: {
+    startIntervalDays: 14,
+    maxIntervalDays: 70,
+    tempoFloorStartFraction: 0.85,
+    tempoFloorStepFraction: 0.05,
+    tempoFloorCapFraction: 1,
+  },
+  bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+};
+
+// Merges DEFAULT_LADDER_CONFIG into whatever a piece already has, field by
+// field, rather than only defaulting when `ladderConfig` is missing
+// entirely. A piece migrated once while `bpmSteps` didn't exist yet (saved
+// back to storage with a `ladderConfig` that has stabilizing/settling/
+// holding but no bpmSteps) would otherwise keep that incomplete shape
+// forever — `piece.ladderConfig || DEFAULT_LADDER_CONFIG` only helps when
+// the whole object is absent. computeLadderAdvance (lib/ladder.js) reads
+// `ladderConfig.bpmSteps.pass/softMiss/fail` unconditionally, so a missing
+// `bpmSteps` throws on the very next logged session — a real crash on
+// real already-saved data, not just a theoretical gap.
+export function mergeLadderConfig(existing) {
+  if (!existing) return DEFAULT_LADDER_CONFIG;
+  return {
+    stabilizing: { ...DEFAULT_LADDER_CONFIG.stabilizing, ...existing.stabilizing },
+    settling: { ...DEFAULT_LADDER_CONFIG.settling, ...existing.settling },
+    holding: { ...DEFAULT_LADDER_CONFIG.holding, ...existing.holding },
+    bpmSteps: { ...DEFAULT_LADDER_CONFIG.bpmSteps, ...existing.bpmSteps },
+  };
+}
+
+// Backfills a single logged session with a real calendar date. Old sessions
+// only carry `day` (a plan-day int, App.jsx:335-345), which stops being a
+// stable reference frame once maintenance review runs past a piece's fixed-
+// length plan (see Repertoire-Lifecycle.md's "How maintenance surfaces in
+// the UI"). `startDate` anchors day 1, so a pre-existing session's date is
+// reconstructed as `startDate + (day - 1)` — an approximation (doesn't
+// account for non-practice/rest days), but the only data available to
+// backfill from for sessions logged before this field existed.
+function backfillSessionDate(session, startDate) {
+  if (session.loggedDate) return session;
+  const loggedDate = typeof session.day === "number" ? addDaysISO(startDate, session.day - 1) : null;
+  return { ...session, loggedDate };
+}
+
+// Backfills per-chunk ladder state (stage/consecutivePasses/practiceBPM/
+// nextDueDate/tier1Done — Repertoire-Lifecycle.md's "The ladder: three
+// stages") onto every existing progress entry, and each entry's sessions
+// with a real calendar date. Every already-saved piece has no ladder state
+// to backfill from, so defaults are the ladder's "not on the ladder yet"
+// values, not derived from session history — same non-destructive spirit as
+// the rest of this migration. Skips the synthetic "__consolidation__" key
+// (Data-Model.md#the-piece-object) since it isn't a real chunk.
+function backfillProgressLadderState(progress, startDate) {
+  const result = {};
+  Object.entries(progress || {}).forEach(([key, entry]) => {
+    if (key === "__consolidation__") {
+      result[key] = entry;
+      return;
+    }
+    // Old boolean `weakSpot` (pre-Pass-6) is read forward as the new
+    // tri-state `flag`'s middle rung, 'rough' — not left orphaned once
+    // `flag` becomes the only field anything actually reads. Only applies
+    // when `flag` itself isn't already set, so it can never clobber a flag
+    // set after this pass shipped. `weakSpot` itself isn't carried forward
+    // once converted — nothing reads it anymore. See
+    // Decisions.md#spaced-repetition--maintenance.
+    const { weakSpot, ...entryWithoutWeakSpot } = entry;
+    const flag = entry.flag !== undefined ? entry.flag : weakSpot ? "rough" : undefined;
+    result[key] = {
+      ...entryWithoutWeakSpot,
+      flag,
+      sessions: (entry.sessions || []).map((s) => backfillSessionDate(s, startDate)),
+      stage: entry.stage !== undefined ? entry.stage : null,
+      consecutivePasses: entry.consecutivePasses !== undefined ? entry.consecutivePasses : 0,
+      // Tracks fails logged back-to-back while stage === 'stabilizing', the
+      // "this was never actually consolidated" signal (ladder.js's
+      // needsRelearning) — distinct from consecutivePasses, which only
+      // counts passes and can't tell a 1st fail from a 2nd.
+      consecutiveStabilizingFails: entry.consecutiveStabilizingFails !== undefined ? entry.consecutiveStabilizingFails : 0,
+      practiceBPM: entry.practiceBPM !== undefined ? entry.practiceBPM : null,
+      nextDueDate: entry.nextDueDate !== undefined ? entry.nextDueDate : null,
+      tier1Done: entry.tier1Done !== undefined ? entry.tier1Done : false,
+    };
+  });
+  return result;
+}
+
+// Most recent session date across every chunk, or null if nothing's ever
+// been logged. Recomputed fresh on every load (like daysToLearn
+// reconciliation below), not backfilled-and-locked-in like startDate,
+// since new sessions keep changing what "most recent" means.
+function computeLastLoggedAt(progress) {
+  let latest = null;
+  Object.entries(progress).forEach(([key, entry]) => {
+    if (key === "__consolidation__") return;
+    (entry.sessions || []).forEach((s) => {
+      if (s.loggedDate && (!latest || s.loggedDate > latest)) latest = s.loggedDate;
+    });
+  });
+  return latest;
+}
+
+export function validateAndMigratePiece(piece) {
   if (!piece || typeof piece !== "object") return null;
 
   // Ensure critical fields exist; missing optional fields are fine
@@ -16,11 +143,16 @@ function validateAndMigratePiece(piece) {
     return null;
   }
 
+  const startDate = piece.startDate || todayISODate();
+  const progress = backfillProgressLadderState(piece.progress || {}, startDate);
+
   // Default missing fields to safe values (non-destructive for old data)
   const migrated = {
     ...piece,
     // Ensure nested objects exist even if old data is incomplete
-    progress: piece.progress || {},
+    progress,
+    ladderConfig: mergeLadderConfig(piece.ladderConfig),
+    lastLoggedAt: computeLastLoggedAt(progress),
     sections: piece.sections || [{ id: "s1", name: "", start: 1, end: piece.totalMeasures }],
     bpmZones: piece.bpmZones || [],
     recordings: piece.recordings || [],
@@ -39,7 +171,7 @@ function validateAndMigratePiece(piece) {
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.
-    startDate: piece.startDate || todayISODate(),
+    startDate,
   };
 
   // A "minutes per day" piece's daysToLearn must stay derived from its
@@ -76,7 +208,17 @@ export function loadPiecesFromStorage() {
             // daysToLearn is different: it's re-checked (not just backfilled
             // once) every load since it's meant to track minutesPerDay, but
             // still only actually re-saved when reconciliation changed it.
-            if (!p.startDate || migrated.daysToLearn !== p.daysToLearn) savePieceToStorage(migrated.id, migrated);
+            // !p.ladderConfig catches a piece with no ladder state yet (every
+            // piece saved before this migration existed); !p.ladderConfig
+            // ?.bpmSteps additionally catches a piece that already has a
+            // ladderConfig but from before bpmSteps existed on it (see
+            // mergeLadderConfig above) — either way the one-time backfill of
+            // ladderConfig/lastLoggedAt/per-chunk ladder fields and session
+            // loggedDates actually gets persisted, not just recomputed in
+            // memory and discarded on the next load.
+            if (!p.startDate || !p.ladderConfig || !p.ladderConfig.bpmSteps || migrated.daysToLearn !== p.daysToLearn) {
+              savePieceToStorage(migrated.id, migrated);
+            }
           }
         }
       } catch (e) {
@@ -249,7 +391,33 @@ function mergeProgress(existingProgress, importedProgress) {
       currentBPM: preferPresent(i.currentBPM, e.currentBPM),
       targetBPM: preferPresent(i.targetBPM, e.targetBPM),
       manualConfidence: preferPresent(i.manualConfidence, e.manualConfidence),
-      weakSpot: i.weakSpot !== undefined ? i.weakSpot : e.weakSpot,
+      flag: i.flag !== undefined ? i.flag : e.flag,
+      // Ladder state is *derived* from practice history (computeLadderAdvance,
+      // lib/ladder.js), not something anyone hand-edits in an exported file
+      // the way minutesPerDay might be — there's no legitimate "intentional
+      // edit in the export should win" case for it the way there is for the
+      // fields above. So unlike those, the import never overwrites it: the
+      // existing piece's ladder progress always wins over whatever snapshot
+      // happened to be sitting in the imported file, the same "must never
+      // silently disappear" treatment doneDays/sessions already get above.
+      // Known limitation: this means restoring a backup from a genuinely
+      // more-advanced *other* device/browser (rather than re-importing an
+      // older copy of the same piece) would keep this device's less-advanced
+      // state instead of the more-advanced import — correctly recovering
+      // that case would mean recomputing ladder state from the merged
+      // session history instead of preferring either snapshot outright,
+      // which is a bigger change than this fix; flagging, not building now.
+      stage: e.stage,
+      consecutivePasses: e.consecutivePasses,
+      consecutiveStabilizingFails: e.consecutiveStabilizingFails,
+      practiceBPM: e.practiceBPM,
+      nextDueDate: e.nextDueDate,
+      tier1Done: e.tier1Done,
+      // Same reasoning as the ladder fields above: undo-scratch data for
+      // "revert this chunk's schedule if the flag gets cleared" (see
+      // App.jsx's handleSetFlag), not something an exported file should
+      // be trusted to set.
+      flagSnapshot: e.flagSnapshot,
     };
   });
   return merged;

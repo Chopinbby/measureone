@@ -1,6 +1,6 @@
-import { clamp } from "./utils";
+import { clamp, rangesOverlap } from "./utils";
 import { EFFORT_TO_MIN } from "./constants";
-import { computeConfidence, getDefaultTargetBPM } from "./confidence";
+import { computeConfidence, getDefaultTargetBPM, sessionOutcome } from "./confidence";
 
 /* ------------------------------------------------------------------ */
 /*  Revival: recovering a piece that was learned once but has gone     */
@@ -49,20 +49,31 @@ export function computeTempoLadder(targetBPM, startFraction, steps) {
 // generateAllChunks's practice chunks/transitions (with their effort scores),
 // EFFORT_TO_MIN, and piece.minutesPerDay, packed greedily the same way
 // ScheduleFields already estimates day counts elsewhere in this file.
-// Combos are intentionally excluded — revival reassessment only covers
-// practice chunks and transitions (seams), per the product scope.
+// Combos don't get their own base-plan task here — they relearn through
+// their underlying content (the anchor hard chunk, already a practice
+// chunk in `items` below, plus whichever neighbor(s) the combo's range
+// overlaps), not as a separate item. A combo only gets an explicit task
+// if that underlying content actually goes wrong during this run — see
+// computeComboEscalations below. (The static code comment that used to
+// exclude combos unconditionally was an unreviewed assumption, not a
+// settled decision — see Decisions.md#spaced-repetition--maintenance.)
 export function computeRevivalPlan(piece, chunkSet, currentDay) {
   const items = [...chunkSet.practiceChunks, ...chunkSet.transitions].map((c) => ({
     id: c.id,
     effort: c.effort,
     confidence: computeConfidence(c, piece, currentDay),
-    weakSpot: !!(piece.progress[c.id] || {}).weakSpot,
+    // `flag` used to be the boolean-only `weakSpot` field; widened to
+    // 'rough' | 'lost' | undefined by the post-run-through logging design
+    // (Repertoire-Lifecycle.md), but prioritization here stays exactly the
+    // binary "flagged at all vs not" it always was — not a redesign into a
+    // three-tier lost-before-rough sort.
+    flagged: !!(piece.progress[c.id] || {}).flag,
   }));
 
-  // Weak spots first, then lowest confidence first — the two prioritization
-  // signals the product asks for, in that order.
+  // Flagged chunks first, then lowest confidence first — the two
+  // prioritization signals the product asks for, in that order.
   items.sort((a, b) => {
-    if (a.weakSpot !== b.weakSpot) return a.weakSpot ? -1 : 1;
+    if (a.flagged !== b.flagged) return a.flagged ? -1 : 1;
     return a.confidence - b.confidence;
   });
 
@@ -86,4 +97,87 @@ export function computeRevivalPlan(piece, chunkSet, currentDay) {
     totalItems: items.length,
     generatedAt: Date.now(),
   };
+}
+
+// A combo's `linkedIds` only stores its anchor hard chunk's id — not the
+// flanking chunk(s) that actually define its start/end range (a combo
+// spans midpoint-to-midpoint across its neighbors, chunking.js's
+// generateComboChunks). "Underlying content" for revival purposes means
+// every practice chunk the combo's range genuinely overlaps, computed
+// fresh here rather than trusted from linkedIds — that field means
+// something narrower elsewhere (e.g. scheduling.js's timeline-readiness
+// gating, which only cares about the anchor) and was never meant to be
+// "the whole story" for a combo.
+export function findComboUnderlyingChunks(combo, practiceChunks) {
+  return practiceChunks.filter((c) => rangesOverlap(combo.start, combo.end, c.start, c.end));
+}
+
+// The most recent session logged on `sessions` at/after `startedAt`, or
+// null if none qualify.
+function latestQualifyingSession(sessions, startedAt) {
+  const qualifying = (sessions || []).filter((s) => s.loggedAt >= startedAt);
+  if (!qualifying.length) return null;
+  return qualifying.reduce((latest, s) => (s.loggedAt > latest.loggedAt ? s : latest));
+}
+
+// Which combos should currently show up as their own explicit revival
+// task. Combos don't get one by default (see computeRevivalPlan above) —
+// only while some underlying chunk's *own* most recent attempt this
+// revival run is a real fail, or the combo's own dedicated task's most
+// recent attempt is. A single real fail is enough (not the maintenance
+// ladder's two-consecutive-fails threshold, lib/ladder.js) — confirmed
+// with the user: revival is already "something's wrong" mode by the time
+// it's running, unlike ordinary practice, where that dampening exists
+// specifically to avoid overreacting to one bad day.
+//
+// Each underlying chunk is judged strictly by its OWN latest qualifying
+// session, never compared against a different chunk's timestamp. (An
+// earlier version pooled every underlying chunk's sessions together with
+// the combo's own and picked one single globally-newest session across
+// all of them — so if chunk A failed and chunk B was later passed, B's
+// unrelated pass would incorrectly clear A's still-standing failure. A
+// version before that scanned for "any fail ever," which had the
+// opposite problem: one early fail pinned the combo escalated for the
+// rest of the run even after being cleanly relearned. Both fixed here —
+// per-chunk recency, not global recency, and not "any fail ever.")
+//
+// The combo's own sessions (the dedicated "Needs another look" task,
+// RevivalTab.jsx — logged under `combo.id`, not fanned out across the
+// chunks it overlaps, which would corrupt their independent histories)
+// get a distinct role, not just another source pooled in with the rest:
+// a fail there always (re-)escalates, same as any underlying chunk's own
+// fail. A PASS there is the one thing allowed to override a still-failing
+// underlying chunk — but only if it's actually more recent than every
+// underlying chunk's own latest fail, so a stale combo-task pass from
+// before a chunk's most recent failure can't paper over it.
+//
+// Deliberately a live derivation off `piece`, not a task written into and
+// persisted on `piece.revival.plan` — same spirit as `chunkSet`/`timeline`
+// being pure, unpersisted derivations (CLAUDE.md). A written task would
+// need an explicit removal path once the underlying content is later
+// relearned cleanly; a derivation just stops returning it once nothing
+// currently qualifies, so "the flag clears automatically" (the doc's own
+// phrasing for this) falls out for free rather than needing to be built.
+export function computeComboEscalations(piece, chunkSet) {
+  const startedAt = (piece.revival || {}).startedAt;
+  if (!startedAt) return [];
+  return (chunkSet.combos || []).filter((combo) => {
+    const underlying = findComboUnderlyingChunks(combo, chunkSet.practiceChunks);
+
+    const failingChunkTimestamps = underlying
+      .map((c) => latestQualifyingSession((piece.progress[c.id] || {}).sessions, startedAt))
+      .filter((s) => s && sessionOutcome(s) === "fail")
+      .map((s) => s.loggedAt);
+
+    const comboLatest = latestQualifyingSession((piece.progress[combo.id] || {}).sessions, startedAt);
+
+    if (comboLatest && sessionOutcome(comboLatest) === "fail") return true;
+    if (!failingChunkTimestamps.length) return false;
+
+    const mostRecentUnderlyingFail = Math.max(...failingChunkTimestamps);
+    if (comboLatest && sessionOutcome(comboLatest) === "pass" && comboLatest.loggedAt >= mostRecentUnderlyingFail) {
+      return false;
+    }
+    return true;
+  });
 }

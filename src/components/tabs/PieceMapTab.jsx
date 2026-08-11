@@ -6,13 +6,27 @@ import { clamp, formatRange } from "../../lib/utils";
 import { DIFFICULTY_META, CONFIDENCE_PRESETS } from "../../lib/constants";
 import { computeConfidence, computeAutoConfidence, isManualConfidence, getDefaultTargetBPM } from "../../lib/confidence";
 
+// Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
+// logging"): undefined ("untouched") -> 'rough' -> 'lost' -> undefined.
+function nextFlag(current) {
+  if (current === "rough") return "lost";
+  if (current === "lost") return undefined;
+  return "rough";
+}
+
+const FLAG_LABEL = {
+  untouched: "Mark rough or lost",
+  rough: "Rough — tap for lost",
+  lost: "Lost — tap to clear",
+};
+
 export function PieceMapTab({
   piece,
   chunks,
   currentDay,
   onUpdateBPM,
   onSetManualConfidence,
-  onSetWeakSpot = () => {},
+  onSetFlag = () => {},
   onSetMemoryAnchor = () => {},
   sequentialMode = false,
   initialSelectedId = null,
@@ -23,7 +37,7 @@ export function PieceMapTab({
   const selectedChunk = chunks.find((c) => c.id === selected);
   const selectedEntry = selectedChunk ? piece.progress[selectedChunk.id] || {} : {};
   const selectedIsManual = selectedChunk ? isManualConfidence(selectedChunk, piece.progress) : false;
-  const selectedIsWeakSpot = !!selectedEntry.weakSpot;
+  const selectedFlag = selectedEntry.flag || "untouched";
   const selectedIdx = selectedChunk ? chunks.findIndex((c) => c.id === selected) : -1;
 
   return (
@@ -45,7 +59,7 @@ export function PieceMapTab({
         {chunks.map((c) => {
           const conf = computeConfidence(c, piece, currentDay);
           const manual = isManualConfidence(c, piece.progress);
-          const weak = !!(piece.progress[c.id] || {}).weakSpot;
+          const flag = (piece.progress[c.id] || {}).flag;
           const tier = conf >= 67 ? "teal" : conf >= 34 ? "brass" : "brick";
           return (
             <button
@@ -60,8 +74,8 @@ export function PieceMapTab({
                 {conf}%{manual && <Pencil size={9} className="manual-mark" title="Set manually" />}
               </span>
               {c.recurring && <span className="map-cell-recurring" title="Recurring material">&#8635;</span>}
-              {weak && (
-                <span className="map-cell-weak" title="Weak spot">
+              {flag && (
+                <span className={`map-cell-flag flag-${flag}`} title={flag === "lost" ? "Lost" : "Rough"}>
                   <Flag size={11} />
                 </span>
               )}
@@ -94,13 +108,13 @@ export function PieceMapTab({
               </div>
 
               <div className="field">
-                <span>Weak spot</span>
+                <span>Run-through flag</span>
                 <button
                   type="button"
-                  className={`weak-toggle ${selectedIsWeakSpot ? "active" : ""}`}
-                  onClick={() => onSetWeakSpot(selectedChunk.id, !selectedIsWeakSpot)}
+                  className={`flag-toggle ${selectedFlag !== "untouched" ? `flag-${selectedFlag}` : ""}`}
+                  onClick={() => onSetFlag(selectedChunk.id, nextFlag(selectedEntry.flag))}
                 >
-                  <Flag size={14} /> {selectedIsWeakSpot ? "Flagged as weak spot" : "Mark as weak spot"}
+                  <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
                 </button>
               </div>
 

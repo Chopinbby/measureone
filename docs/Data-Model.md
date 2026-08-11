@@ -127,7 +127,7 @@ piece = {
                          // engine in lib/ladder.js (computeLadderAdvance), called on every
                          // logged session (handleLogSession, App.jsx) and, since Pass 5, also
                          // consulted indirectly via ChunkProgress.nextDueDate when
-                         // computeTimeline places each chunk's next review — see #ladder-config
+                         // computeTimeline places each chunk's next review — see "Ladder config"
                          // below and Algorithms.md#session-outcomes--the-maintenance-ladder.
   memoryAnchors,         // { [id]: string } — free-text cue ("descending sequence", "watch
                          // left-hand leap") keyed by *either* a practice-chunk/transition id or a
@@ -180,7 +180,7 @@ ChunkProgress = {
                               // kept alongside it, confirmed with the user before that pass
                               // started). Landing on 'rough' or 'lost' also demotes this chunk's
                               // ladder stage and pins nextDueDate to today, via
-                              // lib/ladder.js's applyRunThroughFlag — see #ladder-config below.
+                              // lib/ladder.js's applyRunThroughFlag — see "Ladder config" below.
                               // Also caps computeConfidence's result (55 for rough, 20 for lost,
                               // applied after either the manual or auto branch) so a flagged
                               // chunk can't show stale-high confidence anywhere it's displayed —
@@ -222,7 +222,7 @@ ChunkProgress = {
                               // off null, so every chunk starts and stays here until logged.
                               // Advanced live by handleLogSession (App.jsx) calling
                               // lib/ladder.js's computeLadderAdvance on every logged session.
-                              // See #ladder-config below.
+                              // See "Ladder config" below.
   consecutivePasses,          // number, default 0 — consecutive full passes at the current stage
                                // that cleared that stage's tempo floor. Live, via
                                // computeLadderAdvance on every logged session (see stage above).
@@ -262,7 +262,7 @@ ChunkProgress = {
 }
 ```
 
-### Ladder config (`piece.ladderConfig`) {#ladder-config}
+### Ladder config (`piece.ladderConfig`)
 
 Piece-level tunable data for the spaced-repetition maintenance ladder — see
 [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)

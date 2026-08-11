@@ -49,7 +49,7 @@ for it.
 
 ## Spaced-repetition ladder (stage math built; UI surfacing not yet implemented)
 
-Design: [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+Design: [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
 Decision records: [Decisions.md#spaced-repetition--maintenance](Decisions.md#spaced-repetition--maintenance).
 The stage-transition math (`computeLadderAdvance`, `lib/ladder.js`) is
 built and wired into logging; Tier 1/Tier 2 review scheduling and a live

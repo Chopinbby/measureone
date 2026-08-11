@@ -85,7 +85,7 @@ whether their remaining pace can actually finish the plan.
 Practicing chunks in isolation doesn't teach you to play through the seams
 between them, and re-entering material from the same boundary every time
 doesn't build real security. This is why the chunking model has three tiers,
-not one — see [Data-Model.md](Data-Model.md#practice-chunks-vs-sections):
+not one — see [Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs):
 
 - **Transitions** drill the join between adjacent chunks, scheduled as soon
   as both sides are introduced (not batched to the end).
@@ -107,10 +107,11 @@ repertoire rotation) is a real roadmap item and not an afterthought — see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md) and
 [Roadmap.md](Roadmap.md). The maintenance mechanism itself is now designed
 (a continuous spaced-repetition ladder, not a separate mode) — see
-[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+[Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
 The stage-math engine is built and live (every logged session advances a
-chunk's ladder card); what's not yet built is anything that surfaces that
-state back to the learner as "here's what's due" — see that section for
+chunk's ladder card), and as of Pass 8 that state does reach the learner:
+due reviews surface in Master Agenda and the per-piece Today tab, and keep
+working once a piece runs past its original plan — see that section for
 the current implemented/not-implemented split.
 
 ## No punishment mechanics

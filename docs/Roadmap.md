@@ -89,16 +89,23 @@ decision (see [Decisions.md](Decisions.md)):
    checklist captures a stop count, and the Piece Map's rough/lost flag
    demotes a chunk's ladder stage and pins its next review to today (see
    [Repertoire-Lifecycle.md#post-run-through-logging](Repertoire-Lifecycle.md#post-run-through-logging)).
-   **Still not implemented**: a live "what's due" query that works
-   *beyond* the current plan's bounded length (so maintenance reviews can
-   actually surface to the learner once a piece runs past its original
-   plan), and the three independent auto-triggers that would read the
-   stop-count/lost-flag data above to offer Revival automatically (though
-   combo escalation *within* an already-triggered revival is built — see
-   [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)).
-   This is also what resolves "what does learned mean" (Stage 3), once
+   **Revival's three independent auto-triggers are also built** (Pass 7):
+   stop count > 5 on a run-through, a combo or 2+ regular chunks flagged
+   lost, or 60+ days since anything logged — any one offers a revival from
+   Overview rather than requiring the learner to remember to start one
+   themselves (combo escalation *within* an already-triggered revival was
+   already built separately — see
+   [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)
+   for both). **Still not implemented**: a live "what's due" query that
+   works *beyond* the current plan's bounded length, so maintenance
+   reviews can actually surface to the learner once a piece runs past its
+   original plan. **Now scoped, ahead of building it (Pass 8)**: it
+   surfaces in both Master Agenda and the per-piece Today tab via one
+   shared function (`computeDueReviews`), suppressed for paused/archived
+   pieces and pieces mid-revival. This is also what resolves "what does
+   learned mean" (Stage 3), once
    something queries "is every chunk's stage at Holding" — see
-   [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+   [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
    for the full design and [Decisions.md](Decisions.md#spaced-repetition--maintenance)
    for the decision records. Repertoire rotation (multiple pieces
    competing for daily practice time while in maintenance) remains

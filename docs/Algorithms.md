@@ -280,7 +280,18 @@ below.
   chunks get a small boost (already-familiar material).
 
 `computeConfidence()` wraps this and short-circuits entirely if
-`progress[chunkId].manualConfidence` is set.
+`progress[chunkId].manualConfidence` is set. After that (manual or auto), a
+rough/lost `progress[chunkId].flag` — set from the Piece Map's post-run-through
+flag cycle, [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)
+— caps the result: `Math.min(score, 55)` for rough, `Math.min(score, 20)`
+for lost. Applied even on top of a manual override, so a stale "I know
+better than the algorithm" value from before the flag landed can't hide
+it. Every caller of `computeConfidence` (Overview, Progress, Piece Map,
+Analytics, the Today checklist, `FocusPanel`) gets this for free, since
+none of them compute confidence independently — this is deliberately a cap
+inside the shared function, not a per-tab display adjustment. Does not
+read `stage` — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
+on why ladder stage still doesn't feed into confidence.
 
 `computeConfidenceAsOf(chunk, piece, asOfDay)` reconstructs what
 `computeConfidence` would have returned on a past plan-day: it filters

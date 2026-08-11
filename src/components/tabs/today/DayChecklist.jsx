@@ -1,20 +1,69 @@
-import { Check } from "lucide-react";
+import { useState } from "react";
 import { ChecklistItem } from "./ChecklistItem";
+import { NumberInput } from "../../NumberInput";
 import { formatMinutes } from "../../../lib/utils";
 
-export function DayChecklist({ piece, chunks, day, onLogSession, onUnlogSession, onToggleDone }) {
+// Consolidation-day logging: stop count replaces the old bare "mark
+// complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
+// logging"). Chunk-level rough/lost flagging for what caught during this
+// run-through happens separately, on the Piece Map.
+function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) {
+  const entry = piece.progress["__consolidation__"] || {};
+  const done = (entry.doneDays || []).includes(day);
+  const sessionsToday = (entry.sessions || []).filter((s) => s.day === day);
+  const lastSession = sessionsToday[sessionsToday.length - 1];
+  const [stopCount, setStopCount] = useState("");
+
+  const submit = () => {
+    if (stopCount === "") return;
+    onLogRunThrough(day, Number(stopCount));
+    setStopCount("");
+  };
+
+  return (
+    <div className="panel">
+      <h3>Day {day} — Full run-through</h3>
+      <p className="wizard-hint">No new material today. Play through the whole piece and note where it still catches.</p>
+      {lastSession && (
+        <p className="tip-line">
+          Logged: stopped {lastSession.stopCount} time{lastSession.stopCount === 1 ? "" : "s"}
+          {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
+        </p>
+      )}
+      <div className="log-row">
+        <label>
+          <span>Times stopped</span>
+          <NumberInput value={stopCount} min={0} onCommit={(n) => setStopCount(n)} placeholder="0" />
+        </label>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+        <button className="primary-btn sm" disabled={stopCount === ""} onClick={submit}>
+          {done ? "Log another run-through" : "Log run-through"}
+        </button>
+        {done && (
+          <button className="ghost-btn" onClick={() => onUnlogRunThrough(day)}>
+            Undo most recent
+          </button>
+        )}
+      </div>
+      <p className="wizard-hint" style={{ marginTop: 10, marginBottom: 0 }}>
+        Flag any chunk that caught on the <strong>Piece Map</strong> — rough or lost.
+      </p>
+    </div>
+  );
+}
+
+export function DayChecklist({ piece, chunks, day, onLogSession, onUnlogSession, onLogRunThrough, onUnlogRunThrough }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
 
   if (day.type === "consolidation") {
-    const done = ((piece.progress["__consolidation__"] || {}).doneDays || []).includes(day.dayNumber);
     return (
-      <div className="panel">
-        <h3>Day {day.dayNumber} — Full run-through</h3>
-        <p className="wizard-hint">No new material today. Play through the whole piece and note where it still catches.</p>
-        <button className={done ? "ghost-btn" : "primary-btn"} onClick={() => onToggleDone("__consolidation__", day.dayNumber)}>
-          {done ? <><Check size={14} /> Marked complete</> : "Mark run-through complete"}
-        </button>
-      </div>
+      <ConsolidationPanel
+        piece={piece}
+        day={day.dayNumber}
+        onLogRunThrough={onLogRunThrough}
+        onUnlogRunThrough={onUnlogRunThrough}
+      />
     );
   }
 

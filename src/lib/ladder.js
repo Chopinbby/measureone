@@ -30,7 +30,7 @@
 /*  see Decisions.md#spaced-repetition--maintenance.                   */
 /* ------------------------------------------------------------------ */
 
-const STAGES = ["stabilizing", "settling", "holding"];
+export const STAGES = ["stabilizing", "settling", "holding"];
 
 // Duplicated from adaptiveReviewOffsets (scheduling.js:94-100) rather than
 // imported — factoring it into a shared helper would mean editing
@@ -118,6 +118,31 @@ function addDaysISO(dateStr, days) {
   d.setDate(d.getDate() + days);
   const pad2 = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+// Manual override applied when a run-through's Piece Map flag lands on
+// 'rough' or 'lost' (Repertoire-Lifecycle.md's "Post-run-through logging")
+// — distinct from computeLadderAdvance above, which only ever advances off
+// an actually-logged, classified session outcome. 'rough' demotes exactly
+// one stage, same rule as a fail. 'lost' forces the floor (Stabilizing)
+// regardless of current stage. Both pin nextDueDate to `asOfDate` itself
+// rather than computing a normal-cadence interval, since the design's
+// explicit requirement is "imminent, regardless of the demoted stage's
+// normal cadence" — not a shorter-than-usual interval, but due now.
+// consecutivePasses resets to 0 for the same reason a fail resets it: those
+// passes accrued at the old (higher) stage and shouldn't carry over toward
+// graduating back out of the demoted one. Deliberately doesn't touch
+// practiceBPM or consecutiveStabilizingFails/needsRelearning — those are
+// specifically tied to logged session outcomes, and this is a manual
+// judgment call about a run-through, not a classified session.
+export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
+  const stage = STAGES.includes(chunkLadderState.stage) ? chunkLadderState.stage : "stabilizing";
+  const newStage = flag === "lost" ? "stabilizing" : demote(stage);
+  return {
+    stage: newStage,
+    consecutivePasses: 0,
+    nextDueDate: asOfDate,
+  };
 }
 
 // Advances one chunk's ladder card by exactly one already-classified

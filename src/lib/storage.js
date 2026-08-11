@@ -92,8 +92,18 @@ function backfillProgressLadderState(progress, startDate) {
       result[key] = entry;
       return;
     }
+    // Old boolean `weakSpot` (pre-Pass-6) is read forward as the new
+    // tri-state `flag`'s middle rung, 'rough' — not left orphaned once
+    // `flag` becomes the only field anything actually reads. Only applies
+    // when `flag` itself isn't already set, so it can never clobber a flag
+    // set after this pass shipped. `weakSpot` itself isn't carried forward
+    // once converted — nothing reads it anymore. See
+    // Decisions.md#spaced-repetition--maintenance.
+    const { weakSpot, ...entryWithoutWeakSpot } = entry;
+    const flag = entry.flag !== undefined ? entry.flag : weakSpot ? "rough" : undefined;
     result[key] = {
-      ...entry,
+      ...entryWithoutWeakSpot,
+      flag,
       sessions: (entry.sessions || []).map((s) => backfillSessionDate(s, startDate)),
       stage: entry.stage !== undefined ? entry.stage : null,
       consecutivePasses: entry.consecutivePasses !== undefined ? entry.consecutivePasses : 0,
@@ -381,7 +391,7 @@ function mergeProgress(existingProgress, importedProgress) {
       currentBPM: preferPresent(i.currentBPM, e.currentBPM),
       targetBPM: preferPresent(i.targetBPM, e.targetBPM),
       manualConfidence: preferPresent(i.manualConfidence, e.manualConfidence),
-      weakSpot: i.weakSpot !== undefined ? i.weakSpot : e.weakSpot,
+      flag: i.flag !== undefined ? i.flag : e.flag,
       // Ladder state is *derived* from practice history (computeLadderAdvance,
       // lib/ladder.js), not something anyone hand-edits in an exported file
       // the way minutesPerDay might be — there's no legitimate "intentional
@@ -403,6 +413,11 @@ function mergeProgress(existingProgress, importedProgress) {
       practiceBPM: e.practiceBPM,
       nextDueDate: e.nextDueDate,
       tier1Done: e.tier1Done,
+      // Same reasoning as the ladder fields above: undo-scratch data for
+      // "revert this chunk's schedule if the flag gets cleared" (see
+      // App.jsx's handleSetFlag), not something an exported file should
+      // be trusted to set.
+      flagSnapshot: e.flagSnapshot,
     };
   });
   return merged;

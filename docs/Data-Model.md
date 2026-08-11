@@ -95,10 +95,12 @@ piece = {
                          // see startDate above for that.
   progress,              // { [chunkId]: ChunkProgress } — see below. One key isn't
                          // a real chunk id: "__consolidation__" holds the
-                         // whole-piece consolidation-day run-through's completion
-                         // (just `doneDays` today — see DayChecklist.jsx and
+                         // whole-piece consolidation-day run-through's history —
+                         // `doneDays` plus `sessions: [{ day, stopCount, loggedAt,
+                         // loggedDate }]` (Pass 6, Repertoire-Lifecycle.md's
+                         // "Post-run-through logging") — see DayChecklist.jsx and
                          // ProgressTab.jsx, the two places that key off this
-                         // literal string). A synthetic entry in the same map,
+                         // literal string. A synthetic entry in the same map,
                          // not a documented exception until now.
   rescheduleMarker,      // null | { asOfDay, remainingChunkOrder } — see Algorithms.md#rescheduling
   lastPlayedDate,        // string ("YYYY-MM-DD") | null — collected at revival entry; purely
@@ -162,10 +164,38 @@ ChunkProgress = {
                              // computed score entirely when set. No recorded
                              // set-date — see Algorithms.md's computeConfidenceAsOf
                              // known limitation.
-  weakSpot,                  // boolean | undefined — manual flag, set during revival
-                              // reassessment (or from the regular Piece Map modal at any time).
-                              // Persists independently of any revival cycle; computeRevivalPlan
-                              // prioritizes flagged items first. See #revival below.
+  flag,                      // undefined | 'rough' | 'lost' — manual per-chunk flag, cycled on the
+                              // Piece Map (untouched -> rough -> lost -> untouched) or from
+                              // Revival's sequential reassessment modal (same control, same field).
+                              // Replaces the old boolean `weakSpot` (Pass 6,
+                              // Repertoire-Lifecycle.md's "Post-run-through logging" — merged, not
+                              // kept alongside it, confirmed with the user before that pass
+                              // started). Landing on 'rough' or 'lost' also demotes this chunk's
+                              // ladder stage and pins nextDueDate to today, via
+                              // lib/ladder.js's applyRunThroughFlag — see #ladder-config below.
+                              // Also caps computeConfidence's result (55 for rough, 20 for lost,
+                              // applied after either the manual or auto branch) so a flagged
+                              // chunk can't show stale-high confidence anywhere it's displayed —
+                              // see Algorithms.md#confidence. Persists independently of any
+                              // revival cycle; computeRevivalPlan prioritizes any flagged chunk
+                              // first (rough and lost treated alike for that ordering, not a
+                              // three-tier sort). See #revival below. A pre-Pass-6 piece with the
+                              // old `weakSpot: true` reads that forward as `flag: 'rough'` on
+                              // migration (storage.js's backfillProgressLadderState) — `weakSpot`
+                              // itself does not survive migration once converted, and never wins
+                              // over an already-set `flag`.
+  flagSnapshot,               // { stage, consecutivePasses, nextDueDate } | undefined — captured
+                              // by App.jsx's handleSetFlag the moment `flag` is first set (the
+                              // untouched->rough transition only; not re-captured on rough->lost,
+                              // so it always holds the state from before *any* flag in the current
+                              // cycle). Clearing the flag back to untouched restores these three
+                              // fields from here and deletes it, undoing exactly the schedule
+                              // change the flag caused. If a real session gets logged while
+                              // flagged, handleLogSession deletes this instead — a genuinely
+                              // earned ladder advance must never be discarded by a later "never
+                              // mind" on the flag. Backup-merge (storage.js's mergeProgress) treats
+                              // it like the other ladder fields below: the existing piece's value
+                              // always wins over an imported file's.
   stage,                     // null | 'stabilizing' | 'settling' | 'holding' — this chunk's rung
                               // on the spaced-repetition maintenance ladder. null means "not on
                               // the ladder" — no entry/Tier-1 mechanic exists yet to move a chunk
@@ -392,7 +422,7 @@ revival = {
 ```
 
 `handleEndRevival` resets this object back to its `active: false` defaults;
-it does **not** clear `progress[id].weakSpot`, `progress[id].manualConfidence`,
+it does **not** clear `progress[id].flag`, `progress[id].manualConfidence`,
 or `piece.memoryAnchors` — those are treated as durable chunk metadata, not
 scoped to a single revival cycle.
 
@@ -435,10 +465,6 @@ than a new 0-100 (or 0-4) field. See
   "is every chunk at Holding" to actually compute the piece-level "learned"
   flag itself. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
-- A new tri-state `flag` field (rough/lost, from planned post-run-through
-  logging) would sit alongside the existing `progress[id].weakSpot` above
-  once built, and the two haven't been reconciled — see
-  [Decisions.md](Decisions.md#open-questions).
 - `piece.progress[id].doneDays.length` (surfaced in PieceMapTab as
   "Sessions logged") counts distinct days touched, not sessions logged —
   pre-existing behavior that was a distinction without a difference before

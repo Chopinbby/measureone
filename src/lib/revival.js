@@ -62,13 +62,18 @@ export function computeRevivalPlan(piece, chunkSet, currentDay) {
     id: c.id,
     effort: c.effort,
     confidence: computeConfidence(c, piece, currentDay),
-    weakSpot: !!(piece.progress[c.id] || {}).weakSpot,
+    // `flag` used to be the boolean-only `weakSpot` field; widened to
+    // 'rough' | 'lost' | undefined by the post-run-through logging design
+    // (Repertoire-Lifecycle.md), but prioritization here stays exactly the
+    // binary "flagged at all vs not" it always was — not a redesign into a
+    // three-tier lost-before-rough sort.
+    flagged: !!(piece.progress[c.id] || {}).flag,
   }));
 
-  // Weak spots first, then lowest confidence first — the two prioritization
-  // signals the product asks for, in that order.
+  // Flagged chunks first, then lowest confidence first — the two
+  // prioritization signals the product asks for, in that order.
   items.sort((a, b) => {
-    if (a.weakSpot !== b.weakSpot) return a.weakSpot ? -1 : 1;
+    if (a.flagged !== b.flagged) return a.flagged ? -1 : 1;
     return a.confidence - b.confidence;
   });
 

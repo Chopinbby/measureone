@@ -19,7 +19,7 @@ export function RevivalTab({
   currentDay,
   onUpdateBPM,
   onSetManualConfidence,
-  onSetWeakSpot,
+  onSetFlag,
   onSetMemoryAnchor,
   onFinishReassessment,
   onReopenReassessment,
@@ -41,7 +41,7 @@ export function RevivalTab({
     [revivalItems, chunkSet.combos]
   );
   const ratedCount = revivalItems.filter((c) => isManualConfidence(c, piece.progress)).length;
-  const weakSpots = revivalItems.filter((c) => (piece.progress[c.id] || {}).weakSpot);
+  const flagged = revivalItems.filter((c) => (piece.progress[c.id] || {}).flag);
   const firstUnratedId = (revivalItems.find((c) => !isManualConfidence(c, piece.progress)) || revivalItems[0] || {}).id || null;
   const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
   // Combos whose underlying content (anchor chunk, or an overlapping
@@ -94,7 +94,7 @@ export function RevivalTab({
           <p className="wizard-hint">
             Go chunk by chunk (and seam by seam) and rate confidence from memory right now — this sets a
             fresh baseline for scheduling without touching your original practice history. Flag anything
-            that felt shaky as a weak spot; the plan below will prioritize those first.
+            that felt shaky as rough or lost; the plan below will prioritize those first.
           </p>
           <p className="derived-stat" style={{ marginBottom: 14 }}>
             <strong className="mono">{ratedCount}</strong> of <strong className="mono">{revivalItems.length}</strong> rated
@@ -106,7 +106,7 @@ export function RevivalTab({
               currentDay={currentDay}
               onUpdateBPM={onUpdateBPM}
               onSetManualConfidence={onSetManualConfidence}
-              onSetWeakSpot={onSetWeakSpot}
+              onSetFlag={onSetFlag}
               onSetMemoryAnchor={onSetMemoryAnchor}
               sequentialMode
               initialSelectedId={firstUnratedId}
@@ -121,7 +121,7 @@ export function RevivalTab({
             <h3>Reassessment complete</h3>
             <p className="wizard-hint" style={{ marginBottom: 12 }}>
               {ratedCount} of {revivalItems.length} rated
-              {weakSpots.length > 0 ? `, ${weakSpots.length} flagged as weak spot${weakSpots.length === 1 ? "" : "s"}` : ""}.
+              {flagged.length > 0 ? `, ${flagged.length} flagged rough or lost` : ""}.
             </p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button className="ghost-btn" onClick={onReopenReassessment}>Redo reassessment</button>
@@ -131,11 +131,11 @@ export function RevivalTab({
             </div>
           </div>
 
-          {weakSpots.length > 0 && (
+          {flagged.length > 0 && (
             <div className="panel focus-panel">
-              <h3>Flagged weak spots</h3>
+              <h3>Flagged chunks</h3>
               <div className="focus-list">
-                {weakSpots.map((c) => (
+                {flagged.map((c) => (
                   <div key={c.id} className="focus-row">
                     <span className="mono">{formatRange(c.start, c.end)}</span>
                     <span className="tag subtle">{c.kind === "transition" ? "Review" : "Chunk"}</span>

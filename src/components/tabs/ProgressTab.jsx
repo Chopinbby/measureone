@@ -206,7 +206,14 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
                 <span className="mono history-day">Day {d}</span>
                 <span className="history-items">
                   {historyByDay[d]
-                    .map((id) => (id === "__consolidation__" ? "Full run-through" : formatRange(chunkById[id].start, chunkById[id].end)))
+                    .map((id) => {
+                      if (id !== "__consolidation__") return formatRange(chunkById[id].start, chunkById[id].end);
+                      const sessions = ((piece.progress.__consolidation__ || {}).sessions || []).filter((s) => s.day === d);
+                      const last = sessions[sessions.length - 1];
+                      return last && last.stopCount != null
+                        ? `Full run-through (stopped ${last.stopCount}x)`
+                        : "Full run-through";
+                    })
                     .join(", ")}
                 </span>
               </div>

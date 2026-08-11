@@ -216,10 +216,11 @@ from the Wizard/Settings UI.**
 
 ## Spaced repetition & maintenance
 
-**Status: the stage-math engine and Tier 1/Tier 2 review scheduling are
-built and live (Passes 1–5); a live "what's due" query beyond the current
-plan's bounded length and the post-run-through flag mode are still
-designed, not built.** Full design:
+**Status: the stage-math engine, Tier 1/Tier 2 review scheduling, and
+post-run-through logging (stop count + the rough/lost flag mode) are built
+and live (Passes 1–6); a live "what's due" query beyond the current plan's
+bounded length and Revival's auto-triggers off that logged data are still
+designed, not built (Pass 7).** Full design:
 [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
 Evidence behind several choices below: [Research.md](Research.md).
 
@@ -402,12 +403,14 @@ relearns cleanly, no task is ever generated.**
 
 `computeComboEscalations` and `findComboUnderlyingChunks`
 (`src/lib/revival.js`) implement this, rendered in `RevivalTab.jsx` as a
-"Needs another look" panel. The "lost" flag mentioned below doesn't exist
-yet (that's Pass 6, per the maintenance-ladder build order) — the
-clearing behavior described was designed around that flag existing, but
-what's built now (escalation itself) doesn't depend on it: escalation is
-computed live from session history, so there's nothing to "clear" in the
-first place — see the consequence note below.
+"Needs another look" panel. The "lost" flag mentioned below (now
+`progress[id].flag === 'lost'`, built in Pass 6) doesn't drive this
+escalation mechanism at all — escalation is computed live from session
+outcomes regardless of any flag, so there's nothing to "clear" in the
+first place — see the consequence note below. What Pass 6's flag data
+will eventually feed is Revival's separate stop-count/lost-flag
+auto-trigger conditions above, once Pass 7 wires the check itself in —
+a different mechanism from combo escalation.
 
 - **Why:** This supersedes the current `computeRevivalPlan` code comment
   (`src/lib/revival.js`), which excludes combos from revival statically
@@ -657,6 +660,82 @@ signals, at least for now.**
   through `handleLogSession`, but neither reads the other's derived state.
 - **Revisit when:** Stage 3 ("learned") is actually implemented — see
   [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
+
+**Decision: the post-run-through rough/lost flag (Pass 6) merges into and
+replaces the existing `progress[id].weakSpot` boolean, rather than living
+alongside it as a separate field.**
+
+- **Why:** Flagged as this pass's one blocking question — resolved with
+  the user before implementation started, not silently picked during it.
+  `weakSpot`'s only two consumers (`computeRevivalPlan`'s weak-spots-first
+  sort in `lib/revival.js`, and `RevivalTab`'s flagged-chunks list/count)
+  both already treated it as a plain boolean — "flagged or not" — with no
+  code anywhere distinguishing degrees of flagged-ness. Widening that same
+  field to a tri-state `undefined | 'rough' | 'lost'` and updating both
+  call sites to check "is anything set" instead of "is it `true`" is a
+  one-line change at each site, not a redesign — versus keeping two
+  separate manual "this chunk needs attention" flags per chunk, which
+  would mean Revival's reassessment modal and the Piece Map's run-through
+  flag independently claiming to mean roughly the same thing.
+- **Consequence:** `progress[id].weakSpot` no longer exists;
+  `progress[id].flag` is the single field. Revival's sequential
+  reassessment modal now sets the same field the Piece Map's flag cycle
+  does (same control, `PieceMapTab`'s "Run-through flag" button, reused
+  as-is rather than duplicated) instead of a dedicated weak-spot toggle.
+  `computeRevivalPlan`'s prioritization is unchanged in effect (flagged
+  chunks first, then lowest confidence) — rough and lost are treated alike
+  for that ordering, not a three-tier sort, per the same "no behavioral
+  redesign" reasoning above.
+- See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)
+  and [Data-Model.md](Data-Model.md#the-piece-object).
+
+**Decision: an already-saved piece with the old `weakSpot: true` reads
+that forward as `flag: 'rough'` on migration, rather than the field
+silently going unread.**
+
+- **Why:** Found in a post-ship diagnostic, not anticipated when the merge
+  decision above was made. The merge only changed which field *new* code
+  reads; it didn't address data saved *before* the merge shipped.
+  `weakSpot: true` on an old piece isn't deleted by that change, but
+  nothing reads it anymore either — a silent, no-error loss of visibility
+  (the flag icon, Revival's flagged list, `computeRevivalPlan`'s
+  prioritization all stop showing it) rather than a crash, which is why it
+  wasn't caught by build or tests. 'rough' rather than 'lost' because the
+  old field only ever meant "needs attention," carrying no severity signal
+  to map onto lost's stronger "demote to the floor" meaning.
+- **Consequence:** `backfillProgressLadderState` (`lib/storage.js`)
+  converts on load — covers a regular app load, a brand-new import, and a
+  merged import alike, since all three funnel through
+  `validateAndMigratePiece`. An already-set `flag` always wins over a
+  leftover `weakSpot`, so this can't overwrite a flag set after Pass 6.
+  `weakSpot` is deleted once converted, not left sitting unread — this
+  codebase's general lean against keeping dead fields around (CLAUDE.md).
+- See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging).
+
+**Decision: clearing a rough/lost flag reverts the ladder schedule change
+the flag caused, not just the flag value itself.**
+
+- **Why:** Found in the same diagnostic. The original implementation
+  demoted `stage`/`nextDueDate` on flagging but never reversed it on
+  clearing — "untouched" is documented to mean "held fine"
+  (Repertoire-Lifecycle.md), but a chunk cycled through rough and back
+  stayed permanently demoted, contradicting that. User confirmed the
+  fix direction directly: clearing should revert the chunk's schedule to
+  what it would be without the flag.
+- **Consequence:** `progress[id].flagSnapshot` (see
+  [Data-Model.md](Data-Model.md#the-piece-object)) captures
+  `{ stage, consecutivePasses, nextDueDate }` once, on the untouched→rough
+  transition only — not re-captured on rough→lost, so it always holds the
+  state from before *any* flag in the cycle. Restored and deleted when the
+  flag clears. **Known edge case, deliberately handled conservatively:**
+  if a real session gets logged while flagged, `handleLogSession` deletes
+  the snapshot instead of letting it linger — a genuinely-earned ladder
+  advance must never be silently discarded by a later "never mind" on the
+  flag. In that case, clearing the flag leaves `stage`/`nextDueDate`
+  wherever the flag's demotion last set them rather than reverting past
+  the real progress; there's no attempt to reconstruct what the schedule
+  "should" be by replaying history.
+- See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging).
 
 ## UX
 
@@ -940,10 +1019,6 @@ oversight to silently fix; surface it instead.
   (`piece.targetDate`, an estimated finish date in "minutes per day" mode —
   see [Algorithms.md](Algorithms.md#timeline--scheduler)); worth revisiting
   whether Progress should follow suit for consistency.
-- **Does the ladder's new rough/lost flag merge with the existing
-  `progress[id].weakSpot`?** Both are manual "this chunk needs attention"
-  flags with real overlap; not reconciled. See
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging).
 - **Is a single Tier 1 touch enough**, or does a chunk need a second short
   rung before Stabilizing's first real review reliably survives? Gated on
   fail-rate data once built, not decided preemptively. See

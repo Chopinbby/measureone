@@ -1,5 +1,6 @@
 import { clamp, rangesOverlap } from "./utils";
 import { REQUIRED_REPS } from "./constants";
+import { STAGES } from "./ladder";
 
 // A measure-range tempo target set in Settings (or the whole-piece default)
 // applies to any chunk whose measures fall in that zone, unless the chunk has
@@ -92,12 +93,24 @@ export function computeAutoConfidence(chunk, piece, currentDay) {
   return Math.round(clamp(score, 0, 100));
 }
 
+// Rough/lost flags (Repertoire-Lifecycle.md's "Post-run-through logging")
+// cap displayed confidence, on top of either the manual or auto score —
+// including on top of a manual override, since a stale "I know better than
+// the algorithm" override from before a chunk just went lost is exactly
+// the "visible contradiction" the design explicitly rules out. Caps sit
+// inside PieceMapTab's own tier boundaries (34/67) so a flagged chunk's
+// grid color changes too, not just its number: 'lost' forces "Needs work",
+// 'rough' forces at most "Developing".
+const FLAG_CONFIDENCE_CAP = { rough: 55, lost: 20 };
+
 export function computeConfidence(chunk, piece, currentDay) {
   const entry = piece.progress[chunk.id] || {};
-  if (entry.manualConfidence !== undefined && entry.manualConfidence !== null) {
-    return clamp(Math.round(entry.manualConfidence), 0, 100);
-  }
-  return computeAutoConfidence(chunk, piece, currentDay);
+  const score =
+    entry.manualConfidence !== undefined && entry.manualConfidence !== null
+      ? clamp(Math.round(entry.manualConfidence), 0, 100)
+      : computeAutoConfidence(chunk, piece, currentDay);
+  const cap = FLAG_CONFIDENCE_CAP[entry.flag];
+  return cap !== undefined ? Math.min(score, cap) : score;
 }
 
 // What computeConfidence would have returned if evaluated on a past plan-day:
@@ -126,14 +139,34 @@ export const PROGRESS_TIER_META = {
   mastered: { label: "Mastered", color: "var(--teal)" },
 };
 
-// Buckets a chunk by its most recently logged clean-rep count, not a peak
-// ever achieved — same "what's true right now" convention as currentBPM.
+// Buckets a chunk by its rung on the spaced-repetition maintenance ladder
+// (Repertoire-Lifecycle.md's "The ladder: three stages"), not a single
+// last-session rep count — the ladder is what "how consolidated is this,
+// really" now means, where a last-session snapshot was always a coarse
+// proxy for it. A chunk demoted by a rough/lost flag (lib/ladder.js's
+// applyRunThroughFlag writes `stage` directly) drops a tier here
+// automatically, through the same mechanism as everywhere else — not a
+// separate check. A chunk with real history from before the ladder
+// existed migrates in with `stage: null` (can't tell "never touched" from
+// "practiced a lot before this existed" from stage alone — same landmine
+// already documented for Tier 1 review scheduling,
+// Algorithms.md#timeline--scheduler); such a chunk reads as "learned"
+// (the lowest touched tier) until it's logged again and picks up a real
+// stage, rather than "untouched" or jumping straight to "mastered."
 export function computeProgressTier(chunk, piece) {
-  const sessions = (piece.progress[chunk.id] || {}).sessions || [];
+  const entry = piece.progress[chunk.id] || {};
+  const sessions = entry.sessions || [];
   if (sessions.length === 0) return "untouched";
-  const lastReps = sessions[sessions.length - 1].cleanReps || 0;
-  if (lastReps >= 10) return "mastered";
-  if (lastReps >= 5) return "comfortable";
+  if (entry.stage === "holding") return "mastered";
+  if (entry.stage === "settling") return "comfortable";
+  // null (pre-ladder history, see comment above) and 'stabilizing' both
+  // fall through to "learned" legitimately — anything else is a value
+  // this function doesn't know about (a typo, hand-edited data, a future
+  // stage this wasn't updated for) silently landing in the same bucket.
+  // Warn instead of misclassifying without a trace.
+  if (entry.stage != null && !STAGES.includes(entry.stage)) {
+    console.warn(`computeProgressTier: chunk ${chunk.id} has unrecognized stage "${entry.stage}" — defaulting to "learned"`);
+  }
   return "learned";
 }
 

@@ -137,11 +137,13 @@ evidence behind several specific choices below: [Research.md](Research.md)).
 **The stage-math engine is built and wired into logging** (see "The ladder:
 three stages" below), **and `computeTimeline` itself now schedules reviews
 off it** (Pass 5 — see "Introduction-window review scheduling: Tier 1 /
-Tier 2" below). What's *not* built is everything past that: a live
-"what's due" query that works beyond the current plan's bounded
-`daysToLearn` window, and the post-run-through rough/lost flag mode. See
-each subsection below for what's actually implemented today vs. still just
-designed.
+Tier 2" below). **Post-run-through logging — stop count and the rough/lost
+flag mode — is also now built** (Pass 6, see that subsection below). What's
+*not* built is everything past that: a live "what's due" query that works
+beyond the current plan's bounded `daysToLearn` window, and Revival's three
+auto-triggers that would consume the stop-count/lost-flag data this pass
+produces (Pass 7 — see "Revival auto-triggers" below). See each subsection
+below for what's actually implemented today vs. still just designed.
 
 ### The unifying idea
 
@@ -403,40 +405,107 @@ regardless of clean reps, per the lean this section originally sketched.
 
 ### Post-run-through logging
 
-Today's consolidation-day UI
-([Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler),
-rule 6) is a bare "mark complete" checkbox with no data captured, stored
-today under the synthetic `piece.progress["__consolidation__"]` entry
-(see [Data-Model.md](Data-Model.md) — this convention predates this
-design and isn't itself part of it, but whatever replaces the checkbox
-touches this exact storage location). Planned replacement, shared by both
-learning-phase consolidation days and maintenance run-throughs (one
-mechanism, not two):
+**Implemented** (Pass 6). The old consolidation-day UI was a bare "mark
+complete" checkbox with no data captured, stored under the synthetic
+`piece.progress["__consolidation__"]` entry
+([Data-Model.md](Data-Model.md)) — that storage location is unchanged, it
+just now holds real data. Shared by both learning-phase consolidation days
+and maintenance run-throughs (one mechanism, not two — `DayChecklist.jsx`
+doesn't distinguish which):
 
-- **Stop count** — numeric input: how many times did the run-through get
-  stopped and restarted.
-- **Flag mode on the Piece Map** — a 3-state cycle per chunk, reusing the
-  existing grid rather than new UI: `untouched` (default) → **rough**
-  (demotes one stage, pins the next review to imminent regardless of what
-  the demoted stage's normal cadence would produce) → **lost** (demotes
-  fully to Stabilizing, same imminent pin) → back to `untouched`.
-  Untouched implicitly means "held fine" — no need to positively confirm
-  every unflagged chunk. Rough/lost flags must immediately affect
-  displayed confidence everywhere it shows (Overview, Progress, Piece
-  Map) — a chunk just flagged "lost" showing an unchanged confidence
-  number elsewhere would be a visible contradiction. This is a **new
-  field**, separate from the existing `progress[id].weakSpot`
-  ([Data-Model.md#revival](Data-Model.md#revival)) — the two are not
-  merged in this design, though they cover adjacent territory (both are
-  manual "this chunk needs attention" flags) and that overlap has not been
-  resolved. Worth deciding before implementation, not silently conflating
-  the two.
+- **Stop count** — numeric input ("Times stopped"): how many times the
+  run-through got stopped and restarted. `handleLogRunThrough` (`App.jsx`)
+  appends `{ day, stopCount, loggedAt, loggedDate }` to
+  `progress["__consolidation__"].sessions`, mirroring
+  `handleLogSession`'s shape (multiple same-day attempts allowed, each its
+  own record) rather than overwriting. `handleUnlogRunThrough` undoes the
+  most recent entry, matching `handleUnlogSession`'s convention. Visible
+  on Progress's "Recent practice history" as "Full run-through (stopped
+  Nx)".
+- **Flag mode on the Piece Map** — a 3-state cycle per chunk on the
+  existing grid: `untouched` (default, shown as no icon) → **rough**
+  (demotes one stage, pins the next review to today regardless of what the
+  demoted stage's normal cadence would produce) → **lost** (demotes fully
+  to Stabilizing, same pin) → back to `untouched`. The demote-and-pin
+  operation is `applyRunThroughFlag` (`src/lib/ladder.js`), a sibling to
+  `computeLadderAdvance` — reuses its private `demote()` helper directly
+  rather than duplicating the stage-transition rule, and resets
+  `consecutivePasses` to 0 for the same reason a fail does (passes accrued
+  at the old, higher stage shouldn't carry over toward graduating back out
+  of the demoted one). Deliberately doesn't touch `practiceBPM` or
+  `consecutiveStabilizingFails`/`needsRelearning` — those are tied to
+  classified session outcomes, and a manual run-through flag isn't one.
+  **Resolved, superseding the plan below: this field is `progress[id].flag`
+  (`undefined | 'rough' | 'lost'`), and it *replaces* `weakSpot` rather
+  than sitting alongside it** — confirmed with the user before
+  implementation started (this was the pass's one explicit blocking
+  question). `weakSpot`'s only two consumers both treated it as
+  "flagged or not," so both became "is `flag` set at all," not a rewrite:
+  `computeRevivalPlan`'s weak-spots-first sort
+  (`lib/revival.js`) and `RevivalTab`'s "flagged" list/count — neither
+  distinguishes rough from lost, by design (not a redesign into a
+  three-tier lost-before-rough sort). Revival's sequential reassessment
+  modal now sets the same tri-state flag the Piece Map does (same
+  underlying field, same control), rather than a separate weak-spot
+  toggle.
+- **Confidence cap, not a `stage`/ladder read.** Rough/lost flags must
+  immediately affect displayed confidence everywhere it shows (Overview,
+  Progress, Piece Map, and everywhere else `computeConfidence` is called —
+  Analytics, the Today checklist's confidence pill, `FocusPanel`) — a
+  chunk just flagged "lost" showing an unchanged confidence number
+  elsewhere would be a visible contradiction. Implemented as a cap inside
+  `computeConfidence` itself (`lib/confidence.js`) — `Math.min(score, 55)`
+  for rough, `Math.min(score, 20)` for lost, applied *after* either the
+  manual-override or auto-computed branch, so a stale manual override from
+  before the flag lands can't paper over it either. Every caller reads
+  through this one function, so the cap propagates for free with no
+  per-tab changes needed beyond it. The caps sit inside the Piece Map's
+  own tier boundaries (34/67) so a flagged chunk's grid color changes too,
+  not just its number. This doesn't read `stage` — `computeAutoConfidence`
+  still deliberately doesn't factor in ladder stage (see Stage 3 above);
+  the demote-and-pin operation and the confidence cap are two independent
+  effects of the same flag, not one implemented in terms of the other.
+- **Old `weakSpot` data reads forward as `flag: 'rough'`, not silently
+  orphaned.** Found in review after Pass 6 shipped: the merge above only
+  covered code reading `weakSpot` going forward — it didn't address
+  already-saved pieces that had `weakSpot: true` set before this pass, and
+  since nothing reads that field anymore, that data would otherwise have
+  quietly stopped showing up anywhere (the Piece Map icon, Revival's
+  flagged list, `computeRevivalPlan`'s prioritization) with no error and
+  no visible sign it had happened. Fixed in migration
+  (`backfillProgressLadderState`, `lib/storage.js`): a progress entry with
+  `weakSpot: true` and no `flag` already set converts to `flag: 'rough'`
+  on load (covers regular app load, fresh imports, and merged imports,
+  since all three funnel through `validateAndMigratePiece`); an explicit
+  `flag` already present always wins, so this can't clobber a flag set
+  after Pass 6 shipped. `weakSpot` itself is deleted once converted rather
+  than left sitting unread.
+- **Clearing a flag reverts the schedule change it caused, not just the
+  flag itself.** Found in review: the original implementation demoted
+  `stage`/`nextDueDate` on flagging but never reversed it on un-flagging,
+  so cycling rough → lost → untouched left a chunk permanently demoted
+  even though "untouched" is meant to mean "held fine." Fixed via
+  `progress[id].flagSnapshot` (see [Data-Model.md](Data-Model.md)):
+  `handleSetFlag` (`App.jsx`) captures `{ stage, consecutivePasses,
+  nextDueDate }` once, on the untouched→rough transition only, and
+  restores from it when the flag clears back to untouched. Not recaptured
+  on rough→lost, so it always reflects the state from before *any* flag in
+  the current cycle, not the intermediate rough demotion. Guarded against
+  discarding real progress: if a session gets logged for real while
+  flagged, `handleLogSession` deletes the snapshot, so a later "never
+  mind" on the flag leaves the genuinely-earned advance in place instead
+  of reverting past it — clearing the flag at that point just leaves
+  `stage`/`nextDueDate` wherever the flag's demotion last set them.
 
 ### Revival auto-triggers
 
-[Revival](#revival-built-mvp) above is entry-only manual today. Planned:
-three independent conditions, any one of which offers a revival rather
-than requiring the learner to remember to start one themselves:
+[Revival](#revival-built-mvp) above is entry-only manual today. The data
+these triggers would read now exists — stop count and the rough/lost flag
+(Pass 6, "Post-run-through logging" above) — but nothing yet checks it
+against these conditions or offers a revival automatically; that's Pass 7,
+still not built. Planned: three independent conditions, any one of which
+offers a revival rather than requiring the learner to remember to start
+one themselves:
 
 1. Stop count > 5 on a single logged run-through.
 2. "Large chunks lost": any `combo`-kind chunk flagged lost in a
@@ -471,9 +540,9 @@ threshold — confirmed with the user: revival is already "something's
 wrong" mode by the time it's running, unlike ordinary practice, where that
 dampening exists specifically to avoid overreacting to one bad day.
 
-This is also what resolves condition 2's "combo flagged lost" trigger,
-once that flag exists (Pass 6, not built yet) — but not in the way this
-section originally assumed. Escalation (`computeComboEscalations`) is a
+This is also what will resolve condition 2's "combo flagged lost" trigger
+once Pass 7 wires the auto-trigger check itself in — but not in the way
+this section originally assumed. Escalation (`computeComboEscalations`) is a
 *live derivation* off logged session history, not a task written into
 `piece.revival.plan` and later cleared. That sidesteps the "clearing"
 problem entirely: there's no flag being set that needs unsetting, so
@@ -558,6 +627,12 @@ implemented) — kept here for the record rather than deleted:
   ladder's two-consecutive-fails threshold?~~ A single real fail —
   confirmed with the user while building `computeComboEscalations`
   (`src/lib/revival.js`). See "Combo handling within revival" above.
+- ~~Should the new rough/lost flag field merge with the existing
+  `progress[id].weakSpot`, given both are manual "needs attention"
+  flags?~~ Merged — confirmed with the user before Pass 6 started (the
+  pass's one blocking question). `weakSpot` (boolean) is gone; both Piece
+  Map and Revival's reassessment modal now set the same tri-state
+  `progress[id].flag`. See Stage 4 → Post-run-through logging.
 
 **Still open:**
 
@@ -568,9 +643,6 @@ implemented) — kept here for the record rather than deleted:
 - Whether a second Tier 1 rung is needed before a chunk reliably survives
   to Stabilizing's first real review — gated on fail-rate data once built,
   not decided preemptively.
-- Whether the new rough/lost flag field should merge with the existing
-  `progress[id].weakSpot`, given both are manual "needs attention" flags —
-  not resolved, see Stage 4 → Post-run-through logging.
 - How maintenance surfaces in the UI — most likely Master Agenda and the
   per-piece Today tab, but the data-plumbing implication (a live "what's
   due" query replacing the fixed-length `timeline.days[]` index) isn't

@@ -83,13 +83,16 @@ decision (see [Decisions.md](Decisions.md)):
    front-loaded introduction window is also built** (`computeTimeline`,
    `src/lib/scheduling.js` — see
    [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
-   rule 4). **Still not implemented**: a live "what's due" query that
-   works *beyond* the current plan's bounded length (so maintenance
-   reviews can actually surface to the learner once a piece runs past its
-   original plan), redesigned post-run-through logging (stop count + a
-   rough/lost flag), and the three independent auto-triggers for offering
-   Revival (though combo
-   escalation *within* an already-triggered revival is built — see
+   rule 4). **Post-run-through logging is also built**: the consolidation-day
+   checklist captures a stop count, and the Piece Map's rough/lost flag
+   demotes a chunk's ladder stage and pins its next review to today (see
+   [Repertoire-Lifecycle.md#post-run-through-logging](Repertoire-Lifecycle.md#post-run-through-logging)).
+   **Still not implemented**: a live "what's due" query that works
+   *beyond* the current plan's bounded length (so maintenance reviews can
+   actually surface to the learner once a piece runs past its original
+   plan), and the three independent auto-triggers that would read the
+   stop-count/lost-flag data above to offer Revival automatically (though
+   combo escalation *within* an already-triggered revival is built — see
    [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)).
    This is also what resolves "what does learned mean" (Stage 3), once
    something queries "is every chunk's stage at Holding" — see

@@ -131,12 +131,28 @@ describe("validateAndMigratePiece — representative old piece shapes", () => {
     assert.equal(m.lastLoggedAt, "2026-06-05");
   });
 
-  test("revival-entered piece keeps revival state, weakSpot, and manualConfidence intact while still getting ladder state", () => {
+  test("revival-entered piece keeps revival state and manualConfidence intact, and old weakSpot converts to the new 'rough' flag", () => {
     const m = validateAndMigratePiece(revivalEntered);
     assert.equal(m.revival.active, true);
-    assert.equal(m.progress.c1.weakSpot, true);
+    assert.equal(m.progress.c1.flag, "rough", "pre-Pass-6 weakSpot:true should read forward as flag:'rough'");
+    assert.equal("weakSpot" in m.progress.c1, false, "weakSpot should not survive migration once converted");
     assert.equal(m.progress.c1.manualConfidence, 25);
     assertChunkBackfilled(m.progress.c1);
+  });
+
+  test("a piece that already has a real flag set is not clobbered by a leftover weakSpot value", () => {
+    const withBoth = {
+      ...revivalEntered,
+      progress: { c1: { ...revivalEntered.progress.c1, flag: "lost", weakSpot: true } },
+    };
+    const m = validateAndMigratePiece(withBoth);
+    assert.equal(m.progress.c1.flag, "lost", "an explicit flag should win over a stale weakSpot");
+  });
+
+  test("a piece with no weakSpot and no flag migrates with flag left undefined, not falsely set to 'rough'", () => {
+    const m = validateAndMigratePiece(midPlan);
+    assert.equal(m.progress.c1.flag, undefined);
+    assert.equal(m.progress.c2.flag, undefined);
   });
 
   test("archived piece keeps status and gets ladder state + lastLoggedAt", () => {

@@ -22,7 +22,7 @@ import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
 import { computeRevivalPlan } from "./lib/revival";
-import { computeLadderAdvance } from "./lib/ladder";
+import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
@@ -329,14 +329,39 @@ export default function App() {
     setSettingsEditing(false);
   };
 
-  const handleToggleDone = (chunkId, day) => {
+  // Consolidation-day logging — stop count replaces the old bare "mark
+  // complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
+  // logging"). Mirrors handleLogSession/handleUnlogSession's shape
+  // (doneDays append-if-missing, sessions appended and keyed by loggedAt,
+  // multiple same-day attempts allowed) against the synthetic
+  // "__consolidation__" progress key rather than a real chunk id.
+  const handleLogRunThrough = (day, stopCount) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
-      const entry = progress[chunkId] ? { ...progress[chunkId], doneDays: [...progress[chunkId].doneDays] } : { doneDays: [] };
-      const idx = entry.doneDays.indexOf(day);
-      if (idx >= 0) entry.doneDays.splice(idx, 1);
-      else entry.doneDays.push(day);
-      progress[chunkId] = entry;
+      const prevEntry = progress["__consolidation__"] || { doneDays: [] };
+      const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
+      const loggedDate = todayISODate();
+      const sessions = [...(prevEntry.sessions || []), { day, stopCount, loggedAt: Date.now(), loggedDate }];
+      progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
+      return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
+  // Removes only the most recently logged run-through for `day` — same
+  // "undo the last attempt, not the whole day" convention as
+  // handleUnlogSession.
+  const handleUnlogRunThrough = (day) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress["__consolidation__"];
+      if (!prevEntry) return p;
+      const sessions = [...(prevEntry.sessions || [])];
+      const lastIdx = sessions.map((s) => s.day).lastIndexOf(day);
+      if (lastIdx === -1) return p;
+      sessions.splice(lastIdx, 1);
+      const stillHasDay = sessions.some((s) => s.day === day);
+      const doneDays = stillHasDay ? prevEntry.doneDays : (prevEntry.doneDays || []).filter((d) => d !== day);
+      progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress };
     });
   };
@@ -410,6 +435,11 @@ export default function App() {
         practiceBPM: advance.practiceBPM,
         nextDueDate: advance.nextDueDate,
         tier1Done: advance.tier1Done,
+        // A real logged session moves the ladder forward for real —
+        // clears any pending flagSnapshot (see handleSetFlag below) so
+        // later clearing a rough/lost flag can't discard this genuine
+        // progress by reverting to the state from before the flag.
+        flagSnapshot: undefined,
       };
       return { ...p, progress, lastLoggedAt: loggedDate };
     });
@@ -457,11 +487,64 @@ export default function App() {
     });
   };
 
-  const handleSetWeakSpot = (chunkId, value) => {
+  // Replaces the old boolean-only handleSetWeakSpot: `flag` is
+  // undefined | 'rough' | 'lost', cycled by PieceMapTab (untouched → rough
+  // → lost → untouched). Landing on 'rough' or 'lost' also applies the
+  // forced-demote-and-pin-due-date ladder operation (lib/ladder.js) — every
+  // transition into one of those states is a fresh judgment call about
+  // this run-through, so it reapplies each time, not just once.
+  //
+  // Clearing back to 'untouched' reverts stage/consecutivePasses/
+  // nextDueDate to exactly what they were the moment the flag was first
+  // set — undoes the schedule change the flag caused, rather than just
+  // leaving the demotion in place. Captured once, in `flagSnapshot`, on
+  // the untouched->rough transition only (not re-captured on rough->lost,
+  // so it always reflects the state from *before any* flag in this
+  // cycle). If a real session gets logged while flagged, handleLogSession
+  // above clears the snapshot — so a subsequent "clear the flag" can't
+  // discard genuinely-earned progress by reverting past it.
+  //
+  // Restore is guarded against a malformed/partial snapshot (missing one
+  // of the three fields) rather than trusting it blindly — this is the
+  // only place `flagSnapshot` is ever written today, but a future write
+  // path with a different shape should not silently blank out a chunk's
+  // stage/nextDueDate. On a bad shape, skip the restore (leave the
+  // ladder state exactly where the flag's demotion last set it) and warn,
+  // same "don't guess, say so" spirit as the stage check in
+  // computeProgressTier (lib/confidence.js).
+  const handleSetFlag = (chunkId, flag) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
-      const entry = progress[chunkId] ? { ...progress[chunkId] } : { doneDays: [] };
-      entry.weakSpot = value;
+      const prevEntry = progress[chunkId] ? { ...progress[chunkId] } : { doneDays: [] };
+      const entry = { ...prevEntry, flag };
+      if (flag === "rough" || flag === "lost") {
+        if (!prevEntry.flag) {
+          entry.flagSnapshot = {
+            stage: prevEntry.stage ?? null,
+            consecutivePasses: prevEntry.consecutivePasses ?? 0,
+            nextDueDate: prevEntry.nextDueDate ?? null,
+          };
+        }
+        const advance = applyRunThroughFlag(
+          { stage: prevEntry.stage, consecutivePasses: prevEntry.consecutivePasses },
+          flag,
+          todayISODate()
+        );
+        entry.stage = advance.stage;
+        entry.consecutivePasses = advance.consecutivePasses;
+        entry.nextDueDate = advance.nextDueDate;
+      } else if (prevEntry.flagSnapshot) {
+        const snap = prevEntry.flagSnapshot;
+        const isValidSnapshot = snap && "stage" in snap && "consecutivePasses" in snap && "nextDueDate" in snap;
+        if (isValidSnapshot) {
+          entry.stage = snap.stage;
+          entry.consecutivePasses = snap.consecutivePasses;
+          entry.nextDueDate = snap.nextDueDate;
+        } else {
+          console.warn(`handleSetFlag: malformed flagSnapshot for chunk ${chunkId}, skipping restore (leaving current ladder state as-is)`, snap);
+        }
+        entry.flagSnapshot = undefined;
+      }
       progress[chunkId] = entry;
       return { ...p, progress };
     });
@@ -718,7 +801,7 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
-                onSetWeakSpot={handleSetWeakSpot}
+                onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
               />
             )}
@@ -729,7 +812,7 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
-                onSetWeakSpot={handleSetWeakSpot}
+                onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
@@ -752,7 +835,8 @@ export default function App() {
                 onJumpToday={() => setDayOverride(null)}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
-                onToggleDone={handleToggleDone}
+                onLogRunThrough={handleLogRunThrough}
+                onUnlogRunThrough={handleUnlogRunThrough}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
               />
@@ -1070,11 +1154,14 @@ const CSS = `
 .diff-dot-medium { background: var(--brass); }
 .diff-dot-hard { background: var(--brick); }
 .map-cell-recurring { position: absolute; bottom: 10px; right: 10px; font-size: 13px; color: var(--ink-faint); }
-.map-cell-weak { position: absolute; bottom: 10px; left: 10px; color: var(--brick); display: inline-flex; }
+.map-cell-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; }
+.map-cell-flag.flag-rough { color: var(--brass); }
+.map-cell-flag.flag-lost { color: var(--brick); }
 
-.weak-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
-.weak-toggle:hover { border-color: var(--brick); }
-.weak-toggle.active { border-color: var(--brick); background: rgba(181,71,58,0.1); color: var(--brick); }
+.flag-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
+.flag-toggle:hover { border-color: var(--brass); }
+.flag-toggle.flag-rough { border-color: var(--brass); background: rgba(185,138,62,0.1); color: var(--brass); }
+.flag-toggle.flag-lost { border-color: var(--brick); background: rgba(181,71,58,0.1); color: var(--brick); }
 
 .detail-panel { border-color: var(--ink); }
 .detail-modal { max-width: 480px; }

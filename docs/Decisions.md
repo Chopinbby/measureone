@@ -216,7 +216,10 @@ from the Wizard/Settings UI.**
 
 ## Spaced repetition & maintenance
 
-**Status: designed, not yet implemented.** Full design:
+**Status: the stage-math engine and Tier 1/Tier 2 review scheduling are
+built and live (Passes 1–5); a live "what's due" query beyond the current
+plan's bounded length and the post-run-through flag mode are still
+designed, not built.** Full design:
 [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
 Evidence behind several choices below: [Research.md](Research.md).
 
@@ -244,10 +247,10 @@ mechanism, not two separate systems.**
   "maintenance mode," it just has more of its cards sitting at the top of
   the same ladder every chunk has ridden since introduction.
 
-**Decision: during the front-loaded introduction window, reviews split
-into a near-mandatory Tier 1 (one-time, ~day 1) and a flexible Tier 2 (the
-normal ladder cadence, allowed to roll later under budget pressure) —
-lateness is schedule slack, never a review failure.**
+**Decision (implemented, Pass 5): during the front-loaded introduction
+window, reviews split into a near-mandatory Tier 1 (one-time, ~day 1) and
+a flexible Tier 2 (the normal ladder cadence, allowed to roll later under
+budget pressure) — lateness is schedule slack, never a review failure.**
 
 - **Why:** New-chunk introduction and due reviews compete for the same
   daily budget while the piece is still being introduced. Letting reviews
@@ -267,6 +270,85 @@ lateness is schedule slack, never a review failure.**
 - **Scope:** only applies during the front-loaded introduction window.
   Once nothing new is being introduced, due reviews simply compete
   oldest-due-first.
+- **What actually shipped, beyond the design above** — three specifics
+  three separate follow-up entries below cover in full:
+  Tier 1 has to check for existing session history, not just ladder stage,
+  to avoid mis-scheduling a "first touch" for an already-practiced legacy
+  chunk; Tier 2's "rolls later under pressure" had to be made strictly
+  forward-only after a bug let it drift a review earlier than its actual
+  due date; and only ever the *next* due review is shown per chunk, not a
+  precomputed future sequence, since that's all `nextDueDate` can express
+  at any given moment. See
+  [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
+  rule 4 for the mechanics.
+
+**Decision: Tier 1 requires zero logged sessions, not just `stage === null`,
+before it schedules a chunk a "first touch" review.**
+
+- **Why:** Found via a Codex review of the Pass 5 diff, not anticipated in
+  the original design. Migration (`backfillProgressLadderState`,
+  `lib/storage.js`) sets `stage: null` on *every* pre-existing progress
+  entry that predates the ladder feature — including a chunk with a long,
+  real practice history logged before this feature existed. `stage` alone
+  can't tell "genuinely never touched" apart from "practiced a lot, just
+  not by this system yet." Without the additional check, every
+  already-in-use piece would have had its practiced chunks wrongly
+  scheduled a "first touch" review the moment this scheduling model went
+  live — confirmed as reproducible with a test piece carrying 10 real
+  logged sessions on a `stage: null` chunk.
+- **Consequence:** a chunk in that state (real history, no ladder state
+  yet) gets no review placed at all until it's next logged — at which
+  point `handleLogSession` gives it real ladder state and it starts
+  taking the Tier 2 path like any other chunk already on the ladder. No
+  review is worse than a wrong one here; there was no principled due-date
+  to derive for a chunk the ladder has no record of, short of retroactively
+  replaying its whole pre-ladder session history through
+  `computeLadderAdvance` — judged out of scope for this fix, not built.
+
+**Decision: Tier 2's review-load smoothing only ever moves a review
+*later*, never earlier than its actual due date.**
+
+- **Why:** Found via manual browser verification during the Pass 5 build,
+  not a Codex finding. The smoothing pass was reused unchanged from the
+  pre-ladder fixed-offset system, which nudged a review ±1 or ±2 days in
+  either direction — harmless there, since a fixed-offset review had no
+  specific "due date" to violate. Reused as-is for Tier 2, that same
+  bidirectional nudge could cascade a review *backward* across the
+  smoothing pass's 3 iterations, chasing whichever neighboring day was
+  least loaded at each step: a chunk with a real, correctly-computed due
+  date of day 5 ended up placed on day 2 in one observed case — three days
+  before it was ever due.
+- **Consequence:** the smoothing pass's candidate days for a Tier 2 item
+  are `day + 1`/`day + 2` only, never `day - 1`/`day - 2`. Matches the
+  design's own framing — "rolls to the next day under budget contention"
+  — literally, not just in spirit.
+
+**Decision: `computeDaysNeededForMinutesPerDay`'s per-item review-cost
+padding is reduced from a fixed 4 touches (`REVIEW_OFFSETS.length`) to a
+rough 2.**
+
+- **Why:** Found via Codex review of the Pass 5 diff. This estimate
+  budgets extra effort per introduced item to account for review load
+  landing on top of introduction later, so a "minutes per day" plan's
+  length doesn't undercount what a day actually costs. It was written
+  against the old fixed-offset scheduler, which guaranteed every item
+  exactly 4 future review touches; `computeTimeline` no longer guarantees
+  any fixed count (Tier 1/Tier 2 above), so the old constant systematically
+  overestimated how many days a plan needs.
+- **Why 2, not 1 or 0:** this function has no visibility into how a plan
+  will actually be used (how often a chunk gets logged, how it performs),
+  so there's no way to compute an exact figure here — only a deliberately
+  rough, conservative one. Dropping all the way to 1 (or 0) risked
+  under-provisioning and reintroducing the exact "technically enough for
+  introduction alone, still runs over budget once review lands" bug this
+  estimate exists to prevent (see the "days" mode's own padding, same
+  section of [Algorithms.md](Algorithms.md#deriving-daystolearn-from-minutesperday-scheduleMode-minutes)).
+  2 was chosen as a middle ground, not derived — same "hand-picked, not a
+  hard cap" spirit as the rest of this estimate.
+- **Consequence:** "minutes per day" pieces set up after this change get a
+  meaningfully shorter estimated plan length than before for the same
+  inputs (roughly half, in one measured case) — not a bug, correcting an
+  estimate that had been overshooting since Pass 5 landed.
 
 **Decision: Holding's interval expansion reuses `adaptiveReviewOffsets`'s
 existing 0.6×/1×/1.4× effectiveness multiplier rather than a new
@@ -512,8 +594,10 @@ judgment straight to `fail`.**
 - **Consequence:** `session.effectiveness` stops being written by new
   sessions — `session.outcome` ('pass'/'soft-miss'/'fail') is the field
   going forward. `computeAutoConfidence` (`confidence.js`) and
-  `adaptiveReviewOffsets` (`scheduling.js`) both read `outcome` now instead,
-  via a shared `sessionOutcome()` helper that falls back to mapping old
+  `adaptiveReviewOffsets` (`scheduling.js` — no longer itself called by
+  `computeTimeline` as of Pass 5, but still exported and still correct if
+  called) both read `outcome` now instead, via a shared `sessionOutcome()`
+  helper that falls back to mapping old
   `effectiveness` values for sessions logged before this change (low→fail,
   good→soft-miss, high→pass — chosen to preserve each value's old
   0.6/1/1.4 multiplier effect, not as a claim that "good" truly meant
@@ -539,8 +623,10 @@ its own record, none overwritten by day alone.**
 
 - **Why:** The design notes wanted a semantic Tier-1/due-review/re-attempt
   keying scheme, but classifying which of those a given log action *is*
-  needs Tier 1/Tier 2 review scheduling — a later, explicitly deferred
-  pass. Timestamp keying is buildable now without guessing at that
+  is a distinct problem from Tier 1/Tier 2 review *scheduling* (built in
+  Pass 5) — scheduling decides what to show as upcoming; this would mean
+  tagging what a session *was*, after the fact, which nothing does yet.
+  Timestamp keying is buildable now without guessing at that
   classification, and doesn't foreclose adding the semantic scheme later
   (a `loggedAt`-keyed record can still gain a `kind` tag once that exists).
 - **Consequence:** `ChecklistItem.jsx` had to change beyond just the

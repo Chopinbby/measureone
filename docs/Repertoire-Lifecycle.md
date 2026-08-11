@@ -134,13 +134,14 @@ practice investment — this is the direct mechanism behind the
 principle. The review-interval model is now fully designed (decision
 records: [Decisions.md](Decisions.md#spaced-repetition--maintenance);
 evidence behind several specific choices below: [Research.md](Research.md)).
-**The stage-math engine itself is built and wired into logging** (see "The
-ladder: three stages" below); what's *not* built is everything that would let a chunk's
-ladder state actually surface to the learner as "here's what's due today":
-Tier 1/Tier 2 review scheduling, a live "what's due" query, the
-post-run-through rough/lost flag mode, and any change to `computeTimeline`
-itself. See each subsection below for what's actually implemented today
-vs. still just designed.
+**The stage-math engine is built and wired into logging** (see "The ladder:
+three stages" below), **and `computeTimeline` itself now schedules reviews
+off it** (Pass 5 — see "Introduction-window review scheduling: Tier 1 /
+Tier 2" below). What's *not* built is everything past that: a live
+"what's due" query that works beyond the current plan's bounded
+`daysToLearn` window, and the post-run-through rough/lost flag mode. See
+each subsection below for what's actually implemented today vs. still just
+designed.
 
 ### The unifying idea
 
@@ -156,23 +157,29 @@ and is not part of the ladder. Maintenance mode, for a piece where every
 chunk already holds, is just what the ladder looks like once nothing needs
 graduating anymore — a live "what's due" view, not a fixed calendar plan.
 
-This is a bigger architectural shift than a formula change. Today's
-post-introduction review (`computeTimeline` /
-`adaptiveReviewOffsets`,
-[Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler))
-is a **pure, stateless derivation** — recomputed from scratch on every
-render from `introducedDay` and the single most-recent session's
-`effectiveness`, consistent with `chunkSet`/`timeline` being `useMemo`'d
-off `piece` and never persisted (see `CLAUDE.md`). There's no persisted
-"stage" or "consecutive pass count" anywhere in the data model today. The
-ladder can't be bolted onto that pattern — it needs genuinely persisted,
-event-driven state per chunk (stage, consecutive passes, `practiceBPM`,
-next-due date), advanced by explicit logged outcomes. That makes it
-structurally closer to the existing append-only `progress[id].sessions`
-log than to how `timeline` is computed, and it means real new
-`ChunkProgress` fields plus a migration path for every already-saved
-piece (which has no ladder state to backfill from), not just a new
-function alongside the old one.
+This was a bigger architectural shift than a formula change, which is
+worth understanding even now that it's built. Post-introduction review
+used to be a **pure, stateless derivation** (`computeTimeline` /
+`adaptiveReviewOffsets`) — recomputed from scratch on every render from
+`introducedDay` and the single most-recent session's `effectiveness`,
+consistent with `chunkSet`/`timeline` being `useMemo`'d off `piece` and
+never persisted (see `CLAUDE.md`). There was no persisted "stage" or
+"consecutive pass count" anywhere in the data model. The ladder couldn't be
+bolted onto that pattern — it needed genuinely persisted, event-driven
+state per chunk (stage, consecutive passes, `practiceBPM`, next-due date),
+advanced by explicit logged outcomes, structurally closer to the existing
+append-only `progress[id].sessions` log than to how `timeline` is computed.
+**This is exactly what got built across Passes 1–5**: real new
+`ChunkProgress` fields plus a migration path for every already-saved piece
+(Pass 1), a stage-math engine that advances that state on every logged
+session (`computeLadderAdvance`, Pass 2/3), and — Pass 5 — `computeTimeline`
+itself now reads that persisted state to place reviews, via
+`adaptiveReviewOffsets`'s replacement (see
+[Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler) rule
+4). `chunkSet`/`timeline` are still pure, unpersisted derivations exactly
+as before — what changed is that they now derive from real ladder state
+sitting on `piece.progress`, not that the derivation pattern itself
+changed.
 
 ### The ladder: three stages
 
@@ -185,9 +192,10 @@ function alongside the old one.
 **Implemented and wired into logging**: `computeLadderAdvance` in
 `src/lib/ladder.js` is called from `handleLogSession` (`App.jsx`) on every
 logged session, and its result is persisted — every chunk's `stage` etc.
-now actually advances as the learner practices. Still not built: Tier 1/
-Tier 2 review scheduling (so nothing surfaces "what's due" from
-`nextDueDate` yet) and any scheduler change. A few points below are noted
+now actually advances as the learner practices. **Tier 1/Tier 2 review
+scheduling is also now built** (Pass 5 — see the next section), so
+`nextDueDate` genuinely drives what shows up in the plan, not just
+computed-and-ignored data. A few points below are noted
 as confirmed, superseding the original sketch, once building this made the
 ambiguity concrete:
 
@@ -219,6 +227,12 @@ ambiguity concrete:
   just need to be stored so UI can be additive later.
 
 ### Introduction-window review scheduling: Tier 1 / Tier 2
+
+**Implemented** (Pass 5 of the maintenance-ladder build) — `computeTimeline`
+(`src/lib/scheduling.js`) places both tiers directly; full mechanics:
+[Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler) rule
+4. The design below is what motivated it; a few specifics only became
+concrete once actually building it did, called out inline.
 
 A chunk introduced on day 1 has its first due review on day 4 under the
 ladder — while the app is still trying to introduce every other chunk
@@ -261,6 +275,44 @@ Within that resolution, reviews split into two tiers with different flex:
   gets absorbed; Tier 1 is where it explicitly does not, per the asymmetry
   in [Research.md](Research.md) (reviewing late costs gradually more,
   reviewing early costs almost nothing).
+
+**Three specifics that only became concrete once this was actually built,
+not obvious from the design above:**
+
+- **A chunk with real practice history predating the ladder is not Tier
+  1-eligible, even though its `stage` reads `null` just like a genuinely
+  untouched chunk does.** Migration (`backfillProgressLadderState`,
+  `lib/storage.js`) sets `stage: null` on every pre-existing progress
+  entry regardless of how much it's actually been practiced — `stage`
+  alone can't distinguish "never touched" from "practiced a lot before
+  this feature existed." Found via Codex review of the Pass 5 diff: without
+  an additional check for existing session history, an already-practiced
+  legacy chunk got wrongly scheduled a "first touch" review, as if none of
+  that history had ever happened. Such a chunk now simply gets no review
+  placed at all until it's next logged, at which point it picks up real
+  ladder state and starts taking the Tier 2 path like any other chunk.
+- **"Rolls to the next day" is enforced as strictly forward-only, not a
+  bidirectional nudge.** The review-load-smoothing mechanism Tier 2 reuses
+  (Algorithms.md#timeline--scheduler, rule 5) was inherited from the
+  pre-ladder fixed-offset system, which nudged a review ±1 or ±2 days in
+  *either* direction — harmless there, since it had no specific "due date"
+  to respect. Discovered via manual browser verification during the Pass 5
+  build: reused unchanged, that same bidirectional nudge could cascade a
+  Tier 2 review *backward* across the smoothing pass's 3 iterations,
+  chasing whichever neighboring day was least loaded at each step — a
+  review genuinely due on day 5 landing on day 2, three days before it was
+  ever due. Fixed by restricting Tier 2's candidate days to later-only.
+- **Only the *next* due review ever shows up, not a running schedule of
+  future ones.** `computeTimeline` reruns from scratch on every piece
+  change and reads whatever `nextDueDate` currently says — since the
+  ladder only ever knows a chunk's one *next* due date (not a
+  precomputed future sequence), that's all a single recompute can place.
+  This is a real behavior change from the old fixed-offset system, which
+  front-loaded up to four review instances per chunk into the plan at
+  once. A due date landing beyond this plan's own `daysToLearn` isn't
+  placed in this bounded view at all (see "Explicitly not designed/built
+  here" below) — not a bug, just outside what a fixed-length plan array
+  can represent.
 
 **Open, monitored rather than assumed**: whether a single Tier 1 touch is
 sufficient, or a chunk needs a second short rung (day 1, then day 3, before
@@ -331,10 +383,15 @@ several recent attempts — should surface a note rather than silence.
 **Resolved**: the same-day-overwrite gotcha this section used to flag is
 fixed. `handleLogSession` (`src/App.jsx`) now appends every logged
 session rather than overwriting by `(chunkId, day)`, keyed by a precise
-`loggedAt` timestamp — a placeholder scheme (see the decision record),
-not yet the semantic Tier-1/due-review/re-attempt distinction this
-section originally wanted, since that needs Tier 1/Tier 2 scheduling
-(still not built).
+`loggedAt` timestamp — a placeholder scheme (see the decision record).
+Tier 1/Tier 2 review *scheduling* is now built (Pass 5 — see
+"Introduction-window review scheduling" above), but that's a separate
+thing from what this bullet originally wanted: a *logged session* still
+isn't tagged with which kind of review it actually was (a Tier 1 touch, a
+due Tier 2 review, a same-day re-attempt) — `loggedAt` distinguishes
+multiple same-day records from each other, but doesn't label what any one
+of them represents. That semantic tagging wasn't part of Pass 5 and
+remains not built.
 
 **Resolved**: the old "how did it feel" three-tap effectiveness input
 (`EFFECTIVENESS_OPTIONS`) is gone, folded into a single "needs more work"

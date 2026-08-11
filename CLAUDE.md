@@ -144,14 +144,18 @@ learned" state yet — a definition is decided but not implemented, see
 
 See [`docs/Roadmap.md`](docs/Roadmap.md) — the immediate next item is
 folding the Analytics tab into Progress (agreed, not yet implemented). The
-biggest designed-but-unbuilt item is a spaced-repetition ladder that
-replaces today's fixed `REVIEW_OFFSETS` review with a continuous
-Stabilizing/Settling/Holding cadence and redefines "learned" as every
-chunk reaching Holding — fully designed, not started. If you're about to
-touch scheduling, confidence, or the practice-logging UI, check
+biggest maintenance-ladder item is now **substantially built, not just
+designed**: a continuous Stabilizing/Settling/Holding cadence has replaced
+the old fixed `REVIEW_OFFSETS` review (`computeTimeline` now schedules
+reviews straight off each chunk's live ladder due-date), and "learned" is
+defined as every chunk reaching Holding, though nothing yet queries that
+roll-up. Still not built: a live "what's due" query that works beyond the
+current plan's bounded length, and post-run-through logging (stop
+count/rough-lost flag). If you're about to touch scheduling, confidence,
+or the practice-logging UI, check
 [`docs/Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
-first — you may be about to build on top of a mechanism that's already
-slated for replacement. One invariant from that design worth internalizing
-early: **a review arriving late is schedule slack, never a failure** —
-only the logged outcome (pass/soft-miss/fail) may ever affect the ladder,
-not timing.
+first — this mechanism is now live, not a future replacement to design
+around. One invariant from that design worth internalizing early: **a
+review arriving late is schedule slack, never a failure** — only the
+logged outcome (pass/soft-miss/fail) may ever affect the ladder, not
+timing.

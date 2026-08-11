@@ -79,11 +79,16 @@ decision (see [Decisions.md](Decisions.md)):
    `handleLogSession` on every logged session) — see
    [Data-Model.md](Data-Model.md#the-piece-object) and
    [Algorithms.md#session-outcomes--the-maintenance-ladder](Algorithms.md#session-outcomes--the-maintenance-ladder).
-   **Still not implemented**: a Tier 1/Tier 2 split resolving budget
-   contention during the front-loaded introduction window, a live "what's
-   due" query so any of this actually surfaces to the learner, redesigned
-   post-run-through logging (stop count + a rough/lost flag), and the
-   three independent auto-triggers for offering Revival (though combo
+   **The Tier 1/Tier 2 split resolving budget contention during the
+   front-loaded introduction window is also built** (`computeTimeline`,
+   `src/lib/scheduling.js` — see
+   [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
+   rule 4). **Still not implemented**: a live "what's due" query that
+   works *beyond* the current plan's bounded length (so maintenance
+   reviews can actually surface to the learner once a piece runs past its
+   original plan), redesigned post-run-through logging (stop count + a
+   rough/lost flag), and the three independent auto-triggers for offering
+   Revival (though combo
    escalation *within* an already-triggered revival is built — see
    [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)).
    This is also what resolves "what does learned mean" (Stage 3), once

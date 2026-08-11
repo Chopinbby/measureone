@@ -110,14 +110,15 @@ piece = {
                          // maintenance ladder's 60-day staleness auto-trigger — nothing reads this
                          // yet. See Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
   ladderConfig,          // { stabilizing, settling, holding, bpmSteps } — piece-level tunable
-                         // config for the not-yet-wired-in spaced-repetition maintenance ladder
-                         // (stage lengths, graduation pass-counts, tempo floors, practiceBPM
-                         // ratchet step sizes). Hardcoded defaults set at creation (Wizard.jsx)
-                         // and backfilled on migration (storage.js); no editing UI yet. Read by
-                         // the pure stage-math engine in lib/ladder.js (computeLadderAdvance),
-                         // but that engine isn't called from anywhere in the running app yet.
-                         // See #ladder-config below and
-                         // Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
+                         // config for the spaced-repetition maintenance ladder (stage lengths,
+                         // graduation pass-counts, tempo floors, practiceBPM ratchet step sizes).
+                         // Hardcoded defaults set at creation (Wizard.jsx) and backfilled on
+                         // migration (storage.js); no editing UI yet. Read by the stage-math
+                         // engine in lib/ladder.js (computeLadderAdvance), called on every
+                         // logged session (handleLogSession, App.jsx) and, since Pass 5, also
+                         // consulted indirectly via ChunkProgress.nextDueDate when
+                         // computeTimeline places each chunk's next review — see #ladder-config
+                         // below and Algorithms.md#session-outcomes--the-maintenance-ladder.
   memoryAnchors,         // { [id]: string } — free-text cue ("descending sequence", "watch
                          // left-hand leap") keyed by *either* a practice-chunk/transition id or a
                          // piece.sections id. One flat map because chunk ids (`c…`/`t_…`) and
@@ -143,8 +144,10 @@ ChunkProgress = {
                             // entries — a precise timestamp, set by handleLogSession
                             // (App.jsx) at log time. A placeholder keying scheme, not the
                             // semantic Tier-1/due-review/re-attempt distinction the design
-                            // notes eventually want — that needs Tier 1/Tier 2 scheduling,
-                            // still not built. loggedDate ("YYYY-MM-DD") is the calendar date
+                            // notes eventually want — Tier 1/Tier 2 review *scheduling* is
+                            // now built (Pass 5), but tagging which kind a given logged
+                            // session actually was is a separate, still-unbuilt piece; see
+                            // Decisions.md#spaced-repetition--maintenance. loggedDate ("YYYY-MM-DD") is the calendar date
                             // derived from loggedAt for sessions logged going forward, or
                             // backfilled from `day` + piece.startDate for sessions that
                             // predate the field — see storage.js. outcome ('pass' | 'soft-miss'
@@ -184,18 +187,25 @@ ChunkProgress = {
   practiceBPM,                // number | null — the tempo the ladder is currently asking for on
                                // this chunk, distinct from targetBPM (the eventual goal). Seeded
                                // to whatever tempo was first attempted (a placeholder — see
-                               // handleLogSession, App.jsx; there's no designed ladder-entry/
-                               // Tier-1 mechanic yet), then ratchets via ladderConfig.bpmSteps
-                               // (+2 pass / -2 soft-miss / -2 fail) on every logged session.
+                               // handleLogSession, App.jsx; there's still no deliberate
+                               // ladder-entry seeding mechanic, distinct from the Tier 1
+                               // *scheduling* concept below, which is built), then ratchets via
+                               // ladderConfig.bpmSteps (+2 pass / -2 soft-miss / -2 fail) on
+                               // every logged session.
   nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
-                                // review, recomputed on every logged session. Nothing reads this
-                                // to surface "what's due" yet — that's a live query against a
-                                // real calendar date this field enables, not built (see
-                                // Repertoire-Lifecycle.md's "How maintenance surfaces in the UI").
+                                // review, recomputed on every logged session. Load-bearing since
+                                // Pass 5: computeTimeline reads this directly to place the chunk's
+                                // Tier 2 review (Algorithms.md#timeline--scheduler rule 4). A live
+                                // "what's due" query that works *beyond* the current plan's bounded
+                                // days[] is still not built (see Repertoire-Lifecycle.md's "How
+                                // maintenance surfaces in the UI").
   tier1Done,                   // boolean, default false — whether the one-time first-touch review
                                 // (Repertoire-Lifecycle.md's "Tier 1") has happened for this chunk.
-                                // Read/passed through unchanged by computeLadderAdvance; nothing
-                                // sets it true yet (Tier 1 scheduling isn't built).
+                                // Read/passed through unchanged by computeLadderAdvance; still
+                                // never set true by anything. Pass 5's Tier 1 scheduling is a live,
+                                // recomputed-every-time decision (stage:null and zero sessions) —
+                                // it doesn't write back to this field, so tier1Done stays
+                                // permanently false and unused even now that Tier 1 itself exists.
 }
 ```
 
@@ -224,9 +234,10 @@ ladderConfig = {
   // 0.85, tempoFloorStepFraction: 0.05 ("+5 points per successful pass"),
   // tempoFloorCapFraction: 1. No growth-rate field here — Holding's
   // interval growth is computed entirely from the same 0.6×/1×/1.4×
-  // effectiveness multiplier adaptiveReviewOffsets already uses
-  // (scheduling.js), per the doc's "not a second multiplier system"
-  // instruction — see Decisions.md#spaced-repetition--maintenance.
+  // effectiveness multiplier concept adaptiveReviewOffsets introduced
+  // (scheduling.js) — lib/ladder.js keeps its own small duplicated copy of
+  // the multiplier itself now, per the doc's "not a second multiplier
+  // system" instruction — see Decisions.md#spaced-repetition--maintenance.
   bpmSteps: { pass, softMiss, fail },
   // pass: 2, softMiss: -2, fail: -2 — how much practiceBPM moves per
   // outcome. fail matches the other two rather than the doc's original
@@ -239,10 +250,13 @@ as `EFFORT_TO_MIN`/`LIBERAL_FACTOR` (see [Research.md](Research.md)). The
 stage-transition math and BPM ratcheting that read this config
 (`computeLadderAdvance` in `lib/ladder.js`) are wired into logging:
 `handleLogSession` (`App.jsx`) calls it on every session and persists the
-result. Still not built: Tier 1/Tier 2 review scheduling (so `nextDueDate`
-is computed but nothing surfaces "what's due"), any post-run-through
-flag mode, and any scheduler change. See [Architecture.md](Architecture.md)
-for where the function lives.
+result. `computeTimeline` (`lib/scheduling.js`) also now reads the
+resulting `nextDueDate` directly to schedule each chunk's Tier 1/Tier 2
+review (Pass 5 — see
+[Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)).
+Still not built: a live "what's due" query beyond the current plan's
+bounded length, and any post-run-through flag mode. See
+[Architecture.md](Architecture.md) for where the function lives.
 
 `defaultPiece()` in `src/components/Wizard.jsx` is the literal source of truth
 for this shape and its defaults — read it directly if this table and the code
@@ -396,10 +410,13 @@ than a new 0-100 (or 0-4) field. See
   and `handleReschedule` — rather than a single named constant) are
   hand-picked, not derived from any real practice-time study. See
   [Research.md](Research.md).
-- `adaptiveReviewOffsets`'s 0.6×/1.4× multipliers and the confidence
-  formula's weights are similarly hand-picked, not learned from outcomes.
-  Both now key off `session.outcome` (pass/soft-miss/fail) rather than the
-  old free-standing `effectiveness` self-report — see
+- The 0.6×/1.4× multiplier values (originally `adaptiveReviewOffsets`'s;
+  `adaptiveReviewOffsets` itself is no longer called by `computeTimeline`
+  as of Pass 5, superseded by Tier 1/Tier 2 review placement — see
+  [Algorithms.md#adaptive-review](Algorithms.md#adaptive-review)) and the
+  confidence formula's weights are similarly hand-picked, not learned from
+  outcomes. Both now key off `session.outcome` (pass/soft-miss/fail) rather
+  than the old free-standing `effectiveness` self-report — see
   [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - BPM zones and per-chunk difficulty reassessment both write directly into
   `piece.measureDifficulty` / `piece.bpmZones` — there's no undo history.

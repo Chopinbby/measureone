@@ -25,16 +25,18 @@ self-contained sibling pieces sharing a `workId` — see
 [Decisions.md](Decisions.md#multi-movement-works)), backup export/import,
 `computeConfidenceAsOf` (used by Progress's "most improved" stat), Revival
 (MVP slice — entry flow, chunk/transition reassessment reusing
-`manualConfidence`, weak-spot flagging, revival plan generation, tempo
-ladder, random start generator, memory anchors — see
-[Decisions.md](Decisions.md#revival) and
+`manualConfidence`, manual flagging (a boolean `weakSpot` at the time;
+merged into Pass 6's tri-state rough/lost `progress[id].flag` — see
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)),
+revival plan generation, tempo ladder, random start generator, memory
+anchors — see [Decisions.md](Decisions.md#revival) and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md)).
 
 Explicitly **not** part of that Revival slice, and still not built:
 Maintenance mode, Performance Preparation mode, automatic lifecycle-state
 detection (Learning / Performance Ready / At Risk / etc.), cross-piece
 repertoire health dashboards, and reading/memory/technical diagnosis
-tagging beyond the manual weak-spot flag. See
+tagging beyond the manual flag. See
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md) for where these fit.
 
 Pause/Archive (`piece.status`, set from Settings — pulls a piece off the

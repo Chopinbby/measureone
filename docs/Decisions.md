@@ -233,11 +233,19 @@ spaced-repetition ladder card reaching Holding, not a calendar date
   nothing previously rolled per-chunk state up into a piece-level "done"
   milestone. A piece that consolidates fast now genuinely graduates fast;
   one that doesn't, doesn't, regardless of what the original plan guessed.
-- **Consequence:** `computeProgressTier` and `computeConfidence` are
-  unaffected — this doesn't resolve which of the app's "how good is this
-  chunk" signals is canonical, it just defines a separate, piece-level
-  "done" condition on top of whichever chunk-level signal(s) end up
-  mattering.
+- **Consequence:** at the time this decision was made, `computeProgressTier`
+  and `computeConfidence` were both unaffected — this doesn't resolve
+  which of the app's "how good is this chunk" signals is canonical, it
+  just defines a separate, piece-level "done" condition on top of
+  whichever chunk-level signal(s) end up mattering. **Partially superseded
+  by Pass 6**: `computeProgressTier` now reads `stage` directly too (see
+  the decision below), so it's no longer independent of this one in the
+  literal sense — both now key off the same ladder rung. Still true,
+  though: this remains a piece-level rollup (every chunk at Holding) that
+  nothing yet computes, distinct from `computeProgressTier`'s existing
+  per-chunk bucketing that merely happens to also read `stage` now.
+  `computeConfidence` itself is still unaffected, unchanged from the
+  original claim.
 
 **Decision: learning-review and maintenance are one continuous ladder
 mechanism, not two separate systems.**
@@ -737,6 +745,68 @@ the flag caused, not just the flag value itself.**
   "should" be by replaying history.
 - See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging).
 
+**Decision: `computeProgressTier` (the Overview "Practice progress" bar)
+buckets a chunk by its spaced-repetition ladder `stage`, not its
+most-recently-logged session's clean-rep count.**
+
+- **Why:** Found in the same diagnostic. The rep-count version was
+  entirely independent of the new rough/lost flag — a chunk with strong
+  practice history could get flagged "lost" (capping its confidence low
+  everywhere else) and still show as "Mastered" in this one bar, the
+  exact "visible contradiction" [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)
+  explicitly rules out, just via a display path Pass 6's own verification
+  checklist hadn't named. Confirmed with the user: use `stage` rather
+  than `computeConfidence` for this specific bar, since the ladder is the
+  more meaningful long-term-retention signal for a bar that's always
+  meant "how much of this is really learned," where confidence's
+  recency-weighted, session-to-session read was always a coarser proxy
+  for that same question.
+- **Known landmine, confirmed acceptable rather than blocking:** a chunk
+  with real practice history from before the ladder existed migrates in
+  with `stage: null` (`backfillProgressLadderState`,
+  [Data-Model.md](Data-Model.md#known-simplifications) — the same reason
+  Tier 1 review scheduling has an equivalent guard,
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2)).
+  Such a chunk reads as "Learned" (the lowest touched tier) rather than
+  "Untouched" or "Mastered" until it's logged again and picks up a real
+  stage. User confirmed this isn't worth guarding further given how
+  little existing user data there is to be affected by it — noted here
+  rather than silently accepted, in case that changes once real usage
+  exists.
+- **Consequence:** `PROGRESS_TIER_META`'s four labels are unchanged;
+  only what feeds the bucketing changed. `PartSwitcher`'s untouched-measure
+  count (the only other caller) is unaffected, since it only ever checked
+  the `untouched` bucket, whose own condition (`sessions.length === 0`)
+  didn't change.
+- See [Algorithms.md](Algorithms.md#confidence) and
+  [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
+
+**Decision: two silent-failure risks caught in self-review get a
+`console.warn` and a safe fallback, not a silent misclassification.**
+
+- **Why:** A skeptical self-review (requested explicitly, before
+  committing) flagged that `computeProgressTier`'s stage bucketing
+  treated any unrecognized `stage` value the same as a legitimate one —
+  wrong data would silently land in "Learned" with no trace. Separately,
+  `handleSetFlag`'s `flagSnapshot` restore trusted the snapshot's shape
+  unconditionally — a future write path producing a differently-shaped
+  snapshot would silently write `undefined` into a chunk's `stage`/
+  `nextDueDate` rather than fail visibly. Neither was reachable through
+  today's UI, but both were real gaps a future change could hit.
+- **Consequence:** `computeProgressTier` (`lib/confidence.js`) now imports
+  the same `STAGES` list `lib/ladder.js` already used internally
+  (exported for this reuse) and warns if `stage` isn't `null` or one of
+  the three known values, before falling back to "learned" exactly as
+  before. `handleSetFlag` (`App.jsx`) now checks the snapshot has all
+  three expected fields before trusting it; on a malformed snapshot it
+  warns and skips the restore entirely, leaving `stage`/`nextDueDate`
+  wherever the flag's last demotion set them rather than overwriting them
+  with `undefined`. Both keep this codebase's existing "never crash on
+  bad data" convention (e.g. `lib/ladder.js`'s own defensive fallback to
+  `'stabilizing'`) — the fix is closing the *silent* part, not
+  introducing a throw.
+- See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging).
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -1003,10 +1073,11 @@ These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
 - **Should `computeConfidence` and `computeProgressTier` be unified?** They
-  currently measure different things (weighted session history vs.
-  most-recent-session rep count only) and can disagree. It's not decided
-  whether that's intentional (Overview wants something coarser) or drift
-  that should be resolved. See
+  currently measure different things (weighted session history vs. the
+  spaced-repetition ladder's `stage`, as of Pass 6 — see
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance)) and can
+  still disagree. It's not decided whether that's intentional (Overview
+  wants something coarser) or drift that should be resolved. See
   [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
 - **Exact placement of the Analytics panels once folded into Progress** —
   agreed in general terms ("near effectiveness calibration, somewhere

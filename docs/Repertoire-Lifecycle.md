@@ -51,14 +51,22 @@ queries "is every chunk's `stage` at `holding`" to actually compute a
 piece's "learned" flag — see
 [Data-Model.md](Data-Model.md#known-simplifications).
 
-`computeProgressTier` (buckets a chunk by its most recent session's
-clean-rep count) and `computeConfidence` (continuous 0–100 score) are
-unaffected by this decision and continue to answer their own separate
-questions — see
+`computeProgressTier` (buckets a chunk into untouched/learned/comfortable/
+mastered) and `computeConfidence` (continuous 0–100 score) both continue
+to answer their own separate questions from this piece-level "learned"
+rollup, which nothing computes yet — see
 [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
-Whether ladder stage becomes a third such signal, replaces one of the
-existing two, or stays deliberately separate is **not decided** — flagged
-there, not resolved here.
+**As of Pass 6, `computeProgressTier` buckets directly off the chunk's
+ladder `stage`** rather than its most-recent session's clean-rep count
+(the original signal) — so ladder stage already *is* a live input to one
+of the two existing "how good is this chunk" scores, just not the piece-
+level "learned" rollup this section is about, and still not
+`computeConfidence`, which remains deliberately stage-inert. Whether
+ladder stage eventually replaces one of the two chunk-level scores
+outright, becomes a fully independent third one, or stays split exactly
+like this (feeding one, not the other) is **not decided** — flagged in
+[Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them),
+not resolved here.
 
 ## Revival (built, MVP)
 
@@ -87,9 +95,11 @@ Scoped deliberately narrow for this pass — explicitly **not** built as part
 of it: Maintenance mode (Stage 4 below), Performance Preparation mode,
 automatic lifecycle-state detection, cross-piece repertoire health
 dashboards, or reading/memory/technical diagnosis tagging beyond the manual
-weak-spot flag. Revival's weak-spot flag and memory anchors are the
-lightweight, manual precursor to whatever that deeper tagging might look
-like, not a replacement for it.
+flag. Revival's flag (a plain boolean weak-spot toggle at the time; merged
+into Pass 6's tri-state rough/lost `progress[id].flag` — see "Post-run-
+through logging" below) and memory anchors are the lightweight, manual
+precursor to whatever that deeper tagging might look like, not a
+replacement for it.
 
 Automatic entry triggers (rather than manual-only, as today) are now
 designed — see [Stage 4 → Revival auto-triggers](#revival-auto-triggers)
@@ -465,6 +475,32 @@ doesn't distinguish which):
   still deliberately doesn't factor in ladder stage (see Stage 3 above);
   the demote-and-pin operation and the confidence cap are two independent
   effects of the same flag, not one implemented in terms of the other.
+- **Overview's "Practice progress" bar was still contradicting the flag
+  after the confidence cap shipped.** Found in review: `computeProgressTier`
+  (the Mastered/Comfortable/Learned bar) read only a chunk's most-recently-
+  logged clean-rep count, entirely independent of `flag` — a chunk with
+  strong history could get flagged "lost" and still read "Mastered" right
+  next to its now-capped, low confidence number, the exact contradiction
+  this feature exists to prevent. Fixed by switching that function to
+  bucket off `stage` instead (`holding`→mastered, `settling`→comfortable,
+  else→learned) — a chunk demoted by `applyRunThroughFlag` above drops a
+  tier here automatically, through the same `stage` write, not a
+  redundant separate flag check. See
+  [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)
+  for why this doesn't fully unify `computeConfidence` and
+  `computeProgressTier` — it closes this one contradiction, not the
+  general "two independent scores" question.
+- **Two silent-failure risks caught in a pre-commit self-review, both
+  fixed before shipping.** `computeProgressTier`'s new `stage` check
+  silently treated any unrecognized value the same as a real one — now
+  warns (`console.warn`) before falling back to "learned," rather than
+  misclassifying with no trace. `handleSetFlag`'s `flagSnapshot` restore
+  trusted the snapshot's shape unconditionally — now verifies all three
+  expected fields are present first; on a malformed snapshot it warns and
+  skips the restore (leaving `stage`/`nextDueDate` wherever the flag's
+  last demotion set them) rather than overwriting good data with
+  `undefined`. Neither was reachable through the shipped UI at the time,
+  but both were real gaps a future change could have hit silently.
 - **Old `weakSpot` data reads forward as `flag: 'rough'`, not silently
   orphaned.** Found in review after Pass 6 shipped: the merge above only
   covered code reading `weakSpot` going forward — it didn't address

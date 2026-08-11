@@ -176,7 +176,11 @@ ChunkProgress = {
                               // Also caps computeConfidence's result (55 for rough, 20 for lost,
                               // applied after either the manual or auto branch) so a flagged
                               // chunk can't show stale-high confidence anywhere it's displayed —
-                              // see Algorithms.md#confidence. Persists independently of any
+                              // see Algorithms.md#confidence. Indirectly affects
+                              // computeProgressTier too, via the `stage` demotion above rather
+                              // than reading `flag` itself — a flagged chunk drops a Practice
+                              // Progress tier on Overview through the same mechanism, not a
+                              // separate check. Persists independently of any
                               // revival cycle; computeRevivalPlan prioritizes any flagged chunk
                               // first (rough and lost treated alike for that ordering, not a
                               // three-tier sort). See #revival below. A pre-Pass-6 piece with the
@@ -195,7 +199,11 @@ ChunkProgress = {
                               // earned ladder advance must never be discarded by a later "never
                               // mind" on the flag. Backup-merge (storage.js's mergeProgress) treats
                               // it like the other ladder fields below: the existing piece's value
-                              // always wins over an imported file's.
+                              // always wins over an imported file's. handleSetFlag verifies all
+                              // three fields are present before trusting a snapshot to restore
+                              // from — on a malformed one it warns and skips the restore rather
+                              // than writing undefined into stage/nextDueDate, since this is the
+                              // only write site today but a future one could shape it differently.
   stage,                     // null | 'stabilizing' | 'settling' | 'holding' — this chunk's rung
                               // on the spaced-repetition maintenance ladder. null means "not on
                               // the ladder" — no entry/Tier-1 mechanic exists yet to move a chunk
@@ -363,9 +371,9 @@ places, and they can disagree:
 | | `computeConfidence` | `computeProgressTier` |
 |---|---|---|
 | Shape | continuous 0–100 | one of `untouched / learned / comfortable / mastered` |
-| Inputs | full session history: reps, tempo vs. target, recency decay, self-reported effectiveness, difficulty/recurring adjustments | only the **most recent** session's clean-rep count |
+| Inputs | full session history: reps, tempo vs. target, recency decay, self-reported effectiveness, difficulty/recurring adjustments, a rough/lost flag cap | the chunk's spaced-repetition ladder `stage` (as of Pass 6 — see below) |
 | Overridable | yes, via `manualConfidence` | no |
-| Used by | Piece Map, Focus Panel, Progress ("most improved"), Analytics | Overview's "Practice progress" bar only |
+| Used by | Piece Map, Focus Panel, Progress ("most improved"), Analytics | Overview's "Practice progress" bar, `PartSwitcher`'s untouched-measure count |
 
 This is a real open question, not a documented design decision — see
 [Decisions.md](Decisions.md#open-questions). If you're adding a new
@@ -378,24 +386,36 @@ commit. `computeProgressTier` was added much later (commit `45414ea`,
 *"Replace difficulty balance with practice progress bar on dashboard"*)
 to replace an unrelated, purely static Overview panel — the piece's fixed
 easy/medium/hard measure split — with a practice-progress bar, and was
-written for that one widget using the simplest available signal
-(most-recent clean-rep count), not to complement or check against
-confidence. The disagreement isn't drift from a shared design; there
-never was one.
+originally written for that one widget using the simplest available
+signal at the time (most-recent clean-rep count), not to complement or
+check against confidence. The disagreement isn't drift from a shared
+design; there never was one — and Pass 6 didn't unify the two, it just
+gave `computeProgressTier` a better single input to work from (see
+below). They can still disagree in every other way they always could
+(e.g. a `manualConfidence` override with no corresponding ladder
+movement) — this remains the same real, open, unresolved question.
 
 A spaced-repetition ladder (per-chunk `stage`/`practiceBPM` state — see
 [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built))
-would be a related, third signal. The schema exists (`ChunkProgress.stage`
-etc., `piece.ladderConfig` — see above), the stage-math is built
-(`computeLadderAdvance`, `lib/ladder.js`), and it's now live — every logged
-session advances it (`handleLogSession`, `App.jsx`). **Confirmed inert with
-respect to confidence, deliberately**: `computeAutoConfidence` does not read
-`stage`/`consecutivePasses` at all — a decision made explicitly while wiring
-the ladder in, not an oversight. See
-[Decisions.md](Decisions.md#spaced-repetition--maintenance). Whether it
-replaces one of the two scores above, becomes a new canonical one, or stays
-separate long-term is still not decided — revisit once Stage 3 ("learned")
-is actually defined against real data, per that same decision.
+was flagged here as a related, third signal once its schema landed. The
+stage-math is built (`computeLadderAdvance`, `lib/ladder.js`) and live —
+every logged session advances it (`handleLogSession`, `App.jsx`).
+**Confirmed inert with respect to *confidence*, deliberately**:
+`computeAutoConfidence` still does not read `stage`/`consecutivePasses` at
+all — a decision made explicitly while wiring the ladder in, not an
+oversight, and unchanged by Pass 6. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance). **It is,
+however, no longer inert with respect to `computeProgressTier`**: Pass 6
+rewired that function to bucket directly off `stage` instead of raw
+rep-count, specifically so a chunk demoted by a rough/lost flag drops a
+tier in the Overview bar the same way its confidence number drops
+elsewhere — see [Algorithms.md](Algorithms.md#confidence) and
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+reasoning. Whether the ladder eventually replaces one of the two scores
+above outright, becomes a new canonical third one, or stays split exactly
+like this (feeding one, not the other) long-term is still not decided —
+revisit once Stage 3 ("learned") is actually defined against real data,
+per that same decision.
 
 ## Revival
 

@@ -33,7 +33,19 @@ comments.
 | adaptive review multipliers | 0.6× / 1.4× | `adaptiveReviewOffsets` | Outcome data correlating self-reported effectiveness with actual retention |
 | effectiveness multipliers | 0.8× / 1× / 1.15× | confidence formula | Same |
 | `REQUIRED_REPS` | easy: 3, medium: 4, hard: 5 | confidence formula | Motor-learning research on repetitions-to-consolidation, likely instrument- and passage-dependent |
-| progress-tier thresholds | ≥5 comfortable, ≥10 mastered | `computeProgressTier` | Same, and also: whether rep-count alone is even the right single signal (see [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)) |
+| rough/lost confidence caps | 55 / 20 | `computeConfidence` (Pass 6) | Real data on how much a single rough/lost run-through should actually discount confidence, vs. these hand-picked values chosen to land the display in the Piece Map's existing "Developing"/"Needs work" tiers |
+
+`computeProgressTier`'s old ≥5/≥10 clean-rep thresholds (a hand-picked
+constant in this same spirit) no longer exist — Pass 6 replaced them with
+bucketing straight off the spaced-repetition ladder's `stage`, so the
+open "is rep-count alone the right signal" question this row used to
+flag is resolved in one direction: it isn't, and it's no longer used.
+Whether *stage* is the right signal is a live, un-decided question in
+its own right (see [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them))
+— but it isn't an unvalidated hand-picked *number* the way the old
+thresholds were, so it isn't inventoried as one here; the ladder's own
+stage-length/graduation constants below are the relevant inventory entry
+for it.
 
 ## Spaced-repetition ladder (stage math built; UI surfacing not yet implemented)
 

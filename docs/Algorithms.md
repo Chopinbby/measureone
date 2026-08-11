@@ -394,12 +394,26 @@ reassessment — see [Data-Model.md](Data-Model.md#known-simplifications)).
 
 `computeProgressTier(chunk, piece)` is a **separate, simpler** score from
 confidence — see [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)
-for why the two shouldn't be conflated. It buckets a chunk into
-`untouched / learned / comfortable / mastered` based purely on the **most
-recently logged** session's clean-rep count (≥10 → mastered, ≥5 →
-comfortable, any sessions at all → learned), with no tempo, recency, or
-effectiveness input. It drives only the Overview tab's "Practice progress"
-bar.
+for why the two shouldn't be conflated. **As of Pass 6**, it buckets a
+chunk into `untouched / learned / comfortable / mastered` off the
+chunk's spaced-repetition ladder `stage`
+([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages)):
+`holding` → mastered, `settling` → comfortable, anything else with at
+least one logged session (`stabilizing`, or `null` from real pre-ladder
+history) → learned, no sessions at all → untouched. Superseded the
+original most-recently-logged-session clean-rep-count bucketing
+(≥10 → mastered, ≥5 → comfortable) — see
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for why: a
+chunk demoted by a rough/lost flag ([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging))
+now drops a tier here too, through the same `stage` write every other
+consumer reads, rather than needing its own separate check. It drives
+the Overview tab's "Practice progress" bar and `PartSwitcher`'s
+untouched-measure count for multi-movement works. **Defensive, not
+silent**: a `stage` value outside the known set (`null`, `'stabilizing'`,
+`'settling'`, `'holding'`) still falls through to "learned" rather than
+crashing, but logs a `console.warn` first — found in self-review as a
+silent-failure risk (a corrupted or future stage value would otherwise
+misclassify with no trace).
 
 ## Behind-schedule detection
 
@@ -462,7 +476,8 @@ showing a misleading run of repeated values.
 `computeRevivalPlan(piece, chunkSet, currentDay)` builds the ordered
 day-by-day revival plan: practice chunks and transitions (**not** combos —
 a combo relearns through its underlying content, which is already in this
-list as ordinary practice chunks), sorted weak-spots-first then
+list as ordinary practice chunks), sorted flagged-first (rough or lost —
+`progress[id].flag`, as of Pass 6; was `weakSpot` before) then
 lowest-confidence-first, greedily packed into days against
 `piece.minutesPerDay` using each item's existing `effort` and
 `EFFORT_TO_MIN`. This stays a fixed list, generated once and never mutated

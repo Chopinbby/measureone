@@ -473,16 +473,31 @@ timeline.days.length` guard **never fired for today**: a piece past its
 plan silently re-rendered its last scheduled day, every day, indefinitely.
 Fixing the detection fixed that too.
 
-> **Rounding note:** `elapsedDay` uses `Math.floor` on the millisecond
-> difference, inherited from `getCurrentDay`. The general-purpose
-> `daysBetweenInclusive` helper uses `Math.round` instead, which is the
-> more DST-robust of the two (a spring-forward day is 23 hours, so a floor
-> can undercount by one). The two surfaces originally used
-> `daysBetweenInclusive` and now use `elapsedDay`, which makes past-plan
-> detection agree with the app's day numbering everywhere else — the right
-> trade, but it means **any DST skew in `getCurrentDay` is inherited, not
-> fixed**. Changing the arithmetic would shift day numbering for every
-> existing piece, so it's deliberately left alone.
+**All day counting goes through `daysBetweenInclusive`** — `elapsedDay`
+calls it rather than doing its own arithmetic. This is load-bearing, not
+tidiness. It previously floored the millisecond gap between two *local*
+midnights, which undercounts by a day across a DST boundary (a
+spring-forward day is 23 hours, so `n × 24 − 1` floors to `n − 1`) and
+stayed wrong for the whole ~8 months between transitions.
+
+That mattered because `computeTimeline` converts `nextDueDate` to a plan
+day with `daysBetweenInclusive` (`Math.round`) — so the app ran **two
+different day-numbering conventions at once**, disagreeing by one for any
+piece started before the spring transition. Because both numbers advance
+together each day, a review genuinely due today was placed permanently one
+day ahead and never arrived: the app showed "Day 191 of 250 — Nothing
+scheduled" while the review due that day sat on day 192. One shared
+counting function is what keeps "what day is it" and "what day is this
+date" in agreement.
+
+> **Stored day numbers were not migrated.** `doneDays` and `sessions[].day`
+> were recorded under the old counting and now sit one behind for affected
+> pieces. `computeScheduleStatus` tests `doneDays.length > 0` rather than
+> day equality, so behind-schedule detection is unaffected;
+> `computeAutoConfidence`'s recency term reads one day staler (negligible).
+> The one visible artifact is a session logged *today, before the fix
+> landed* losing its checkmark. See
+> [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 ## Behind-schedule detection
 
@@ -514,6 +529,24 @@ sessions logged). `getEffectiveTimeline` then keeps every day before
 `asOfDay` exactly as originally computed, and re-runs `computeTimeline` on
 just the remaining chunks packed into whatever days are left, splicing the
 two together.
+
+**Invariant: everything coming back from that nested call is numbered from
+1 and must be re-based to `asOfDay` before it's merged.** The sub-plan is a
+complete plan in its own right — its day 1 *is* `asOfDay` — so both
+`days[].dayNumber` and `introducedDay` need the same `asOfDay - 1` offset.
+Chunks that aren't in the remainder (already practiced) keep their original
+introduction day untouched.
+
+This was a real bug, not a hypothetical: `introducedDay` was merged
+un-shifted while `days[]` was re-based correctly, so every rescheduled
+chunk reported an introduction day of 1, 2, 3… against a `currentDay` of
+`asOfDay` or later. `computeScheduleStatus` counts a chunk as behind when
+`introducedDay[id] < currentDay`, so **every rescheduled chunk stayed
+"behind schedule" forever and the banner never cleared** — making the
+Reschedule button appear to do nothing, even though the marker saved
+correctly and the plan really had been rebalanced. `computeScheduleStatus`
+is the only external reader of `introducedDay`, which is why the symptom
+was confined to that banner.
 
 The feasibility check shown in the reschedule confirmation dialog
 (`handleReschedule` in the `App` component, not part of `getEffectiveTimeline`

@@ -374,3 +374,95 @@ describe("[regression, Codex review] computeDaysNeededForMinutesPerDay's review-
     assert.ok(days > 1, "some review padding must still inflate the day count beyond the bare introduction-only minimum");
   });
 });
+
+describe("[regression] getEffectiveTimeline must re-base introducedDay onto asOfDay, or the behind-schedule banner never clears", () => {
+  // Reported as "the Reschedule remaining days button isn't working on any
+  // of my pieces". It was working — the marker saved and the plan really was
+  // rebalanced — but computeScheduleStatus is the only external reader of
+  // introducedDay, and it counts a chunk as behind when
+  // `introducedDay[id] < currentDay`. The rescheduled sub-timeline numbers
+  // its days from 1 (where 1 means asOfDay); days[] was re-based on merge,
+  // introducedDay was not. So every rescheduled chunk reported day 1, 2, 3...
+  // against a currentDay of asOfDay or later and stayed "behind" forever.
+  //
+  // The previous suite in this file covers the same function's Tier 2 date
+  // math and still passed throughout — the gap was never an uncovered
+  // function, it was an unasserted return value. See
+  // docs/Algorithms.md#rescheduling.
+  const CURRENT_DAY = 8;
+
+  function behindPiece(overrides) {
+    // 24 measures / 4 = 6 practice chunks, a 14-day plan, nothing logged —
+    // by day 8 most chunks are past their scheduled introduction.
+    return basePiece({ totalMeasures: 24, customChunkSize: 4, daysToLearn: 14, minutesPerDay: 20, ...overrides });
+  }
+
+  test("rescheduling actually clears the behind-schedule count", () => {
+    const piece = behindPiece();
+    const chunkSet = generateAllChunks(piece);
+    const before = computeScheduleStatus(piece, chunkSet.practiceChunks, getEffectiveTimeline(piece, chunkSet), CURRENT_DAY);
+    assert.ok(before.missedCount > 0, "precondition: the piece must actually be behind before rescheduling");
+
+    // Exactly what App.jsx's handleConfirmReschedule writes.
+    const rescheduled = {
+      ...piece,
+      rescheduleMarker: { asOfDay: CURRENT_DAY, remainingChunkOrder: before.remainingChunkIds },
+    };
+    const after = computeScheduleStatus(
+      rescheduled,
+      chunkSet.practiceChunks,
+      getEffectiveTimeline(rescheduled, chunkSet),
+      CURRENT_DAY
+    );
+    assert.equal(after.missedCount, 0, "after rescheduling nothing is behind — this is the user-visible promise of the button");
+  });
+
+  test("no rescheduled chunk claims an introduction day earlier than the reschedule point", () => {
+    const piece = behindPiece();
+    const chunkSet = generateAllChunks(piece);
+    const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, getEffectiveTimeline(piece, chunkSet), CURRENT_DAY);
+    const rescheduled = { ...piece, rescheduleMarker: { asOfDay: CURRENT_DAY, remainingChunkOrder: remainingChunkIds } };
+    const effective = getEffectiveTimeline(rescheduled, chunkSet);
+
+    for (const id of remainingChunkIds) {
+      assert.ok(
+        effective.introducedDay[id] >= CURRENT_DAY,
+        `${id} was re-placed by the reschedule, so it cannot report an introduction day (${effective.introducedDay[id]}) before asOfDay (${CURRENT_DAY})`
+      );
+    }
+  });
+
+  test("an already-practiced chunk keeps its original introduction day", () => {
+    // The button's stated promise: "Chunks you've already practiced stay
+    // where they are." Only re-placed chunks shift.
+    const piece = behindPiece({
+      progress: { c1: { doneDays: [1], sessions: [{ day: 1, cleanReps: 4, bpm: 80, outcome: "pass" }] } },
+    });
+    const chunkSet = generateAllChunks(piece);
+    const original = computeTimeline(piece, chunkSet);
+    const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, getEffectiveTimeline(piece, chunkSet), CURRENT_DAY);
+    assert.ok(!remainingChunkIds.includes("c1"), "a practiced chunk is never part of the rescheduled remainder");
+
+    const rescheduled = { ...piece, rescheduleMarker: { asOfDay: CURRENT_DAY, remainingChunkOrder: remainingChunkIds } };
+    const effective = getEffectiveTimeline(rescheduled, chunkSet);
+    assert.equal(effective.introducedDay.c1, original.introducedDay.c1, "c1 was already practiced, so its introduction day must survive the reschedule untouched");
+  });
+
+  test("confirms the bug this guards against was real: an un-shifted merge leaves everything behind", () => {
+    // Reconstructs the old merge (sub-plan introducedDay spread in without
+    // the asOfDay offset) and asserts the banner would NOT have cleared —
+    // so this suite fails loudly if the shift is ever dropped again.
+    const piece = behindPiece();
+    const chunkSet = generateAllChunks(piece);
+    const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, getEffectiveTimeline(piece, chunkSet), CURRENT_DAY);
+    const rescheduled = { ...piece, rescheduleMarker: { asOfDay: CURRENT_DAY, remainingChunkOrder: remainingChunkIds } };
+    const effective = getEffectiveTimeline(rescheduled, chunkSet);
+
+    const unshifted = { ...effective, introducedDay: {} };
+    for (const [id, day] of Object.entries(effective.introducedDay)) {
+      unshifted.introducedDay[id] = remainingChunkIds.includes(id) ? day - (CURRENT_DAY - 1) : day;
+    }
+    const wouldBe = computeScheduleStatus(rescheduled, chunkSet.practiceChunks, unshifted, CURRENT_DAY);
+    assert.ok(wouldBe.missedCount > 0, "without the re-base, rescheduled chunks still read as behind — the symptom that made the button look broken");
+  });
+});

@@ -94,13 +94,25 @@ export function sumPracticeSeconds(piece) {
 // it clamps to the plan's length (a 10-day plan started three months ago
 // still reports day 10). Used by the maintenance due-list surfaces; see
 // Algorithms.md#whats-due--the-live-maintenance-query.
+//
+// Counts days via `daysBetweenInclusive` rather than its own arithmetic.
+// That is load-bearing, not tidiness: this used to floor the millisecond
+// gap between two *local* midnights, which undercounts by a day across a
+// DST boundary (a spring-forward day is 23 hours, so `n × 24 − 1` floors
+// to `n − 1`) — and it stayed wrong for the whole ~8 months between
+// transitions, not just the changeover day. Meanwhile `computeTimeline`
+// converts a chunk's `nextDueDate` to a plan day with `daysBetweenInclusive`
+// (`Math.round`), so the two disagreed by one for any piece started before
+// the spring transition: a review genuinely due today was placed one day
+// ahead of the day the app thought it was, and — because both numbers
+// advance together — it never arrived. Sharing one counting function is
+// what keeps "what day is it" and "what day is this date" in agreement.
 export function elapsedDay(piece) {
   const startDate = piece.startDate || todayISODate();
-  const diff = Math.floor((new Date(`${todayISODate()}T00:00:00`) - new Date(`${startDate}T00:00:00`)) / MS_PER_DAY);
   // Floored at 1, so a piece with a future startDate reads as "day 1, not
   // started" rather than a negative day — matching getCurrentDay's own
   // lower clamp.
-  return Math.max(1, diff + 1);
+  return Math.max(1, daysBetweenInclusive(startDate, todayISODate()) || 1);
 }
 
 // getCurrentDay is elapsedDay capped to the plan's length. Derived from it

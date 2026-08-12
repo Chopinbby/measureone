@@ -955,17 +955,52 @@ unclamped elapsed-day derivation in each surface, not by `getCurrentDay`
   derived from it** (`clamp(elapsedDay(piece), 1, totalDays)`) rather than
   repeating the same date arithmetic a third time — so the clamped and
   unclamped forms can't drift. Behaviour verified unchanged on both
-  surfaces, in-plan and past-plan. One knock-on worth knowing: the surfaces
-  previously computed elapsed days via `daysBetweenInclusive` (`Math.round`)
-  and now inherit `getCurrentDay`'s `Math.floor`, so past-plan detection
-  agrees with the app's day numbering everywhere else — but also inherits
-  any DST skew that numbering already has. See
-  [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
+  surfaces, in-plan and past-plan. The counting itself has since been fixed
+  too — see the DST decision immediately below.
 - **Related, unchanged:** `ScheduleBanner` still runs off the clamped
   `currentDay`, so a piece past its plan can show "N chunks behind
   schedule" above its maintenance due list. Pre-existing, not a Pass 8
   regression, and arguably wrong next to a completed plan given the
   "a late review is slack, never a failure" rule — but out of scope.
+
+**Decision: day counting goes through `daysBetweenInclusive` everywhere —
+fixing a DST undercount that made due reviews permanently invisible for
+pieces started before the spring transition.**
+
+- **The bug:** `elapsedDay`/`getCurrentDay` (`lib/utils.js`) floored the
+  millisecond gap between two *local* midnights. A spring-forward day is 23
+  hours, so the interval is `n × 24 − 1` and the floor lands a day short.
+  Not a changeover-day glitch — it held for the whole ~8 months between the
+  March and November transitions.
+- **Why it mattered more than an off-by-one label:** `computeTimeline`
+  converts a chunk's `nextDueDate` to a plan day with `daysBetweenInclusive`
+  (`Math.round`, `scheduling.js`), so the app was running *two different
+  day-numbering conventions at once*. For a piece started before the spring
+  transition they disagreed by one — and since both advance together each
+  day, a review genuinely due today was placed permanently one day ahead
+  and **never became visible**. Reproduced before the fix (`America/Denver`,
+  2026-08-11, piece started 2026-02-01): the app read "Day 191 of 250 —
+  Nothing scheduled" while the review due *that day* sat on day 192.
+- **The fix:** `elapsedDay` now calls `daysBetweenInclusive` instead of
+  doing its own arithmetic, so one counting function backs both "what day
+  is it" and "what plan day is this date". `getCurrentDay` stays derived
+  from `elapsedDay`. Verified after: the same piece reads day 192 and the
+  due review appears today; pieces started after the transition are
+  unaffected and render byte-identically.
+- **Stored day numbers were deliberately not migrated.** `doneDays` and
+  `sessions[].day` hold plan-day ints recorded under the old counting, so
+  for affected pieces they now sit one behind. Checked each consumer:
+  `computeScheduleStatus` tests `doneDays.length > 0`, not day equality, so
+  behind-schedule detection is unaffected; `computeAutoConfidence`'s
+  recency term reads one day staler, which is negligible; the only visible
+  artifact is that a session logged *today, before the fix landed* loses
+  its checkmark. Rewriting historical session data to chase that was judged
+  the riskier option — sessions already carry an authoritative `loggedDate`,
+  and `day` is a convenience key.
+- **Found** while verifying the `elapsedDay` extraction above, not by a
+  user report; logged as an open question first, then fixed as its own pass
+  rather than folded into unrelated work. See
+  [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
 
 ## UX
 
@@ -1232,36 +1267,6 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
-- **`getCurrentDay` undercounts by a day across a DST boundary — a real
-  correctness bug, not a rounding nitpick, and it is not fixed.**
-  `elapsedDay`/`getCurrentDay` (`lib/utils.js`) compute
-  `Math.floor((today − startDate) / MS_PER_DAY) + 1` on two *local*
-  midnights. After a spring-forward the interval is `n × 24 − 1` hours, so
-  the floor lands a day short; the general-purpose `daysBetweenInclusive`
-  uses `Math.round` and doesn't have this problem. **This is not a
-  changeover-day glitch — it persists for the whole ~8 months between the
-  March and November transitions**, then self-corrects. Measured in
-  `America/Denver` on 2026-08-11: a piece started 2026-02-01 reads day 191
-  where it should read 192; started 2025-12-01, day 253 instead of 254. A
-  piece started after the March transition is unaffected. Consequence: for
-  most of the year, a piece begun in winter shows the learner *yesterday's*
-  practice tasks — `getCurrentDay` drives "Day N of N", which day's
-  checklist renders, and behind-schedule detection.
-  - **Why it's not just fixed:** the change is one word (`Math.floor` →
-    `Math.round`), but it shifts day numbering by one for every affected
-    piece the moment it lands, which reads to the user as their plan
-    jumping forward a day. That deserves a deliberate pass — including a
-    check of whether anything keys off the old numbering (`doneDays`
-    entries and `sessions[].day` are stored plan-day ints) — not a silent
-    tweak folded into unrelated work.
-  - **Found** while verifying the `elapsedDay` extraction, not by a report.
-    Pre-dates that commit and pre-dates Pass 8: it has been in
-    `getCurrentDay` since the app was written. The extraction *did* newly
-    subject past-plan detection to the same skew (those two surfaces
-    previously used `daysBetweenInclusive`) — accepted deliberately, since
-    the alternative was the app disagreeing with itself about what day it
-    is. See
-    [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
 - **Should `computeConfidence` and `computeProgressTier` be unified?** They
   currently measure different things (weighted session history vs. the
   spaced-repetition ladder's `stage`, as of Pass 6 — see

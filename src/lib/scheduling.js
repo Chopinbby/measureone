@@ -390,12 +390,30 @@ export function getEffectiveTimeline(piece, chunkSet) {
     ...sub.days.map((d, i) => ({ ...d, dayNumber: asOfDay + i })),
   ];
 
+  // `sub` is a whole plan in its own right: its day numbers restart at 1,
+  // where 1 means asOfDay. `mergedDays` above already re-bases them;
+  // introducedDay has to be re-based by the same offset or it reports
+  // sub-plan numbers as if they were absolute plan days.
+  //
+  // Getting this wrong is not cosmetic — computeScheduleStatus (the only
+  // external reader) counts a chunk as behind when
+  // `introducedDay[id] < currentDay`. Un-shifted, every rescheduled chunk
+  // looks like it was introduced on day 1-2-3 while currentDay is asOfDay
+  // or later, so all of them stay "behind schedule" and the banner never
+  // clears — making the Reschedule button look like it did nothing, even
+  // though the marker saved and the plan really was rebalanced.
+  const shiftedIntroducedDay = Object.fromEntries(
+    Object.entries(sub.introducedDay).map(([id, day]) => [id, asOfDay + day - 1])
+  );
+
   return {
     days: mergedDays,
     learningDays: asOfDay - 1 + sub.learningDays,
     consolidationDays: sub.consolidationDays,
     halfPoint: sub.halfPoint,
-    introducedDay: { ...original.introducedDay, ...sub.introducedDay },
+    // Chunks not in the rescheduled remainder (already practiced) keep
+    // their original introduction day; only the re-placed ones shift.
+    introducedDay: { ...original.introducedDay, ...shiftedIntroducedDay },
   };
 }
 

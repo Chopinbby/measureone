@@ -530,6 +530,24 @@ sessions logged). `getEffectiveTimeline` then keeps every day before
 just the remaining chunks packed into whatever days are left, splicing the
 two together.
 
+**Invariant: everything coming back from that nested call is numbered from
+1 and must be re-based to `asOfDay` before it's merged.** The sub-plan is a
+complete plan in its own right — its day 1 *is* `asOfDay` — so both
+`days[].dayNumber` and `introducedDay` need the same `asOfDay - 1` offset.
+Chunks that aren't in the remainder (already practiced) keep their original
+introduction day untouched.
+
+This was a real bug, not a hypothetical: `introducedDay` was merged
+un-shifted while `days[]` was re-based correctly, so every rescheduled
+chunk reported an introduction day of 1, 2, 3… against a `currentDay` of
+`asOfDay` or later. `computeScheduleStatus` counts a chunk as behind when
+`introducedDay[id] < currentDay`, so **every rescheduled chunk stayed
+"behind schedule" forever and the banner never cleared** — making the
+Reschedule button appear to do nothing, even though the marker saved
+correctly and the plan really had been rebalanced. `computeScheduleStatus`
+is the only external reader of `introducedDay`, which is why the symptom
+was confined to that banner.
+
 The feasibility check shown in the reschedule confirmation dialog
 (`handleReschedule` in the `App` component, not part of `getEffectiveTimeline`
 itself) estimates required vs. available days using `EFFORT_TO_MIN` and the

@@ -593,7 +593,6 @@ export default function App() {
 
   const handleConfirmReschedule = () => {
     if (!rescheduleStatus) return;
-    console.log('Confirming reschedule:', rescheduleStatus);
     updatePiece((p) => ({
       ...p,
       rescheduleMarker: { asOfDay: rescheduleStatus.asOfDay, remainingChunkOrder: rescheduleStatus.remainingChunkIds },

@@ -390,8 +390,12 @@ touch, then a later re-attempt) produces two distinct records instead of
 one silently replacing the other. `handleUnlogSession` removes only the
 most recently logged session for a day, not every session that day, and
 does not roll back the ladder state that session's outcome already
-advanced (same "no undo history" spirit as BPM zones and difficulty
-reassessment — see [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about)).
+advanced. **This is a scoped defect, not an accepted limitation** — the
+control reads as "this didn't happen" while the schedule keeps the change,
+so a mis-logged pass can push a chunk's `nextDueDate` weeks out and leave
+it there after the undo. The fix (a per-session snapshot, scoped to the
+most recent session) is designed but not built — see
+[Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 `computeProgressTier(chunk, piece)` is a **separate, simpler** score from
 confidence — see [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)

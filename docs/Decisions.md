@@ -776,7 +776,59 @@ its own record, none overwritten by day alone.**
   (`handleUnlogSession`) removes the record but does not roll back the
   ladder state (`stage`/`practiceBPM`/etc.) that session's outcome already
   advanced — same "no undo history" spirit as BPM zones and difficulty
-  reassessment (see Data-Model.md's known simplifications).
+  reassessment (see Data-Model.md's known simplifications). **Now scoped as
+  a defect rather than an accepted limitation — see the next entry.**
+
+**Decision (scoped, not built): session undo should fully reverse the
+ladder, via a per-session snapshot — and until it does, the UI must stop
+implying that it already has.**
+
+Raised by the user, whose framing is the point: the checkbox reads as
+"this didn't happen," so a partial undo is a UI honesty problem as much as
+a data one.
+
+- **Why this is a defect, not a limitation:** undo predates the ladder.
+  When a session was only a record, deleting the record *was* a complete
+  undo. The ladder later gave sessions lasting consequences —
+  `stage`, `consecutivePasses`, `consecutiveStabilizingFails`,
+  `practiceBPM`, `nextDueDate` — and undo was never revisited. The
+  behaviour was carried forward as "no undo history," alongside BPM zones
+  and difficulty reassessment, but it isn't really the same thing: those
+  never claimed to reverse anything.
+- **User-visible harm:** the two "how good is this chunk" scores fall out
+  of sync — `computeConfidence` reads sessions and drops, while
+  `computeProgressTier` reads `stage` and stays high
+  ([Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)).
+  Worse, a mis-logged pass that pushed `nextDueDate` weeks out keeps that
+  date after the undo, so the chunk silently leaves the review rotation
+  while its history says it was never practised. On a Holding chunk that
+  can be the difference between a 14-day and a ~70-day gap.
+- **Approach:** snapshot the pre-session ladder state and store it **on the
+  session record itself** (not on the chunk entry), so multiple sessions in
+  one day each carry their own "before" picture and undo simply pops the
+  last one. Six small fields; storage cost is negligible. This is the same
+  snapshot-and-restore pattern `flagSnapshot` already uses successfully for
+  rough/lost flags in `handleSetFlag` (`App.jsx`) — proven in the same
+  file, just never extended to session logging.
+- **The genuinely hard corner, and the scope that avoids it:** restoring a
+  snapshot rewinds to a moment in time, so undoing a *non-latest* session
+  would silently erase every later session's effects too — inherent to any
+  forward-moving state machine, not a flaw here. Full generality needs
+  replaying everything after the undone point, which is impossible today:
+  manual actions (`applyRunThroughFlag` for rough/lost, `handleUpdateBPM`)
+  also move the ladder and are not recorded as replayable events. **Scope
+  the fix to the most recent session only** — which covers the real case
+  ("I just mistyped that") — and leave older sessions on today's partial
+  behaviour, stated plainly in the UI.
+- **Do the honest label regardless.** Even before the data work, the undo
+  control should not imply the schedule rewinds. That half is cheap,
+  independent, and worth having on its own.
+- **Migration:** sessions logged before this exists carry no snapshot.
+  Undo on those must fall back to current behaviour rather than guess at a
+  reconstruction — the same "don't guess, say so" rule applied to
+  `flagSnapshot`'s malformed-shape guard.
+- **Related:** pairs naturally with the starting-BPM open question, since
+  both are ladder-entry concerns. **Not built.**
 
 **Decision: ladder stage/consecutivePasses do not feed into
 `computeAutoConfidence` — confidence and the ladder stay two independent

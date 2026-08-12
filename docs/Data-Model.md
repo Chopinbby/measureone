@@ -493,10 +493,13 @@ than a new 0-100 (or 0-4) field. See
   [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - BPM zones and per-chunk difficulty reassessment both write directly into
   `piece.measureDifficulty` / `piece.bpmZones` — there's no undo history.
-  Same is now true of a logged session's ladder effects: undoing a session
-  (`handleUnlogSession`, `App.jsx`) removes the session record but does not
-  roll back the `stage`/`practiceBPM`/etc. that session's outcome already
-  advanced.
+  A logged session's ladder effects behave the same way today — undoing a
+  session (`handleUnlogSession`, `App.jsx`) removes the record but not the
+  `stage`/`practiceBPM`/`nextDueDate` it advanced — but unlike the two
+  above, **that one is a scoped defect rather than an accepted
+  simplification**, since the undo control implies a rollback it doesn't
+  perform. Fix designed, not built:
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - `manualConfidence` has no recorded set-date, which is why
   `computeConfidenceAsOf` (used for "most improved this week") can't
   correctly exclude a manual override that was set *after* the historical

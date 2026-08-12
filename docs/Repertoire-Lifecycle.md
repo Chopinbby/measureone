@@ -756,10 +756,20 @@ implemented) — kept here for the record rather than deleted:
 
 **Still open:**
 
-- What "a short structured re-learning pass" (the response to two
-  consecutive Stabilizing fails) concretely means, now that it's confirmed
-  *not* to be Revival — nothing else in the app defines this mechanic yet.
-  Currently just a data flag (`needsRelearning`) with nothing reading it.
+- ~~What "a short structured re-learning pass" concretely means~~ — **now
+  scoped, still not built.** Four rules agreed with the user: it *replaces*
+  review rather than running alongside it (so a chunk in this state must
+  produce no due reviews at all); it exits on either the normal 4-pass
+  graduation or a manual override; it reuses the `lost` mechanism but must
+  never show the user that word (the material was often never held in the
+  first place); and the practice tempo resets. Full reasoning in
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+  Two things remain genuinely open: the user-facing label, and the tempo
+  reset — which is **blocked** on there being no defined starting BPM for a
+  chunk at all (see Decisions.md's Open questions). `needsRelearning` is
+  still computed and discarded on every logged session; the underlying
+  `consecutiveStabilizingFails` count *is* persisted, so this can be
+  switched on retroactively across existing pieces.
 - Whether a second Tier 1 rung is needed before a chunk reliably survives
   to Stabilizing's first real review — gated on fail-rate data once built,
   not decided preemptively.

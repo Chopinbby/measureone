@@ -660,6 +660,59 @@ auto-trigger condition.**
   since a fail always resets it to 0. Added to the migration in
   `storage.js` and `Wizard.jsx`'s `defaultPiece()` alongside the ladder
   engine build. See [Data-Model.md](Data-Model.md#the-piece-object).
+- **Superseded in part:** the "what should read this flag" question above
+  is now largely answered — see the next entry. Still not built.
+
+**Decision (scoped, not built): what the `needsRelearning` signal should
+actually do — four rules, agreed with the user.**
+
+Answers the question the entry above deliberately left open. Nothing here
+is implemented; this is the design a future pass should start from rather
+than re-deriving it.
+
+- **1. Re-learning *replaces* review, never runs alongside it.** Confirmed
+  with the user, whose reasoning is the rule worth keeping: *"it's either
+  ready for longer interval review or it's not."* A chunk cannot
+  simultaneously be something you're rebuilding and something you're
+  testing retention on. **Concrete consequence:** while a chunk is in this
+  state it must produce **no due reviews at all** — both `computeTimeline`'s
+  review placement and `computeDueReviews` (`lib/maintenance.js`) have to
+  skip it. Worth stating explicitly, since "leave the reviews running too"
+  is the easy accidental implementation.
+- **2. Exit is dual — the normal graduation rule *or* a manual override.**
+  No special exit criterion is needed. Stabilizing already graduates on 4
+  consecutive full passes and is the **only** stage with no tempo floor
+  (`ladderConfig.stabilizing.tempoFloorFraction: null`), so its passes
+  count on reps alone regardless of speed — already tempo-agnostic, and
+  therefore already compatible with a rebuilding phase that isn't about
+  tempo. The manual override on top follows the existing
+  automatic-with-a-manual-escape-hatch pattern (`manualConfidence` over
+  `computeAutoConfidence` — see
+  [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch)).
+- **3. Reuse the `lost` mechanism, but never show the user that word.**
+  Functionally this lands a chunk in the same state Pass 6's manual `lost`
+  flag already produces (forced to Stabilizing, `nextDueDate` pinned to
+  today — `applyRunThroughFlag`, `lib/ladder.js`), so the mechanism is
+  reused rather than duplicated. The **label must differ**: "lost" asserts
+  the material was once held, which is false in the common case where this
+  fires during initial learning and the chunk was never consolidated at
+  all. A history-agnostic label ("needs extra review" or similar) stays
+  honest across both histories this signal can have — never consolidated,
+  or once solid and since decayed all the way back down. Exact wording not
+  chosen.
+- **4. The practice tempo resets — agreed in principle, currently blocked.**
+  A rebuilding chunk should restart at a genuinely slow tempo rather than
+  keep its ratcheted `practiceBPM` (two fails step it down only 4 BPM in
+  total, nowhere near "start over"). Intended target: whatever tempo the
+  chunk would start at during introduction. **No such tempo exists today**
+  — see the new open question below. Agreed in principle, not
+  implementable until that gap is closed.
+- **Still open:** the exact user-facing wording for rule 3, and rule 4's
+  blocking dependency.
+- **Not built** — recorded ahead of implementation, the same way the ladder
+  design was recorded before Pass 1 and the maintenance-UI design before
+  Pass 8. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
 
 **Decision: the old free-standing "how did it feel" 3-tap effectiveness
 input (`EFFECTIVENESS_OPTIONS`) is removed, folded into a single "needs
@@ -1267,6 +1320,22 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **How is a chunk's *starting* practice tempo determined? There is no
+  answer today, and it now blocks something.** `practiceBPM` is seeded, the
+  first time a chunk is ever logged, from whatever tempo the learner
+  happened to attempt — `handleLogSession` (`App.jsx`) says so outright and
+  calls it a placeholder, since the real ladder-entry mechanic was deferred
+  out of Pass 2. So a chunk's tempo floor derives from an accident of the
+  first session rather than from anything about the chunk (its difficulty,
+  the piece's `targetBPM`, the learner's level).
+  - **Why it matters now:** the re-learning design above (rule 4) requires
+    resetting a chunk's tempo to "whatever it would start at during
+    introduction." That currently resolves to "reset it to an arbitrary
+    historical number," which is not a reset in any meaningful sense.
+    Re-learning's tempo rule cannot be implemented until this is defined —
+    surfaced while scoping that work, not previously connected to it.
+  - Note this is distinct from `getDefaultTargetBPM` (`lib/confidence.js`),
+    which answers where a chunk is *going*, not where it starts.
 - **Should `computeConfidence` and `computeProgressTier` be unified?** They
   currently measure different things (weighted session history vs. the
   spaced-repetition ladder's `stage`, as of Pass 6 — see

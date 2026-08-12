@@ -377,4 +377,66 @@ describe("Import path — validateAndMigratePiece protects imported pieces too",
     assert.equal(merged.progress.c9.stage, "stabilizing");
     assert.equal(merged.progress.c9.practiceBPM, 82);
   });
+
+  // Regression tests for the fix that follows the one above: mergeProgress
+  // already protected the *ladder* fields unconditionally (stage,
+  // consecutivePasses, etc. — never overwritten by an import at all), but
+  // status/currentBPM/targetBPM/manualConfidence still went through plain
+  // preferPresent, so a re-imported OLDER backup could silently un-pause/
+  // un-archive a piece, or roll back a just-logged tempo or a manual
+  // confidence override the user set today. mergeImportedPiece now compares
+  // piece.updatedAt (bumped on every local mutation — App.jsx's updatePiece)
+  // and only lets an import's value win when it isn't older than what's
+  // already here.
+  describe("mergeImportedPiece — importIsStale protects status/BPM/confidence from an older re-import", () => {
+    test("[regression] re-importing an older backup does not silently un-pause a piece", () => {
+      const existingPiece = { ...fresh, id: "p_status", status: "paused", updatedAt: 2000 };
+      const staleImport = { ...fresh, id: "p_status", status: "active", updatedAt: 1000 };
+      const merged = mergeImportedPiece(existingPiece, staleImport);
+      assert.equal(merged.status, "paused", "the older import must not revert the piece back to active");
+    });
+
+    test("an import that is actually newer (e.g. status changed on another device) still wins", () => {
+      const existingPiece = { ...fresh, id: "p_status2", status: "active", updatedAt: 1000 };
+      const newerImport = { ...fresh, id: "p_status2", status: "archived", updatedAt: 2000 };
+      const merged = mergeImportedPiece(existingPiece, newerImport);
+      assert.equal(merged.status, "archived", "a genuinely newer import should still be allowed to change status");
+    });
+
+    test("[regression] re-importing an older backup does not roll back a chunk's currentBPM or manualConfidence", () => {
+      const existingPiece = {
+        ...fresh,
+        id: "p_bpm",
+        updatedAt: 2000,
+        progress: { c1: { doneDays: [1], sessions: [], currentBPM: 100, manualConfidence: 80 } },
+      };
+      const staleImport = {
+        ...fresh,
+        id: "p_bpm",
+        updatedAt: 1000,
+        progress: { c1: { doneDays: [1], sessions: [], currentBPM: 40, manualConfidence: 10 } },
+      };
+      const merged = mergeImportedPiece(existingPiece, staleImport);
+      assert.equal(merged.progress.c1.currentBPM, 100, "a stale import must not overwrite a more recent logged tempo");
+      assert.equal(merged.progress.c1.manualConfidence, 80, "a stale import must not overwrite a more recent manual override");
+    });
+
+    test("a backup exported before piece.updatedAt existed is treated as stale, not as automatically winning", () => {
+      // Missing imported.updatedAt reads as 0 — always older than any
+      // existing piece that has a real timestamp (every piece loaded
+      // through validateAndMigratePiece does). The conservative default:
+      // an import we can't date is assumed to be the older copy.
+      const existingPiece = { ...fresh, id: "p_no_ts", status: "archived", updatedAt: 5000 };
+      const undatedImport = { ...fresh, id: "p_no_ts", status: "active" };
+      const merged = mergeImportedPiece(existingPiece, undatedImport);
+      assert.equal(merged.status, "archived");
+    });
+
+    test("merged.updatedAt is the max of both sides, so a later comparison isn't fooled by a stale import's own timestamp", () => {
+      const existingPiece = { ...fresh, id: "p_ts", updatedAt: 5000 };
+      const staleImport = { ...fresh, id: "p_ts", updatedAt: 1000 };
+      const merged = mergeImportedPiece(existingPiece, staleImport);
+      assert.equal(merged.updatedAt, 5000);
+    });
+  });
 });

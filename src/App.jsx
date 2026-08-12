@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Upload,
   X,
+  AlertTriangle,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
@@ -96,6 +97,7 @@ export default function App() {
   const [rescheduleStatus, setRescheduleStatus] = useState(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
+  const [storageError, setStorageError] = useState(false);
   const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
@@ -108,10 +110,16 @@ export default function App() {
     setLoaded(true);
   }, []);
 
-  // Persist only the active piece when it changes.
+  // Persist only the active piece when it changes. A failed write (most
+  // likely QuotaExceededError, since session history only ever grows — see
+  // storage.js) used to be swallowed silently, so a logged session could
+  // vanish with no sign anything went wrong. Surface it instead: a banner
+  // stays up until a save actually succeeds again, so recovering (e.g. after
+  // deleting an old piece to free up space) clears it on its own.
   useEffect(() => {
     if (!loaded || !activePieceId || !pieces[activePieceId]) return;
-    savePieceToStorage(activePieceId, pieces[activePieceId]);
+    const result = savePieceToStorage(activePieceId, pieces[activePieceId]);
+    setStorageError(!result.ok);
   }, [pieces, activePieceId, loaded]);
 
   // Persist which piece is active.
@@ -126,7 +134,11 @@ export default function App() {
       const current = prev[activePieceId];
       if (!current) return prev;
       const next = typeof updater === "function" ? updater(current) : updater;
-      return { ...prev, [activePieceId]: next };
+      // Bumped on every mutation through this single funnel (CLAUDE.md: all
+      // piece changes go through updatePiece) so mergeImportedPiece can tell
+      // "this device has newer state than the file being re-imported" from
+      // "the file actually is the newer copy" — see storage.js.
+      return { ...prev, [activePieceId]: { ...next, updatedAt: Date.now() } };
     });
   };
 
@@ -158,7 +170,7 @@ export default function App() {
 
   const handleComplete = (finished, options = {}) => {
     const id = `p_${Date.now()}`;
-    const withId = ensureWorkId({ ...finished, id });
+    const withId = ensureWorkId({ ...finished, id, updatedAt: Date.now() });
     setPieces((prev) => ({ ...prev, [id]: withId }));
     setActivePieceId(id);
     setWizardOpen(false);
@@ -680,6 +692,23 @@ export default function App() {
         }}
       />
 
+      {storageError && (
+        <div className="storage-error-banner">
+          <AlertTriangle size={18} />
+          <div>
+            <p className="storage-error-title">Your last change couldn't be saved</p>
+            <p className="storage-error-sub">
+              Browser storage is full or unavailable, so recent practice data may not be
+              persisted. Export a backup now, then free up space (e.g. delete an old piece) —
+              this banner clears once a save succeeds again.
+            </p>
+          </div>
+          <button className="ghost-btn" onClick={() => setExportModalOpen(true)}>
+            Export backup
+          </button>
+        </div>
+      )}
+
       {!loaded ? (
         <div className="empty-state">
           <p className="wizard-hint" style={{ margin: 0 }}>Loading your pieces…</p>
@@ -1137,6 +1166,12 @@ const CSS = `
 .schedule-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(181,71,58,0.08); border: 1px solid rgba(181,71,58,0.3); border-radius: 14px; padding: 16px 20px; }
 .schedule-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
 .schedule-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; max-width: 480px; }
+
+.storage-error-banner { display: flex; align-items: center; gap: 14px; background: rgba(181,71,58,0.1); border-bottom: 1px solid rgba(181,71,58,0.35); color: var(--brick); padding: 12px 24px; }
+.storage-error-banner svg { flex-shrink: 0; }
+.storage-error-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brick); }
+.storage-error-sub { font-size: 12px; color: var(--ink-soft); margin: 0; max-width: 620px; }
+.storage-error-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
 .revival-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(185,138,62,0.1); border: 1px solid rgba(185,138,62,0.35); border-radius: 14px; padding: 16px 20px; }
 .revival-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brass); }
 .revival-banner-reasons { font-size: 12.5px; color: var(--ink-soft); margin: 0; padding-left: 18px; max-width: 480px; }

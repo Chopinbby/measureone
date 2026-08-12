@@ -157,6 +157,15 @@ export function validateAndMigratePiece(piece) {
     progress,
     ladderConfig: mergeLadderConfig(piece.ladderConfig),
     lastLoggedAt: computeLastLoggedAt(progress),
+    // Bumped on every local mutation (App.jsx's updatePiece) and carried
+    // through export/import unchanged otherwise. Lets mergeImportedPiece
+    // tell "an older backup being re-imported" apart from "an intentional
+    // hand-edit of a fresh export" — see mergeImportedPiece below. A piece
+    // with no updatedAt yet (every piece saved before this field existed)
+    // defaults to "now" rather than 0: treating pre-existing local data as
+    // freshly touched is the safe direction, since the alternative (0) would
+    // make it look infinitely stale and let any import silently overwrite it.
+    updatedAt: piece.updatedAt || Date.now(),
     sections: piece.sections || [{ id: "s1", name: "", start: 1, end: piece.totalMeasures }],
     bpmZones: piece.bpmZones || [],
     recordings: piece.recordings || [],
@@ -219,8 +228,10 @@ export function loadPiecesFromStorage() {
             // mergeLadderConfig above) — either way the one-time backfill of
             // ladderConfig/lastLoggedAt/per-chunk ladder fields and session
             // loggedDates actually gets persisted, not just recomputed in
-            // memory and discarded on the next load.
-            if (!p.startDate || !p.ladderConfig || !p.ladderConfig.bpmSteps || migrated.daysToLearn !== p.daysToLearn) {
+            // memory and discarded on the next load. !p.updatedAt catches a
+            // piece saved before that field existed, same one-time-backfill
+            // reasoning as startDate.
+            if (!p.startDate || !p.ladderConfig || !p.ladderConfig.bpmSteps || !p.updatedAt || migrated.daysToLearn !== p.daysToLearn) {
               savePieceToStorage(migrated.id, migrated);
             }
           }
@@ -250,11 +261,18 @@ export function loadActivePieceId(pieces) {
   return active;
 }
 
+// Returns { ok: true } or { ok: false, error } instead of swallowing the
+// failure — a write that silently doesn't happen (most commonly
+// QuotaExceededError, since session history only ever grows) used to be
+// indistinguishable from a successful save. App.jsx surfaces a persistent
+// banner when this comes back false, so a lost write is visible instead of
+// discovered later as "why did my session disappear."
 export function savePieceToStorage(id, piece) {
   try {
     localStorage.setItem(PIECE_KEY_PREFIX + id, JSON.stringify(piece));
+    return { ok: true };
   } catch (e) {
-    /* storage unavailable */
+    return { ok: false, error: e };
   }
 }
 
@@ -262,8 +280,9 @@ export function saveActivePieceIdToStorage(id) {
   try {
     if (id) localStorage.setItem(ACTIVE_KEY, JSON.stringify(id));
     else localStorage.removeItem(ACTIVE_KEY);
+    return { ok: true };
   } catch (e) {
-    /* storage unavailable */
+    return { ok: false, error: e };
   }
 }
 
@@ -350,6 +369,25 @@ function preferPresent(importedVal, existingVal) {
   return importedVal;
 }
 
+// preferPresent alone can't tell "an intentional hand-edit of a fresh
+// export" apart from "a stale backup being re-imported by accident" — both
+// look like "the import has a value, use it." That distinction used to not
+// exist at all: re-importing an old backup would silently revert whatever
+// scalar fields it happened to carry, including piece.status (an old
+// backup re-imported after pausing/archiving a piece would silently make it
+// active again) and per-chunk currentBPM/targetBPM/manualConfidence. This
+// wraps preferPresent with the one extra bit `mergeImportedPiece` now
+// tracks: importIsStale, true when the imported piece's updatedAt predates
+// the existing piece's. When stale, the preference direction flips —
+// existing wins if both sides have a value, imported only fills in a gap
+// existing doesn't have. Still not a schema change for most fields (no new
+// "protected" list to maintain); when the import isn't stale (including the
+// no-timestamp-available case, preserved for pieces saved before updatedAt
+// existed), behavior is unchanged from before.
+function preferByRecency(importedVal, existingVal, importIsStale) {
+  return importIsStale ? preferPresent(existingVal, importedVal) : preferPresent(importedVal, existingVal);
+}
+
 // Additive merge for arrays of {id, ...} records (sections, recordings,
 // bpmZones): existing entries are kept, imported entries are added or
 // overlay an existing entry with the same id. Never drops an existing entry
@@ -378,7 +416,12 @@ function mergeSessionArrays(existingSessions, importedSessions) {
 // other outright — e.g. sessions logged in the app after a backup was
 // exported (but before it was hand-edited and re-imported) survive the
 // re-import instead of being wiped by the now-stale exported snapshot.
-function mergeProgress(existingProgress, importedProgress) {
+// `importIsStale` (see preferByRecency above) governs currentBPM/targetBPM/
+// manualConfidence the same way it governs piece-level fields in
+// mergeImportedPiece — those three are the per-chunk fields a stale import
+// could otherwise silently roll back (e.g. a manual confidence override set
+// today, reverted by re-importing last month's export).
+function mergeProgress(existingProgress, importedProgress, importIsStale) {
   const existing = existingProgress || {};
   const imported = importedProgress || {};
   const merged = {};
@@ -392,9 +435,9 @@ function mergeProgress(existingProgress, importedProgress) {
       ...i,
       doneDays: [...new Set([...(e.doneDays || []), ...(i.doneDays || [])])].sort((a, b) => a - b),
       sessions: mergeSessionArrays(e.sessions, i.sessions),
-      currentBPM: preferPresent(i.currentBPM, e.currentBPM),
-      targetBPM: preferPresent(i.targetBPM, e.targetBPM),
-      manualConfidence: preferPresent(i.manualConfidence, e.manualConfidence),
+      currentBPM: preferByRecency(i.currentBPM, e.currentBPM, importIsStale),
+      targetBPM: preferByRecency(i.targetBPM, e.targetBPM, importIsStale),
+      manualConfidence: preferByRecency(i.manualConfidence, e.manualConfidence, importIsStale),
       flag: i.flag !== undefined ? i.flag : e.flag,
       // Ladder state is *derived* from practice history (computeLadderAdvance,
       // lib/ladder.js), not something anyone hand-edits in an exported file
@@ -436,17 +479,40 @@ const MERGE_FIELDS_HANDLED_SEPARATELY = [
 // non-destructively — see the field-level helpers above for the reasoning
 // on each piece. Caller is responsible for re-deriving workId (ensureWorkId)
 // and clearing rescheduleMarker afterward, same as any other schedule edit.
+//
+// importIsStale: whether the imported snapshot predates whatever's already
+// on this device, by piece.updatedAt (bumped on every local mutation —
+// App.jsx's updatePiece). Missing timestamp on either side reads as 0, so:
+// an import with no updatedAt at all (a backup exported before this field
+// existed) is always treated as stale against a piece that has one — the
+// conservative direction, since there's no way to actually know its age;
+// an existing piece with no updatedAt yet (shouldn't happen once loaded
+// through validateAndMigratePiece, which backfills it) never counts an
+// import as stale, since there's nothing to protect. This is what fixes the
+// "importing an older backup silently overwrites newer progress" failure
+// mode — previously *any* field the import had a value for won outright,
+// including piece.status (silently un-pausing/un-archiving a piece) and
+// per-chunk currentBPM/targetBPM/manualConfidence.
 export function mergeImportedPiece(existing, imported) {
+  const importedUpdatedAt = typeof imported.updatedAt === "number" ? imported.updatedAt : 0;
+  const existingUpdatedAt = typeof existing.updatedAt === "number" ? existing.updatedAt : 0;
+  const importIsStale = importedUpdatedAt < existingUpdatedAt;
+
   const merged = { ...existing };
 
   Object.keys(imported).forEach((key) => {
     if (MERGE_FIELDS_HANDLED_SEPARATELY.includes(key)) return;
-    merged[key] = preferPresent(imported[key], existing[key]);
+    merged[key] = preferByRecency(imported[key], existing[key], importIsStale);
   });
+  // Whichever side is more recent should win going forward regardless of
+  // which fields above changed — otherwise a stale import (imported.updatedAt
+  // preserved as-is) could make this piece look older than it actually is on
+  // the very next comparison.
+  merged.updatedAt = Math.max(importedUpdatedAt, existingUpdatedAt) || undefined;
 
   // totalMeasures and measureDifficulty must move together — mixing sources
   // would leave measureDifficulty the wrong length for totalMeasures.
-  if (imported.totalMeasures && imported.measureDifficulty && imported.measureDifficulty.length) {
+  if (imported.totalMeasures && imported.measureDifficulty && imported.measureDifficulty.length && !importIsStale) {
     merged.totalMeasures = imported.totalMeasures;
     merged.measureDifficulty = imported.measureDifficulty;
   }
@@ -455,7 +521,7 @@ export function mergeImportedPiece(existing, imported) {
   merged.recordings = mergeById(existing.recordings, imported.recordings);
   merged.bpmZones = mergeById(existing.bpmZones, imported.bpmZones);
   merged.memoryAnchors = { ...(existing.memoryAnchors || {}), ...(imported.memoryAnchors || {}) };
-  merged.progress = mergeProgress(existing.progress, imported.progress);
+  merged.progress = mergeProgress(existing.progress, imported.progress, importIsStale);
   // An in-progress revival is live session state — protect it from being
   // overwritten by a stale import even if the import's revival looks
   // "present" by the generic rule above.

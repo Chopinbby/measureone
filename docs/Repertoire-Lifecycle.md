@@ -49,7 +49,7 @@ every logged session (Pass 2/3 of the maintenance-ladder build). **What's
 still not implemented** is the piece-level rollup itself: nothing yet
 queries "is every chunk's `stage` at `holding`" to actually compute a
 piece's "learned" flag — see
-[Data-Model.md](Data-Model.md#known-simplifications).
+[Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
 
 `computeProgressTier` (buckets a chunk into untouched/learned/comfortable/
 mastered) and `computeConfidence` (continuous 0–100 score) both continue
@@ -81,7 +81,13 @@ nothing enforces that.
 
 Two entry points, both landing in the same reassessment flow:
 - **Manually from the Overview dashboard**, whenever the user decides an
-  existing piece needs it — the original entry point.
+  existing piece needs it — the original entry point. As of Pass 7, this
+  same button can also be proactively *suggested*: a banner surfaces above
+  it whenever `computeRevivalTriggers` (see "Revival auto-triggers" below)
+  finds a reason to — clicking through still lands on the exact same entry
+  modal, so this isn't a third distinct flow, just the existing manual
+  entry point with a reason attached instead of requiring the learner to
+  remember on their own.
 - **At piece creation**, via a toggle on the Wizard's final step ("Learning
   it fresh" vs. "I already know this piece"). Covers repertoire the user
   already knew before ever using the app — Setup still runs in full (a
@@ -101,8 +107,8 @@ through logging" below) and memory anchors are the lightweight, manual
 precursor to whatever that deeper tagging might look like, not a
 replacement for it.
 
-Automatic entry triggers (rather than manual-only, as today) are now
-designed — see [Stage 4 → Revival auto-triggers](#revival-auto-triggers)
+Automatic entry triggers (rather than manual-only, as it was before Pass
+7) are now built — see [Stage 4 → Revival auto-triggers](#revival-auto-triggers)
 below.
 
 ## Pause / Archive (built)
@@ -133,9 +139,13 @@ reachable via the piece switcher, just no longer part of the daily rotation.
 **Deliberately not this feature**: an automatic "learned" detector, or any
 scheduled maintenance-review mechanic. Pause/archive is a manual visibility
 toggle only — it answers "keep this off my daily plate," not "tell me when
-to revisit it." That's still Stage 4 below — now designed, still not built.
+to revisit it." That's Stage 4 below — now mostly built (the ladder,
+Tier 1/2 scheduling, post-run-through logging, and Revival's auto-triggers
+are all live); what's still missing is a live "what's due" query that
+surfaces maintenance in the UI beyond the current plan's bounded length —
+see "Explicitly not designed/built here" below.
 
-## Stage 4 — Maintenance (designed, not built)
+## Stage 4 — Maintenance (mostly built)
 
 Roadmap item 2. Once a piece is "learned" (Stage 3), it needs periodic
 maintenance review to avoid the memory decay that would otherwise erase the
@@ -148,12 +158,14 @@ evidence behind several specific choices below: [Research.md](Research.md)).
 three stages" below), **and `computeTimeline` itself now schedules reviews
 off it** (Pass 5 — see "Introduction-window review scheduling: Tier 1 /
 Tier 2" below). **Post-run-through logging — stop count and the rough/lost
-flag mode — is also now built** (Pass 6, see that subsection below). What's
-*not* built is everything past that: a live "what's due" query that works
-beyond the current plan's bounded `daysToLearn` window, and Revival's three
-auto-triggers that would consume the stop-count/lost-flag data this pass
-produces (Pass 7 — see "Revival auto-triggers" below). See each subsection
-below for what's actually implemented today vs. still just designed.
+flag mode — is also now built** (Pass 6, see that subsection below), **and
+so are Revival's three auto-triggers that consume that stop-count/lost-flag
+data** (Pass 7 — see "Revival auto-triggers" below). What's *not* built yet
+is a live "what's due" query that works beyond the current plan's bounded
+`daysToLearn` window — **now scoped** (Master Agenda + Today tab, one
+shared query — Pass 8) but not implemented; see "Explicitly not
+designed/built here" below. See each subsection below for what's actually
+implemented today vs. still just designed.
 
 ### The unifying idea
 
@@ -535,20 +547,28 @@ doesn't distinguish which):
 
 ### Revival auto-triggers
 
-[Revival](#revival-built-mvp) above is entry-only manual today. The data
-these triggers would read now exists — stop count and the rough/lost flag
-(Pass 6, "Post-run-through logging" above) — but nothing yet checks it
-against these conditions or offers a revival automatically; that's Pass 7,
-still not built. Planned: three independent conditions, any one of which
-offers a revival rather than requiring the learner to remember to start
-one themselves:
+**Implemented (Pass 7).** [Revival](#revival-built-mvp) above used to be
+entry-only manual; `computeRevivalTriggers(piece, chunkSet)`
+(`src/lib/revival.js`), called from `OverviewTab`, now checks three
+independent conditions on every render and surfaces a "This piece might be
+due for a revival" banner (with every condition that fired listed, not
+just the first) whenever any one of them is true and no revival is already
+active:
 
-1. Stop count > 5 on a single logged run-through.
-2. "Large chunks lost": any `combo`-kind chunk flagged lost in a
-   run-through, or 2+ regular practice chunks flagged lost in the same
-   run-through (reuses the existing `combo` kind as the "large chunk"
-   concept rather than a separate size threshold).
-3. 60+ days since anything was logged on the piece at all.
+1. Stop count > 5 on a single logged run-through — reads
+   `progress["__consolidation__"].sessions` (Pass 6, "Post-run-through
+   logging" above).
+2. "Large chunks lost": any `combo`-kind chunk flagged lost, or 2+ regular
+   practice chunks flagged lost — reads the live, current-state
+   `progress[id].flag` (Pass 6) across `chunkSet.combos` and
+   `chunkSet.practiceChunks` directly, not per a specific logged
+   run-through event (reuses the existing `combo` kind as the "large
+   chunk" concept rather than a separate size threshold; a transition
+   flagged lost does not count toward either half of this condition).
+3. 60+ days since anything was logged on the piece at all — reads
+   `piece.lastLoggedAt`. Does **not** fire when `lastLoggedAt` is `null`
+   (nothing ever logged) — it's a fallback for a piece with real but aging
+   activity, not a catch-all for a brand-new piece.
 
 Condition 3 is a **distinct fallback**, not a diluted version of 1/2 — 1
 and 2 can only fire if a run-through was actually attempted and logged, so
@@ -556,6 +576,18 @@ a piece nobody has touched in two months has no data to trip the other two
 even though it would almost certainly meet them if attempted. Kept as
 three separately-checked conditions, deliberately not unified into one
 formula.
+
+**Bug found and fixed while building condition 3:** `piece.lastLoggedAt`
+is recomputed fresh on every piece load (`computeLastLoggedAt`,
+`lib/storage.js`) from the max `loggedDate` across every progress entry's
+sessions. That function used to explicitly skip the synthetic
+`"__consolidation__"` entry — meaning a piece practiced *only* via
+run-throughs would have `lastLoggedAt` stuck at `null` (or a stale date)
+on every reload, exactly the scenario condition 1 is built to catch. Fixed
+by removing that exclusion; see
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for the full
+account and [Data-Model.md](Data-Model.md#the-piece-object) for the
+corrected field description.
 
 **Combo handling within revival, once triggered** (implemented — supersedes
 the old `computeRevivalPlan` code comment, which statically excluded
@@ -576,9 +608,26 @@ threshold — confirmed with the user: revival is already "something's
 wrong" mode by the time it's running, unlike ordinary practice, where that
 dampening exists specifically to avoid overreacting to one bad day.
 
-This is also what will resolve condition 2's "combo flagged lost" trigger
-once Pass 7 wires the auto-trigger check itself in — but not in the way
-this section originally assumed. Escalation (`computeComboEscalations`) is a
+**Correction: this turned out to be unrelated to condition 2, not the
+mechanism behind it — an assumption this section made before Pass 7 was
+actually built.** The original plan here expected the "combo flagged
+lost" auto-trigger to resolve *through* `computeComboEscalations`, since
+both are about a combo and "lost." What actually got built keeps them
+completely separate: `computeRevivalTriggers`' condition 2 reads
+`progress[id].flag === 'lost'` directly — the same manual, persistent flag
+the Piece Map cycles — with no dependency on `computeComboEscalations` or
+session-outcome history at all. The two mechanisms just happen to live in
+the same file and both key off "a combo went badly," for genuinely
+different purposes: escalation (below) decides what to actively relearn
+*during* a revival that's already running, off live fail history since
+`revival.startedAt`; the trigger decides whether to *offer* a revival in
+the first place, off whatever's flagged right now, revival-independent.
+Confusing the two would have been a real design mistake — escalation
+requires `piece.revival.startedAt` to mean anything (there's no "revival
+run" to measure fails against otherwise), which makes no sense as a
+precondition for *deciding whether to start one*.
+
+Escalation (`computeComboEscalations`) is, on its own terms, a
 *live derivation* off logged session history, not a task written into
 `piece.revival.plan` and later cleared. That sidesteps the "clearing"
 problem entirely: there's no flag being set that needs unsetting, so
@@ -592,6 +641,53 @@ output whether or not any fails occurred during the run). The escalated
 task lives entirely outside that stored plan, as a parallel derivation
 computed the same way `chunkSet`/`timeline` already are (CLAUDE.md).
 
+### How maintenance surfaces in the UI (built)
+
+The ladder had been writing each chunk's `nextDueDate` since Pass 1, but
+until Pass 8 **nothing read it outside the plan** — so a review the ladder
+scheduled past the end of a piece's `daysToLearn` window could never reach
+the learner. This is what closed that loop.
+
+Due maintenance surfaces in **two places, both calling one shared query**
+(`computeDueReviews` — [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query)),
+rather than a new tab or Master Agenda alone:
+
+- **Master Agenda** — a per-piece summary card alongside its existing
+  cross-piece daily list: merged measure ranges under a "Due" tag, plus a
+  count and a time estimate.
+- **The per-piece Today tab** — full detail. Once a piece runs past its
+  plan, "Day N of N" becomes "Plan complete — maintenance, day N" and the
+  day checklist is replaced by the due list. Day nav is disabled there (no
+  bounded grid left to page through); "View all" still shows the original
+  plan.
+
+Due items are logged through the **same** `ChecklistItem` the bounded plan
+uses, so a maintenance review advances the ladder by exactly the same path
+a plan-day session does — no parallel logging mechanic.
+
+Three rules this obeys, each load-bearing:
+
+- **Strictly "due as of today."** No forward-looking window, no
+  due-in-N-days, no maintenance calendar. A chunk due in three days appears
+  nowhere until it's due.
+- **A review arriving late is schedule slack, never a failure.** Overdue
+  items are stated plainly and sorted most-overdue-first, with no penalty
+  styling and no effect on the ladder — and because the next due date is
+  computed forward from the day you actually practice, lateness costs
+  nothing (see [Product-Principles.md](Product-Principles.md#no-punishment-mechanics)).
+- **Suppressed** for paused/archived pieces and for any piece with an
+  active revival — reasoning in
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+What made this harder than it looks is that day-numbering in this app has
+no unbounded concept — `getCurrentDay` explicitly `clamp`s to
+`[1, totalDays]`, so "past the plan" isn't a state it can report. The due
+query sidesteps plan-day numbering entirely by working from
+`ChunkProgress.nextDueDate`, which was specified as a real calendar date
+back in Pass 1 precisely so this would be possible. The surfaces detect
+"past the plan" from elapsed calendar days instead — see the decision
+record for that and for the known duplication it left behind.
+
 ### Explicitly not designed/built here
 
 - Revival's internal structure/pacing beyond the trigger conditions and
@@ -602,26 +698,9 @@ computed the same way `chunkSet`/`timeline` already are (CLAUDE.md).
   planned for this pass.
 - A second Tier 1 rung — not built preemptively; ship the single-touch
   version and monitor per the plan above.
-- **How maintenance surfaces in the UI** — still genuinely undecided. The
-  most likely shape is folding "what's due" into the existing Master
-  Agenda ([Architecture.md](Architecture.md)) and per-piece Today tab
-  rather than a new tab, since both already render day-shaped chunk lists
-  — but both currently source their data by indexing a fixed-length,
-  `daysToLearn`-bounded `timeline.days[]` array
-  ([Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)),
-  and that's a sharper problem than it first looks: `getCurrentDay`
-  (`src/lib/utils.js`) doesn't just happen to be array-bounded, it
-  explicitly `clamp`s to `[1, totalDays]` — day-numbering itself has no
-  unbounded concept anywhere in the app today, not just an
-  indexing convenience. A chunk's ladder due-date can't be expressed as
-  "a bigger plan-day number" once a piece runs past its plan (which
-  happens well before the whole piece reaches Holding — Holding's
-  interval alone runs 8–12 weeks); it needs an actual reference frame
-  outside plan-day numbers entirely, e.g. a real calendar date. Surfacing
-  maintenance in either tab needs a live "what's due" query keyed off
-  each chunk's own due-date in that frame, not an index into
-  `timeline.days[]` — a new function operating in different units, not a
-  bigger loop over the existing one.
+- ~~How maintenance surfaces in the UI~~ — **built in Pass 8**, moved out
+  of this list. See [How maintenance surfaces in the UI](#how-maintenance-surfaces-in-the-ui-built)
+  below.
 
 ## Stage 5 — Repertoire rotation (not built)
 
@@ -669,6 +748,11 @@ implemented) — kept here for the record rather than deleted:
   pass's one blocking question). `weakSpot` (boolean) is gone; both Piece
   Map and Revival's reassessment modal now set the same tri-state
   `progress[id].flag`. See Stage 4 → Post-run-through logging.
+- ~~How should maintenance surface in the UI?~~ Both Master Agenda and the
+  per-piece Today tab, via one shared `computeDueReviews` query rather
+  than a new tab or Master Agenda alone — **built in Pass 8**. See Stage 4
+  → [How maintenance surfaces in the UI](#how-maintenance-surfaces-in-the-ui-built)
+  and [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 **Still open:**
 
@@ -679,7 +763,3 @@ implemented) — kept here for the record rather than deleted:
 - Whether a second Tier 1 rung is needed before a chunk reliably survives
   to Stabilizing's first real review — gated on fail-rate data once built,
   not decided preemptively.
-- How maintenance surfaces in the UI — most likely Master Agenda and the
-  per-piece Today tab, but the data-plumbing implication (a live "what's
-  due" query replacing the fixed-length `timeline.days[]` index) isn't
-  designed — see Stage 4 → Explicitly not designed/built here.

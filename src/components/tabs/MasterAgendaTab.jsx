@@ -2,7 +2,8 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
-import { todayISODate, addDaysISO, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
+import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
+import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 
 export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
@@ -15,11 +16,9 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
 
       // Offset (in days) of the selected date from real "today" — applied on
       // top of each piece's own current-day anchor below, rather than as an
-      // absolute calendar calculation per piece. A piece's "current day" is
-      // already elapsed-days-since-created clamped into its plan (see
-      // getCurrentDay in lib/utils), the same anchor Today's Practice and
-      // Overview use — so a plan whose window has technically passed still
-      // parks on its last scheduled day instead of vanishing here.
+      // absolute calendar calculation per piece. A piece whose plan window
+      // has passed no longer parks on its last scheduled day here — it
+      // switches to the live maintenance due list instead (see below).
       const todayMs = new Date(`${todayISODate()}T00:00:00`).getTime();
       const selectedDateMs = new Date(`${selectedDate}T00:00:00`).getTime();
       const daysFromToday = Math.round((selectedDateMs - todayMs) / 86400000);
@@ -40,10 +39,41 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
 
           if (!timeline || !timeline.days || !timeline.days.length) return;
 
-          const realCurrentDay = getCurrentDay(piece, timeline.days.length);
-          const dayNumber = realCurrentDay + daysFromToday;
+          // Deliberately *not* getCurrentDay: that clamps into the plan, so
+          // a piece whose plan ran out weeks ago would park on its last
+          // scheduled day forever and re-show already-finished work. The
+          // unclamped elapsed day is what lets us tell "past the plan" from
+          // "on the last day of the plan".
+          const dayNumber = computeElapsedDay(piece) + daysFromToday;
 
-          if (dayNumber < 1 || dayNumber > timeline.days.length) return;
+          if (dayNumber < 1) return;
+
+          // Past the end of the bounded plan there is no timeline day to
+          // render — the live maintenance ladder takes over (see
+          // lib/maintenance.js). Only ever for real "today": due-ness is
+          // strictly "as of today", and asking the picker about a future
+          // date must not become an upcoming-due window.
+          if (dayNumber > timeline.days.length) {
+            if (selectedDate !== todayISODate()) return;
+            const dueItems = computeDueReviews(piece, chunkSet, selectedDate);
+            if (!dueItems.length) return;
+            const dueMinutes = totalDueMinutes(dueItems);
+            totalMinutes += dueMinutes;
+            items.push({
+              pieceId,
+              piece,
+              isDueList: true,
+              dueRanges: mergeRanges(dueItems.map((i) => i.chunk)),
+              // Counted off the items, not the merged display ranges —
+              // two adjacent due chunks collapse into one chip but are
+              // still two things to practice.
+              dueCount: dueItems.length,
+              dueOverdueCount: dueItems.filter((i) => i.daysOverdue > 0).length,
+              totalTime: dueMinutes,
+              missedCount: 0,
+            });
+            return;
+          }
 
           const day = timeline.days[dayNumber - 1];
           if (!day) return;
@@ -151,7 +181,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
         </div>
       ) : (
         <div className="master-agenda-cards">
-          {agendaData.items.map(({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount }) => (
+          {agendaData.items.map(({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount, isDueList, dueRanges, dueCount, dueOverdueCount }) => (
             <div key={pieceId} className="piece-card">
               <div className="piece-card-head">
                 <div>
@@ -164,7 +194,14 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
                 </div>
               </div>
 
-              {day.type === "consolidation" ? (
+              {isDueList ? (
+                <div className="day-card-group">
+                  <span className="day-card-tag review">Due</span>
+                  {dueRanges.map((r) => (
+                    <span key={`due-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
+                  ))}
+                </div>
+              ) : day.type === "consolidation" ? (
                 <p className="day-card-note">Full run-through of the piece</p>
               ) : (
                 <>
@@ -199,8 +236,15 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
               )}
 
               <div className="piece-footer">
-                <span style={{ fontSize: "12px", color: missedCount > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
-                  {missedCount > 0 ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule` : "On schedule"}
+                {/* A review arriving late is schedule slack, never a
+                    failure — the due card states the count plainly and is
+                    never styled as "behind". */}
+                <span style={{ fontSize: "12px", color: isDueList ? "var(--ink-soft)" : missedCount > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
+                  {isDueList
+                    ? `Maintenance — ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
+                    : missedCount > 0
+                      ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule`
+                      : "On schedule"}
                 </span>
                 <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
                   Log practice →

@@ -98,19 +98,27 @@ piece = {
                          // whole-piece consolidation-day run-through's history —
                          // `doneDays` plus `sessions: [{ day, stopCount, loggedAt,
                          // loggedDate }]` (Pass 6, Repertoire-Lifecycle.md's
-                         // "Post-run-through logging") — see DayChecklist.jsx and
-                         // ProgressTab.jsx, the two places that key off this
-                         // literal string. A synthetic entry in the same map,
-                         // not a documented exception until now.
+                         // "Post-run-through logging"). DayChecklist.jsx and
+                         // ProgressTab.jsx key off this literal string directly; as of
+                         // Pass 7, computeRevivalTriggers (lib/revival.js) reads its
+                         // `sessions[].stopCount` too (the > 5 auto-trigger condition), and
+                         // storage.js's computeLastLoggedAt reads its `sessions[].loggedDate`
+                         // like any other entry's — it used to skip this key specially, which
+                         // was a bug (see the `lastLoggedAt` field below). A synthetic entry
+                         // in the same map, not a documented exception until now.
   rescheduleMarker,      // null | { asOfDay, remainingChunkOrder } — see Algorithms.md#rescheduling
   lastPlayedDate,        // string ("YYYY-MM-DD") | null — collected at revival entry; purely
                          // informational (displayed on Overview), not used by any automatic
                          // staleness detection — see Repertoire-Lifecycle.md and #revival below.
   lastLoggedAt,          // string ("YYYY-MM-DD") | null — most recent session.loggedDate across
-                         // every chunk, recomputed on every load (not backfilled-and-locked-in
-                         // like startDate). Data plumbing for the not-yet-built spaced-repetition
-                         // maintenance ladder's 60-day staleness auto-trigger — nothing reads this
-                         // yet. See Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built.
+                         // every progress entry (INCLUDING "__consolidation__"'s run-through
+                         // sessions — excluding them was a real bug, fixed alongside Pass 7),
+                         // recomputed on every load (not backfilled-and-locked-in like
+                         // startDate). Read by Revival's 60+-days-untouched auto-trigger
+                         // condition (computeRevivalTriggers, lib/revival.js, Pass 7) — a piece
+                         // whose only activity is run-throughs must not look falsely stale here.
+                         // See Repertoire-Lifecycle.md#revival-auto-triggers and
+                         // Decisions.md#spaced-repetition--maintenance.
   ladderConfig,          // { stabilizing, settling, holding, bpmSteps } — piece-level tunable
                          // config for the spaced-repetition maintenance ladder (stage lengths,
                          // graduation pass-counts, tempo floors, practiceBPM ratchet step sizes).
@@ -119,7 +127,7 @@ piece = {
                          // engine in lib/ladder.js (computeLadderAdvance), called on every
                          // logged session (handleLogSession, App.jsx) and, since Pass 5, also
                          // consulted indirectly via ChunkProgress.nextDueDate when
-                         // computeTimeline places each chunk's next review — see #ladder-config
+                         // computeTimeline places each chunk's next review — see "Ladder config"
                          // below and Algorithms.md#session-outcomes--the-maintenance-ladder.
   memoryAnchors,         // { [id]: string } — free-text cue ("descending sequence", "watch
                          // left-hand leap") keyed by *either* a practice-chunk/transition id or a
@@ -172,7 +180,7 @@ ChunkProgress = {
                               // kept alongside it, confirmed with the user before that pass
                               // started). Landing on 'rough' or 'lost' also demotes this chunk's
                               // ladder stage and pins nextDueDate to today, via
-                              // lib/ladder.js's applyRunThroughFlag — see #ladder-config below.
+                              // lib/ladder.js's applyRunThroughFlag — see "Ladder config" below.
                               // Also caps computeConfidence's result (55 for rough, 20 for lost,
                               // applied after either the manual or auto branch) so a flagged
                               // chunk can't show stale-high confidence anywhere it's displayed —
@@ -183,7 +191,11 @@ ChunkProgress = {
                               // separate check. Persists independently of any
                               // revival cycle; computeRevivalPlan prioritizes any flagged chunk
                               // first (rough and lost treated alike for that ordering, not a
-                              // three-tier sort). See #revival below. A pre-Pass-6 piece with the
+                              // three-tier sort). A 'lost' flag specifically (not 'rough') also
+                              // feeds Revival's "large chunks lost" auto-trigger condition (Pass
+                              // 7, computeRevivalTriggers, lib/revival.js) — a live read of
+                              // whatever's flagged lost right now, not a per-event log. See
+                              // #revival below. A pre-Pass-6 piece with the
                               // old `weakSpot: true` reads that forward as `flag: 'rough'` on
                               // migration (storage.js's backfillProgressLadderState) — `weakSpot`
                               // itself does not survive migration once converted, and never wins
@@ -210,7 +222,7 @@ ChunkProgress = {
                               // off null, so every chunk starts and stays here until logged.
                               // Advanced live by handleLogSession (App.jsx) calling
                               // lib/ladder.js's computeLadderAdvance on every logged session.
-                              // See #ladder-config below.
+                              // See "Ladder config" below.
   consecutivePasses,          // number, default 0 — consecutive full passes at the current stage
                                // that cleared that stage's tempo floor. Live, via
                                // computeLadderAdvance on every logged session (see stage above).
@@ -233,10 +245,13 @@ ChunkProgress = {
   nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
                                 // review, recomputed on every logged session. Load-bearing since
                                 // Pass 5: computeTimeline reads this directly to place the chunk's
-                                // Tier 2 review (Algorithms.md#timeline--scheduler rule 4). A live
-                                // "what's due" query that works *beyond* the current plan's bounded
-                                // days[] is still not built (see Repertoire-Lifecycle.md's "How
-                                // maintenance surfaces in the UI").
+                                // Tier 2 review (Algorithms.md#timeline--scheduler rule 4). Also read
+                                // *outside* the plan's bounded days[] since Pass 8, by
+                                // computeDueReviews(piece, chunkSet, asOfDate) (lib/maintenance.js),
+                                // which compares it against a real calendar date to drive the due
+                                // lists in Master Agenda and the Today tab — the reason this field
+                                // was specified as a date rather than a plan-day int in the first
+                                // place. See Algorithms.md#whats-due--the-live-maintenance-query.
   tier1Done,                   // boolean, default false — whether the one-time first-touch review
                                 // (Repertoire-Lifecycle.md's "Tier 1") has happened for this chunk.
                                 // Read/passed through unchanged by computeLadderAdvance; still
@@ -247,10 +262,10 @@ ChunkProgress = {
 }
 ```
 
-### Ladder config (`piece.ladderConfig`) {#ladder-config}
+### Ladder config (`piece.ladderConfig`)
 
 Piece-level tunable data for the spaced-repetition maintenance ladder — see
-[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+[Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
 for the full design. Hardcoded defaults for now (no editing UI); stored so a
 later UI pass is additive rather than needing its own migration.
 
@@ -292,9 +307,17 @@ result. `computeTimeline` (`lib/scheduling.js`) also now reads the
 resulting `nextDueDate` directly to schedule each chunk's Tier 1/Tier 2
 review (Pass 5 — see
 [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)).
-Still not built: a live "what's due" query beyond the current plan's
-bounded length, and any post-run-through flag mode. See
-[Architecture.md](Architecture.md) for where the function lives.
+As of Pass 8 the resulting `nextDueDate` is read a second way, outside the
+plan entirely: `computeDueReviews` (`lib/maintenance.js`) compares it
+against a real calendar date to drive the due lists in Master Agenda and
+the Today tab, so a review still reaches the learner once a piece runs past
+its original `daysToLearn` — see
+[Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query) and
+[Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+Still not built against this config: any editing UI for the values below
+(stage lengths, tempo floors, BPM step sizes) — they remain hardcoded
+defaults, stored per-piece so a later UI pass is additive.
 
 `defaultPiece()` in `src/components/Wizard.jsx` is the literal source of truth
 for this shape and its defaults — read it directly if this table and the code
@@ -336,7 +359,7 @@ This distinction matters and is easy to get backwards:
   scheduled, logged, and scored. The `kind: "section"` name is a collision
   with `piece.sections` left over from an earlier iteration — a naming
   accident, not a relationship. Worth renaming to `"chunk"` if you touch
-  this code; see [Architecture.md](Architecture.md#suggested-refactor).
+  this code; see [Architecture.md](Architecture.md#module-layout-the-old-suggested-refactor--now-done).
 - **Transitions** (`kind: "transition"`) — auto-generated blocks spanning
   the seam between two adjacent practice chunks. Shown to the user as
   **"Review"**, not "Transition" — the label is softened, but the internal
@@ -396,7 +419,7 @@ below). They can still disagree in every other way they always could
 movement) — this remains the same real, open, unresolved question.
 
 A spaced-repetition ladder (per-chunk `stage`/`practiceBPM` state — see
-[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built))
+[Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built))
 was flagged here as a related, third signal once its schema landed. The
 stage-math is built (`computeLadderAdvance`, `lib/ladder.js`) and live —
 every logged session advances it (`handleLogSession`, `App.jsx`).

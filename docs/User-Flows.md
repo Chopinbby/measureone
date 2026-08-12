@@ -113,7 +113,7 @@ pick a measure range and a new difficulty level, hit Apply. This writes
 directly into `piece.measureDifficulty` for that range and closes the panel
 in the same action — matching how difficulty was originally entered at setup
 (per-measure, not per-chunk). There is no undo for this — see
-[Data-Model.md](Data-Model.md#known-simplifications).
+[Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
 
 ## 6. Multi-piece switching
 

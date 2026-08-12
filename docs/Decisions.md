@@ -52,7 +52,7 @@ computed score, with no conditions.**
 - **Known accepted gap:** no set-date is recorded for the override, so
   historical reconstruction (`computeConfidenceAsOf`) can't correctly
   exclude an override that didn't exist yet at the reconstructed date. Not
-  fixed — see [Data-Model.md](Data-Model.md#known-simplifications).
+  fixed — see [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
 
 ## Scheduling
 
@@ -202,7 +202,7 @@ from the Wizard/Settings UI.**
   `ScheduleFields` version didn't account for at all — without it, the
   derived day count was "enough" for introduction alone but still ran over
   budget once review load landed on top. See
-  [Algorithms.md](Algorithms.md#deriving-daystolearn-from-minutesperday-scheduleMode-minutes).
+  [Algorithms.md](Algorithms.md#deriving-daystolearn-from-minutesperday-schedulemode-minutes).
 - **Known limitation, not fixed here:** this derivation estimates a day
   count, it doesn't cap any individual day. `computeTimeline`'s own
   placement (new-chunk introduction spread only across the first half of
@@ -216,12 +216,13 @@ from the Wizard/Settings UI.**
 
 ## Spaced repetition & maintenance
 
-**Status: the stage-math engine, Tier 1/Tier 2 review scheduling, and
-post-run-through logging (stop count + the rough/lost flag mode) are built
-and live (Passes 1–6); a live "what's due" query beyond the current plan's
-bounded length and Revival's auto-triggers off that logged data are still
-designed, not built (Pass 7).** Full design:
-[Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+**Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
+post-run-through logging (stop count + the rough/lost flag mode), and
+Revival's three auto-trigger conditions off that logged data are built and
+live (Passes 1–7). A live "what's due" query beyond the current plan's
+bounded length is now scoped (see the Pass 8 decision at the end of this
+section) but not built.** Full design:
+[Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
 Evidence behind several choices below: [Research.md](Research.md).
 
 **Decision: "learned" is redefined as every practice chunk's
@@ -351,7 +352,7 @@ rough 2.**
   under-provisioning and reintroducing the exact "technically enough for
   introduction alone, still runs over budget once review lands" bug this
   estimate exists to prevent (see the "days" mode's own padding, same
-  section of [Algorithms.md](Algorithms.md#deriving-daystolearn-from-minutesperday-scheduleMode-minutes)).
+  section of [Algorithms.md](Algorithms.md#deriving-daystolearn-from-minutesperday-schedulemode-minutes)).
   2 was chosen as a middle ground, not derived — same "hand-picked, not a
   hard cap" spirit as the rest of this estimate.
 - **Consequence:** "minutes per day" pieces set up after this change get a
@@ -389,10 +390,18 @@ full pass, soft miss, real fail — and add `practiceBPM`, a per-chunk
   section ("the old free-standing 'how did it feel' 3-tap effectiveness
   input... is removed").
 
-**Decision: revival gets three independent, separately-checked auto-trigger
-conditions (stop count > 5 on a run-through; a combo or 2+ regular chunks
-flagged lost in one run-through; 60+ days since anything logged) rather
-than one unified formula.**
+**Decision (implemented, Pass 7): revival gets three independent,
+separately-checked auto-trigger conditions (stop count > 5 on a
+run-through; a combo or 2+ regular chunks flagged lost, checked as
+current-state, not per-event; 60+ days since anything logged) rather than
+one unified formula.**
+
+`computeRevivalTriggers(piece, chunkSet)` (`src/lib/revival.js`)
+implements this, called from `OverviewTab` to drive the "This piece might
+be due for a revival" banner (suppressed while a revival is already
+active). Returns every condition that independently fired, not just the
+first — see [Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7)
+for the full mechanics.
 
 - **Why:** Conditions 1 and 2 can only fire if a run-through was actually
   attempted and logged. A piece nobody's touched in two months has no data
@@ -401,6 +410,65 @@ than one unified formula.**
   not a diluted version of the other two. Unifying them into one formula
   would hide that a piece can fail this test for a reason none of the
   logged-data conditions can see.
+- **Note on condition 2's scope:** "regular practice chunks" and "a combo"
+  deliberately excludes transitions — a transition flagged lost doesn't
+  count toward either half of this condition, even though it's a real
+  chunk-shaped entity with the same `flag` field. Transitions are seams
+  between chunks, not independent practice content, so a transition alone
+  going lost isn't the "large chunk lost" signal this condition is for.
+- **Note on `lastLoggedAt: null`:** condition 3 deliberately does not fire
+  when nothing has ever been logged at all. It reads as a fallback for a
+  piece with real but aging activity, not a catch-all for a
+  freshly-created piece with zero data — a brand-new piece isn't "overdue
+  for revival," it just hasn't started.
+
+**Bug fix (found and fixed while building condition 3 above): `lastLoggedAt`
+was silently excluding run-through activity, which would have made
+condition 3 fire falsely for exactly the pieces most likely to be revival
+candidates via condition 1.**
+
+- **What was wrong:** `computeLastLoggedAt` (`src/lib/storage.js`), which
+  recomputes `piece.lastLoggedAt` fresh on every piece load, explicitly
+  skipped the `"__consolidation__"` progress key when scanning for the
+  most recent session date. That exclusion predates Pass 7 — it was
+  originally written for `backfillProgressLadderState`'s ladder-state
+  backfill, where skipping the synthetic entry is correct (it isn't a real
+  chunk, so it has no ladder stage to backfill), and `computeLastLoggedAt`
+  copied the same `key === "__consolidation__"` guard without it actually
+  applying to what that function does.
+- **The consequence:** a piece practiced *only* via full run-throughs
+  (Pass 6's stop-count logging, no individual chunk sessions at all) would
+  have `lastLoggedAt` stuck at whatever it last was before the exclusion
+  — `null` for a piece that had never logged a real chunk session — on
+  every reload, even immediately after logging a run-through. In a single
+  browser session this wasn't visible (`handleLogRunThrough` in `App.jsx`
+  sets `piece.lastLoggedAt` directly in memory on every call, independent
+  of the storage-layer recompute), but the discrepancy surfaced the moment
+  the page reloaded and `validateAndMigratePiece` recomputed it from
+  scratch. That's exactly the scenario condition 1 (stop count > 5) is
+  built to catch, so the piece most likely to actually need this fix was
+  also the piece most likely to give condition 3 a wrong answer.
+- **The fix:** removed the `"__consolidation__"` special case from
+  `computeLastLoggedAt` entirely — it now scans every progress entry's
+  `sessions` uniformly, `"__consolidation__"` included. Verified with new
+  regression tests (`test/storage.test.mjs`) covering a piece whose only
+  activity is a run-through, and a run-through that is/isn't more recent
+  than a real chunk session.
+- **Why this wasn't a two-line silent patch:** discovered during manual
+  browser verification of condition 3 (setting `piece.lastLoggedAt`
+  directly in `localStorage`, then finding it reset on reload) — flagged
+  to the user as a discovery per the pass's own "surface it, don't
+  silently adjust" instruction, then fixed as a separate, explicit step
+  once confirmed. See [Data-Model.md](Data-Model.md#the-piece-object)'s
+  `lastLoggedAt`/`progress` field comments for the corrected behavior.
+- **Separate, smaller fix caught in self-review:** `computeRevivalTriggers`
+  itself originally guarded `piece.progress` with `|| {}` for condition 1
+  but dereferenced `piece.progress[c.id]` directly (unguarded) for
+  condition 2 — inconsistent, and a real (if unreachable in practice,
+  since `App.jsx` always passes a post-migration piece) crash risk if ever
+  called with a bare `piece` object. Fixed by deriving `progress = piece.progress || {}`
+  once and using it throughout the function; covered by a regression test
+  passing `{}` as the whole piece.
 
 **Decision (implemented): combos do not get their own revival task by
 default. Revival relearns the underlying content normally (the anchor hard
@@ -416,9 +484,11 @@ relearns cleanly, no task is ever generated.**
 escalation mechanism at all — escalation is computed live from session
 outcomes regardless of any flag, so there's nothing to "clear" in the
 first place — see the consequence note below. What Pass 6's flag data
-will eventually feed is Revival's separate stop-count/lost-flag
-auto-trigger conditions above, once Pass 7 wires the check itself in —
-a different mechanism from combo escalation.
+feeds instead is Revival's separate stop-count/lost-flag auto-trigger
+conditions above (`computeRevivalTriggers`, built in Pass 7) — a
+different mechanism from combo escalation, reading the same field for a
+different purpose (deciding whether to *offer* a revival at all, not
+what to relearn once one's running).
 
 - **Why:** This supersedes the current `computeRevivalPlan` code comment
   (`src/lib/revival.js`), which excludes combos from revival statically
@@ -549,7 +619,7 @@ uses) as its *only* growth mechanism — the piece-level
 `holding.intervalGrowthFactor` field from the config's first draft was
 removed, not just left unused.**
 
-- **Why:** [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built)
+- **Why:** [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
   explicitly says Holding's growth should reuse the existing multiplier
   "rather than introducing a second multiplier system" — a standalone
   `intervalGrowthFactor` tunable sitting alongside that reused multiplier
@@ -764,7 +834,7 @@ most-recently-logged session's clean-rep count.**
 - **Known landmine, confirmed acceptable rather than blocking:** a chunk
   with real practice history from before the ladder existed migrates in
   with `stage: null` (`backfillProgressLadderState`,
-  [Data-Model.md](Data-Model.md#known-simplifications) — the same reason
+  [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about) — the same reason
   Tier 1 review scheduling has an equivalent guard,
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2)).
   Such a chunk reads as "Learned" (the lowest touched tier) rather than
@@ -806,6 +876,96 @@ most-recently-logged session's clean-rep count.**
   `'stabilizing'`) — the fix is closing the *silent* part, not
   introducing a throw.
 - See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging).
+
+**Decision (built — Pass 8): the live "what's due beyond the plan"
+maintenance query surfaces in both Master Agenda and the per-piece Today
+tab, via one function shared by both, not a new tab or Master Agenda
+alone.**
+
+- **Why:** [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here)
+  left this genuinely undecided even after Pass 7 shipped — which UI
+  surface(s) show due-maintenance reviews changes how big this pass is and
+  which files it touches, so it wasn't safe to guess going in. Scoped with
+  the user before starting implementation: a new dedicated tab would
+  duplicate Master Agenda's existing cross-piece daily view; Master Agenda
+  alone would leave the per-piece Today tab dead-ending at "Day N of N"
+  forever for a piece past its plan, with no way to see what's actually
+  due for that one piece.
+- **Consequence:** one new pure function, `computeDueReviews(piece,
+  chunkSet, asOfDate)` (`src/lib/maintenance.js`), reads
+  `progress[id].nextDueDate` — already a real calendar date, not a
+  plan-day int (see the `ChunkProgress` entry, Data-Model.md) — directly
+  against `asOfDate`, entirely independent of `timeline.days[]` /
+  `computeTimeline`. Both surfaces call the *same* function rather than
+  Master Agenda getting its own lightweight summary query — confirmed with
+  the user: one source of truth, Master Agenda just renders less of the
+  same result than Today tab does. `TodayTab.jsx` gained a second render
+  branch for the past-plan case (prev/next day nav disabled in that mode —
+  there's no bounded plan grid left to page through; "View all" still
+  reaches the original plan); `MasterAgendaTab.jsx`'s "skip if `dayNumber >
+  timeline.days.length`" guard became a call into this function instead of
+  a skip. Due items log through the same `ChecklistItem` the bounded plan
+  uses, keyed to the elapsed day number, so there's one
+  logging/undo/ladder-advance path rather than two.
+- **Suppression rules, confirmed rather than assumed:** a paused or
+  archived piece never surfaces due-maintenance items — consistent with
+  pause/archive already meaning "off my daily plate" for schedule pressure
+  generally ([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built)),
+  not a special case invented for this pass. A piece with an active
+  revival (`piece.revival.startedAt` set) also suppresses ordinary
+  due-maintenance items, since revival is already "something's wrong,
+  working through it" mode and showing routine maintenance items alongside
+  it would compete for attention with no clear priority between them.
+- **Scoped out:** any forward-looking window (due-in-N-days) — strictly
+  "due as of today," matching what [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
+  actually asks for; nothing in the design calls for a maintenance
+  calendar view.
+- **Built in Pass 8**, essentially as scoped above. This entry was
+  originally recorded ahead of implementation (same as the original ladder
+  design was recorded before Pass 1) and has since been reconciled against
+  what actually shipped; the one place the scoping was wrong is the
+  next decision below.
+- See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here)
+  and [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
+
+**Decision (Pass 8): "has this piece run past its plan?" is answered by an
+unclamped elapsed-day derivation in each surface, not by `getCurrentDay`
+— which structurally cannot answer it.**
+
+- **Why:** the scoping above (and the pass description written from it)
+  assumed the past-plan case could be detected as "`currentDay` exceeds
+  `timeline.days.length`". That state **cannot occur**: `getCurrentDay`
+  (`lib/utils.js`) `clamp`s to `[1, totalDays]`, so a 10-day plan that
+  started three months ago still reports day 10. Detection therefore has
+  to come from elapsed calendar days since `piece.startDate`, compared
+  against `timeline.days.length`, without the clamp.
+- **Consequence — this fixed a latent bug nobody had filed.** Because of
+  the clamp, Master Agenda's pre-existing `dayNumber >
+  timeline.days.length` guard *never fired for today*: a piece past its
+  plan silently re-rendered its last scheduled day, every day,
+  indefinitely (in testing, a stale "Full run-through of the piece" as
+  today's task). Correcting the detection removed that as a side effect,
+  so Pass 8 is a bug fix as well as a feature.
+- **Resolved (follow-up commit):** Pass 8 shipped this derivation inline in
+  both `TodayTab.jsx` and `MasterAgendaTab.jsx`, with the two copies
+  differing slightly (Master Agenda floored at 1 for a future `startDate`,
+  TodayTab didn't) — flagged rather than folded in, since `lib/utils.js`
+  was outside the pass's stated scope. It's since been extracted to
+  `elapsedDay(piece)` in `lib/utils.js`, and **`getCurrentDay` is now
+  derived from it** (`clamp(elapsedDay(piece), 1, totalDays)`) rather than
+  repeating the same date arithmetic a third time — so the clamped and
+  unclamped forms can't drift. Behaviour verified unchanged on both
+  surfaces, in-plan and past-plan. One knock-on worth knowing: the surfaces
+  previously computed elapsed days via `daysBetweenInclusive` (`Math.round`)
+  and now inherit `getCurrentDay`'s `Math.floor`, so past-plan detection
+  agrees with the app's day numbering everywhere else — but also inherits
+  any DST skew that numbering already has. See
+  [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
+- **Related, unchanged:** `ScheduleBanner` still runs off the clamped
+  `currentDay`, so a piece past its plan can show "N chunks behind
+  schedule" above its maintenance due list. Pre-existing, not a Pass 8
+  regression, and arguably wrong next to a completed plan given the
+  "a late review is slack, never a failure" rule — but out of scope.
 
 ## UX
 
@@ -852,7 +1012,7 @@ UI is now the only option in the wizard and Settings.**
   / `recurringMeasures` remain in the data model and `generatePracticeChunks`
   still honors them — this only removed the UI to *choose* those modes going
   forward, so pieces already saved with them keep working unchanged. See
-  [Data-Model.md](Data-Model.md#known-simplifications).
+  [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
 
 ## Data model
 
@@ -1072,6 +1232,36 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **`getCurrentDay` undercounts by a day across a DST boundary — a real
+  correctness bug, not a rounding nitpick, and it is not fixed.**
+  `elapsedDay`/`getCurrentDay` (`lib/utils.js`) compute
+  `Math.floor((today − startDate) / MS_PER_DAY) + 1` on two *local*
+  midnights. After a spring-forward the interval is `n × 24 − 1` hours, so
+  the floor lands a day short; the general-purpose `daysBetweenInclusive`
+  uses `Math.round` and doesn't have this problem. **This is not a
+  changeover-day glitch — it persists for the whole ~8 months between the
+  March and November transitions**, then self-corrects. Measured in
+  `America/Denver` on 2026-08-11: a piece started 2026-02-01 reads day 191
+  where it should read 192; started 2025-12-01, day 253 instead of 254. A
+  piece started after the March transition is unaffected. Consequence: for
+  most of the year, a piece begun in winter shows the learner *yesterday's*
+  practice tasks — `getCurrentDay` drives "Day N of N", which day's
+  checklist renders, and behind-schedule detection.
+  - **Why it's not just fixed:** the change is one word (`Math.floor` →
+    `Math.round`), but it shifts day numbering by one for every affected
+    piece the moment it lands, which reads to the user as their plan
+    jumping forward a day. That deserves a deliberate pass — including a
+    check of whether anything keys off the old numbering (`doneDays`
+    entries and `sessions[].day` are stored plan-day ints) — not a silent
+    tweak folded into unrelated work.
+  - **Found** while verifying the `elapsedDay` extraction, not by a report.
+    Pre-dates that commit and pre-dates Pass 8: it has been in
+    `getCurrentDay` since the app was written. The extraction *did* newly
+    subject past-plan detection to the same skew (those two surfaces
+    previously used `daysBetweenInclusive`) — accepted deliberately, since
+    the alternative was the app disagreeing with itself about what day it
+    is. See
+    [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
 - **Should `computeConfidence` and `computeProgressTier` be unified?** They
   currently measure different things (weighted session history vs. the
   spaced-repetition ladder's `stage`, as of Pass 6 — see

@@ -55,7 +55,10 @@ MeasureOne.jsx/
     │   ├── chunking.js              # generatePracticeChunks and friends
     │   ├── scheduling.js             # computeTimeline and friends
     │   ├── confidence.js              # computeConfidence and friends
-    │   ├── revival.js                  # computeRevivalPlan and friends
+    │   ├── revival.js                  # computeRevivalPlan, computeComboEscalations,
+    │   │                                # and computeRevivalTriggers (Pass 7's three
+    │   │                                # independent auto-trigger conditions, read by
+    │   │                                # OverviewTab — see Repertoire-Lifecycle.md#revival-auto-triggers)
     │   ├── ladder.js                     # computeLadderAdvance — spaced-repetition
     │   │                                  # maintenance stage math; called from
     │   │                                  # App.jsx's handleLogSession on every
@@ -63,6 +66,15 @@ MeasureOne.jsx/
     │   │                                  # (Pass 6's rough/lost demote-and-pin,
     │   │                                  # called from handleSetFlag) and STAGES
     │   │                                  # (exported for confidence.js's reuse)
+    │   ├── maintenance.js                 # computeDueReviews — the live "what's
+    │   │                                  # due" query (Pass 8). Reads each chunk's
+    │   │                                  # nextDueDate against a real calendar date,
+    │   │                                  # entirely independent of computeTimeline /
+    │   │                                  # timeline.days[], so it still answers for a
+    │   │                                  # piece that has run past its plan. Called by
+    │   │                                  # both MasterAgendaTab and TodayTab
+    │   │                                  # (plus totalDueMinutes, the shared
+    │   │                                  # effort→minutes total for a due list)
     │   ├── works.js                      # multi-movement grouping helpers
     │   └── storage.js                     # localStorage load/save/export/import
     └── components/
@@ -105,7 +117,7 @@ single-file Claude.ai artifact.
 | `PartSwitcher` | Strip of sibling movements on the Overview of any piece belonging to a multi-movement work, plus "Add a movement". Shows each movement's own measures-touched percentage — deliberately not a combined work total, see [Decisions.md](Decisions.md#multi-movement-works). |
 | `Wizard` | Multi-step modal for creating a new piece (create-only — see [User-Flows.md](User-Flows.md#1-setting-up-a-new-piece)). |
 | `ScheduleBanner` | The "N chunks behind schedule" banner (Overview, Today). |
-| `OverviewTab` | The dashboard / landing screen. |
+| `OverviewTab` | The dashboard / landing screen. Renders `ScheduleBanner`, plus — since Pass 7 — a revival-suggestion banner driven by `computeRevivalTriggers(piece, chunkSet)` (`lib/revival.js`) whenever any of Revival's three auto-trigger conditions fire and no revival is already active; lists every reason that independently fired, not just the first. Takes `chunkSet` as a prop (passed down from `App.jsx` alongside `piece`) specifically for this check. See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#revival-auto-triggers). |
 | `TimelineTab` | Full day-by-day schedule, grouped by week; day cards jump to that day in Today. |
 | `PieceMapTab` | Grid of every chunk colored by confidence. Clicking a tile opens a **modal** (not inline — see [UX-Principles.md](UX-Principles.md#detail-on-demand-uses-a-real-modal-not-inline-expansion)) with BPM inputs, manual-confidence override, a run-through flag toggle (untouched/rough/lost — replaces the old boolean weak-spot toggle as of Pass 6, see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)), and a memory-anchor field. Also used embedded (with `hideHeader`/`sequentialMode`/`initialSelectedId`/`onFinishSequential`) by `RevivalTab` for the fast reassessment pass — see [Algorithms.md](Algorithms.md#revival) — rather than a second grid component. |
 | `MemoryAnchorField` | Small commit-on-blur textarea, same decouple-from-render pattern as `NumberInput`, for the modal's memory-anchor field. |
@@ -113,7 +125,7 @@ single-file Claude.ai artifact.
 | `FocusPanel` | Ranks everything touched so far by confidence, independent of today's schedule. |
 | `SectionRunThroughPanel` | Surfaces unlocked section run-throughs/combined run-throughs — see [Algorithms.md](Algorithms.md#section-run-throughs). |
 | `ReassessPanel` | Re-rate difficulty for a measure range; Apply commits and closes in one action. |
-| `TodayTab` | Composes `ScheduleBanner`, `FocusPanel`, `DayChecklist` (or all days in "View all" mode), `SectionRunThroughPanel`, `ReassessPanel`. |
+| `TodayTab` | Composes `ScheduleBanner`, `FocusPanel`, `DayChecklist` (or all days in "View all" mode), `SectionRunThroughPanel`, `ReassessPanel`. **Since Pass 8 it has a second day-view branch**: once the piece has run past the end of its bounded plan, the "Day N of N" header becomes "Plan complete — maintenance, day N" and `DayChecklist` is replaced by an internal `DueReviewPanel` listing `computeDueReviews(...)` output. Prev/next day nav is disabled in that state (no bounded grid left to page through); "View all" still shows the whole original plan, so the plan stays reachable. Due items render through the same `ChecklistItem` the plan uses, keyed to the elapsed day number, so logging, undo and the ladder advance are the one code path either way. |
 | `RevivalEntryModal` | Collects `lastPlayedDate`, optional `performanceTempo`, and required `purpose` before a revival cycle starts. Styled like `Wizard`'s modal shell. |
 | `DeletePieceModal` | Confirms permanent deletion by requiring the piece's exact name to be typed back, rather than a single `window.confirm()` — deletion has no undo and takes all practice history with it. |
 | `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. `PieceCheckRow` is the shared checkbox-row list item both modals render. |
@@ -121,7 +133,7 @@ single-file Claude.ai artifact.
 | `RevivalTab` | Composes the revival flow end to end: settings (performance tempo, tempo ladder start fraction), the embedded `PieceMapTab` reassessment pass, flagged-chunks summary (rough/lost, same field the Piece Map's run-through flag sets — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)), `RandomStartPanel`, and the generated plan (day-grouped `ChecklistItem`s with tempo ladders/memory anchors). See [Algorithms.md](Algorithms.md#revival). |
 | `ProgressTab` | Trend/diagnosis charts — rolling-window consistency, heatmap, actual-vs-planned, projected finish, tempo trend, effectiveness calibration, recent history. |
 | `AnalyticsTab` | Confidence-by-difficulty, recurring-material payoff. **Slated to be folded into `ProgressTab` and removed** — not yet done; see [Roadmap.md](Roadmap.md). Check the sidebar `NAV` array for current truth before assuming either state. |
-| `MasterAgendaTab` | Cross-piece daily view — aggregates every *active* piece's scheduled tasks for a selected date (date-navigable, not locked to today) into one list, so a multi-piece user isn't switching between pieces to see the whole day. Reads each piece's `getEffectiveTimeline(...).days[dayNumber - 1]` directly, so it inherits the same fixed-length, `daysToLearn`-bounded indexing `TodayTab` uses — see [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built) for why that matters for the planned maintenance-ladder work. |
+| `MasterAgendaTab` | Cross-piece daily view — aggregates every *active* piece's scheduled tasks for a selected date (date-navigable, not locked to today) into one list, so a multi-piece user isn't switching between pieces to see the whole day. For a piece still inside its plan it reads `getEffectiveTimeline(...).days[dayNumber - 1]` directly, the same fixed-length, `daysToLearn`-bounded indexing `TodayTab` uses. **Since Pass 8, a piece that has run past its plan no longer falls out of that indexing** — it renders a due-maintenance summary from `computeDueReviews` (`lib/maintenance.js`) instead: merged measure ranges under a "Due" tag, plus a count. That branch only ever fires for the real today, since due-ness is strictly "as of today" and the date picker must not become a forward-looking window. |
 | `SettingsTab` | View mode: read-only summary + Edit/Delete/Add-new-piece/Export/Import. Edit mode reuses the shared field-editor components. |
 | `App` | Root component. Owns all state and renders the sidebar + active tab, or the empty-state/loading screens. |
 

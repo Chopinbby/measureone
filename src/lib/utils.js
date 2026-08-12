@@ -87,10 +87,26 @@ export function sumPracticeSeconds(piece) {
 // before startDate existed; that fallback is transient, so storage.js
 // backfills and persists a real startDate on load rather than relying on
 // this recomputing "today" fresh on every call.
-export function getCurrentDay(piece, totalDays) {
+//
+// `elapsedDay` is the *unclamped* form: how many days the piece has been
+// running, with no upper bound. It's what answers "has this piece run past
+// its plan?" — a question `getCurrentDay` structurally cannot answer, since
+// it clamps to the plan's length (a 10-day plan started three months ago
+// still reports day 10). Used by the maintenance due-list surfaces; see
+// Algorithms.md#whats-due--the-live-maintenance-query.
+export function elapsedDay(piece) {
   const startDate = piece.startDate || todayISODate();
   const diff = Math.floor((new Date(`${todayISODate()}T00:00:00`) - new Date(`${startDate}T00:00:00`)) / MS_PER_DAY);
-  return clamp(diff + 1, 1, totalDays);
+  // Floored at 1, so a piece with a future startDate reads as "day 1, not
+  // started" rather than a negative day — matching getCurrentDay's own
+  // lower clamp.
+  return Math.max(1, diff + 1);
+}
+
+// getCurrentDay is elapsedDay capped to the plan's length. Derived from it
+// rather than repeating the date arithmetic, so the two can't drift.
+export function getCurrentDay(piece, totalDays) {
+  return clamp(elapsedDay(piece), 1, totalDays);
 }
 
 function pad2(n) {

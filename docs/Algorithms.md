@@ -119,9 +119,10 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
      [Session outcomes & the maintenance ladder](#session-outcomes--the-maintenance-ladder)
      below), converted to a day number via `piece.startDate`. A due date
      that falls beyond this plan's own `daysToLearn` simply isn't placed in
-     this bounded view at all — surfacing it is a live "what's due" query
-     that doesn't exist yet (Repertoire-Lifecycle.md's "Explicitly not
-     designed/built here").
+     this bounded view at all — surfacing it is the job of
+     [`computeDueReviews`](#whats-due--the-live-maintenance-query) (Pass 8),
+     a separate query that reads `nextDueDate` against a real calendar date
+     rather than indexing `days[]`.
    - The old fixed `REVIEW_OFFSETS = [1, 3, 7, 14]`-days-after-introduction
      mechanism this rule used to describe is **no longer called by
      `computeTimeline`** — `adaptiveReviewOffsets` (below) still exists as a
@@ -309,7 +310,7 @@ measure-range match first, then falls back to `piece.targetBPM`.
 ## Session outcomes & the maintenance ladder
 
 Data shapes: [Data-Model.md](Data-Model.md#the-piece-object) (`ChunkProgress.stage`
-etc., `piece.ladderConfig`). Design: [Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+etc., `piece.ladderConfig`). Design: [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
 Replaces the old flat pass/fail and free-standing "how did it feel"
 self-report with an objective three-tier judgment, and advances a
 per-chunk spaced-repetition ladder on every logged session.
@@ -376,9 +377,9 @@ review in `computeTimeline` (see
 visible numbers — only their downstream effects are: `practiceBPM` (shown
 as "Practice tempo" in `ChecklistItem`) and, indirectly, which day a review
 lands on. A live "what's due" query that works *outside* the current plan's
-bounded `daysToLearn` window is a separate, not-yet-built piece of this
-design — see
-[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-designed-not-built).
+bounded `daysToLearn` window is built as of Pass 8 — see
+[What's due — the live maintenance query](#whats-due--the-live-maintenance-query)
+below.
 
 `handleLogSession` also seeds `practiceBPM` from whatever tempo was first
 attempted, the first time a chunk is logged (since there's no designed
@@ -390,7 +391,7 @@ one silently replacing the other. `handleUnlogSession` removes only the
 most recently logged session for a day, not every session that day, and
 does not roll back the ladder state that session's outcome already
 advanced (same "no undo history" spirit as BPM zones and difficulty
-reassessment — see [Data-Model.md](Data-Model.md#known-simplifications)).
+reassessment — see [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about)).
 
 `computeProgressTier(chunk, piece)` is a **separate, simpler** score from
 confidence — see [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)
@@ -414,6 +415,74 @@ silent**: a `stage` value outside the known set (`null`, `'stabilizing'`,
 crashing, but logs a `console.warn` first — found in self-review as a
 silent-failure risk (a corrupted or future stage value would otherwise
 misclassify with no trace).
+
+## What's due — the live maintenance query
+
+`computeDueReviews(piece, chunkSet, asOfDate)` (`lib/maintenance.js`,
+Pass 8) is the query that finally *reads* the `nextDueDate` the ladder has
+been writing since Pass 1. It walks `chunkSet.all`, keeps every chunk whose
+`progress[id].nextDueDate` is on or before `asOfDate`, and returns them
+sorted most-overdue-first (ties broken by measure order, so the list reads
+front-to-back through the piece). Each item carries `chunkId`, `chunk`,
+`dueDate`, `stage`, `daysOverdue` (0 on the day it comes due) and
+`minutes` (the chunk's effort through `EFFORT_TO_MIN`, the same conversion
+every other time estimate uses; `totalDueMinutes(items)` sums it).
+
+**It is deliberately independent of `computeTimeline` and
+`timeline.days[]`.** That's the whole point: `nextDueDate` is a real
+calendar date, so this answers correctly for a piece whose plan ran out
+weeks ago, which the bounded `days[]` array structurally cannot
+([Timeline / scheduler](#timeline--scheduler) rule 4).
+
+**Strictly "due as of `asOfDate`" — there is no forward-looking window.** A
+chunk due tomorrow does not appear anywhere, and Master Agenda's date
+picker does not turn into an upcoming-due view (it only computes due items
+for the real today).
+
+**Suppression** — returns `[]`, never null, for:
+
+- a **paused or archived** piece, consistent with pause/archive already
+  meaning "off my daily plate" for schedule pressure generally; and
+- a piece with an **active revival** (`piece.revival.startedAt` set), since
+  revival is already "something's wrong, working through it" mode and
+  routine maintenance shown alongside it would compete for attention with
+  no clear priority.
+
+Both call sites (`MasterAgendaTab`, `TodayTab`) use this one function
+rather than each running its own query — Master Agenda just renders less of
+the same result. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+### Detecting that a piece has run past its plan
+
+Both surfaces need to know "is this piece past its plan?" before they can
+switch to the due list, and **`getCurrentDay` cannot answer it** — it
+`clamp`s to `[1, totalDays]`, so a 10-day plan that started three months
+ago still reports day 10.
+
+`elapsedDay(piece)` (`lib/utils.js`) is the unclamped form: the same
+day-1-is-`startDate` arithmetic, floored at 1 (so a future `startDate`
+reads as "day 1, not started" rather than a negative day) but with no
+upper bound. Both surfaces call it and compare against
+`timeline.days.length`. **`getCurrentDay` is now derived from it**
+(`clamp(elapsedDay(piece), 1, totalDays)`) rather than repeating the date
+arithmetic, so the clamped and unclamped forms cannot drift apart.
+
+This clamp is also why Master Agenda's pre-Pass-8 `dayNumber >
+timeline.days.length` guard **never fired for today**: a piece past its
+plan silently re-rendered its last scheduled day, every day, indefinitely.
+Fixing the detection fixed that too.
+
+> **Rounding note:** `elapsedDay` uses `Math.floor` on the millisecond
+> difference, inherited from `getCurrentDay`. The general-purpose
+> `daysBetweenInclusive` helper uses `Math.round` instead, which is the
+> more DST-robust of the two (a spring-forward day is 23 hours, so a floor
+> can undercount by one). The two surfaces originally used
+> `daysBetweenInclusive` and now use `elapsedDay`, which makes past-plan
+> detection agree with the app's day numbering everywhere else — the right
+> trade, but it means **any DST skew in `getCurrentDay` is inherited, not
+> fixed**. Changing the arithmetic would shift day numbering for every
+> existing piece, so it's deliberately left alone.
 
 ## Behind-schedule detection
 
@@ -449,7 +518,7 @@ two together.
 The feasibility check shown in the reschedule confirmation dialog
 (`handleReschedule` in the `App` component, not part of `getEffectiveTimeline`
 itself) estimates required vs. available days using `EFFORT_TO_MIN` and the
-0.65 efficiency constant — see [Data-Model.md](Data-Model.md#known-simplifications).
+0.65 efficiency constant — see [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
 
 ## Revival
 
@@ -523,7 +592,7 @@ piece's real `currentDay` (the same value `TodayTab` uses) to every
 under, so session recency math (`computeAutoConfidence`'s day-since-last-
 practice decay) stays correct. There is intentionally no revival-specific
 session-day numbering — see
-[Data-Model.md](Data-Model.md#known-simplifications) generally for why this
+[Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about) generally for why this
 codebase avoids parallel data model concepts.
 
 Reassessment itself does not have a dedicated compute function — it *is*
@@ -534,3 +603,52 @@ flow so the same grid-and-modal component can be stepped through
 chunk-by-chunk instead of reopened per cell). See
 [Decisions.md](Decisions.md#revival) for why this reuses `manualConfidence`
 rather than introducing a separate scale.
+
+### Revival auto-triggers (Pass 7)
+
+`computeRevivalTriggers(piece, chunkSet)` (`lib/revival.js`) is what
+`OverviewTab` calls to decide whether to surface the "This piece might be
+due for a revival" banner. It checks three independent conditions — see
+[Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)
+for the full design and [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+for why they're three separately-checked conditions rather than one
+formula — and returns `{ triggered, reasons }`, where `reasons` is every
+condition that independently fired (not just the first), each as
+`{ key, label }` for direct display:
+
+1. **Stop count > 5 on a single logged run-through** — reads
+   `progress["__consolidation__"].sessions`, the synthetic run-through log
+   Pass 6 added (`handleLogRunThrough`, `App.jsx`).
+2. **A combo, or 2+ regular practice chunks, currently flagged `'lost'`** —
+   reads the live `progress[id].flag` state across `chunkSet.combos` and
+   `chunkSet.practiceChunks` (Pass 6's rough/lost flag). This is a
+   current-state check, not a per-run-through log, so it reflects whatever
+   is flagged lost right now, however that flag got set. A transition
+   flagged lost does not count toward either half of this condition — only
+   practice chunks and combos are "regular"/"large" chunks by this
+   condition's definition.
+3. **60+ days since anything was logged on the piece at all** — reads
+   `piece.lastLoggedAt`, a real calendar date (`daysBetweenInclusive`
+   against `todayISODate()`), not a plan-day number, since a stale piece
+   may be well past its plan's bounded day range. If `lastLoggedAt` is
+   `null` (nothing has ever been logged), this condition does not fire —
+   it's a fallback for a piece with real but aging activity, not a
+   catch-all for a piece with zero data.
+
+`piece.lastLoggedAt` itself is not stamped by this function — it comes
+from `computeLastLoggedAt` (`lib/storage.js`), recomputed on every piece
+load as the max `loggedDate` across every progress entry's `sessions`,
+**including** `"__consolidation__"`'s run-through sessions. Excluding them
+was a real bug fixed alongside this pass: before the fix, a piece
+practiced only via full run-throughs (no individual chunk sessions) would
+have `lastLoggedAt` silently stuck at `null` (or a stale pre-run-through
+date) on every reload, since the pre-fix version explicitly skipped that
+key when scanning for the most recent session — making condition 3 above
+either never fire or fire on stale information for exactly the pieces most
+likely to be revival candidates via condition 1. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for the fuller
+account.
+
+The banner itself is suppressed whenever `piece.revival.active` is
+already true — `OverviewTab` already shows "Continue revival" in that
+state, so there's nothing to additionally suggest.

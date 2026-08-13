@@ -639,6 +639,18 @@ Confidence cap: added on top of the four rules once the flag existed, same
 mechanism the rough/lost flags already use — see "Confidence cap, not a
 `stage`/ladder read" above.
 
+**Verified manually in the browser**, not just via unit tests: forced the
+flag via two real consecutive Stabilizing fails, confirmed the chunk drops
+out of the Timeline's review slots entirely (reappearing once cleared),
+confirmed the Piece Map badge/label/confidence cap render correctly
+(including against a manual override), confirmed the manual-clear button
+and the automatic 4-pass graduation both clear the flag, and confirmed
+`practiceBPM` resets to the real `getSuggestedStartingBPM` value (not the
+normal −2 step) once a piece has a target BPM configured — the earlier
+in-plan test had none, so that first pass only exercised the fallback
+step, not the actual reset; a second chunk with a real target BPM
+confirmed the reset itself.
+
 Deliberately not built here: a second Tier 1 rung, and anything wiring
 this signal into Revival (unchanged from the earlier decision above — it's
 chunk-scoped, Revival's triggers are piece-wide).

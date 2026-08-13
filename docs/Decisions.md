@@ -785,6 +785,31 @@ Answers the question the entry above deliberately left open.
 - Built in Pass 11. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages).
 
+**Decision: `needsRelearning` caps displayed confidence the same way the
+`rough`/`lost` flags do — `Math.min(score, 20)`, added in the same pass
+after a post-implementation review caught the gap, not part of the
+original four rules above.**
+
+- **Why:** The rough/lost cap exists specifically so a stale manual
+  override can't paper over a flag the learner is actively looking at (see
+  Post-run-through logging above). `needsRelearning` reuses the exact same
+  underlying ladder state (forced to Stabilizing) that `lost` produces —
+  leaving it uncapped would reopen precisely the contradiction that
+  earlier decision closed, just reachable by a different route (two
+  Stabilizing fails instead of a manual run-through flag) that happened to
+  not exist yet when that cap was first built.
+- **Value, confirmed with the user:** same 20 as `lost`, not a distinct
+  number — functionally the same state, so no reason to invent a third
+  tier. Combined with any `flag` cap via `Math.min` of both, so a chunk
+  carrying both `flag: 'rough'` and `needsRelearning: true` at once (not
+  reachable through the shipped UI today, but not prevented by the data
+  model either) shows the stricter of the two rather than one silently
+  overriding the other.
+- **Verified live, not just unit-tested**: manually forced a chunk into
+  `needsRelearning` in the browser, set a manual confidence override of
+  90, and confirmed the displayed number stayed at 20 — see the browser
+  verification note in [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built).
+
 **Decision: the old free-standing "how did it feel" 3-tap effectiveness
 input (`EFFECTIVENESS_OPTIONS`) is removed, folded into a single "needs
 more work" checkbox that overrides the objective pass/soft-miss/fail

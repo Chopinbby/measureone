@@ -322,11 +322,17 @@ below.
   chunks get a small boost (already-familiar material).
 
 `computeConfidence()` wraps this and short-circuits entirely if
-`progress[chunkId].manualConfidence` is set. After that (manual or auto), a
-rough/lost `progress[chunkId].flag` — set from the Piece Map's post-run-through
+`progress[chunkId].manualConfidence` is set. After that (manual or auto), two
+independent caps can pull the result down further, combined via `Math.min`
+of whichever apply (a chunk could in principle carry both at once):
+a rough/lost `progress[chunkId].flag` — set from the Piece Map's post-run-through
 flag cycle, [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)
-— caps the result: `Math.min(score, 55)` for rough, `Math.min(score, 20)`
-for lost. Applied even on top of a manual override, so a stale "I know
+— caps at `Math.min(score, 55)` for rough, `Math.min(score, 20)` for lost;
+and `progress[chunkId].needsRelearning` (Pass 11) caps at `Math.min(score, 20)`,
+the same value as `lost` since it's the same underlying ladder state
+(forced to Stabilizing) reached a different way — see
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built).
+Both caps apply even on top of a manual override, so a stale "I know
 better than the algorithm" value from before the flag landed can't hide
 it. Every caller of `computeConfidence` (Overview, Progress, Piece Map,
 Analytics, the Today checklist, `FocusPanel`) gets this for free, since
@@ -411,9 +417,30 @@ Settling → Holding stages:
   same magnitude as the other two steps, not the steeper pullback an
   earlier design sketch had), demotes exactly one stage (never below
   Stabilizing), and — specifically for a *second consecutive* fail while
-  still in Stabilizing — sets `needsRelearning: true` on the result. That
-  flag is not read anywhere yet; see
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages).
+  still in Stabilizing — turns on `needsRelearning`. As of Pass 11 this is
+  a **persisted, sticky boolean**, not just a per-call informational
+  return value: `computeLadderAdvance` reads it back in via
+  `chunkLadderState.needsRelearning` on every call, so once set it stays
+  set across subsequent sessions until either 4 consecutive full passes
+  graduate the chunk out of Stabilizing (the pass branch clears it
+  automatically) or a manual override does (`handleClearRelearning`,
+  `App.jsx`). The exact fail that turns it on also does two more things in
+  the same call, only on that one transition — not reapplied on later
+  fails while already flagged: `nextDueDate` pins to `outcome.asOfDate`
+  (reusing `applyRunThroughFlag`'s `lost` pin-to-today semantics inline,
+  since that function itself deliberately never touches
+  `practiceBPM`/`consecutiveStabilizingFails`), and `practiceBPM` resets
+  to the caller-supplied `chunkLadderState.suggestedStartingBPM`
+  (`getSuggestedStartingBPM(piece, chunk)`, concept 1 below) instead of
+  the normal −2 step, when that suggestion is available — a piece with no
+  target BPM configured has nothing to suggest, so `computeLadderAdvance`
+  falls back to the ordinary step in that case rather than resetting to
+  nothing. While flagged, `computeTimeline` and `computeDueReviews` both
+  skip the chunk outright — see
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built)
+  for the full four-rule design and
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for why each
+  rule landed where it did.
 - **Holding's review interval** starts at `startIntervalDays` (default
   14) and grows by the same 0.6×/1×/1.4× effectiveness multiplier
   [Adaptive review](#adaptive-review) uses, raised to the power of the
@@ -480,6 +507,16 @@ to avoid:
      and as a one-line note ("Suggested starting tempo: N BPM — choose
      whatever tempo lets you play accurately and comfortably, slower is
      fine") that disappears the moment a real session exists.
+   - As of Pass 11, `ChecklistItem` also resolves this value **unconditionally**
+     (every render, not just first encounter) and threads it through
+     `sessionInput.suggestedStartingBPM` on every `onLogSession` call — a
+     second consumer beyond the first-encounter UI note above.
+     `needsRelearning`'s rule 4 (below, and
+     [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built))
+     needs this value the moment a chunk gets flagged, which can happen
+     long after its first encounter — `lib/ladder.js` has no `piece`/`chunk`
+     access to compute it itself, so the caller resolves it unconditionally
+     and passes it down, same pattern `targetBPM` already uses.
 2. **User-selected starting tempo** — whatever the learner actually logs
    the first time they touch a chunk, whether or not it matches the
    suggestion. `handleLogSession` (`App.jsx`) seeds `practiceBPM` from

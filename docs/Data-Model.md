@@ -178,8 +178,9 @@ ChunkProgress = {
                             // that only have `effectiveness` are read through
                             // lib/confidence.js's sessionOutcome(), not migrated in place.
                             // ladderSnapshot ({ stage, consecutivePasses,
-                            // consecutiveStabilizingFails, practiceBPM, nextDueDate, tier1Done } |
-                            // undefined, Pass 10) — the six ladder fields below, captured as they
+                            // consecutiveStabilizingFails, practiceBPM, nextDueDate, tier1Done,
+                            // needsRelearning } | undefined, Pass 10, needsRelearning added Pass 11)
+                            // — the seven ladder fields below, captured as they
                             // stood immediately BEFORE this session was logged. Stored per-session
                             // (not on the chunk entry) so same-day multi-session logging keeps
                             // each session's own "before" picture distinct — same
@@ -189,7 +190,12 @@ ChunkProgress = {
                             // an earlier session while a later one still stands would silently
                             // erase that later session's effects, so that case (and any session
                             // logged before this field existed, which carries no snapshot) falls
-                            // back to removing the record only. See
+                            // back to removing the record only. The validity check that gates this
+                            // restore still only requires the original six fields (not
+                            // needsRelearning) — a snapshot missing needsRelearning entirely (any
+                            // session logged before Pass 11) restores it as false rather than
+                            // failing validation, since false was correct for every such snapshot
+                            // anyway (the flag didn't exist yet to be true). See
                             // Decisions.md#spaced-repetition--maintenance.
   currentBPM,               // number | undefined — last logged tempo (what was actually played)
   targetBPM,                // number | undefined — explicit per-chunk override;
@@ -210,7 +216,9 @@ ChunkProgress = {
                               // Also caps computeConfidence's result (55 for rough, 20 for lost,
                               // applied after either the manual or auto branch) so a flagged
                               // chunk can't show stale-high confidence anywhere it's displayed —
-                              // see Algorithms.md#confidence. Indirectly affects
+                              // see Algorithms.md#confidence. `needsRelearning` below caps the same
+                              // way (also 20) via a completely separate field — the two caps combine
+                              // via Math.min rather than either overriding the other. Indirectly affects
                               // computeProgressTier too, via the `stage` demotion above rather
                               // than reading `flag` itself — a flagged chunk drops a Practice
                               // Progress tier on Overview through the same mechanism, not a
@@ -261,11 +269,32 @@ ChunkProgress = {
   consecutiveStabilizingFails, // number, default 0 — fails logged back-to-back while
                                 // stage === 'stabilizing'. Distinct from consecutivePasses, which
                                 // only counts passes and can't tell a 1st fail from a 2nd (a fail
-                                // always resets it to 0). Drives lib/ladder.js's needsRelearning
-                                // signal ("this was never actually consolidated" — two Stabilizing
-                                // fails in a row) — confirmed NOT wired to Revival (chunk-scoped,
-                                // Revival's triggers are piece-wide); currently just a data flag
-                                // nothing reads. See Decisions.md.
+                                // always resets it to 0). Drives needsRelearning below: hitting 2
+                                // sets it. Reset to 0 by any pass, and also by a manual
+                                // needsRelearning clear (handleClearRelearning, App.jsx) — see that
+                                // field for why the manual clear needed this too.
+  needsRelearning,             // boolean, default false — the "this was never actually
+                                // consolidated" re-learning signal (Pass 11), set the moment
+                                // consecutiveStabilizingFails hits 2. Unlike stage/practiceBPM/etc,
+                                // this is a STICKY flag: computeLadderAdvance reads it back in via
+                                // chunkLadderState.needsRelearning on every call and carries it
+                                // forward unchanged (fail or soft-miss) until either a graduating
+                                // pass clears it automatically or a manual clear
+                                // (handleClearRelearning, App.jsx — resets consecutiveStabilizingFails
+                                // to 0 too, confirmed with the user, so a manual clear doesn't leave
+                                // the chunk one fail away from instantly re-flagging) clears it by
+                                // hand. While true: computeTimeline (lib/scheduling.js) and
+                                // computeDueReviews (lib/maintenance.js) both skip this chunk
+                                // outright, regardless of nextDueDate — see nextDueDate below;
+                                // computeConfidence caps displayed confidence at 20, same value and
+                                // mechanism as a 'lost' flag (see `flag` above), independently
+                                // combined via Math.min if both happen to be set. Confirmed NOT
+                                // wired to Revival — chunk-scoped, Revival's triggers are piece-wide.
+                                // User-facing label: "Needs reinforcement" (Piece Map grid icon +
+                                // chunk detail modal), deliberately never the word "lost," since the
+                                // material may never have been consolidated in the first place. See
+                                // Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built
+                                // and Decisions.md#spaced-repetition--maintenance.
   practiceBPM,                // number | null — the tempo the ladder is currently asking for on
                                // this chunk, distinct from targetBPM (the eventual goal). Seeded
                                // from whatever the learner actually logs the first time they touch
@@ -277,7 +306,11 @@ ChunkProgress = {
                                // fail) on every logged session — except a session with 3+ clean
                                // reps at a bpm above the current value jumps practiceBPM straight
                                // to that bpm instead (computeDemonstratedTempoBaseline,
-                               // lib/ladder.js), the third ("demonstrated") tempo concept.
+                               // lib/ladder.js), the third ("demonstrated") tempo concept. One more
+                               // exception (Pass 11): the exact fail that turns needsRelearning on
+                               // resets practiceBPM to getSuggestedStartingBPM instead of the normal
+                               // -2 step, when that suggestion is available (a piece with no target
+                               // BPM has nothing to suggest, so the normal step still applies then).
   nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
                                 // review, recomputed on every logged session. Load-bearing since
                                 // Pass 5: computeTimeline reads this directly to place the chunk's
@@ -288,6 +321,12 @@ ChunkProgress = {
                                 // lists in Master Agenda and the Today tab — the reason this field
                                 // was specified as a date rather than a plan-day int in the first
                                 // place. See Algorithms.md#whats-due--the-live-maintenance-query.
+                                // Both readers check needsRelearning FIRST and skip the chunk if
+                                // true, regardless of what this value holds — a flagged chunk's
+                                // nextDueDate still gets pinned to today the moment the flag turns
+                                // on (see needsRelearning above), but that value is never actually
+                                // surfaced anywhere while the flag is set; it's what a manual clear
+                                // resumes review against.
   tier1Done,                   // boolean, default false — whether the one-time first-touch review
                                 // (Repertoire-Lifecycle.md's "Tier 1") has happened for this chunk.
                                 // Read/passed through unchanged by computeLadderAdvance; still

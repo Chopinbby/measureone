@@ -152,10 +152,16 @@ defined as every chunk reaching Holding, though nothing yet queries that
 roll-up. The live "what's due" query that works beyond the current plan's
 bounded length is built as of Pass 8 (`computeDueReviews` in
 `src/lib/maintenance.js`, surfaced in Master Agenda and the Today tab), as
-is post-run-through logging (stop count / rough-lost flag, Pass 6). Still
-not built: any editing UI for `ladderConfig`, a second Tier 1 rung, the
-"short structured re-learning pass" that would consume `needsRelearning`,
-and Stage 5 repertoire rotation. If you're about to touch scheduling, confidence,
+is post-run-through logging (stop count / rough-lost flag, Pass 6). The
+"short structured re-learning pass" that consumes `needsRelearning` is
+also now built (Pass 11) — two consecutive Stabilizing fails sets a
+persisted, sticky per-chunk flag that replaces review entirely (zero due
+reviews from either `computeTimeline` or `computeDueReviews` while set),
+exits on 4 consecutive passes or a manual override, reuses the `lost`
+demote-and-pin mechanism under the label "Needs reinforcement," and resets
+`practiceBPM` to `getSuggestedStartingBPM`. Still not built: any editing UI
+for `ladderConfig`, a second Tier 1 rung, and Stage 5 repertoire rotation.
+If you're about to touch scheduling, confidence,
 or the practice-logging UI, check
 [`docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
 first — this mechanism is now live, not a future replacement to design

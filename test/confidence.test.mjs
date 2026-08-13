@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { getSuggestedStartingBPM } from "../src/lib/confidence.js";
+import { getSuggestedStartingBPM, computeConfidence } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
   return { id: "c1", start: 1, end: 8, difficultyLabel: "medium", ...overrides };
@@ -102,5 +102,51 @@ describe("user-selected starting tempo overrides the suggestion (mirrors App.jsx
     const bpmThisSession = 50;
     const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : bpmThisSession;
     assert.equal(seededPracticeBPM, 45);
+  });
+});
+
+// needsRelearning (Pass 11) gets the same confidence cap treatment as
+// rough/lost flags (Repertoire-Lifecycle.md's "Post-run-through logging")
+// — same reasoning: it reuses the `lost` demote-and-pin mechanism under
+// the hood, so a stale manual override showing high confidence while a
+// chunk needs reinforcement would be the exact "visible contradiction" the
+// cap exists to prevent.
+describe("computeConfidence — flag and needsRelearning caps", () => {
+  test("a manual override of 90 is capped at 55 while flag is 'rough'", () => {
+    const piece = makePiece({ progress: { c1: { manualConfidence: 90, flag: "rough" } } });
+    assert.equal(computeConfidence(makeChunk(), piece, 1), 55);
+  });
+
+  test("a manual override of 90 is capped at 20 while flag is 'lost'", () => {
+    const piece = makePiece({ progress: { c1: { manualConfidence: 90, flag: "lost" } } });
+    assert.equal(computeConfidence(makeChunk(), piece, 1), 20);
+  });
+
+  test("a manual override of 90 is capped at 20 while needsRelearning is true, same as 'lost'", () => {
+    const piece = makePiece({ progress: { c1: { manualConfidence: 90, needsRelearning: true } } });
+    assert.equal(computeConfidence(makeChunk(), piece, 1), 20);
+  });
+
+  test("needsRelearning caps the auto-computed score too, not just a manual override", () => {
+    const withoutFlag = makePiece({ progress: { c1: { manualConfidence: 75 } } });
+    assert.equal(computeConfidence(makeChunk(), withoutFlag, 1), 75, "sanity check: no cap applies without the flag");
+
+    const flagged = makePiece({ progress: { c1: { manualConfidence: 75, needsRelearning: true } } });
+    assert.equal(computeConfidence(makeChunk(), flagged, 1), 20);
+  });
+
+  test("a lower score than the cap passes through unchanged — the cap only ever pulls down", () => {
+    const piece = makePiece({ progress: { c1: { manualConfidence: 5, needsRelearning: true } } });
+    assert.equal(computeConfidence(makeChunk(), piece, 1), 5);
+  });
+
+  test("both flag='rough' and needsRelearning set at once: the lower of the two caps wins", () => {
+    const piece = makePiece({ progress: { c1: { manualConfidence: 90, flag: "rough", needsRelearning: true } } });
+    assert.equal(computeConfidence(makeChunk(), piece, 1), 20, "needsRelearning's cap (20) is stricter than rough's (55)");
+  });
+
+  test("clearing needsRelearning removes the cap again", () => {
+    const piece = makePiece({ progress: { c1: { manualConfidence: 90, needsRelearning: false } } });
+    assert.equal(computeConfidence(makeChunk(), piece, 1), 90);
   });
 });

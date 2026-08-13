@@ -504,11 +504,10 @@ to avoid:
    `classifySessionOutcome`'s own "manualFail always wins" precedent. The
    "3 perfect reps" threshold (`DEMONSTRATED_TEMPO_MIN_CLEAN_REPS`) is a
    fixed product-spec number, deliberately independent of
-   `REQUIRED_REPS`'s per-difficulty pass threshold (3/4/5) — this
-   codebase has no separate "perfect rep" concept from a "clean rep"
-   (`session.cleanReps`), so the two are treated as the same thing; see
-   [Decisions.md](Decisions.md#spaced-repetition--maintenance) for this
-   flagged as an assumption rather than a confirmed definition.
+   `REQUIRED_REPS`'s per-difficulty pass threshold (3/4/5). **Confirmed with
+   the user: "perfect rep" means "clean rep"** (`session.cleanReps`) — not a
+   stricter, separate concept this codebase would need to introduce. See
+   [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 All future goal calculations — the tempo floor a stage gates on
 (`clearsStageFloor`), the next ratchet step, what `ChecklistItem` shows as

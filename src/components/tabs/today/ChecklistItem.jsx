@@ -62,7 +62,12 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   // there's no user-selected starting tempo (practiceBPM) or session history
   // to fall back on — the one moment the suggested-tempo note below is shown.
   const isFirstEncounter = practiceBPM == null && (entry.sessions || []).length === 0;
-  const suggestedStartingBPM = isFirstEncounter ? getSuggestedStartingBPM(piece, chunk) : null;
+  // Computed unconditionally (not just isFirstEncounter-gated like the
+  // note below) — handleLogSession (App.jsx) also needs this value for
+  // needsRelearning's rule 4 (Decisions.md#spaced-repetition--maintenance):
+  // a chunk can be flagged for re-learning well past its first encounter,
+  // and the tempo it resets to at that moment is this same suggestion.
+  const suggestedStartingBPM = getSuggestedStartingBPM(piece, chunk);
 
   const submitLog = () => {
     if (!canLog) return;
@@ -79,7 +84,7 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
       manualFail,
       previousOutcome,
     });
-    onLogSession(chunk.id, day, { cleanReps, bpm: bpmAttempted, outcome, durationSeconds, targetBPM });
+    onLogSession(chunk.id, day, { cleanReps, bpm: bpmAttempted, outcome, durationSeconds, targetBPM, suggestedStartingBPM });
     setReps("");
     setBpm("");
     setManualFail(false);

@@ -112,6 +112,20 @@ function backfillProgressLadderState(progress, startDate) {
       // needsRelearning) — distinct from consecutivePasses, which only
       // counts passes and can't tell a 1st fail from a 2nd.
       consecutiveStabilizingFails: entry.consecutiveStabilizingFails !== undefined ? entry.consecutiveStabilizingFails : 0,
+      // Persisted re-learning flag (Pass 11) — see lib/ladder.js's
+      // needsRelearning. Unlike the other fields above, a piece saved
+      // before this flag existed isn't backfilled to a blank default:
+      // consecutiveStabilizingFails has been persisted since Pass 1, so a
+      // piece already sitting at >=2 while still in Stabilizing gets the
+      // flag switched on retroactively here, matching
+      // Repertoire-Lifecycle.md's note that this was always possible once
+      // the counter existed. Only applies when `needsRelearning` itself
+      // isn't already present, so it can never override a value this pass
+      // (or a later manual clear) already wrote.
+      needsRelearning:
+        entry.needsRelearning !== undefined
+          ? entry.needsRelearning
+          : entry.stage === "stabilizing" && (entry.consecutiveStabilizingFails || 0) >= 2,
       practiceBPM: entry.practiceBPM !== undefined ? entry.practiceBPM : null,
       nextDueDate: entry.nextDueDate !== undefined ? entry.nextDueDate : null,
       tier1Done: entry.tier1Done !== undefined ? entry.tier1Done : false,

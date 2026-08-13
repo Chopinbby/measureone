@@ -211,6 +211,13 @@ describe("Two-consecutive-fails-in-Stabilizing signal", () => {
     assert.equal(second.needsRelearning, true);
   });
 
+  test("the flag pins nextDueDate to the logging date itself (the reused 'lost' demote-and-pin), not a normal 4-day Stabilizing interval", () => {
+    const first = computeLadderAdvance(baseState(), { result: "fail", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(first.nextDueDate, "2026-01-05", "an ordinary Stabilizing fail still uses the 4-day cadence");
+    const second = computeLadderAdvance(first, { result: "fail", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(second.nextDueDate, "2026-01-05", "the fail that sets the flag pins to today instead");
+  });
+
   test("a pass in between resets the Stabilizing fail streak", () => {
     const afterFail = computeLadderAdvance(baseState(), { result: "fail", asOfDate: "2026-01-01" }, LADDER_CONFIG);
     const afterPass = computeLadderAdvance(afterFail, { result: "pass", asOfDate: "2026-01-05" }, LADDER_CONFIG);
@@ -226,6 +233,93 @@ describe("Two-consecutive-fails-in-Stabilizing signal", () => {
   test("needsRelearning never fires for fails outside Stabilizing", () => {
     const r = computeLadderAdvance(baseState({ stage: "holding", consecutiveStabilizingFails: 5 }), { result: "fail", asOfDate: "2026-01-01" }, LADDER_CONFIG);
     assert.equal(r.needsRelearning, false);
+  });
+});
+
+// Pass 11 — the four re-learning rules
+// (docs/Decisions.md#spaced-repetition--maintenance). The flag stopped
+// being a per-call informational return and became persisted, sticky
+// state read back in via chunkLadderState.needsRelearning.
+describe("needsRelearning: stickiness and the dual exit (rule 2)", () => {
+  test("the flag persists across a subsequent soft-miss — neither set nor cleared by one", () => {
+    const flagged = baseState({ needsRelearning: true, consecutiveStabilizingFails: 2 });
+    const r = computeLadderAdvance(flagged, { result: "soft-miss", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(r.needsRelearning, true);
+  });
+
+  test("the flag persists across a non-graduating pass", () => {
+    const flagged = baseState({ needsRelearning: true, consecutivePasses: 0 });
+    const r = computeLadderAdvance(flagged, { result: "pass", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(r.consecutivePasses, 1);
+    assert.equal(r.needsRelearning, true, "one pass is not four — still rebuilding");
+  });
+
+  test("the flag persists across further fails while already flagged", () => {
+    const flagged = baseState({ needsRelearning: true, consecutiveStabilizingFails: 2 });
+    const r = computeLadderAdvance(flagged, { result: "fail", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(r.needsRelearning, true);
+    assert.equal(r.consecutiveStabilizingFails, 3);
+  });
+
+  test("4 consecutive full passes graduate out of Stabilizing and clear the flag automatically", () => {
+    let state = baseState({ needsRelearning: true, consecutiveStabilizingFails: 2, consecutivePasses: 0, practiceBPM: 40 });
+    const flagAfterEach = [];
+    for (let i = 0; i < 4; i++) {
+      state = computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+      flagAfterEach.push(state.needsRelearning);
+    }
+    assert.deepEqual(flagAfterEach, [true, true, true, false], "clears only on the 4th (graduating) pass");
+    assert.equal(state.stage, "settling");
+    assert.equal(state.graduated, true);
+  });
+
+  test("a graduation out of Settling does not spuriously clear a flag (the flag can only live in Stabilizing anyway)", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "settling", consecutivePasses: 3, practiceBPM: 70, targetBPM: 100, needsRelearning: true }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "holding");
+    assert.equal(r.needsRelearning, true, "only a Stabilizing graduation is the documented auto-exit");
+  });
+
+  test("an absent needsRelearning on the incoming state is read as false, not undefined", () => {
+    const { needsRelearning, ...noFlag } = baseState();
+    const r = computeLadderAdvance(noFlag, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(r.needsRelearning, false);
+  });
+});
+
+describe("needsRelearning: practiceBPM resets to the suggested starting tempo (rule 4)", () => {
+  test("practiceBPM jumps to suggestedStartingBPM the moment the flag is set, not the normal -2 fail step", () => {
+    const first = computeLadderAdvance(
+      baseState({ practiceBPM: 92, suggestedStartingBPM: 55 }),
+      { result: "fail", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(first.needsRelearning, false);
+    assert.equal(first.practiceBPM, 90, "first fail is still just the ordinary -2 step");
+
+    const second = computeLadderAdvance(
+      { ...first, suggestedStartingBPM: 55, targetBPM: 100 },
+      { result: "fail", asOfDate: "2026-01-05" },
+      LADDER_CONFIG
+    );
+    assert.equal(second.needsRelearning, true);
+    assert.equal(second.practiceBPM, 55, "the flagging fail resets to the suggestion outright");
+  });
+
+  test("the reset is not reapplied on later fails while already flagged — the ordinary -2 step resumes", () => {
+    const flagged = baseState({ needsRelearning: true, consecutiveStabilizingFails: 2, practiceBPM: 60, suggestedStartingBPM: 55 });
+    const r = computeLadderAdvance(flagged, { result: "fail", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(r.practiceBPM, 58);
+  });
+
+  test("with no suggestedStartingBPM supplied, the flagging fail falls back to the normal step rather than writing null", () => {
+    const first = computeLadderAdvance(baseState({ practiceBPM: 92 }), { result: "fail", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    const second = computeLadderAdvance(first, { result: "fail", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(second.needsRelearning, true);
+    assert.equal(second.practiceBPM, 88);
   });
 });
 

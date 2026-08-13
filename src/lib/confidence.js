@@ -164,14 +164,29 @@ export function computeAutoConfidence(chunk, piece, currentDay) {
 // 'rough' forces at most "Developing".
 const FLAG_CONFIDENCE_CAP = { rough: 55, lost: 20 };
 
+// needsRelearning (Repertoire-Lifecycle.md's "The short structured
+// re-learning pass") gets the same treatment, for the same reason: it
+// reuses the `lost` demote-and-pin mechanism under the hood
+// (lib/ladder.js's computeLadderAdvance fail branch), so a stale manual
+// override showing high confidence while a chunk sits flagged for
+// reinforcement would be exactly the same "visible contradiction" the
+// rough/lost cap exists to prevent. Same cap value as 'lost' — it's the
+// same underlying ladder state (forced to Stabilizing), just reached via a
+// different route (two Stabilizing fails, not a manual run-through flag).
+// Independent of `entry.flag`: a chunk could in principle carry both, and
+// the lower of the two applicable caps should win either way.
+const NEEDS_RELEARNING_CONFIDENCE_CAP = 20;
+
 export function computeConfidence(chunk, piece, currentDay) {
   const entry = piece.progress[chunk.id] || {};
   const score =
     entry.manualConfidence !== undefined && entry.manualConfidence !== null
       ? clamp(Math.round(entry.manualConfidence), 0, 100)
       : computeAutoConfidence(chunk, piece, currentDay);
-  const cap = FLAG_CONFIDENCE_CAP[entry.flag];
-  return cap !== undefined ? Math.min(score, cap) : score;
+  const caps = [FLAG_CONFIDENCE_CAP[entry.flag], entry.needsRelearning ? NEEDS_RELEARNING_CONFIDENCE_CAP : undefined].filter(
+    (c) => c !== undefined
+  );
+  return caps.length ? Math.min(score, ...caps) : score;
 }
 
 // What computeConfidence would have returned if evaluated on a past plan-day:

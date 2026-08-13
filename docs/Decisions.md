@@ -630,19 +630,16 @@ the full mechanics.**
   `lib/ladder.js`) — new. 3+ clean reps at a bpm above the chunk's current
   `practiceBPM`, on a `pass` or `soft-miss` outcome (never `fail`),
   replaces the baseline outright instead of the usual +2 incremental step.
-  **Open terminology assumption, flagged rather than resolved**: the
-  product spec's "3 perfect reps" has no existing definition in this
-  codebase distinct from a "clean rep" (`session.cleanReps`), so the two
-  are treated as identical. If "perfect" was meant to mean something
-  stricter (zero mistakes of any kind, not just "clean" per the existing
-  rubric), this equivalence needs revisiting — nothing in the current data
-  model captures a finer-grained per-rep quality signal to fall back on
-  instead.
+  **Confirmed with the user: "perfect rep" means "clean rep"**
+  (`session.cleanReps`) — not a stricter, separate concept. The equivalence
+  this codebase already used (no finer-grained per-rep quality signal
+  exists in the data model) was the correct reading, not just a stand-in
+  for a missing one.
 - **Consequence:** the re-learning design's rule 4 (resetting a chunk's
-  tempo to "whatever it would start at during introduction") should reset
-  to the *suggestion* (concept 1) specifically, now that it's cleanly
-  separated from the learner's actual baseline — still Pass 14 scope, not
-  built here.
+  tempo to "whatever it would start at during introduction") resets to the
+  *suggestion* (concept 1) specifically, now that it's cleanly separated
+  from the learner's actual baseline — built in Pass 11, not Pass 14 as
+  this entry originally expected; see the `needsRelearning` decision below.
 
 **Decision: stage lengths, graduation pass-counts, tempo floors, and
 practiceBPM ratchet step sizes (`ladderConfig.bpmSteps`) are all stored as
@@ -717,15 +714,13 @@ auto-trigger condition.**
   since a fail always resets it to 0. Added to the migration in
   `storage.js` and `Wizard.jsx`'s `defaultPiece()` alongside the ladder
   engine build. See [Data-Model.md](Data-Model.md#the-piece-object).
-- **Superseded in part:** the "what should read this flag" question above
-  is now largely answered — see the next entry. Still not built.
+- **Superseded:** the "what should read this flag" question above is now
+  answered and built — see the next entry.
 
-**Decision (scoped, not built): what the `needsRelearning` signal should
-actually do — four rules, agreed with the user.**
+**Decision: what the `needsRelearning` signal should actually do — four
+rules, agreed with the user. Built in Pass 11.**
 
-Answers the question the entry above deliberately left open. Nothing here
-is implemented; this is the design a future pass should start from rather
-than re-deriving it.
+Answers the question the entry above deliberately left open.
 
 - **1. Re-learning *replaces* review, never runs alongside it.** Confirmed
   with the user, whose reasoning is the rule worth keeping: *"it's either
@@ -735,7 +730,11 @@ than re-deriving it.
   state it must produce **no due reviews at all** — both `computeTimeline`'s
   review placement and `computeDueReviews` (`lib/maintenance.js`) have to
   skip it. Worth stating explicitly, since "leave the reviews running too"
-  is the easy accidental implementation.
+  is the easy accidental implementation. **Built**: `progress[id].needsRelearning`
+  is now a persisted, sticky boolean (set the moment the fail streak hits
+  2, carried forward across subsequent calls via `computeLadderAdvance`'s
+  `chunkLadderState.needsRelearning` input) — both `computeTimeline`'s Tier
+  2 loop and `computeDueReviews` check it first and skip the chunk outright.
 - **2. Exit is dual — the normal graduation rule *or* a manual override.**
   No special exit criterion is needed. Stabilizing already graduates on 4
   consecutive full passes and is the **only** stage with no tempo floor
@@ -746,30 +745,45 @@ than re-deriving it.
   automatic-with-a-manual-escape-hatch pattern (`manualConfidence` over
   `computeAutoConfidence` — see
   [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch)).
+  **Built**: `computeLadderAdvance`'s pass branch clears the flag itself
+  when a graduation-out-of-Stabilizing pass fires; `handleClearRelearning`
+  (`App.jsx`) is the manual half — a direct field write, the same shape as
+  `handleSetManualConfidence`, no snapshot to restore. **Also resets
+  `consecutiveStabilizingFails` to 0**, confirmed with the user after the
+  fact: without this, the streak that triggered the flag (already at 2)
+  survives a manual clear, so the very next fail reads as fail #3 (still
+  `>= 2`) and re-flags instantly instead of behaving like an ordinary
+  single fail. The automatic exit path needs no equivalent fix — any real
+  pass already resets the streak to 0 on its own, so by the time 4 of them
+  graduate a chunk out, the streak has long since been at 0 regardless.
 - **3. Reuse the `lost` mechanism, but never show the user that word.**
   Functionally this lands a chunk in the same state Pass 6's manual `lost`
   flag already produces (forced to Stabilizing, `nextDueDate` pinned to
-  today — `applyRunThroughFlag`, `lib/ladder.js`), so the mechanism is
-  reused rather than duplicated. The **label must differ**: "lost" asserts
-  the material was once held, which is false in the common case where this
-  fires during initial learning and the chunk was never consolidated at
-  all. A history-agnostic label ("needs extra review" or similar) stays
-  honest across both histories this signal can have — never consolidated,
-  or once solid and since decayed all the way back down. Exact wording not
-  chosen.
-- **4. The practice tempo resets — agreed in principle, currently blocked.**
-  A rebuilding chunk should restart at a genuinely slow tempo rather than
-  keep its ratcheted `practiceBPM` (two fails step it down only 4 BPM in
-  total, nowhere near "start over"). Intended target: whatever tempo the
-  chunk would start at during introduction. **No such tempo exists today**
-  — see the new open question below. Agreed in principle, not
-  implementable until that gap is closed.
-- **Still open:** the exact user-facing wording for rule 3, and rule 4's
-  blocking dependency.
-- **Not built** — recorded ahead of implementation, the same way the ladder
-  design was recorded before Pass 1 and the maintenance-UI design before
-  Pass 8. See
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
+  today), so the mechanism is reused (the fail branch pins `nextDueDate` to
+  `outcome.asOfDate` at the moment the flag turns on) rather than calling
+  `applyRunThroughFlag` itself — reusing that function directly wasn't
+  possible without also clobbering `consecutiveStabilizingFails`/
+  `practiceBPM`, which it deliberately never touches (see Post-run-through
+  logging above), so `computeLadderAdvance`'s own fail branch reproduces
+  just the pin-to-today part inline instead. **Label, confirmed with the
+  user: "Needs reinforcement"** — history-agnostic, reads correctly whether
+  the chunk was once solid and decayed, or never consolidated in the first
+  place. Surfaced on the Piece Map: a small icon on the grid cell, plus a
+  labeled row with a "Clear, resume review" button in the chunk detail
+  modal (`PieceMapTab.jsx`) — the rule-2 manual override control.
+- **4. The practice tempo resets.** A rebuilding chunk restarts at a
+  genuinely slow tempo rather than keeping its ratcheted `practiceBPM` (two
+  fails step it down only 4 BPM in total, nowhere near "start over").
+  **Built, now that Pass 9 closed the blocking gap**: resets to
+  `getSuggestedStartingBPM(piece, chunk)` (concept 1 of the three-concept
+  tempo split above) — the same moment `needsRelearning` turns on, not
+  reapplied on later fails while already flagged. `getSuggestedStartingBPM`
+  needs the full `piece`/`chunk`, which `lib/ladder.js` doesn't have, so —
+  same pattern as `targetBPM` — the caller resolves it: `ChecklistItem.jsx`
+  computes it unconditionally (not just on first encounter) and passes it
+  through `sessionInput.suggestedStartingBPM` to `handleLogSession`.
+- Built in Pass 11. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages).
 
 **Decision: the old free-standing "how did it feel" 3-tap effectiveness
 input (`EFFECTIVENESS_OPTIONS`) is removed, folded into a single "needs

@@ -21,13 +21,15 @@
 /*  signal below has something to count from (consecutivePasses alone  */
 /*  can't tell a 1st fail from a 2nd — a fail always resets it to 0).   */
 /*                                                                     */
-/*  needsRelearning is deliberately just a flag on the returned state, */
-/*  not a trigger into anything: it isn't one of Revival's three       */
-/*  documented auto-trigger conditions (all piece-wide — stop count,   */
-/*  a lost combo/chunks, 60+ days untouched), and this signal is       */
-/*  chunk-scoped, not piece-scoped, so folding it into Revival wasn't  */
-/*  part of that design. Confirmed with the user while building this;  */
-/*  see Decisions.md#spaced-repetition--maintenance.                   */
+/*  needsRelearning is a persisted, sticky flag (Pass 11) — once a fail   */
+/*  turns it on, it stays on across subsequent calls (passed back in via  */
+/*  chunkLadderState.needsRelearning) until either the normal 4-pass      */
+/*  Stabilizing graduation clears it or the caller applies a manual       */
+/*  override (App.jsx). It still isn't one of Revival's three documented  */
+/*  auto-trigger conditions (all piece-wide — stop count, a lost          */
+/*  combo/chunks, 60+ days untouched); this signal stays chunk-scoped, so */
+/*  folding it into Revival isn't part of that design. Confirmed with the */
+/*  user while building this; see Decisions.md#spaced-repetition--maintenance. */
 /* ------------------------------------------------------------------ */
 
 export const STAGES = ["stabilizing", "settling", "holding"];
@@ -130,12 +132,9 @@ function addDaysISO(dateStr, days) {
 // `minCleanReps` (3) is a fixed threshold from the product spec — 3
 // consecutive "perfect" reps at a higher tempo — deliberately independent
 // of REQUIRED_REPS' per-difficulty pass threshold (constants.js: 3/4/5).
-// This codebase doesn't have a separate "perfect rep" concept from a
-// "clean rep" (`session.cleanReps`, classifySessionOutcome's own
-// vocabulary throughout lib/confidence.js) — the spec's "perfect rep" is
-// treated as the same thing, since no stricter existing definition exists
-// to reuse instead. Flagged in the PR write-up as an assumption, not
-// silently invented from scratch.
+// Confirmed with the user: "perfect rep" means "clean rep"
+// (`session.cleanReps`, classifySessionOutcome's own vocabulary throughout
+// lib/confidence.js) — not a stricter, separate concept.
 //
 // Applies on both 'pass' and 'soft-miss' outcomes — both log a real
 // cleanReps count, and a soft-miss can still legitimately demonstrate a
@@ -199,6 +198,15 @@ export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
 //   targetBPM,                    // number | null — the chunk's actual tempo goal, used to
 //                                 // turn ladderConfig's fraction-based floors into a BPM value
 //   tier1Done,                    // boolean — read/passed through only, not used by this fn
+//   needsRelearning,              // boolean — persisted re-learning flag (Pass 11), read back in
+//                                 // so it stays set across calls until graduation or a manual
+//                                 // override clears it. Defensively treated as false if absent.
+//   suggestedStartingBPM,         // number | null — caller-resolved getSuggestedStartingBPM
+//                                 // result (lib/confidence.js), needed here only for the instant
+//                                 // a fail newly sets needsRelearning (rule 4: practiceBPM resets
+//                                 // to this value then, not the normal -2 step). Computing it
+//                                 // requires the full piece/chunk, which this pure module doesn't
+//                                 // have — same reason targetBPM above is caller-resolved.
 // }
 // outcome = {
 //   result,        // 'pass' | 'soft-miss' | 'fail' — already classified by the caller
@@ -215,21 +223,41 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   const stage = STAGES.includes(chunkLadderState.stage) ? chunkLadderState.stage : "stabilizing";
   const consecutivePasses = chunkLadderState.consecutivePasses || 0;
   const consecutiveStabilizingFails = chunkLadderState.consecutiveStabilizingFails || 0;
-  const { practiceBPM, targetBPM, tier1Done } = chunkLadderState;
+  const wasFlagged = !!chunkLadderState.needsRelearning;
+  const { practiceBPM, targetBPM, tier1Done, suggestedStartingBPM } = chunkLadderState;
 
   if (outcome.result === "fail") {
     const newStage = demote(stage);
     const newFailStreak = stage === "stabilizing" ? consecutiveStabilizingFails + 1 : 0;
+    // Rule 1 (Decisions.md#spaced-repetition--maintenance): the signal
+    // fires exactly once, on the fail that pushes the streak to 2 while
+    // already in Stabilizing — not re-fired on every fail thereafter.
+    const becomesFlagged = !wasFlagged && stage === "stabilizing" && newFailStreak >= 2;
+    const newNeedsRelearning = wasFlagged || becomesFlagged;
     return {
       stage: newStage,
       consecutivePasses: 0,
       consecutiveStabilizingFails: newFailStreak,
-      practiceBPM: stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.fail),
-      nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, 0, outcome.effectiveness)),
+      // Rule 4: practiceBPM resets to the suggested starting tempo at the
+      // exact moment the flag turns on, instead of the normal -2 step —
+      // never re-applied on later fails while already flagged.
+      practiceBPM:
+        becomesFlagged && suggestedStartingBPM != null
+          ? suggestedStartingBPM
+          : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.fail),
+      // Rule 3: reuses applyRunThroughFlag's 'lost' pin-to-today semantics
+      // at the moment of flagging (newStage is already 'stabilizing' here,
+      // since only a fail already in Stabilizing can trigger this) —
+      // functionally moot once the flag is on (computeTimeline/
+      // computeDueReviews skip it regardless), but keeps the persisted
+      // date consistent with what a manual clear would resume against.
+      nextDueDate: becomesFlagged
+        ? outcome.asOfDate
+        : addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, 0, outcome.effectiveness)),
       tier1Done,
       graduated: false,
       demoted: true,
-      needsRelearning: stage === "stabilizing" && newFailStreak >= 2,
+      needsRelearning: newNeedsRelearning,
     };
   }
 
@@ -250,7 +278,10 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
       tier1Done,
       graduated: false,
       demoted: false,
-      needsRelearning: false,
+      // Neither sets nor clears the flag — a soft-miss isn't a fail (so it
+      // can't trigger rule 1) and isn't a full pass (so it can't graduate
+      // rule 2's exit) — it just carries whatever was already there.
+      needsRelearning: wasFlagged,
     };
   }
 
@@ -278,6 +309,9 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
     tier1Done,
     graduated: shouldGraduate,
     demoted: false,
-    needsRelearning: false,
+    // Rule 2's auto exit: graduating out of Stabilizing (the only stage a
+    // flagged chunk can be in) clears the flag same as a manual override
+    // would. Any other pass just carries the flag through unchanged.
+    needsRelearning: stage === "stabilizing" && shouldGraduate ? false : wasFlagged,
   };
 }

@@ -2,7 +2,14 @@ import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
 import { formatRange, formatDuration } from "../../../lib/utils";
 import { ROLE_LABEL, DIFFICULTY_META, REQUIRED_REPS, SESSION_OUTCOME_META } from "../../../lib/constants";
-import { computeConfidence, suggestMethods, classifySessionOutcome, sessionOutcome, getDefaultTargetBPM } from "../../../lib/confidence";
+import {
+  computeConfidence,
+  suggestMethods,
+  classifySessionOutcome,
+  sessionOutcome,
+  getDefaultTargetBPM,
+  getSuggestedStartingBPM,
+} from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
 
 export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession, tempoLadder, memoryAnchor }) {
@@ -15,6 +22,23 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   // reachable rather than gated behind undoing the first.
   const sessionsToday = (entry.sessions || []).filter((s) => s.day === day);
   const session = sessionsToday[sessionsToday.length - 1];
+  // Honest undo copy (docs/Decisions.md's "session undo should fully
+  // reverse the ladder" entry): undo only fully reverses stage/tempo/
+  // nextDueDate when the session being undone is this chunk's most recent
+  // session *overall* (not just for `day`) and carries the ladderSnapshot
+  // handleLogSession seeds it with. Otherwise (an earlier session, or one
+  // logged before this pass existed) undo can only remove the record —
+  // mirrors App.jsx's handleUnlogSession fallback exactly, so the control
+  // never claims more than it will actually do.
+  const allSessions = entry.sessions || [];
+  const isLatestSessionOverall = allSessions.length > 0 && allSessions[allSessions.length - 1] === session;
+  const hasValidLadderSnapshot =
+    !!session &&
+    !!session.ladderSnapshot &&
+    ["stage", "consecutivePasses", "consecutiveStabilizingFails", "practiceBPM", "nextDueDate", "tier1Done"].every(
+      (key) => key in session.ladderSnapshot
+    );
+  const undoWillFullyReverse = isLatestSessionOverall && hasValidLadderSnapshot;
   const conf = computeConfidence(chunk, piece, day);
   const tips = suggestMethods(chunk, conf);
   const [reps, setReps] = useState("");
@@ -34,6 +58,11 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   const practiceBPM = entry.practiceBPM ?? null;
   const suggestedReps = REQUIRED_REPS[chunk.difficultyLabel];
   const outcomeMeta = session && SESSION_OUTCOME_META[sessionOutcome(session)];
+  // First encounter = nothing has ever been logged for this chunk yet, i.e.
+  // there's no user-selected starting tempo (practiceBPM) or session history
+  // to fall back on — the one moment the suggested-tempo note below is shown.
+  const isFirstEncounter = practiceBPM == null && (entry.sessions || []).length === 0;
+  const suggestedStartingBPM = isFirstEncounter ? getSuggestedStartingBPM(piece, chunk) : null;
 
   const submitLog = () => {
     if (!canLog) return;
@@ -61,7 +90,16 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   return (
     <div className={`checklist-item ${checked ? "checked" : ""}`}>
       {checked ? (
-        <button className="checklist-check" onClick={() => onUnlogSession(chunk.id, day)} aria-label="Undo most recent log">
+        <button
+          className="checklist-check"
+          onClick={() => onUnlogSession(chunk.id, day)}
+          aria-label={undoWillFullyReverse ? "Undo most recent log" : "Remove most recent log"}
+          title={
+            undoWillFullyReverse
+              ? "Undo: removes this log and reverses the tempo and schedule changes it caused."
+              : "Removes this log entry, but can't reverse tempo or schedule changes it already caused — a later session has been logged since, or this entry predates undo support."
+          }
+        >
           <Check size={13} />
         </button>
       ) : (
@@ -131,10 +169,24 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
               value={bpm}
               min={20}
               onCommit={(n) => setBpm(n)}
-              placeholder={practiceBPM != null ? String(practiceBPM) : targetBPM ? String(targetBPM) : "e.g. 88"}
+              placeholder={
+                practiceBPM != null
+                  ? String(practiceBPM)
+                  : suggestedStartingBPM != null
+                  ? String(suggestedStartingBPM)
+                  : targetBPM
+                  ? String(targetBPM)
+                  : "e.g. 88"
+              }
             />
           </label>
         </div>
+        {isFirstEncounter && suggestedStartingBPM != null && (
+          <p className="tip-line">
+            Suggested starting tempo: {suggestedStartingBPM} BPM — choose whatever tempo lets you play accurately and
+            comfortably, slower is fine.
+          </p>
+        )}
         <label className="fail-override-row">
           <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />
           <span>Needs more work (mark as a fail regardless of reps)</span>

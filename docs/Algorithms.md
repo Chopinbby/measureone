@@ -231,6 +231,47 @@ doesn't have to wait for a reload to get corrected). See
 [Decisions.md](Decisions.md#scheduling) for why this couldn't just stay a
 UI-only concern.
 
+## Import merge
+
+`mergeImportedPiece(existing, imported)` (`lib/storage.js`) merges a
+freshly-imported piece into the existing piece `findMatchingPiece` matched it
+to. Most fields follow `preferPresent`/`preferByRecency` (below); a few are
+handled separately and documented at their own field in
+[Data-Model.md](Data-Model.md#the-piece-object) — `progress` (per-chunk,
+per-session merge, see below), `sections`/`recordings`/`bpmZones`
+(additive by id, `mergeById`), `revival` (an active revival always wins over
+whatever the import has), and `id`/`createdAt` (never touched by a merge —
+the piece already exists).
+
+`preferByRecency(importedVal, existingVal, importIsStale)` governs
+everything else: `piece.status`, and — inside `mergeProgress` — a chunk's
+`currentBPM`/`targetBPM`/`manualConfidence`. `importIsStale` is computed once
+per merge in `mergeImportedPiece`, from each side's `updatedAt`
+(`typeof x.updatedAt === "number" ? x.updatedAt : 0` — a missing timestamp,
+i.e. a backup exported before this field existed, reads as 0 and is always
+stale against a piece that has a real one). When the import is stale, the
+preference direction flips: the existing value wins if both sides have one,
+the import only fills a gap the existing piece doesn't have — the same
+`preferPresent` logic as before, just with the two sides swapped. `merged.updatedAt`
+is set to `Math.max(importedUpdatedAt, existingUpdatedAt)`, so a stale
+import's own (older) timestamp can never make the merged piece look older
+than it actually is on a later comparison.
+
+**This is deliberately narrower than real conflict resolution.** It answers
+"is the import older than what's already here," not "which side actually has
+more practice history" — a chunk's *ladder* state (`stage`,
+`consecutivePasses`, `consecutiveStabilizingFails`, `practiceBPM`,
+`nextDueDate`, `tier1Done`) is untouched by this and still always keeps the
+existing piece's value unconditionally, same as before this fix (see
+[Decisions.md](Decisions.md#data-model)) — genuinely reconciling ladder state
+across two diverged copies needs either replaying merged session history or a
+real "choose which side to keep" UI, neither of which this builds. What this
+does fix: a plain older backup (the common case — re-importing your own
+earlier export, or accidentally re-importing an old file) can no longer
+silently revert `status` (e.g. un-pausing/un-archiving a piece) or a
+recently-logged `currentBPM`/`manualConfidence` with no warning in either
+direction.
+
 ## Adaptive review
 
 **Superseded as of Pass 5 of the maintenance-ladder build — kept in this
@@ -342,15 +383,30 @@ signal instead of reading as neutral.
 (`App.jsx`) on every logged session, implementing the Stabilizing →
 Settling → Holding stages:
 - **Full pass:** `practiceBPM` steps up (`ladderConfig.bpmSteps.pass`,
-  default +2); counts toward graduation only once `practiceBPM` clears
-  the current stage's tempo floor (Stabilizing has none; Settling/Holding
-  gate on a fraction of `targetBPM`) — the floor gates progress, not the
-  pass/fail judgment itself. Graduating resets the pass counter and moves
-  to the next stage (Holding has no ceiling — it just keeps accruing
-  passes, which drives its own escalating tempo floor and interval
-  growth, below).
+  default +2) — *unless* this session also clears the demonstrated-tempo
+  override below, in which case `practiceBPM` jumps straight to the
+  achieved bpm instead of stepping by +2. Counts toward graduation only
+  once `practiceBPM` clears the current stage's tempo floor (Stabilizing
+  has none; Settling/Holding gate on a fraction of `targetBPM`) — the
+  floor gates progress, not the pass/fail judgment itself, and is
+  evaluated against `practiceBPM` *before* this session's step/override.
+  Graduating resets the pass counter and moves to the next stage (Holding
+  has no ceiling — it just keeps accruing passes, which drives its own
+  escalating tempo floor and interval growth, below).
+  **Known gap, not yet fixed:** because the floor check runs against the
+  *pre-session* `practiceBPM`, a session whose demonstrated-tempo jump
+  would clearly clear the floor doesn't get credit toward graduation in
+  that same call — e.g. `practiceBPM` jumping 50→100 against a 70 floor
+  still evaluates the floor at 50 and fails it. Confirmed by direct
+  reproduction, not just inferred. Not corrupting — the chunk graduates
+  one session later than it should — but a real inconsistency between
+  "demonstrated tempo replaces the baseline outright" and "that same
+  session should also count toward graduation." See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - **Soft miss:** `practiceBPM` steps down (default −2), the pass counter
-  resets, stage does not change.
+  resets, stage does not change — unless this session also clears the
+  demonstrated-tempo override below, in which case `practiceBPM` still
+  jumps up despite the overall miss (see rationale below).
 - **Real fail:** `practiceBPM` steps down (default −2 — deliberately the
   same magnitude as the other two steps, not the steeper pullback an
   earlier design sketch had), demotes exactly one stage (never below
@@ -381,20 +437,138 @@ bounded `daysToLearn` window is built as of Pass 8 — see
 [What's due — the live maintenance query](#whats-due--the-live-maintenance-query)
 below.
 
-`handleLogSession` also seeds `practiceBPM` from whatever tempo was first
-attempted, the first time a chunk is logged (since there's no designed
-ladder-entry/Tier-1 mechanic yet to do this deliberately), and appends
-sessions keyed by a precise `loggedAt` timestamp rather than overwriting
-by plan-day — so logging the same chunk twice in one day (e.g. an early
-touch, then a later re-attempt) produces two distinct records instead of
-one silently replacing the other. `handleUnlogSession` removes only the
-most recently logged session for a day, not every session that day, and
-does not roll back the ladder state that session's outcome already
-advanced. **This is a scoped defect, not an accepted limitation** — the
-control reads as "this didn't happen" while the schedule keeps the change,
-so a mis-logged pass can push a chunk's `nextDueDate` weeks out and leave
-it there after the undo. The fix (a per-session snapshot, scoped to the
-most recent session) is designed but not built — see
+### Starting, suggested, and demonstrated tempo
+
+There are three distinct tempo concepts feeding `practiceBPM`, not one —
+an earlier version of this section conflated them into a single
+system-computed "starting tempo" that got written straight into
+`practiceBPM`, which is exactly the mistake this section now documents how
+to avoid:
+
+1. **Suggested starting tempo** — `getSuggestedStartingBPM(piece, chunk)`
+   (`lib/confidence.js`). A pure system recommendation from the chunk's
+   effective target BPM (`getDefaultTargetBPM`/`entry.targetBPM`) and
+   `difficultyLabel` alone. **Guidance only** — surfaced to the learner
+   (see below) but never written into `piece.progress` by anything.
+   - Formula: `suggested = base_d * (target / 100) ^ k_d`, a per-difficulty
+     diminishing-returns curve — `{ easy: {base: 75, k: 0.27}, medium:
+     {base: 60, k: 0.18}, hard: {base: 45, k: 0.12} }`. Replaces an
+     earlier flat-fraction formula (75%/65%/55% of target, at *every*
+     target) that scaled linearly and got unreasonable at high targets —
+     a 240 BPM "easy" chunk doesn't belong starting near 180. The
+     power-law shape keeps the suggestion growing far slower than target
+     as target increases (sub-linear, `k < 1`), while still landing on a
+     round, sensible number right at a 100 BPM target where `k` has no
+     effect (`base` itself). Hand-fit against four product-supplied
+     calibration points, not derived from a study — same status as every
+     other tunable constant in this codebase (see
+     [Research.md](Research.md)):
+     | target BPM | easy | medium | hard |
+     |---|---|---|---|
+     | 100 | 75 | 60 | 45 |
+     | 140 | ~80–85 | ~60–70 | ~45–50 |
+     | 180 | ~85–90 | ~65–70 | ~45–50 |
+     | 240 | ~90–100 | ~65–75 | ~45–55 |
+   - Modeled on, but distinct from, Revival's `tempoLadderStartFraction`
+     idea (`computeTempoLadder`, `lib/revival.js`): that fraction paces a
+     *return* to an already-learned piece; this one paces *first-time*
+     ladder entry.
+   - Surfaced in `ChecklistItem` two ways, both gated on **first
+     encounter only** (no session ever logged for the chunk, i.e.
+     `practiceBPM == null` and `entry.sessions` is empty) — every later
+     session shows neither: as the "BPM achieved" field's placeholder,
+     and as a one-line note ("Suggested starting tempo: N BPM — choose
+     whatever tempo lets you play accurately and comfortably, slower is
+     fine") that disappears the moment a real session exists.
+2. **User-selected starting tempo** — whatever the learner actually logs
+   the first time they touch a chunk, whether or not it matches the
+   suggestion. `handleLogSession` (`App.jsx`) seeds `practiceBPM` from
+   this — `prevEntry.practiceBPM != null ? prevEntry.practiceBPM : bpm` —
+   never from `getSuggestedStartingBPM` directly. This is the real
+   baseline every later floor/step/goal calculation reads, until superseded
+   by (3). `practiceBPM` values seeded before this three-concept split
+   existed, under the earlier conflated behavior, are left as-is — not
+   backfilled — for the same reason given below (rewriting lived practice
+   history is worse than leaving an old placeholder value in place).
+3. **Demonstrated tempo** — `computeDemonstratedTempoBaseline` (`lib/ladder.js`),
+   wired into `computeLadderAdvance`'s `pass` and `soft-miss` branches. A
+   session with **3 or more clean reps at a bpm above the chunk's current
+   `practiceBPM`** replaces the baseline outright with the achieved bpm
+   (capped at `targetBPM`, same cap the normal step uses), instead of the
+   usual incremental `ladderConfig.bpmSteps.pass` (+2) nudge. Applies on
+   both `pass` and `soft-miss` outcomes (both log a real `cleanReps` count
+   — a `soft-miss` can still genuinely demonstrate a higher tempo, e.g. a
+   hard chunk needing 5 reps for a full pass but already showing 3 clean
+   reps well above baseline) — never on `fail` (including a manual "needs
+   more work" self-report or a repeat-soft-miss auto-fail), mirroring
+   `classifySessionOutcome`'s own "manualFail always wins" precedent. The
+   "3 perfect reps" threshold (`DEMONSTRATED_TEMPO_MIN_CLEAN_REPS`) is a
+   fixed product-spec number, deliberately independent of
+   `REQUIRED_REPS`'s per-difficulty pass threshold (3/4/5) — this
+   codebase has no separate "perfect rep" concept from a "clean rep"
+   (`session.cleanReps`), so the two are treated as the same thing; see
+   [Decisions.md](Decisions.md#spaced-repetition--maintenance) for this
+   flagged as an assumption rather than a confirmed definition.
+
+All future goal calculations — the tempo floor a stage gates on
+(`clearsStageFloor`), the next ratchet step, what `ChecklistItem` shows as
+"Practice tempo" — read `practiceBPM` (concept 2, later superseded by
+concept 3) and never concept 1. A suggestion the learner ignores has zero
+effect on anything.
+
+The first-4-passes tempo-gating exemption (Stabilizing has no tempo floor —
+`ladderConfig.stabilizing.tempoFloorFraction: null`, `graduationPasses: 4`
+— see the "Full pass" bullet above) predates this section and needed no
+change here; it already means a chunk's first 4 graduating passes never
+need to clear a tempo floor at all, regardless of which of the three tempo
+concepts above set `practiceBPM`.
+
+`handleLogSession` also appends sessions keyed by a precise `loggedAt`
+timestamp rather than overwriting by plan-day — so logging the same chunk
+twice in one day (e.g. an early touch, then a later re-attempt) produces
+two distinct records instead of one silently replacing the other.
+
+**Session undo (`handleUnlogSession`, `App.jsx`) fully reverses the ladder
+— Pass 10, built.** Every session `handleLogSession` writes now also
+carries a `session.ladderSnapshot`: the six ladder fields
+(`stage`/`consecutivePasses`/`consecutiveStabilizingFails`/`practiceBPM`/
+`nextDueDate`/`tier1Done`) exactly as they stood *immediately before* that
+session — the same snapshot-and-restore shape `flagSnapshot` already used
+for rough/lost flags (below), just never extended to session logging until
+now. `handleUnlogSession` restores that snapshot when undoing a session,
+**but only when the session being undone is the chunk's most recent
+session overall** (`lastIdx === sessions.length - 1` against the *entire*
+`sessions` array, not just the sessions on the `day` being undone —
+working ahead and then going back to undo an earlier day's session is
+correctly treated as non-latest). Restoring a snapshot rewinds to a moment
+in time, so undoing a non-latest session would silently erase every later
+session's effects too — out of scope by design (see
+[Decisions.md](Decisions.md#spaced-repetition--maintenance)); it falls
+back to removing the record only, same as a session logged before this
+field existed (no snapshot to restore from) or a snapshot missing one of
+the six fields (defensive, warns rather than partially restoring).
+`ChecklistItem`'s undo control recomputes this same
+latest-session-plus-valid-snapshot check client-side and shows distinct
+copy/tooltips *before* the click ("Undo most recent log" vs. "Remove most
+recent log") — the control never claims to reverse more than it actually
+will.
+
+A full reversal also clears a rough/lost `flag`/`flagSnapshot` if one was
+applied on top of the undone session, so a flag doesn't outlive the ladder
+state it was based on — `flagSnapshot` itself is documented in
+[Data-Model.md](Data-Model.md#the-piece-object) and
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging);
+see [Decisions.md](Decisions.md#spaced-repetition--maintenance) for how
+this is proven safe (reusing the existing "a real session log always
+clears `flagSnapshot`" invariant, not a new check).
+
+**Known gap, not yet fixed:** a full undo does not revert `currentBPM` (the
+"what was last actually played" display field, distinct from the ladder's
+`practiceBPM`) — it's not one of the six snapshotted fields. After undoing
+a chunk's only session, `computeAutoConfidence` can still read a stale,
+nonzero `currentBPM` and produce a nonzero confidence score for a chunk
+that otherwise looks fully untouched (`stage: null`, no sessions). Found in
+review, not fixed; see
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 `computeProgressTier(chunk, piece)` is a **separate, simpler** score from

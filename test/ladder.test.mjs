@@ -3,7 +3,7 @@
 // App.jsx's handleLogSession on every logged session.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeLadderAdvance } from "../src/lib/ladder.js";
+import { computeLadderAdvance, computeDemonstratedTempoBaseline } from "../src/lib/ladder.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
 const LADDER_CONFIG = {
@@ -243,5 +243,92 @@ describe("Defensive / passthrough behavior", () => {
   test("a null practiceBPM (never seeded) passes through unchanged rather than becoming NaN", () => {
     const r = computeLadderAdvance(baseState({ practiceBPM: null }), { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
     assert.equal(r.practiceBPM, null);
+  });
+});
+
+// Concept 3 of the starting/suggested/demonstrated tempo split
+// (docs/Algorithms.md, lib/confidence.js's getSuggestedStartingBPM block
+// comment): 3+ clean ("perfect") reps at a bpm above the chunk's current
+// baseline replace the baseline outright, rather than the usual +2/-2
+// incremental step.
+describe("computeDemonstratedTempoBaseline (the raw override rule)", () => {
+  test("3 clean reps at a bpm above the current baseline overrides it directly", () => {
+    const result = computeDemonstratedTempoBaseline({ outcome: "pass", cleanReps: 3, bpm: 85, practiceBPM: 75, targetBPM: 120 });
+    assert.equal(result, 85);
+  });
+
+  test("fewer than 3 clean reps does NOT trigger the override, even at a much higher bpm", () => {
+    const result = computeDemonstratedTempoBaseline({ outcome: "pass", cleanReps: 2, bpm: 85, practiceBPM: 75, targetBPM: 120 });
+    assert.equal(result, null);
+  });
+
+  test("a bpm at or below the current baseline does not trigger the override, even with enough reps", () => {
+    const atBaseline = computeDemonstratedTempoBaseline({ outcome: "pass", cleanReps: 5, bpm: 75, practiceBPM: 75, targetBPM: 120 });
+    const belowBaseline = computeDemonstratedTempoBaseline({ outcome: "pass", cleanReps: 5, bpm: 70, practiceBPM: 75, targetBPM: 120 });
+    assert.equal(atBaseline, null);
+    assert.equal(belowBaseline, null);
+  });
+
+  test("applies on a soft-miss too — enough reps at a higher tempo still counts as demonstrated, even if the overall session wasn't a full pass", () => {
+    const result = computeDemonstratedTempoBaseline({ outcome: "soft-miss", cleanReps: 3, bpm: 85, practiceBPM: 75, targetBPM: 120 });
+    assert.equal(result, 85);
+  });
+
+  test("never applies on a fail, even with 3+ clean reps at a higher bpm (e.g. a repeat-soft-miss auto-fail, or a manual override)", () => {
+    const result = computeDemonstratedTempoBaseline({ outcome: "fail", cleanReps: 5, bpm: 90, practiceBPM: 75, targetBPM: 120 });
+    assert.equal(result, null);
+  });
+
+  test("the demonstrated bpm is still capped at targetBPM, same as the normal ratchet step", () => {
+    const result = computeDemonstratedTempoBaseline({ outcome: "pass", cleanReps: 3, bpm: 150, practiceBPM: 75, targetBPM: 120 });
+    assert.equal(result, 120);
+  });
+
+  test("no targetBPM configured means no cap — the raw achieved bpm becomes the baseline", () => {
+    const result = computeDemonstratedTempoBaseline({ outcome: "pass", cleanReps: 3, bpm: 150, practiceBPM: 75, targetBPM: null });
+    assert.equal(result, 150);
+  });
+});
+
+describe("computeLadderAdvance wires the demonstrated-tempo override into practiceBPM", () => {
+  test("a pass with 3 clean reps well above the current baseline jumps straight to the achieved bpm, not just +2", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 75 }),
+      { result: "pass", cleanReps: 3, bpm: 85, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.practiceBPM, 85);
+  });
+
+  test("a pass with only 2 clean reps (below the override threshold) falls back to the normal +2 step", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 75 }),
+      { result: "pass", cleanReps: 2, bpm: 85, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.practiceBPM, 77);
+  });
+
+  test("a soft-miss with 3 clean reps above the baseline still overrides practiceBPM upward, despite the overall miss", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 75 }),
+      { result: "soft-miss", cleanReps: 3, bpm: 85, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.practiceBPM, 85);
+  });
+
+  test("a fail never overrides practiceBPM upward, even with cleanReps/bpm that would otherwise qualify", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 75, stage: "settling" }),
+      { result: "fail", cleanReps: 5, bpm: 90, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.practiceBPM, 73); // normal fail step: -2
+  });
+
+  test("existing pass behavior (no outcome.cleanReps/bpm supplied) is unaffected — falls back to the normal +2 step", () => {
+    const r = computeLadderAdvance(baseState({ practiceBPM: 75 }), { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(r.practiceBPM, 77);
   });
 });

@@ -11,6 +11,67 @@ export function getDefaultTargetBPM(piece, chunk) {
   return piece.targetBPM || null;
 }
 
+// ------------------------------------------------------------------
+// Starting tempo has three distinct concepts, not one (see
+// docs/Algorithms.md's "Starting, suggested, and demonstrated tempo" and
+// docs/Decisions.md for the full writeup — this replaces an earlier,
+// conflated single-function version of this):
+//
+//   1. SUGGESTED starting tempo (this function) — a system recommendation
+//      from target BPM + difficulty alone. Guidance only: it is shown to
+//      the learner (ChecklistItem's first-encounter note) but never
+//      silently written into a chunk's actual practice state.
+//   2. USER-SELECTED starting tempo — whatever the learner actually logs
+//      the first time they touch a chunk, whether that matches the
+//      suggestion or not. This — not the suggestion — is what
+//      handleLogSession (App.jsx) seeds `practiceBPM` from.
+//   3. DEMONSTRATED tempo — practiceBPM is later overridden outright by a
+//      session that proves the chunk can go faster than the ladder's
+//      normal incremental step would suggest (see
+//      computeDemonstratedTempoBaseline, lib/ladder.js).
+//
+// All future goal calculations (tempo floors, the next ratchet step, etc.)
+// read `practiceBPM` — i.e. concept 2, later superseded by concept 3 — and
+// never concept 1. This function only ever produces concept 1.
+// ------------------------------------------------------------------
+
+// Per-difficulty diminishing-returns curve: suggested = base * (target/100)^k.
+// `base` is the exact recommendation at a 100 BPM target; `k` (< 1,
+// sub-linear) controls how much more slowly the suggestion grows than the
+// target as target increases — a fast piece shouldn't ask an "easy" chunk
+// to start anywhere near as fast as its target, but a merely-fast easy
+// chunk and a very-fast one shouldn't get wildly different suggestions
+// either. Replaces an earlier flat-fraction version (75%/65%/55% of target,
+// every target) that was too aggressive at high target tempos — a 240 BPM
+// "easy" chunk doesn't belong starting near 180.
+//
+// Hand-fit (not derived from a study — same status as every other tunable
+// constant here, see docs/Research.md) against four product-supplied
+// calibration points; `k` solved from the 100→240 BPM pair, then checked
+// against 140/180:
+//   target 100 → easy 75   / medium 60   / hard 45    (exact, k has no effect at target=100)
+//   target 140 → easy ~82  / medium ~64  / hard ~47   (spec range 80–85 / 60–70 / 45–50)
+//   target 180 → easy ~88  / medium ~67  / hard ~48   (spec range 85–90 / 65–70 / 45–50)
+//   target 240 → easy ~95  / medium ~70  / hard ~50   (spec range 90–100 / 65–75 / 45–55)
+const SUGGESTED_STARTING_TEMPO_CURVE = {
+  easy: { base: 75, k: 0.27 },
+  medium: { base: 60, k: 0.18 },
+  hard: { base: 45, k: 0.12 },
+};
+
+// Concept 1 (see block comment above): a system-recommended starting tempo
+// from target BPM + difficulty only. Guidance only — see getDefaultTargetBPM
+// for the target-resolution rule this reuses. Without a target BPM there's
+// nothing to calibrate against, so this returns null, same convention as
+// getDefaultTargetBPM.
+export function getSuggestedStartingBPM(piece, chunk) {
+  const entry = piece.progress[chunk.id] || {};
+  const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
+  if (!targetBPM) return null;
+  const curve = SUGGESTED_STARTING_TEMPO_CURVE[chunk.difficultyLabel] || SUGGESTED_STARTING_TEMPO_CURVE.medium;
+  return Math.round(curve.base * Math.pow(targetBPM / 100, curve.k));
+}
+
 // Classifies one logged attempt into the three-tier outcome model
 // (Repertoire-Lifecycle.md's "Session outcomes: three tiers, not two"):
 // - full pass: required clean reps hit, at/above the tempo currently asked

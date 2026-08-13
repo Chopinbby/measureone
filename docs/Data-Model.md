@@ -93,6 +93,18 @@ piece = {
                          // browser/instance. Sort-order bookkeeping only (piece
                          // switcher, work grouping) — NOT the scheduling anchor;
                          // see startDate above for that.
+  updatedAt,             // epoch ms — bumped on every local mutation (App.jsx's
+                         // updatePiece, the single funnel every piece change goes
+                         // through per CLAUDE.md). Exists to let mergeImportedPiece
+                         // (lib/storage.js) tell "this device has moved on since this
+                         // backup was exported" apart from "this file really is the
+                         // newer copy," when re-importing — see Decisions.md#data-model.
+                         // Missing on pieces saved before this field existed;
+                         // backfilled to "now" on the next load (validateAndMigratePiece,
+                         // lib/storage.js), the same one-time-backfill treatment
+                         // startDate gets. Unlike lastLoggedAt, this tracks *any* edit
+                         // (settings changes, flags, pause/archive), not just logged
+                         // practice sessions.
   progress,              // { [chunkId]: ChunkProgress } — see below. One key isn't
                          // a real chunk id: "__consolidation__" holds the
                          // whole-piece consolidation-day run-through's history —
@@ -147,7 +159,7 @@ ChunkProgress = {
   sessions: [{              // one entry per LOGGED ATTEMPT, most recent last. Multiple entries
                             // can now share the same `day` (a Tier 1 touch, a due review, a
                             // re-attempt) — never overwritten by day alone; see loggedAt below.
-    day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds
+    day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds, ladderSnapshot
   }],                       // durationSeconds comes from the ChecklistItem timer, or from
                             // the manual minutes field when the user typed one instead.
                             // loggedAt (epoch ms) is what actually distinguishes same-day
@@ -165,6 +177,20 @@ ChunkProgress = {
                             // see Decisions.md#spaced-repetition--maintenance. Old sessions
                             // that only have `effectiveness` are read through
                             // lib/confidence.js's sessionOutcome(), not migrated in place.
+                            // ladderSnapshot ({ stage, consecutivePasses,
+                            // consecutiveStabilizingFails, practiceBPM, nextDueDate, tier1Done } |
+                            // undefined, Pass 10) — the six ladder fields below, captured as they
+                            // stood immediately BEFORE this session was logged. Stored per-session
+                            // (not on the chunk entry) so same-day multi-session logging keeps
+                            // each session's own "before" picture distinct — same
+                            // snapshot-and-restore shape `flagSnapshot` below already uses.
+                            // handleUnlogSession (App.jsx) restores it when undoing this session,
+                            // but ONLY when it's this chunk's most recent session overall — undoing
+                            // an earlier session while a later one still stands would silently
+                            // erase that later session's effects, so that case (and any session
+                            // logged before this field existed, which carries no snapshot) falls
+                            // back to removing the record only. See
+                            // Decisions.md#spaced-repetition--maintenance.
   currentBPM,               // number | undefined — last logged tempo (what was actually played)
   targetBPM,                // number | undefined — explicit per-chunk override;
                              // falls back to piece.targetBPM / bpmZones if unset
@@ -209,7 +235,13 @@ ChunkProgress = {
                               // change the flag caused. If a real session gets logged while
                               // flagged, handleLogSession deletes this instead — a genuinely
                               // earned ladder advance must never be discarded by a later "never
-                              // mind" on the flag. Backup-merge (storage.js's mergeProgress) treats
+                              // mind" on the flag. Symmetrically, handleUnlogSession (Pass 10)
+                              // clears both `flag` and `flagSnapshot` when it fully reverses a
+                              // session — flagSnapshot still being present at undo time proves
+                              // (via the same clear-on-log rule above) the flag was applied after
+                              // that session with nothing logged since, so undoing the session
+                              // undoes the flag with it rather than leaving it pointing at a
+                              // ladder state that no longer exists. Backup-merge (storage.js's mergeProgress) treats
                               // it like the other ladder fields below: the existing piece's value
                               // always wins over an imported file's. handleSetFlag verifies all
                               // three fields are present before trusting a snapshot to restore
@@ -236,12 +268,16 @@ ChunkProgress = {
                                 // nothing reads. See Decisions.md.
   practiceBPM,                // number | null — the tempo the ladder is currently asking for on
                                // this chunk, distinct from targetBPM (the eventual goal). Seeded
-                               // to whatever tempo was first attempted (a placeholder — see
-                               // handleLogSession, App.jsx; there's still no deliberate
-                               // ladder-entry seeding mechanic, distinct from the Tier 1
-                               // *scheduling* concept below, which is built), then ratchets via
-                               // ladderConfig.bpmSteps (+2 pass / -2 soft-miss / -2 fail) on
-                               // every logged session.
+                               // from whatever the learner actually logs the first time they touch
+                               // a chunk — the USER-SELECTED starting tempo, one of three distinct
+                               // tempo concepts (suggested / user-selected / demonstrated) split
+                               // apart in lib/confidence.js's getSuggestedStartingBPM block comment
+                               // and Algorithms.md#starting-suggested-and-demonstrated-tempo. Then
+                               // ratchets via ladderConfig.bpmSteps (+2 pass / -2 soft-miss / -2
+                               // fail) on every logged session — except a session with 3+ clean
+                               // reps at a bpm above the current value jumps practiceBPM straight
+                               // to that bpm instead (computeDemonstratedTempoBaseline,
+                               // lib/ladder.js), the third ("demonstrated") tempo concept.
   nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
                                 // review, recomputed on every logged session. Load-bearing since
                                 // Pass 5: computeTimeline reads this directly to place the chunk's

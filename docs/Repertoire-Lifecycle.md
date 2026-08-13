@@ -356,11 +356,21 @@ evidence.
 - `targetBPM` = the eventual goal — performance tempo, or a deliberately
   inflated overlearn tempo chosen on purpose.
 - `practiceBPM` = the tempo the app is *currently* asking the learner to
-  attempt for that specific chunk. Starts low, ratchets toward `targetBPM`
-  over sessions — the fix for grading every session against a distant
-  fixed target (e.g. an overlearn tempo 10 BPM above performance)
-  producing repeated "almost but not quite" sessions that read as failure
-  when the target itself was fine, just ungraded incrementally.
+  attempt for that specific chunk. Ratchets toward `targetBPM` over
+  sessions (or jumps straight there — see below) — the fix for grading
+  every session against a distant fixed target (e.g. an overlearn tempo 10
+  BPM above performance) producing repeated "almost but not quite" sessions
+  that read as failure when the target itself was fine, just ungraded
+  incrementally.
+- **How `practiceBPM` gets its starting value is three distinct concepts,
+  not one** (a later revision — see
+  [Algorithms.md](Algorithms.md#starting-suggested-and-demonstrated-tempo)
+  for the full mechanics): a system-*suggested* starting tempo (guidance
+  only, from target BPM + difficulty), the learner's own *chosen* starting
+  tempo (whatever they actually log first — this is what `practiceBPM`
+  actually seeds from), and a *demonstrated* tempo that can later replace
+  the baseline outright (3+ clean reps at a bpm above the current value,
+  on a pass or soft-miss) instead of the usual +2-per-pass ratchet.
 - Step sizes (`ladderConfig.bpmSteps`, tunable, defaults): **+2 BPM** on a
   full pass, **−2 BPM** on a soft miss, **−2 BPM** pullback on a real fail
   too — not the steeper ~8-10 BPM drop originally sketched here. Confirmed
@@ -386,9 +396,15 @@ called from `ChecklistItem.jsx` on every log and passed to
 `handleLogSession` already classified. Replaces the old flat pass/fail:
 
 1. **Full pass** — required clean reps hit at/above current `practiceBPM`.
-   `practiceBPM` steps up; counts toward stage graduation only once
-   `practiceBPM` has cleared that stage's tempo floor (the floor gates
-   `practiceBPM`, not the per-session pass/fail itself).
+   `practiceBPM` steps up (or jumps straight to the achieved tempo, if 3+
+   clean reps at a bpm above the current value qualifies as "demonstrated" —
+   see above); counts toward stage graduation only once `practiceBPM` (as
+   it stood *before* this session) has cleared that stage's tempo floor
+   (the floor gates `practiceBPM`, not the per-session pass/fail itself).
+   **Known gap:** a same-session demonstrated-tempo jump doesn't get
+   graduation credit for clearing the floor it just jumped past, since the
+   check runs before the jump — see
+   [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 2. **Soft miss** — some clean reps, not enough in a row at that tempo.
    `practiceBPM` steps down, consecutive-pass count resets, **stage does
    not change**. New tier — the fix for "plateau via frustration": no
@@ -441,9 +457,15 @@ doesn't distinguish which):
   `progress["__consolidation__"].sessions`, mirroring
   `handleLogSession`'s shape (multiple same-day attempts allowed, each its
   own record) rather than overwriting. `handleUnlogRunThrough` undoes the
-  most recent entry, matching `handleUnlogSession`'s convention. Visible
-  on Progress's "Recent practice history" as "Full run-through (stopped
-  Nx)".
+  most recent entry, same append-and-remove-most-recent shape
+  `handleUnlogSession` uses — but not full parity as of Pass 10: a
+  run-through entry carries no ladder state (`__consolidation__` isn't a
+  real chunk, has no `stage`/`practiceBPM`) to reverse in the first place,
+  so there's nothing for it to fully undo the way `handleUnlogSession` now
+  fully reverses a regular chunk's ladder state — see
+  [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder).
+  Visible on Progress's "Recent practice history" as "Full run-through
+  (stopped Nx)".
 - **Flag mode on the Piece Map** — a 3-state cycle per chunk on the
   existing grid: `untouched` (default, shown as no icon) → **rough**
   (demotes one stage, pins the next review to today regardless of what the
@@ -544,6 +566,18 @@ doesn't distinguish which):
   mind" on the flag leaves the genuinely-earned advance in place instead
   of reverting past it — clearing the flag at that point just leaves
   `stage`/`nextDueDate` wherever the flag's demotion last set them.
+- **Undoing a session also undoes a flag applied on top of it — found in
+  Pass 10's code review, fixed same session.** Symmetric to the point
+  above: if a chunk is flagged rough/lost *after* a session (no session
+  logged since), then that session gets undone, `handleUnlogSession` now
+  clears `flag`/`flagSnapshot` too, not just the ladder state — otherwise
+  the flag would outlive the ladder state it was based on, and
+  `flagSnapshot` would point at a restore value that no longer exists.
+  Safe because `flagSnapshot` still being present at undo time *proves*
+  (via the clear-on-log rule above) the flag came after this session with
+  nothing logged in between; a flag with no `flagSnapshot` (predates the
+  session, or survived a later real log) is left untouched. See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 ### Revival auto-triggers
 

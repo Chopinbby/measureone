@@ -587,6 +587,63 @@ correctly, worth recording why.**
   more complex than "just check the newest session," but the simpler shape
   is the one that was tried twice and found wrong.
 
+**Decision: starting tempo is three distinct concepts — suggested, user-selected,
+and demonstrated — not the single system-computed "starting tempo" an earlier
+version of this decision described. Superseded below; see
+[Algorithms.md](Algorithms.md#starting-suggested-and-demonstrated-tempo) for
+the full mechanics.**
+
+- **Why revised:** the first pass at this (a `getStartingBPM(piece, chunk)`
+  function, a flat 75%/65%/55%-of-target fraction by difficulty, written
+  straight into `practiceBPM` on first log) resolved the old "starting
+  practice tempo" open question but conflated three things a later review
+  asked to be kept separate: a system *recommendation*, the learner's own
+  *choice*, and later *proof* they can go faster. Auto-writing the
+  recommendation into `practiceBPM` meant the "suggestion" silently became
+  a decision the learner never actually made.
+- **1. Suggested starting tempo** (`getSuggestedStartingBPM`,
+  `lib/confidence.js`) — guidance only, never written into
+  `piece.progress` by anything. The flat-fraction formula is also revised:
+  a diminishing-returns power-law curve (`base * (target/100)^k`,
+  per-difficulty) replaces the flat fraction, because a flat percentage of
+  target scaled linearly and got unreasonable at high targets (a 240 BPM
+  "easy" chunk suggesting ~180 is not a gentle starting point). `base`/`k`
+  per difficulty are hand-fit against four product-supplied
+  (target, difficulty) → suggested-BPM calibration points — hand-picked,
+  not derived from a study, same status as every other tunable constant
+  here (see [Research.md](Research.md)).
+- **2. User-selected starting tempo** — `handleLogSession` (`App.jsx`)
+  seeds `practiceBPM` from whatever the learner actually logs the first
+  time they touch a chunk, exactly like the pre-`getStartingBPM`
+  placeholder behavior — but no longer "an accident of the first session":
+  `ChecklistItem` now surfaces the suggestion as both a field placeholder
+  and an explicit one-time note ("choose whatever tempo lets you play
+  accurately and comfortably, slower is fine") on first encounter only, so
+  the learner is actually choosing, informed, rather than anchoring on
+  whatever they happened to type. **`practiceBPM` values already seeded
+  under the earlier conflated behavior are left as-is, not backfilled** —
+  unchanged from the original reasoning: backfilling would rewrite lived
+  practice history based on a number that was never really chosen, and
+  there's no clean way to tell whether a chunk's *current* `practiceBPM`
+  still reflects that seed or has long since ratcheted past it.
+- **3. Demonstrated tempo** (`computeDemonstratedTempoBaseline`,
+  `lib/ladder.js`) — new. 3+ clean reps at a bpm above the chunk's current
+  `practiceBPM`, on a `pass` or `soft-miss` outcome (never `fail`),
+  replaces the baseline outright instead of the usual +2 incremental step.
+  **Open terminology assumption, flagged rather than resolved**: the
+  product spec's "3 perfect reps" has no existing definition in this
+  codebase distinct from a "clean rep" (`session.cleanReps`), so the two
+  are treated as identical. If "perfect" was meant to mean something
+  stricter (zero mistakes of any kind, not just "clean" per the existing
+  rubric), this equivalence needs revisiting — nothing in the current data
+  model captures a finer-grained per-rep quality signal to fall back on
+  instead.
+- **Consequence:** the re-learning design's rule 4 (resetting a chunk's
+  tempo to "whatever it would start at during introduction") should reset
+  to the *suggestion* (concept 1) specifically, now that it's cleanly
+  separated from the learner's actual baseline — still Pass 14 scope, not
+  built here.
+
 **Decision: stage lengths, graduation pass-counts, tempo floors, and
 practiceBPM ratchet step sizes (`ladderConfig.bpmSteps`) are all stored as
 piece-level tunable data from the start, with no editing UI built yet.**
@@ -779,7 +836,7 @@ its own record, none overwritten by day alone.**
   reassessment (see Data-Model.md's known simplifications). **Now scoped as
   a defect rather than an accepted limitation — see the next entry.**
 
-**Decision (scoped, not built): session undo should fully reverse the
+**Decision (built, Pass 10): session undo should fully reverse the
 ladder, via a per-session snapshot — and until it does, the UI must stop
 implying that it already has.**
 
@@ -828,7 +885,35 @@ a data one.
   reconstruction — the same "don't guess, say so" rule applied to
   `flagSnapshot`'s malformed-shape guard.
 - **Related:** pairs naturally with the starting-BPM open question, since
-  both are ladder-entry concerns. **Not built.**
+  both are ladder-entry concerns.
+- **Built as designed above, Pass 10 — implementation notes:** the field is
+  named `session.ladderSnapshot` (see [Data-Model.md](Data-Model.md#the-piece-object)).
+  "Most recent session only" is checked against the chunk's *entire*
+  `sessions` array (`lastIdx === sessions.length - 1`), not just the
+  sessions logged on the `day` being undone — a session for an earlier
+  plan-day logged after a later plan-day's session (e.g. working ahead,
+  then going back to log something missed) is correctly treated as
+  non-latest and falls back, exactly per the scoping above. The honest-UI
+  half lives in `ChecklistItem.jsx`: it recomputes the same
+  latest-session-plus-valid-snapshot check the handler will use and shows
+  distinct copy ("Undo most recent log" vs. "Remove most recent log," with
+  matching tooltips) *before* the click, not just distinct behavior after
+  it.
+- **Follow-up fix (found in review, same pass): a full undo also clears a
+  rough/lost flag applied on top of the undone session.** Without this, a
+  session could be flagged rough/lost, then undone — reverting the ladder
+  state but leaving the flag standing on top of a ladder state that no
+  longer existed, and leaving `flagSnapshot` pointing at a restore point
+  (the post-session, pre-flag state) that was itself now invalid. Fixed by
+  reusing an existing invariant rather than inventing a new check:
+  `handleLogSession` already unconditionally clears `flagSnapshot` on
+  every real session log, so `flagSnapshot` still being present at
+  full-undo time *proves* the flag was applied after this session with
+  nothing logged in between — safe to clear both `flag` and
+  `flagSnapshot` in that case. A flag with no `flagSnapshot` (predates
+  this session, or survived a later real log — the same "genuine progress
+  can't be discarded by the flag cycle" rule `handleLogSession` already
+  enforces) is left untouched, same as before this fix.
 
 **Decision: ladder stage/consecutivePasses do not feed into
 `computeAutoConfidence` — confidence and the ladder stay two independent
@@ -1194,7 +1279,14 @@ match, instead of always creating a new piece.**
   by hand from an older export) can't wipe out sessions logged in the app
   since that export was taken. `id`/`createdAt` are never touched by a
   merge — the piece already exists; only `workId` gets re-derived
-  (`ensureWorkId`), same as any other edit.
+  (`ensureWorkId`), same as any other edit. **Revised — "the import wins
+  whenever it's present" no longer applies unconditionally to every field.**
+  A subset (`status`, and per-chunk `currentBPM`/`targetBPM`/
+  `manualConfidence`) now goes through `preferByRecency` instead of plain
+  `preferPresent`, gated on each side's `updatedAt` — see the entry below and
+  [Algorithms.md](Algorithms.md#import-merge). `minutesPerDay` and most other
+  scalar fields are unaffected by that change and still follow the original
+  "present wins" rule described above.
 - **Alternative considered:** matching by id only. Rejected on its own — the
   fallback name+composer match matters too, e.g. a piece shared from another
   device/session that never had the chance to collide on id but is
@@ -1229,6 +1321,61 @@ whichever is actually more advanced.**
   "choose which history to keep" step shown to the user when both sides
   have genuinely diverged, instead of a silent rule in either direction.
   Not built; planned for a later pass.
+
+**Decision: `piece.status` and a chunk's `currentBPM`/`targetBPM`/
+`manualConfidence` are protected from a stale re-import by a real recency
+comparison (`piece.updatedAt`), not just by whether the import happens to
+have a value.**
+
+- **Why:** Found alongside the ladder-state issue above, but distinct from
+  it — these fields went through plain `preferPresent`, so *any* backup
+  with a value for them won outright, including a plainly older one.
+  Concretely: re-importing an old backup after pausing a piece could
+  silently make it active again; re-importing after a manual confidence
+  override or a fresh tempo log could silently roll either back — with no
+  warning shown in either direction, the exact failure mode a prior
+  data-reliability review flagged as a real (not hypothetical) risk.
+- **Approach:** `piece.updatedAt` (new field, [Data-Model.md](Data-Model.md#the-piece-object))
+  is bumped on every local mutation via `updatePiece` (`App.jsx`) — the
+  single funnel every piece change already goes through. `mergeImportedPiece`
+  computes `importIsStale` from comparing each side's `updatedAt` (missing
+  reads as 0, so an import from before this field existed is always treated
+  as the older side) and threads it into a new `preferByRecency` helper,
+  which `preferPresent`'s callers for these specific fields now use instead.
+  Full mechanics: [Algorithms.md](Algorithms.md#import-merge).
+- **Deliberately narrower than the ladder-state problem above:** this does
+  not touch ladder state at all (`stage`/`consecutivePasses`/`practiceBPM`/
+  `nextDueDate`/etc. still always keep the existing value, unconditionally,
+  exactly as the entry above describes) — genuinely reconciling *that* needs
+  either replaying merged session history or the "choose which history to
+  keep" UI, still not built. This fix only closes the narrower, blunter gap:
+  a plain older backup no longer wins by accident on fields where "present"
+  and "correct" used to be treated as the same thing.
+- Regression-tested: `test/storage.test.mjs`.
+
+**Decision: a failed `localStorage` write is surfaced to the user, not
+silently discarded.**
+
+- **Why:** `savePieceToStorage`/`saveActivePieceIdToStorage` (`lib/storage.js`)
+  caught every write exception and did nothing else with it — most likely to
+  actually fire as `QuotaExceededError`, since session history only ever
+  grows and there's no server-side backup to fall back on. A save that
+  silently didn't happen was indistinguishable from one that did; a learner
+  could keep practicing for weeks believing everything was recorded.
+- **Approach:** both functions now return `{ ok: true }` or
+  `{ ok: false, error }` instead of swallowing the exception. `App.jsx`'s
+  active-piece persistence effect checks the result and sets a
+  `storageError` flag; a banner ("Your last change couldn't be saved…") with
+  an Export-backup shortcut shows whenever it's true, and clears itself the
+  next time a save actually succeeds — no manual dismissal needed, since the
+  underlying condition (storage full/unavailable) either resolves or it
+  doesn't.
+- **Scoped narrowly:** this surfaces the failure; it doesn't retry the write,
+  free up space automatically, or change what triggers `QuotaExceededError`
+  in the first place (that's the auto-backup-reminder idea, a separate,
+  not-yet-built item).
+- Verified in-browser with a simulated quota failure (see the session that
+  shipped this fix) as well as `test/storage.test.mjs`.
 
 ## Multi-movement works
 
@@ -1372,22 +1519,36 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
-- **How is a chunk's *starting* practice tempo determined? There is no
-  answer today, and it now blocks something.** `practiceBPM` is seeded, the
-  first time a chunk is ever logged, from whatever tempo the learner
-  happened to attempt — `handleLogSession` (`App.jsx`) says so outright and
-  calls it a placeholder, since the real ladder-entry mechanic was deferred
-  out of Pass 2. So a chunk's tempo floor derives from an accident of the
-  first session rather than from anything about the chunk (its difficulty,
-  the piece's `targetBPM`, the learner's level).
-  - **Why it matters now:** the re-learning design above (rule 4) requires
-    resetting a chunk's tempo to "whatever it would start at during
-    introduction." That currently resolves to "reset it to an arbitrary
-    historical number," which is not a reset in any meaningful sense.
-    Re-learning's tempo rule cannot be implemented until this is defined —
-    surfaced while scoping that work, not previously connected to it.
-  - Note this is distinct from `getDefaultTargetBPM` (`lib/confidence.js`),
-    which answers where a chunk is *going*, not where it starts.
+- **Graduation's tempo-floor check uses `practiceBPM` from *before* the
+  current session, even when that same session's demonstrated-tempo
+  override (see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder))
+  would clearly clear the floor.** Found in code review this session, via
+  direct reproduction (`practiceBPM` jumping 50→100 against a Settling-stage
+  70 floor: `practiceBPM` after the call is correctly 100, but
+  `graduated: false` and the pass isn't counted — the floor check ran
+  against the stale pre-jump 50). Not corrupting: the chunk just graduates
+  one session later than it ideally should, and self-corrects next
+  session. Deferred rather than fixed immediately — narrow trigger
+  (requires Settling/Holding stage, where a floor exists at all, plus a
+  same-session demonstrated-tempo jump), and fixing it means deciding
+  whether `clearsStageFloor` should read the *post*-override `practiceBPM`
+  within the same `computeLadderAdvance` call, which touches the ordering
+  of an already-dense function (`lib/ladder.js`) — worth a deliberate pass,
+  not a quick patch.
+- **A full session undo doesn't revert `currentBPM`.** `currentBPM` (last
+  actually-played tempo, distinct from the ladder's `practiceBPM`) isn't
+  one of the six fields `ladderSnapshot` captures, by original design (see
+  the "session undo should fully reverse the ladder" entry below — "six
+  small fields" was deliberate, not an oversight at the time). Found as a
+  real consequence in this session's review: after undoing a chunk's only
+  session, `stage`/`practiceBPM`/`sessions` all correctly read as
+  untouched, but `currentBPM` still holds the undone session's value, and
+  `computeAutoConfidence` reads it directly — so a fully-reverted chunk can
+  still show a nonzero confidence score. Deferred, not fixed: reverting it
+  would need either a 7th snapshot field or a decision that `currentBPM`
+  should just be derived from `sessions` (last session's `bpm`, or absent)
+  rather than stored separately — the latter would remove the field
+  entirely rather than patch around it, worth deciding deliberately.
 - **Should `computeConfidence` and `computeProgressTier` be unified?** They
   currently measure different things (weighted session history vs. the
   spaced-repetition ladder's `stage`, as of Pass 6 — see
@@ -1416,13 +1577,19 @@ oversight to silently fix; surface it instead.
   "what's due" query replacing `timeline.days[]` indexing) that isn't
   designed either. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
-- **Import/backup merge conflicts are resolved by a fixed rule, not a real
-  user choice.** When both the existing piece and an imported backup have
-  progress on the same chunk, ladder state (stage, tempo, next review
-  date) always keeps the existing value — correct for the common
-  "re-importing an older copy of the same piece" case, silently wrong for
-  the opposite one (restoring a genuinely more-advanced backup from
-  another device). No warning is shown either way today. Planned fix: a
-  "choose which history to keep" step surfaced to the user when the two
-  sides have actually diverged, rather than a silent rule in either
-  direction — not built yet. See [Data model](#data-model) above.
+- **Import/backup merge conflicts, for a chunk's *ladder* state specifically,
+  are still resolved by a fixed rule, not a real user choice.** When both
+  the existing piece and an imported backup have progress on the same
+  chunk, ladder state (stage, tempo, next review date) always keeps the
+  existing value — correct for the common "re-importing an older copy of
+  the same piece" case, silently wrong for the opposite one (restoring a
+  genuinely more-advanced backup from another device). No warning is shown
+  either way today. Planned fix: a "choose which history to keep" step
+  surfaced to the user when the two sides have actually diverged, rather
+  than a silent rule in either direction — not built yet. **Narrower than it
+  used to be:** `piece.status` and a chunk's `currentBPM`/`targetBPM`/
+  `manualConfidence` are no longer part of this gap — they're now
+  recency-gated via `piece.updatedAt` instead of a fixed rule (see
+  [Data model](#data-model) above) — but that fix is still a timestamp
+  comparison, not the "choose which side to keep" UI this question is
+  ultimately asking for, and ladder state itself is untouched by it.

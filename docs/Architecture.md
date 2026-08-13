@@ -41,7 +41,7 @@ MeasureOne.jsx/
 ├── vite.config.js
 └── src/
     ├── main.jsx                 # ReactDOM entry point, just mounts <App />
-    ├── App.jsx                  # state + layout only — ~1,250 lines; renders
+    ├── App.jsx                  # state + layout only — ~1,460 lines; renders
     │                            # the sidebar and whichever tab is active,
     │                            # owns updatePiece and every handler passed
     │                            # down as props. The CSS string also still
@@ -54,7 +54,12 @@ MeasureOne.jsx/
     │   │                           # single source of truth, see Research.md
     │   ├── chunking.js              # generatePracticeChunks and friends
     │   ├── scheduling.js             # computeTimeline and friends
-    │   ├── confidence.js              # computeConfidence and friends
+    │   ├── confidence.js              # computeConfidence and friends; also
+    │   │                               # getSuggestedStartingBPM — the
+    │   │                               # system-recommended (guidance-only)
+    │   │                               # starting tempo, one of three
+    │   │                               # distinct tempo concepts, see
+    │   │                               # Algorithms.md#starting-suggested-and-demonstrated-tempo
     │   ├── revival.js                  # computeRevivalPlan, computeComboEscalations,
     │   │                                # and computeRevivalTriggers (Pass 7's three
     │   │                                # independent auto-trigger conditions, read by
@@ -64,8 +69,14 @@ MeasureOne.jsx/
     │   │                                  # App.jsx's handleLogSession on every
     │   │                                  # logged session. Also applyRunThroughFlag
     │   │                                  # (Pass 6's rough/lost demote-and-pin,
-    │   │                                  # called from handleSetFlag) and STAGES
-    │   │                                  # (exported for confidence.js's reuse)
+    │   │                                  # called from handleSetFlag), STAGES
+    │   │                                  # (exported for confidence.js's reuse),
+    │   │                                  # and computeDemonstratedTempoBaseline
+    │   │                                  # (Pass 10-adjacent: 3+ clean reps at a
+    │   │                                  # bpm above the current baseline
+    │   │                                  # overrides it outright — the third of
+    │   │                                  # the three tempo concepts, see
+    │   │                                  # Algorithms.md#starting-suggested-and-demonstrated-tempo)
     │   ├── maintenance.js                 # computeDueReviews — the live "what's
     │   │                                  # due" query (Pass 8). Reads each chunk's
     │   │                                  # nextDueDate against a real calendar date,
@@ -121,7 +132,7 @@ single-file Claude.ai artifact.
 | `TimelineTab` | Full day-by-day schedule, grouped by week; day cards jump to that day in Today. |
 | `PieceMapTab` | Grid of every chunk colored by confidence. Clicking a tile opens a **modal** (not inline — see [UX-Principles.md](UX-Principles.md#detail-on-demand-uses-a-real-modal-not-inline-expansion)) with BPM inputs, manual-confidence override, a run-through flag toggle (untouched/rough/lost — replaces the old boolean weak-spot toggle as of Pass 6, see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)), and a memory-anchor field. Also used embedded (with `hideHeader`/`sequentialMode`/`initialSelectedId`/`onFinishSequential`) by `RevivalTab` for the fast reassessment pass — see [Algorithms.md](Algorithms.md#revival) — rather than a second grid component. |
 | `MemoryAnchorField` | Small commit-on-blur textarea, same decouple-from-render pattern as `NumberInput`, for the modal's memory-anchor field. |
-| `ChecklistItem` / `DayChecklist` | The practice-logging UI for a regular chunk: timer, reps/BPM inputs, a "needs more work" fail override, checkbox that submits directly (`submitLog()`). Reps/BPM are auto-classified into a pass/soft-miss/fail outcome — see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder) — not a free-standing effectiveness rating. Stays visible (relabeled "Log another attempt") even once something's logged for the day, so a same-day re-attempt is reachable, not just supported by the data model. `ChecklistItem` also accepts optional `tempoLadder`/`memoryAnchor` props (rendered as extra tip lines when present) — used by revival plan items, absent everywhere else. **On a consolidation day, `DayChecklist` renders a distinct internal `ConsolidationPanel` instead of a list of `ChecklistItem`s** — a stop-count input (Log/Undo, same append-and-undo-most-recent pattern as regular logging) rather than reps/BPM, since there's no new material to grade (Pass 6, see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)). |
+| `ChecklistItem` / `DayChecklist` | The practice-logging UI for a regular chunk: timer, reps/BPM inputs, a "needs more work" fail override, checkbox that submits directly (`submitLog()`). Reps/BPM are auto-classified into a pass/soft-miss/fail outcome — see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder) — not a free-standing effectiveness rating. Stays visible (relabeled "Log another attempt") even once something's logged for the day, so a same-day re-attempt is reachable, not just supported by the data model. On a chunk's first-ever encounter (no session logged, no `practiceBPM` yet), the BPM field's placeholder shows `getSuggestedStartingBPM`'s recommendation and a one-line note invites the learner to pick their own tempo instead — gone once a real session exists. The undo control's label/tooltip differ depending on whether undo will fully reverse the session (stage/tempo/schedule) or only remove the log record — computed client-side from the same latest-session-plus-snapshot check `handleUnlogSession` uses, so the copy never promises more than it'll do; see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder). `ChecklistItem` also accepts optional `tempoLadder`/`memoryAnchor` props (rendered as extra tip lines when present) — used by revival plan items, absent everywhere else. **On a consolidation day, `DayChecklist` renders a distinct internal `ConsolidationPanel` instead of a list of `ChecklistItem`s** — a stop-count input (Log/Undo, same append-and-remove-most-recent-record shape as regular logging, but no ladder state to fully reverse) rather than reps/BPM, since there's no new material to grade (Pass 6, see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)). |
 | `FocusPanel` | Ranks everything touched so far by confidence, independent of today's schedule. |
 | `SectionRunThroughPanel` | Surfaces unlocked section run-throughs/combined run-throughs — see [Algorithms.md](Algorithms.md#section-run-throughs). |
 | `ReassessPanel` | Re-rate difficulty for a measure range; Apply commits and closes in one action. |

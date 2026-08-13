@@ -120,6 +120,43 @@ function addDaysISO(dateStr, days) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+// Concept 3 of the starting/suggested/demonstrated tempo split
+// (docs/Algorithms.md, lib/confidence.js's getSuggestedStartingBPM block
+// comment): a session that clearly proves a chunk can already go faster
+// than the ladder's normal incremental step assumed should replace the
+// baseline outright, rather than nudging toward it a couple of BPM at a
+// time over many future sessions.
+//
+// `minCleanReps` (3) is a fixed threshold from the product spec — 3
+// consecutive "perfect" reps at a higher tempo — deliberately independent
+// of REQUIRED_REPS' per-difficulty pass threshold (constants.js: 3/4/5).
+// This codebase doesn't have a separate "perfect rep" concept from a
+// "clean rep" (`session.cleanReps`, classifySessionOutcome's own
+// vocabulary throughout lib/confidence.js) — the spec's "perfect rep" is
+// treated as the same thing, since no stricter existing definition exists
+// to reuse instead. Flagged in the PR write-up as an assumption, not
+// silently invented from scratch.
+//
+// Applies on both 'pass' and 'soft-miss' outcomes — both log a real
+// cleanReps count, and a soft-miss can still legitimately demonstrate a
+// higher tempo (e.g. a hard chunk needing 5 reps to fully pass, but 3
+// clean reps already logged well above the current baseline). Never
+// applies on 'fail' — including a manual "needs more work" self-report or
+// a repeat-soft-miss auto-fail — since a fail is an explicit "this isn't
+// solid yet" signal a raw rep/tempo count shouldn't override, mirroring
+// classifySessionOutcome's own "manualFail always wins" rule
+// (lib/confidence.js). Returns null when the override doesn't apply, so
+// callers fall back to the normal per-outcome stepBPM nudge.
+export const DEMONSTRATED_TEMPO_MIN_CLEAN_REPS = 3;
+
+export function computeDemonstratedTempoBaseline({ outcome, cleanReps, bpm, practiceBPM, targetBPM }) {
+  if (outcome === "fail") return null;
+  if ((cleanReps || 0) < DEMONSTRATED_TEMPO_MIN_CLEAN_REPS) return null;
+  if (practiceBPM != null && bpm <= practiceBPM) return null;
+  if (bpm == null) return null;
+  return targetBPM != null ? Math.min(bpm, targetBPM) : bpm;
+}
+
 // Manual override applied when a run-through's Piece Map flag lands on
 // 'rough' or 'lost' (Repertoire-Lifecycle.md's "Post-run-through logging")
 // — distinct from computeLadderAdvance above, which only ever advances off
@@ -167,6 +204,9 @@ export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
 //   result,        // 'pass' | 'soft-miss' | 'fail' — already classified by the caller
 //   effectiveness, // 'low' | 'good' | 'high' | undefined — reused for Holding's interval math
 //   asOfDate,      // 'YYYY-MM-DD' — the calendar date this outcome happened
+//   cleanReps,     // number — this session's clean-rep count, read only for
+//                  // computeDemonstratedTempoBaseline's "3 perfect reps" check below
+//   bpm,           // number — this session's achieved tempo, same purpose as cleanReps above
 // }
 //
 // Returns a new chunkLadderState-shaped object (same fields, plus
@@ -194,11 +234,18 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   }
 
   if (outcome.result === "soft-miss") {
+    const demonstrated = computeDemonstratedTempoBaseline({
+      outcome: outcome.result,
+      cleanReps: outcome.cleanReps,
+      bpm: outcome.bpm,
+      practiceBPM,
+      targetBPM,
+    });
     return {
       stage,
       consecutivePasses: 0,
       consecutiveStabilizingFails: 0,
-      practiceBPM: stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.softMiss),
+      practiceBPM: demonstrated != null ? demonstrated : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.softMiss),
       nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(stage, ladderConfig, consecutivePasses, outcome.effectiveness)),
       tier1Done,
       graduated: false,
@@ -214,12 +261,19 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   const shouldGraduate = clearsFloor && graduationPasses != null && passesIfCounted >= graduationPasses;
   const newStage = shouldGraduate ? promote(stage) : stage;
   const passesAfter = shouldGraduate ? 0 : passesIfCounted;
+  const demonstratedOnPass = computeDemonstratedTempoBaseline({
+    outcome: outcome.result,
+    cleanReps: outcome.cleanReps,
+    bpm: outcome.bpm,
+    practiceBPM,
+    targetBPM,
+  });
 
   return {
     stage: newStage,
     consecutivePasses: passesAfter,
     consecutiveStabilizingFails: 0,
-    practiceBPM: stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.pass),
+    practiceBPM: demonstratedOnPass != null ? demonstratedOnPass : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.pass),
     nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, passesAfter, outcome.effectiveness)),
     tier1Done,
     graduated: shouldGraduate,

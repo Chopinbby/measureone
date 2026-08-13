@@ -401,14 +401,38 @@ export default function App() {
       const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
       const loggedDate = todayISODate();
       const loggedAt = Date.now();
-      const sessions = [...(prevEntry.sessions || []), { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds }];
+      // Snapshot the ladder state as it stood *before* this session, onto
+      // the session record itself — not the chunk entry — so same-day
+      // multi-session logging keeps each session's own "before" picture
+      // distinct. Lets handleUnlogSession fully reverse the ladder when
+      // undoing the most recent session, instead of just deleting the
+      // record and leaving stage/tempo/nextDueDate advanced (the
+      // desync bug documented in docs/Decisions.md's "session undo should
+      // fully reverse the ladder" entry). Same snapshot-and-restore pattern
+      // `flagSnapshot` already uses for rough/lost flags (handleSetFlag,
+      // below).
+      const ladderSnapshot = {
+        stage: prevEntry.stage ?? null,
+        consecutivePasses: prevEntry.consecutivePasses ?? 0,
+        consecutiveStabilizingFails: prevEntry.consecutiveStabilizingFails ?? 0,
+        practiceBPM: prevEntry.practiceBPM ?? null,
+        nextDueDate: prevEntry.nextDueDate ?? null,
+        tier1Done: prevEntry.tier1Done ?? false,
+      };
+      const sessions = [
+        ...(prevEntry.sessions || []),
+        { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds, ladderSnapshot },
+      ];
 
-      // Ladder entry/Tier-1 seeding isn't built yet (a later, deferred
-      // pass) — without it practiceBPM would stay null forever, since
-      // computeLadderAdvance has nothing to step from. Seeding it to
-      // whatever tempo was just attempted, the first time only, is a
-      // placeholder minimal enough to keep this pass testable; see PR
-      // summary for why this isn't a designed entry mechanic.
+      // practiceBPM is seeded from whatever the learner actually logs the
+      // first time they touch a chunk — the USER-SELECTED starting tempo,
+      // concept 2 of the three-concept split (see
+      // lib/confidence.js's getSuggestedStartingBPM block comment,
+      // docs/Algorithms.md). getSuggestedStartingBPM (concept 1) is
+      // guidance only, surfaced to the learner in ChecklistItem's
+      // first-encounter note — it never gets written here directly, so a
+      // suggestion never silently becomes the real baseline without the
+      // learner actually choosing it.
       const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : bpm;
 
       // computeLadderAdvance's Holding-stage interval math (lib/ladder.js)
@@ -432,7 +456,7 @@ export default function App() {
           targetBPM,
           tier1Done: prevEntry.tier1Done,
         },
-        { result: outcome, effectiveness, asOfDate: loggedDate },
+        { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
         p.ladderConfig
       );
 
@@ -459,10 +483,26 @@ export default function App() {
 
   // Removes only the most recently logged session for `day`, not every
   // session that day — multiple sessions can now legitimately share a
-  // plan-day (see handleLogSession above). Does not roll back the ladder
-  // state that session's outcome advanced (stage/practiceBPM/etc.) — same
-  // "no undo history" limitation already documented for BPM zones and
-  // difficulty reassessment (Data-Model.md).
+  // plan-day (see handleLogSession above).
+  //
+  // Fully reverses the ladder state that session's outcome advanced
+  // (stage/consecutivePasses/consecutiveStabilizingFails/practiceBPM/
+  // nextDueDate/tier1Done) via the ladderSnapshot handleLogSession now
+  // captures on every session — but ONLY when the session being undone is
+  // this chunk's most recent session *overall* (not just the most recent
+  // for `day`: restoring a snapshot rewinds to a moment in time, so
+  // undoing an earlier session while a later one still stands would
+  // silently erase that later session's effects too — the "genuinely hard
+  // corner" docs/Decisions.md's "session undo should fully reverse the
+  // ladder" entry scopes around). Outside that case — a non-latest
+  // session, or a pre-migration session logged before ladderSnapshot
+  // existed — falls back to removing the record only, same behavior as
+  // before this pass: it does not guess or reconstruct what the ladder
+  // state should be.
+  //
+  // A full reversal also undoes a rough/lost flag applied on top of this
+  // session (see the flagSnapshot check below) — otherwise the flag would
+  // outlive the ladder state it was based on.
   const handleUnlogSession = (chunkId, day) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
@@ -471,10 +511,51 @@ export default function App() {
       const sessions = [...(prevEntry.sessions || [])];
       const lastIdx = sessions.map((s) => s.day).lastIndexOf(day);
       if (lastIdx === -1) return p;
+
+      const isLatestSession = lastIdx === sessions.length - 1;
+      const snapshot = sessions[lastIdx].ladderSnapshot;
+
       sessions.splice(lastIdx, 1);
       const stillHasDay = sessions.some((s) => s.day === day);
       const doneDays = stillHasDay ? prevEntry.doneDays : (prevEntry.doneDays || []).filter((d) => d !== day);
-      progress[chunkId] = { ...prevEntry, doneDays, sessions };
+
+      let entry = { ...prevEntry, doneDays, sessions };
+      if (isLatestSession && snapshot) {
+        const isValidSnapshot =
+          "stage" in snapshot &&
+          "consecutivePasses" in snapshot &&
+          "consecutiveStabilizingFails" in snapshot &&
+          "practiceBPM" in snapshot &&
+          "nextDueDate" in snapshot &&
+          "tier1Done" in snapshot;
+        if (isValidSnapshot) {
+          entry = {
+            ...entry,
+            stage: snapshot.stage,
+            consecutivePasses: snapshot.consecutivePasses,
+            consecutiveStabilizingFails: snapshot.consecutiveStabilizingFails,
+            practiceBPM: snapshot.practiceBPM,
+            nextDueDate: snapshot.nextDueDate,
+            tier1Done: snapshot.tier1Done,
+          };
+          // A rough/lost flag still carrying its flagSnapshot can only have
+          // been applied AFTER this session, with nothing logged since —
+          // handleLogSession unconditionally clears flagSnapshot on every
+          // real session, so its mere presence here proves that ordering.
+          // Undoing the session that predates the flag should undo the
+          // flag too, not leave it pointing at a ladder state (and a
+          // flagSnapshot restore point) that no longer exists. A flag with
+          // no flagSnapshot predates this session (or survived a later
+          // real log) and is left untouched, same as today.
+          if (entry.flag && entry.flagSnapshot) {
+            entry.flag = undefined;
+            entry.flagSnapshot = undefined;
+          }
+        } else {
+          console.warn(`handleUnlogSession: malformed ladderSnapshot for chunk ${chunkId}, falling back to record-only removal`, snapshot);
+        }
+      }
+      progress[chunkId] = entry;
       return { ...p, progress };
     });
   };

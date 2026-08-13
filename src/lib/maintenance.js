@@ -47,6 +47,10 @@ export function computeDueReviews(piece, chunkSet, asOfDate) {
   (chunkSet.all || []).forEach((chunk) => {
     const entry = progress[chunk.id];
     if (!entry || !entry.nextDueDate) return;
+    // Rule 1 (Decisions.md#spaced-repetition--maintenance): a chunk
+    // flagged for re-learning produces no due reviews — it's replacing
+    // review, not running alongside it.
+    if (entry.needsRelearning) return;
     // Both sides are 'YYYY-MM-DD', where lexicographic order is calendar
     // order — same comparison computeLastLoggedAt (storage.js) already
     // relies on for loggedDate.

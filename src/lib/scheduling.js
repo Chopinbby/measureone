@@ -296,6 +296,11 @@ export function computeTimeline(piece, chunkSet) {
     if (!start) return;
     const entry = piece.progress[chunk.id] || {};
     if (entry.stage == null || !entry.nextDueDate) return;
+    // Rule 1 (Decisions.md#spaced-repetition--maintenance): re-learning
+    // replaces review, never runs alongside it — a flagged chunk produces
+    // zero due reviews here, full stop, regardless of what nextDueDate
+    // happens to hold.
+    if (entry.needsRelearning) return;
     const rawDay = daysBetweenInclusive(piece.startDate, entry.nextDueDate);
     if (rawDay == null) return;
     const day = snapOrDrop(Math.max(rawDay, start + 1));

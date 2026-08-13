@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Pencil, Flag, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
 import { clamp, formatRange } from "../../lib/utils";
@@ -28,6 +28,7 @@ export function PieceMapTab({
   onSetManualConfidence,
   onSetFlag = () => {},
   onSetMemoryAnchor = () => {},
+  onClearRelearning = () => {},
   sequentialMode = false,
   initialSelectedId = null,
   onFinishSequential,
@@ -60,6 +61,7 @@ export function PieceMapTab({
           const conf = computeConfidence(c, piece, currentDay);
           const manual = isManualConfidence(c, piece.progress);
           const flag = (piece.progress[c.id] || {}).flag;
+          const needsRelearning = (piece.progress[c.id] || {}).needsRelearning;
           const tier = conf >= 67 ? "teal" : conf >= 34 ? "brass" : "brick";
           return (
             <button
@@ -77,6 +79,11 @@ export function PieceMapTab({
               {flag && (
                 <span className={`map-cell-flag flag-${flag}`} title={flag === "lost" ? "Lost" : "Rough"}>
                   <Flag size={11} />
+                </span>
+              )}
+              {needsRelearning && (
+                <span className="map-cell-relearning" title="Needs reinforcement">
+                  <RotateCcw size={11} />
                 </span>
               )}
             </button>
@@ -117,6 +124,21 @@ export function PieceMapTab({
                   <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
                 </button>
               </div>
+
+              {selectedEntry.needsRelearning && (
+                <div className="field">
+                  <span>Ladder status</span>
+                  <div className="manual-conf-row">
+                    <p className="wizard-hint relearning-hint" style={{ margin: 0, flex: 1 }}>
+                      <RotateCcw size={13} /> Needs reinforcement — review is paused while this chunk rebuilds
+                      consistency in Stabilizing. Clears automatically after 4 consecutive full passes.
+                    </p>
+                    <button className="ghost-btn" onClick={() => onClearRelearning(selectedChunk.id)}>
+                      Clear, resume review
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {sequentialMode && (
                 <div className="field">

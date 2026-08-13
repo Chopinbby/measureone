@@ -378,13 +378,18 @@ export default function App() {
     });
   };
 
-  // `sessionInput` = { cleanReps, bpm, outcome, durationSeconds, targetBPM }
-  // — outcome is already classified by the caller (classifySessionOutcome,
-  // lib/confidence.js), since that needs the full chunk (difficultyLabel)
-  // and the piece's bpmZones, neither of which this handler has from just
-  // a chunkId. targetBPM is the caller's already-resolved effective target
-  // (entry.targetBPM || getDefaultTargetBPM(...)), needed here for
-  // lib/ladder.js's tempo-floor gating.
+  // `sessionInput` = { cleanReps, bpm, outcome, durationSeconds, targetBPM,
+  // suggestedStartingBPM } — outcome is already classified by the caller
+  // (classifySessionOutcome, lib/confidence.js), since that needs the full
+  // chunk (difficultyLabel) and the piece's bpmZones, neither of which this
+  // handler has from just a chunkId. targetBPM is the caller's
+  // already-resolved effective target (entry.targetBPM ||
+  // getDefaultTargetBPM(...)), needed here for lib/ladder.js's tempo-floor
+  // gating. suggestedStartingBPM is likewise caller-resolved
+  // (getSuggestedStartingBPM(piece, chunk), lib/confidence.js) — needed
+  // only for the moment a fail newly sets needsRelearning (rule 4:
+  // Decisions.md#spaced-repetition--maintenance), same reason targetBPM is
+  // resolved by the caller rather than here.
   //
   // Sessions are appended, never overwritten by day alone — logging the
   // same chunk twice on one plan-day (e.g. an early touch, then a later
@@ -394,7 +399,7 @@ export default function App() {
   // eventually wants — that needs Tier 1/Tier 2 scheduling, a later,
   // explicitly deferred pass.
   const handleLogSession = (chunkId, day, sessionInput) => {
-    const { cleanReps, bpm, outcome, durationSeconds, targetBPM } = sessionInput;
+    const { cleanReps, bpm, outcome, durationSeconds, targetBPM, suggestedStartingBPM } = sessionInput;
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId] || { doneDays: [] };
@@ -418,6 +423,7 @@ export default function App() {
         practiceBPM: prevEntry.practiceBPM ?? null,
         nextDueDate: prevEntry.nextDueDate ?? null,
         tier1Done: prevEntry.tier1Done ?? false,
+        needsRelearning: prevEntry.needsRelearning ?? false,
       };
       const sessions = [
         ...(prevEntry.sessions || []),
@@ -455,6 +461,8 @@ export default function App() {
           practiceBPM: seededPracticeBPM,
           targetBPM,
           tier1Done: prevEntry.tier1Done,
+          needsRelearning: prevEntry.needsRelearning,
+          suggestedStartingBPM,
         },
         { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
         p.ladderConfig
@@ -471,6 +479,7 @@ export default function App() {
         practiceBPM: advance.practiceBPM,
         nextDueDate: advance.nextDueDate,
         tier1Done: advance.tier1Done,
+        needsRelearning: advance.needsRelearning,
         // A real logged session moves the ladder forward for real —
         // clears any pending flagSnapshot (see handleSetFlag below) so
         // later clearing a rough/lost flag can't discard this genuine
@@ -537,6 +546,12 @@ export default function App() {
             practiceBPM: snapshot.practiceBPM,
             nextDueDate: snapshot.nextDueDate,
             tier1Done: snapshot.tier1Done,
+            // needsRelearning was added to the snapshot shape in the same
+            // pass that added the flag itself — an older snapshot (missing
+            // the key entirely) predates the flag ever being settable, so
+            // false is the correct restore, not a validity failure like
+            // the six fields checked above.
+            needsRelearning: "needsRelearning" in snapshot ? snapshot.needsRelearning : false,
           };
           // A rough/lost flag still carrying its flagSnapshot can only have
           // been applied AFTER this session, with nothing logged since —
@@ -575,6 +590,37 @@ export default function App() {
       const progress = { ...p.progress };
       const entry = progress[chunkId] ? { ...progress[chunkId] } : { doneDays: [] };
       entry.manualConfidence = value;
+      progress[chunkId] = entry;
+      return { ...p, progress };
+    });
+  };
+
+  // Rule 2's manual half of needsRelearning's dual exit (the other half is
+  // automatic: 4 consecutive full Stabilizing passes, handled inside
+  // computeLadderAdvance itself — lib/ladder.js). Same escape-hatch shape
+  // as handleSetManualConfidence above: a direct field write, no snapshot
+  // to restore, since "resume normal review now" needs nothing reversed —
+  // unlike handleSetFlag's rough/lost cycle, which undoes a demotion this
+  // flag never separately applies (rule 3's demote-and-pin already
+  // happened as part of the fail that set the flag, and stays whether or
+  // not the flag itself is later cleared).
+  //
+  // Also resets consecutiveStabilizingFails to 0 — confirmed with the
+  // user: clearing should put the chunk back where a single fail would
+  // leave it, not one fail away from immediately re-flagging. Without
+  // this, the streak that triggered the flag (already at 2) survives the
+  // clear, so the very next fail (3) still reads as ">= 2" and re-flags
+  // instantly — one fail after a manual "I've got this," not two. The
+  // automatic exit doesn't need this: any real pass already resets the
+  // streak to 0 on its own (computeLadderAdvance's pass branch, every
+  // outcome), so by the time 4 of them graduate a chunk out, the streak
+  // has long since been at 0 regardless of this handler.
+  const handleClearRelearning = (chunkId) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const entry = progress[chunkId] ? { ...progress[chunkId] } : { doneDays: [] };
+      entry.needsRelearning = false;
+      entry.consecutiveStabilizingFails = 0;
       progress[chunkId] = entry;
       return { ...p, progress };
     });
@@ -913,6 +959,7 @@ export default function App() {
                 onSetManualConfidence={handleSetManualConfidence}
                 onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
+                onClearRelearning={handleClearRelearning}
               />
             )}
             {activeTab === "revival" && piece.revival && piece.revival.active && (
@@ -1276,11 +1323,15 @@ const CSS = `
 .map-cell-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; }
 .map-cell-flag.flag-rough { color: var(--brass); }
 .map-cell-flag.flag-lost { color: var(--brick); }
+.map-cell-relearning { position: absolute; top: 10px; left: 10px; display: inline-flex; color: var(--brick); }
 
 .flag-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
 .flag-toggle:hover { border-color: var(--brass); }
 .flag-toggle.flag-rough { border-color: var(--brass); background: rgba(185,138,62,0.1); color: var(--brass); }
 .flag-toggle.flag-lost { border-color: var(--brick); background: rgba(181,71,58,0.1); color: var(--brick); }
+
+.relearning-hint { display: flex; align-items: flex-start; gap: 6px; color: var(--brick); }
+.relearning-hint svg { flex-shrink: 0; margin-top: 1px; }
 
 .detail-panel { border-color: var(--ink); }
 .detail-modal { max-width: 480px; }

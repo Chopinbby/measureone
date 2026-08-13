@@ -225,15 +225,14 @@ ambiguity concrete:
 
 - A fail drops a chunk back exactly **one** stage, never to zero.
 - Two consecutive fails specifically while in Stabilizing is a distinct
-  signal ("this was never actually consolidated," not normal decay) — now
-  surfaced as a `needsRelearning` flag on the chunk's returned ladder
-  state. **Confirmed with the user: this does not plug into Revival** —
-  Revival's three auto-triggers (below) are all piece-wide, this signal is
-  chunk-scoped, and folding a single-chunk problem into a whole-piece
-  recovery flow was never part of that design. What (if anything) should
-  read this flag, and what "a short structured re-learning pass" concretely
-  means, is still undecided — it's currently just data, not a route to
-  anywhere.
+  signal ("this was never actually consolidated," not normal decay) —
+  surfaced as a persisted, sticky `needsRelearning` flag
+  (`progress[id].needsRelearning`). **Confirmed with the user: this does
+  not plug into Revival** — Revival's three auto-triggers (below) are all
+  piece-wide, this signal is chunk-scoped, and folding a single-chunk
+  problem into a whole-piece recovery flow was never part of that design.
+  **Built in Pass 11** — see "The short structured re-learning pass" below
+  for what actually reads and reacts to the flag now.
 - Holding's interval expansion reuses the effectiveness multiplier already
   built for `adaptiveReviewOffsets` (0.6×/1×/1.4× —
   [Algorithms.md#adaptive-review](Algorithms.md#adaptive-review)) as its
@@ -509,6 +508,13 @@ doesn't distinguish which):
   still deliberately doesn't factor in ladder stage (see Stage 3 above);
   the demote-and-pin operation and the confidence cap are two independent
   effects of the same flag, not one implemented in terms of the other.
+  **`needsRelearning` gets the same cap, added in Pass 11 once that flag
+  existed** — `Math.min(score, 20)`, same value as `lost`, since it reuses
+  the same underlying demote-and-pin mechanism just reached a different way
+  (two Stabilizing fails, not a manual run-through flag). Independent of
+  `entry.flag`: a chunk can in principle carry both at once, and the two
+  caps are combined with `Math.min` rather than one overriding the other,
+  so whichever is stricter always wins.
 - **Overview's "Practice progress" bar was still contradicting the flag
   after the confidence cap shipped.** Found in review: `computeProgressTier`
   (the Mastered/Comfortable/Learned bar) read only a chunk's most-recently-
@@ -578,6 +584,76 @@ doesn't distinguish which):
   nothing logged in between; a flag with no `flagSnapshot` (predates the
   session, or survived a later real log) is left untouched. See
   [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+### The short structured re-learning pass (built)
+
+**Implemented (Pass 11).** Two consecutive fails while in Stabilizing sets
+`progress[id].needsRelearning` — a persisted, sticky boolean, not just the
+per-call informational flag `computeLadderAdvance` used to return. Four
+rules, agreed with the user and recorded ahead of implementation in
+[Decisions.md](Decisions.md#spaced-repetition--maintenance):
+
+1. **Replaces review, never runs alongside it.** `computeTimeline`'s Tier 2
+   loop (`lib/scheduling.js`) and `computeDueReviews`
+   (`lib/maintenance.js`) both check the flag first and skip the chunk
+   outright — a flagged chunk produces zero due reviews anywhere.
+2. **Exit is dual.** The normal 4-consecutive-full-pass Stabilizing
+   graduation clears it automatically (inside `computeLadderAdvance`
+   itself); a manual override — `handleClearRelearning` (`App.jsx`), the
+   same escape-hatch shape as `handleSetManualConfidence` — clears it on
+   demand from the Piece Map. The manual clear also resets
+   `consecutiveStabilizingFails` to 0 (confirmed with the user): otherwise
+   the streak that triggered the flag survives the clear, and the very next
+   fail re-flags instantly instead of behaving like an ordinary first fail.
+3. **Reuses the `lost` demote-and-pin mechanism, never shows the word
+   "lost."** The moment the flag turns on, `nextDueDate` pins to today,
+   same as `applyRunThroughFlag`'s `lost` case — reproduced inline in
+   `computeLadderAdvance`'s fail branch rather than calling
+   `applyRunThroughFlag` directly, since that function deliberately never
+   touches `practiceBPM`/`consecutiveStabilizingFails` and this rule needs
+   both. User-facing label, confirmed with the user: **"Needs
+   reinforcement"** — a small icon on the Piece Map grid cell, plus a
+   labeled row with a "Clear, resume review" button in the chunk detail
+   modal (`PieceMapTab.jsx`).
+4. **`practiceBPM` resets.** To `getSuggestedStartingBPM(piece, chunk)`
+   (concept 1 of the [starting/suggested/demonstrated tempo
+   split](Algorithms.md#starting-suggested-and-demonstrated-tempo)) at the
+   exact moment the flag turns on — not reapplied on later fails while
+   already flagged. This was blocked until Pass 9 gave the app a real
+   "suggested starting tempo" concept to reset to; unblocked once that
+   landed. Since `lib/ladder.js` is a pure module without `piece`/`chunk`
+   access, the caller resolves this value the same way it already resolves
+   `targetBPM`: `ChecklistItem.jsx` computes
+   `getSuggestedStartingBPM(piece, chunk)` unconditionally (not just on
+   first encounter, since a chunk can be flagged well past its first
+   session) and passes it through `sessionInput.suggestedStartingBPM` to
+   `handleLogSession`.
+
+Migration note: `consecutiveStabilizingFails` has been persisted since
+Pass 1, so a piece already sitting at 2+ while still in Stabilizing gets
+`needsRelearning` switched on retroactively on load
+(`backfillProgressLadderState`, `lib/storage.js`), rather than defaulting
+every already-saved piece to "not flagged" regardless of its real state.
+
+Confidence cap: added on top of the four rules once the flag existed, same
+mechanism the rough/lost flags already use — see "Confidence cap, not a
+`stage`/ladder read" above.
+
+**Verified manually in the browser**, not just via unit tests: forced the
+flag via two real consecutive Stabilizing fails, confirmed the chunk drops
+out of the Timeline's review slots entirely (reappearing once cleared),
+confirmed the Piece Map badge/label/confidence cap render correctly
+(including against a manual override), confirmed the manual-clear button
+and the automatic 4-pass graduation both clear the flag, and confirmed
+`practiceBPM` resets to the real `getSuggestedStartingBPM` value (not the
+normal −2 step) once a piece has a target BPM configured — the earlier
+in-plan test had none, so that first pass only exercised the fallback
+step, not the actual reset; a second chunk with a real target BPM
+confirmed the reset itself.
+
+Deliberately not built here: a second Tier 1 rung, and anything wiring
+this signal into Revival (unchanged from the earlier decision above — it's
+chunk-scoped, Revival's triggers are piece-wide).
 
 ### Revival auto-triggers
 
@@ -761,9 +837,11 @@ implemented) — kept here for the record rather than deleted:
   override paths, consistent with
   [Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch).
 - ~~Does the two-consecutive-Stabilizing-fails signal plug into Revival?~~
-  No — confirmed with the user while building `lib/ladder.js`. Revival's
+  No — confirmed with the user while building `lib/ladder.js`, unchanged
+  once the signal's own behavior was built out in Pass 11. Revival's
   auto-triggers are piece-wide; this signal is chunk-scoped and stays a
-  standalone flag (`needsRelearning`) with no destination yet.
+  standalone flag (`needsRelearning`) — see "The short structured
+  re-learning pass" above for what it now actually does.
 - ~~Does the existing "how did it feel" effectiveness input survive
   alongside pass/soft-miss/fail?~~ No — folded into a single "needs more
   work" fail override, confirmed with the user while wiring logging in.
@@ -787,23 +865,18 @@ implemented) — kept here for the record rather than deleted:
   than a new tab or Master Agenda alone — **built in Pass 8**. See Stage 4
   → [How maintenance surfaces in the UI](#how-maintenance-surfaces-in-the-ui-built)
   and [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+- ~~What "a short structured re-learning pass" concretely means~~ — four
+  rules agreed with the user, **built in Pass 11**: it *replaces* review
+  rather than running alongside it; it exits on either the normal 4-pass
+  graduation or a manual override; it reuses the `lost` mechanism but never
+  shows the user that word (label: "Needs reinforcement"); and the practice
+  tempo resets to `getSuggestedStartingBPM`, unblocked once Pass 9 gave the
+  app a real starting-tempo concept to reset to. See "The short structured
+  re-learning pass" above and
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 **Still open:**
 
-- ~~What "a short structured re-learning pass" concretely means~~ — **now
-  scoped, still not built.** Four rules agreed with the user: it *replaces*
-  review rather than running alongside it (so a chunk in this state must
-  produce no due reviews at all); it exits on either the normal 4-pass
-  graduation or a manual override; it reuses the `lost` mechanism but must
-  never show the user that word (the material was often never held in the
-  first place); and the practice tempo resets. Full reasoning in
-  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
-  Two things remain genuinely open: the user-facing label, and the tempo
-  reset — which is **blocked** on there being no defined starting BPM for a
-  chunk at all (see Decisions.md's Open questions). `needsRelearning` is
-  still computed and discarded on every logged session; the underlying
-  `consecutiveStabilizingFails` count *is* persisted, so this can be
-  switched on retroactively across existing pieces.
 - Whether a second Tier 1 rung is needed before a chunk reliably survives
   to Stabilizing's first real review — gated on fail-rate data once built,
   not decided preemptively.

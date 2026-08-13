@@ -308,6 +308,67 @@ export function removePieceFromStorage(id) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Export reminder — nudges toward a backup export since this app has  */
+/*  no server-side persistence at all (see CLAUDE.md's "no backend").   */
+/*  App-level, not per-piece: a single export already bundles every     */
+/*  piece together, so there's only one "last exported" instant to      */
+/*  track, not one per piece.                                           */
+/* ------------------------------------------------------------------ */
+
+const LAST_EXPORTED_AT_KEY = "measureone-last_exported_at";
+const FIRST_USE_AT_KEY = "measureone-first_use_at";
+const EXPORT_REMINDER_INTERVAL_MS = 1 * 24 * 60 * 60 * 1000; // 1 day
+
+export function loadLastExportedAt() {
+  try {
+    const raw = localStorage.getItem(LAST_EXPORTED_AT_KEY);
+    return raw ? Number(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function saveLastExportedAt(timestamp) {
+  try {
+    localStorage.setItem(LAST_EXPORTED_AT_KEY, String(timestamp));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+}
+
+// Lazily seeds the anchor the reminder falls back to for a piece/app that's
+// never been exported at all — written once, the first time anything reads
+// it, so a user upgrading into this feature isn't retroactively treated as
+// already overdue just because they've had the app open for a while.
+// Missing/unavailable storage reads as null, same conservative-no-reminder
+// direction as isExportReminderDue takes below.
+export function loadOrInitFirstUseAt() {
+  try {
+    const raw = localStorage.getItem(FIRST_USE_AT_KEY);
+    if (raw) return Number(raw);
+    const now = Date.now();
+    localStorage.setItem(FIRST_USE_AT_KEY, String(now));
+    return now;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Pure so it's cheaply unit-testable without a localStorage shim (see
+// test/storage.test.mjs, which otherwise only exercises pure functions from
+// this file). lastExportedAt is the anchor whenever an export has actually
+// happened; firstUseAt is only consulted as a fallback for "never exported
+// yet." Neither anchor available (e.g. storage unavailable entirely) means
+// there's nothing to measure elapsed time against, so no reminder rather
+// than a false positive.
+export function isExportReminderDue(lastExportedAt, firstUseAt, now = Date.now()) {
+  const anchor = lastExportedAt || firstUseAt;
+  if (!anchor) return false;
+  return now - anchor >= EXPORT_REMINDER_INTERVAL_MS;
+}
+
 export function downloadBackup(pieces) {
   const backup = {
     exportedAt: new Date().toISOString(),

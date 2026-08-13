@@ -5,7 +5,7 @@
 // silently drop data. See docs/AI-GUIDELINES.md and CLAUDE.md for context.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece } from "../src/lib/storage.js";
+import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue } from "../src/lib/storage.js";
 
 const fresh = {
   id: "p_fresh",
@@ -438,5 +438,59 @@ describe("Import path — validateAndMigratePiece protects imported pieces too",
       const merged = mergeImportedPiece(existingPiece, staleImport);
       assert.equal(merged.updatedAt, 5000);
     });
+  });
+});
+
+// Pass 12: the app-level "back up your data" nudge. lastExportedAt is the
+// anchor whenever an export has actually happened; firstUseAt only matters
+// as a fallback for a piece/app that's never been exported at all.
+describe("isExportReminderDue — Pass 12 export reminder cadence", () => {
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const now = 10_000_000; // arbitrary fixed "now" so tests don't depend on real time
+
+  test("a lastExportedAt from over a day ago is due", () => {
+    const lastExportedAt = now - ONE_DAY_MS - 1;
+    assert.equal(isExportReminderDue(lastExportedAt, null, now), true);
+  });
+
+  test("a lastExportedAt from exactly one day ago is due (>=, not strictly >)", () => {
+    const lastExportedAt = now - ONE_DAY_MS;
+    assert.equal(isExportReminderDue(lastExportedAt, null, now), true);
+  });
+
+  test("a recent lastExportedAt (under a day old) is not due", () => {
+    const lastExportedAt = now - (ONE_DAY_MS - 1);
+    assert.equal(isExportReminderDue(lastExportedAt, null, now), false);
+  });
+
+  test("a lastExportedAt of right now is not due", () => {
+    assert.equal(isExportReminderDue(now, null, now), false);
+  });
+
+  test("missing lastExportedAt falls back to firstUseAt", () => {
+    const firstUseAt = now - ONE_DAY_MS - 1;
+    assert.equal(isExportReminderDue(null, firstUseAt, now), true);
+  });
+
+  test("missing lastExportedAt with a recent firstUseAt is not due", () => {
+    const firstUseAt = now - 1000;
+    assert.equal(isExportReminderDue(null, firstUseAt, now), false);
+  });
+
+  test("lastExportedAt takes priority over firstUseAt when both are present", () => {
+    // A piece exported recently but with an old firstUseAt (long-time user)
+    // should not be nagged — the export, not the app's age, is what matters.
+    const lastExportedAt = now - 1000;
+    const firstUseAt = now - ONE_DAY_MS * 30;
+    assert.equal(isExportReminderDue(lastExportedAt, firstUseAt, now), false);
+  });
+
+  test("both anchors missing (storage unavailable) is never due, not a false positive", () => {
+    assert.equal(isExportReminderDue(null, null, now), false);
+  });
+
+  test("defaults `now` to Date.now() when omitted", () => {
+    const lastExportedAt = Date.now() - ONE_DAY_MS - 5000;
+    assert.equal(isExportReminderDue(lastExportedAt, null), true);
   });
 });

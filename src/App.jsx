@@ -14,6 +14,7 @@ import {
   Pencil,
   RefreshCw,
   Upload,
+  Download,
   X,
   AlertTriangle,
 } from "lucide-react";
@@ -37,6 +38,10 @@ import {
   findMatchingPiece,
   mergeImportedPiece,
   validateAndMigratePiece,
+  loadLastExportedAt,
+  saveLastExportedAt,
+  loadOrInitFirstUseAt,
+  isExportReminderDue,
 } from "./lib/storage";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
@@ -98,6 +103,8 @@ export default function App() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
+  const [exportReminderDue, setExportReminderDue] = useState(false);
+  const [exportReminderDismissed, setExportReminderDismissed] = useState(false);
   const importInputRef = useRef(null);
 
   const piece = activePieceId ? pieces[activePieceId] : null;
@@ -127,6 +134,17 @@ export default function App() {
     if (!loaded) return;
     saveActivePieceIdToStorage(activePieceId);
   }, [activePieceId, loaded]);
+
+  // Check the export reminder once pieces are loaded — app-level (not
+  // per-piece), since export already bundles every piece into one backup.
+  // loadOrInitFirstUseAt seeds its anchor on first read, so this doubles as
+  // that seeding call.
+  useEffect(() => {
+    if (!loaded) return;
+    const lastExportedAt = loadLastExportedAt();
+    const firstUseAt = loadOrInitFirstUseAt();
+    setExportReminderDue(isExportReminderDue(lastExportedAt, firstUseAt));
+  }, [loaded]);
 
   const updatePiece = (updater) => {
     if (!activePieceId) return;
@@ -221,6 +239,10 @@ export default function App() {
   const handleConfirmExport = (selectedIds) => {
     const subset = Object.fromEntries(selectedIds.map((id) => [id, pieces[id]]).filter(([, p]) => p));
     downloadBackup(subset);
+    const result = saveLastExportedAt(Date.now());
+    if (!result.ok) setStorageError(true);
+    setExportReminderDue(false);
+    setExportReminderDismissed(false);
     setExportModalOpen(false);
   };
 
@@ -836,6 +858,29 @@ export default function App() {
         </div>
       )}
 
+      {exportReminderDue && !exportReminderDismissed && pieceList.length > 0 && (
+        <div className="export-reminder-banner">
+          <Download size={18} />
+          <div>
+            <p className="export-reminder-title">Back up your practice data</p>
+            <p className="export-reminder-sub">
+              MeasureOne only saves to this browser — it's been a while since your last export.
+              Download a backup so your plans and practice history aren't only in one place.
+            </p>
+          </div>
+          <button className="ghost-btn" onClick={() => setExportModalOpen(true)}>
+            Export backup
+          </button>
+          <button
+            className="export-reminder-dismiss"
+            aria-label="Dismiss reminder"
+            onClick={() => setExportReminderDismissed(true)}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {!loaded ? (
         <div className="empty-state">
           <p className="wizard-hint" style={{ margin: 0 }}>Loading your pieces…</p>
@@ -1300,6 +1345,13 @@ const CSS = `
 .storage-error-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brick); }
 .storage-error-sub { font-size: 12px; color: var(--ink-soft); margin: 0; max-width: 620px; }
 .storage-error-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
+.export-reminder-banner { display: flex; align-items: center; gap: 14px; background: rgba(185,138,62,0.1); border-bottom: 1px solid rgba(185,138,62,0.35); color: var(--brass-deep); padding: 12px 24px; }
+.export-reminder-banner svg { flex-shrink: 0; }
+.export-reminder-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brass-deep); }
+.export-reminder-sub { font-size: 12px; color: var(--ink-soft); margin: 0; max-width: 620px; }
+.export-reminder-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
+.export-reminder-dismiss { background: transparent; border: none; color: var(--ink-soft); cursor: pointer; padding: 4px; flex-shrink: 0; display: inline-flex; border-radius: 6px; }
+.export-reminder-dismiss:hover { color: var(--ink); background: rgba(32,42,51,0.06); }
 .revival-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(185,138,62,0.1); border: 1px solid rgba(185,138,62,0.35); border-radius: 14px; padding: 16px 20px; }
 .revival-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brass); }
 .revival-banner-reasons { font-size: 12.5px; color: var(--ink-soft); margin: 0; padding-left: 18px; max-width: 480px; }

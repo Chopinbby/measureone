@@ -409,10 +409,27 @@ called from `ChecklistItem.jsx` on every log and passed to
    not change**. New tier — the fix for "plateau via frustration": no
    honest way existed to log "close, but not quite" without it reading as
    failure against a fixed distant number.
-3. **Real fail** — self-report override ("needs more work"), failing reps
-   at a tempo previously cleared (genuine regression), or repeated
-   soft-misses even after `practiceBPM` has already backed off. One-stage
-   demotion, per the ladder rules above.
+3. **Real fail** — self-report override ("needs more work"), zero clean
+   reps, or repeated soft-misses — but **only when both the current and the
+   previous shortfall were reps-driven** (fewer than the required clean
+   reps), not merely a tempo miss. One-stage demotion, per the ladder rules
+   above.
+
+   **Resolved (Pass 14) — the BPM-gating false-fail fix:** the original
+   escalation rule fired off the previous session's *outcome label* alone
+   (`previousOutcome === "soft-miss"`), which didn't distinguish *why* that
+   soft-miss happened. A learner who hit every required rep but logged a
+   couple BPM under `practiceBPM` — itself already stepping down after a
+   miss — got auto-classified `"fail"` on the second such session, even
+   though nothing about their playing had regressed. `classifySessionOutcome`
+   now also takes `previousCleanReps`, and the escalation only fires when
+   this session's own reps also fell short of `requiredReps` *and* the
+   previous soft-miss was itself reps-driven — a tempo-only shortfall can
+   never be the fail trigger, in either session of the pair, no matter how
+   many times it repeats. See
+   [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+   options considered and why this one was chosen over delaying the
+   threshold or removing BPM from the pass/fail gate entirely.
 
 Plateau (reps consistently met, `practiceBPM` not climbing) should be rare
 by construction now, since tempo increase is built into what a full pass

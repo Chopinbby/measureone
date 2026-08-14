@@ -1231,6 +1231,84 @@ pieces started before the spring transition.**
   rather than folded into unrelated work. See
   [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
 
+**Decision (Pass 14): a repeat soft-miss only escalates to a real fail when
+both the current and the previous shortfall were reps-driven — a tempo-only
+shortfall (required reps hit, just under `practiceBPM`) can never be the
+fail trigger, in either session of the pair, no matter how many times it
+repeats.**
+
+- **The bug:** `classifySessionOutcome`'s escalation rule
+  (`previousOutcome === "soft-miss" → "fail"`) read only the previous
+  session's *outcome label*, not *why* it was a soft-miss. A soft-miss can
+  come from two different signals — insufficient clean reps, or full reps
+  but under tempo — and the rule treated them identically. A learner who
+  hit every required rep, twice in a row, but logged a couple BPM under a
+  `practiceBPM` that was already stepping down in their favor (soft-miss
+  steps it down by 2) got auto-classified `"fail"` on the second session —
+  a real stage demotion, and after two such fails while in Stabilizing,
+  `needsRelearning` fires and resets `practiceBPM` back to the suggested
+  starting tempo. Nothing about their playing regressed; they were
+  penalized for a tempo technicality the ladder was already correcting
+  for on its own.
+- **Options considered, presented to the user before writing any code:**
+  1. Raise the repeat threshold from 2 to a tunable N before escalating.
+     Simplest patch, but doesn't remove the false-fail case — just delays
+     it, and adds another hand-picked constant to the pile in
+     [Research.md](Research.md).
+  2. **(Chosen)** Only let a reps-driven repeat escalate to fail; a
+     tempo-only shortfall never can, however many times it repeats.
+  3. Remove BPM from the pass/fail gate entirely — "pass" becomes
+     reps-only, and tempo only paces how `practiceBPM` steps. The most
+     thorough fix to the underlying philosophy, but the widest blast
+     radius: it would have required changing `computeLadderAdvance`'s pass
+     branch (which currently always steps `practiceBPM` up on a pass), and
+     would change what counts as `effectiveness: "high"`, what can
+     graduate a stage, and what `revival.js`'s combo-escalation can ever
+     see as a fail from tempo alone (`sessionOutcome(s) === "fail"`,
+     `computeComboEscalations`).
+- **Why option 2:** it fully eliminates the false-fail case (not just
+  delays it, unlike option 1) while keeping the change contained to
+  `classifySessionOutcome` and its one caller (`ChecklistItem.jsx`) — it
+  doesn't touch what "pass" means, what graduates a stage, or what revival
+  can see, unlike option 3. It also preserves the original rule's intent:
+  genuine stagnation (reps not coming together, session after session)
+  should still surface as a real fail; it just no longer conflates that
+  with a learner who is solidly meeting reps and only needs a little more
+  time on tempo.
+- **The fix:** `classifySessionOutcome` (`src/lib/confidence.js`) gained a
+  `previousCleanReps` parameter. Escalation now requires
+  `cleanReps < requiredReps` on **both** the current session and the
+  previous one (`previousCleanReps < requiredReps`) — checking only the
+  previous session's reps would have let an asymmetric case slip through:
+  a reps-solid-but-slow session right after a genuinely bad one would
+  still have wrongly escalated if the check only looked backward. No
+  schema change was needed — `previousCleanReps` is read off the previous
+  session's already-stored `cleanReps`, mirroring how `ladderSnapshot`
+  already exposes the previous `practiceBPM`. `ChecklistItem.jsx` passes
+  it through from `priorSessions[priorSessions.length - 1]`. `ladder.js`
+  needed no change — it only ever consumed the returned outcome label, and
+  that label's meaning (pass/soft-miss/fail) didn't change, only *when*
+  "fail" gets assigned did.
+- **Known limitation, reviewed and accepted — not a defect to fix:**
+  `previousCleanReps` is compared against the `requiredReps` in force
+  *now*, not the one that applied when that earlier session was actually
+  logged. So reassessing a chunk's difficulty between two sessions makes
+  the look-back judge the earlier session by the newer standard. Confirmed
+  acceptable with the user: a difficulty reassessment realistically happens
+  either within the first couple of encounters with a chunk or later once
+  tempo has risen substantially, and in both cases what matters is that the
+  chunk is *eventually* judged by the appropriate standard — which it is,
+  from the reassessment onward. Recording the per-session standard would
+  mean a new persisted field on every session record plus a backfill rule
+  for all existing history; deliberately not built. The direction of the
+  error is safe regardless: the Pass 14 rule escalates on a strict subset
+  of what the pre-Pass-14 rule escalated on, so it can never produce a
+  `"fail"` the old code wouldn't have produced too.
+- Verified with new unit tests in `test/confidence.test.mjs`, including a
+  direct reproduction of the original false-fail scenario and the
+  asymmetric-repeat cases above. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two).
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -1658,7 +1736,11 @@ oversight to silently fix; surface it instead.
   whether `clearsStageFloor` should read the *post*-override `practiceBPM`
   within the same `computeLadderAdvance` call, which touches the ordering
   of an already-dense function (`lib/ladder.js`) — worth a deliberate pass,
-  not a quick patch.
+  not a quick patch. **Re-reviewed in Pass 14 and deliberately left open,
+  the user's explicit call:** the one-session delay self-corrects on the
+  next logged session, and reordering that function preemptively carries
+  more risk than the symptom warrants. Revisit if it actually shows up in
+  real use.
 - **A full session undo doesn't revert `currentBPM`.** `currentBPM` (last
   actually-played tempo, distinct from the ladder's `practiceBPM`) isn't
   one of the six fields `ladderSnapshot` captures, by original design (see

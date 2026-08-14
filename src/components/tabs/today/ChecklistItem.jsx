@@ -73,7 +73,8 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
     if (!canLog) return;
     const requiredReps = REQUIRED_REPS[chunk.difficultyLabel] || 4;
     const priorSessions = entry.sessions || [];
-    const previousOutcome = priorSessions.length ? sessionOutcome(priorSessions[priorSessions.length - 1]) : null;
+    const previousSession = priorSessions.length ? priorSessions[priorSessions.length - 1] : null;
+    const previousOutcome = previousSession ? sessionOutcome(previousSession) : null;
     const cleanReps = Number(reps);
     const bpmAttempted = Number(bpm);
     const outcome = classifySessionOutcome({
@@ -83,6 +84,7 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
       practiceBPM,
       manualFail,
       previousOutcome,
+      previousCleanReps: previousSession ? previousSession.cleanReps : null,
     });
     onLogSession(chunk.id, day, { cleanReps, bpm: bpmAttempted, outcome, durationSeconds, targetBPM, suggestedStartingBPM });
     setReps("");

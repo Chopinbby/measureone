@@ -80,18 +80,38 @@ export function getSuggestedStartingBPM(piece, chunk) {
 //   OR a manual "needs more work" override (self-report escape hatch — the
 //   folded-in replacement for the old separate "how did it feel" input,
 //   catching what the numbers alone can't: memory slips, poor technique
-//   despite clean reps), OR a repeat soft-miss right after the previous one
-//   (repeated soft-misses even after backing off — see the doc).
+//   despite clean reps), OR a repeat soft-miss right after a previous
+//   soft-miss, but ONLY when both shortfalls were reps-driven (see below).
 // - soft-miss: some clean reps, just not enough (or not at the asked
 //   tempo) to count as a full pass — the default middle case.
+//
+// A soft-miss caused purely by tempo (required reps hit, just under
+// practiceBPM) never escalates to "fail," in either session of the pair —
+// practiceBPM already steps down on its own after a tempo-only soft-miss,
+// so a learner who keeps meeting required reps hasn't regressed on the
+// thing that actually matters, no matter how many times in a row they log
+// a hair under an already-adjusting target. Escalation is reserved for a
+// genuine reps shortfall, twice in a row. Fixes a false-fail case found
+// while building this rule — see
+// docs/Decisions.md#spaced-repetition--maintenance (Pass 14).
 // `practiceBPM` may be null (chunk not yet seeded onto the ladder); a null
 // floor is treated as already cleared, same convention as lib/ladder.js.
-export function classifySessionOutcome({ cleanReps, bpm, requiredReps, practiceBPM, manualFail, previousOutcome }) {
+export function classifySessionOutcome({
+  cleanReps,
+  bpm,
+  requiredReps,
+  practiceBPM,
+  manualFail,
+  previousOutcome,
+  previousCleanReps,
+}) {
   if (manualFail) return "fail";
   if (!cleanReps || cleanReps <= 0) return "fail";
   const clearsTempo = practiceBPM == null || bpm >= practiceBPM;
   if (cleanReps >= requiredReps && clearsTempo) return "pass";
-  if (previousOutcome === "soft-miss") return "fail";
+  const thisIsRepsShortfall = cleanReps < requiredReps;
+  const previousWasRepsShortfall = previousCleanReps != null && previousCleanReps < requiredReps;
+  if (thisIsRepsShortfall && previousOutcome === "soft-miss" && previousWasRepsShortfall) return "fail";
   return "soft-miss";
 }
 

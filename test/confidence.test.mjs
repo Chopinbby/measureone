@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { getSuggestedStartingBPM, computeConfidence } from "../src/lib/confidence.js";
+import { getSuggestedStartingBPM, computeConfidence, classifySessionOutcome } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
   return { id: "c1", start: 1, end: 8, difficultyLabel: "medium", ...overrides };
@@ -148,5 +148,192 @@ describe("computeConfidence — flag and needsRelearning caps", () => {
   test("clearing needsRelearning removes the cap again", () => {
     const piece = makePiece({ progress: { c1: { manualConfidence: 90, needsRelearning: false } } });
     assert.equal(computeConfidence(makeChunk(), piece, 1), 90);
+  });
+});
+
+// Pass 14 — the BPM-gating decision (docs/Decisions.md#spaced-repetition--maintenance):
+// a repeat soft-miss only escalates to "fail" when BOTH the current and the
+// previous shortfall were reps-driven (cleanReps < requiredReps). A
+// tempo-only shortfall (required reps hit, just under practiceBPM) never
+// escalates, in either session of the pair, no matter how many times it
+// repeats — practiceBPM already backs off on its own after a tempo-only
+// soft-miss.
+describe("classifySessionOutcome — base cases (unchanged by Pass 14)", () => {
+  test("manualFail always wins, even with full reps and tempo cleared", () => {
+    assert.equal(
+      classifySessionOutcome({ cleanReps: 10, bpm: 200, requiredReps: 4, practiceBPM: 100, manualFail: true }),
+      "fail"
+    );
+  });
+
+  test("zero clean reps is always a fail", () => {
+    assert.equal(
+      classifySessionOutcome({ cleanReps: 0, bpm: 100, requiredReps: 4, practiceBPM: 100, manualFail: false }),
+      "fail"
+    );
+  });
+
+  test("required reps hit at/above practiceBPM is a full pass", () => {
+    assert.equal(
+      classifySessionOutcome({ cleanReps: 4, bpm: 100, requiredReps: 4, practiceBPM: 100, manualFail: false }),
+      "pass"
+    );
+    assert.equal(
+      classifySessionOutcome({ cleanReps: 4, bpm: 105, requiredReps: 4, practiceBPM: 100, manualFail: false }),
+      "pass"
+    );
+  });
+
+  test("a null practiceBPM (chunk not yet seeded) treats tempo as already cleared", () => {
+    assert.equal(
+      classifySessionOutcome({ cleanReps: 4, bpm: 40, requiredReps: 4, practiceBPM: null, manualFail: false }),
+      "pass"
+    );
+  });
+
+  test("a first-ever session (no previousOutcome) that falls short is a soft-miss, not a fail", () => {
+    assert.equal(
+      classifySessionOutcome({ cleanReps: 4, bpm: 90, requiredReps: 4, practiceBPM: 100, manualFail: false, previousOutcome: null }),
+      "soft-miss"
+    );
+    assert.equal(
+      classifySessionOutcome({ cleanReps: 2, bpm: 100, requiredReps: 4, practiceBPM: 100, manualFail: false, previousOutcome: null }),
+      "soft-miss"
+    );
+  });
+
+  test("two consecutive reps-insufficient soft-misses still escalates to a real fail (genuine stagnation is preserved)", () => {
+    // Session 1: only 2 of 4 required reps — a soft-miss.
+    const first = classifySessionOutcome({ cleanReps: 2, bpm: 100, requiredReps: 4, practiceBPM: 100, manualFail: false, previousOutcome: null });
+    assert.equal(first, "soft-miss");
+    // Session 2: still only 1 of 4 required reps, right after another reps-driven soft-miss.
+    const second = classifySessionOutcome({
+      cleanReps: 1,
+      bpm: 100,
+      requiredReps: 4,
+      practiceBPM: 100,
+      manualFail: false,
+      previousOutcome: first,
+      previousCleanReps: 2,
+    });
+    assert.equal(second, "fail");
+  });
+});
+
+describe("classifySessionOutcome — the false-fail fix (Pass 14)", () => {
+  test("the exact reproduction: full required reps, a hair under an already-ratcheted-down practiceBPM, twice in a row — stays soft-miss, not fail", () => {
+    // Session 1: practiceBPM=100, required reps hit, 1 BPM under — soft-miss.
+    // (The ladder would step practiceBPM down to 98 after this in lib/ladder.js.)
+    const first = classifySessionOutcome({
+      cleanReps: 4,
+      bpm: 99,
+      requiredReps: 4,
+      practiceBPM: 100,
+      manualFail: false,
+      previousOutcome: null,
+    });
+    assert.equal(first, "soft-miss");
+
+    // Session 2: practiceBPM has stepped down to 98, required reps hit again, still 1 BPM under.
+    // Before Pass 14 this classified as "fail" purely because the previous outcome
+    // was also "soft-miss" — even though reps were never the problem either time.
+    const second = classifySessionOutcome({
+      cleanReps: 4,
+      bpm: 97,
+      requiredReps: 4,
+      practiceBPM: 98,
+      manualFail: false,
+      previousOutcome: first,
+      previousCleanReps: 4,
+    });
+    assert.equal(second, "soft-miss", "a tempo-only shortfall must never escalate to fail, even repeated");
+  });
+
+  test("a tempo-only shortfall never escalates to fail no matter how many times it repeats", () => {
+    let previousOutcome = null;
+    let previousCleanReps = null;
+    let outcome;
+    for (let i = 0; i < 5; i++) {
+      outcome = classifySessionOutcome({
+        cleanReps: 4,
+        bpm: 90,
+        requiredReps: 4,
+        practiceBPM: 100,
+        manualFail: false,
+        previousOutcome,
+        previousCleanReps,
+      });
+      assert.equal(outcome, "soft-miss", `attempt ${i + 1} should still be a soft-miss, not a fail`);
+      previousOutcome = outcome;
+      previousCleanReps = 4;
+    }
+  });
+
+  test("this session is reps-solid-but-slow, even though the PREVIOUS session was a genuine reps shortfall — stays soft-miss", () => {
+    // Previous session: reps-driven soft-miss (2 of 4 required).
+    // This session: all 4 required reps hit, just under tempo — the current
+    // shortfall is tempo-only, so it can never be the fail trigger, regardless
+    // of what happened last time.
+    assert.equal(
+      classifySessionOutcome({
+        cleanReps: 4,
+        bpm: 90,
+        requiredReps: 4,
+        practiceBPM: 100,
+        manualFail: false,
+        previousOutcome: "soft-miss",
+        previousCleanReps: 2,
+      }),
+      "soft-miss"
+    );
+  });
+
+  test("this session is a genuine reps shortfall, but the PREVIOUS session was tempo-only — stays soft-miss (no escalation)", () => {
+    // Previous session: full reps, just under tempo (tempo-only soft-miss).
+    // This session: only 1 of 4 required reps. Escalation requires BOTH
+    // sessions to be reps-driven, so a single reps-driven session on its own
+    // (with a tempo-only session before it) doesn't yet count as "twice in a row."
+    assert.equal(
+      classifySessionOutcome({
+        cleanReps: 1,
+        bpm: 100,
+        requiredReps: 4,
+        practiceBPM: 100,
+        manualFail: false,
+        previousOutcome: "soft-miss",
+        previousCleanReps: 4,
+      }),
+      "soft-miss"
+    );
+  });
+
+  test("a missing previousCleanReps (legacy/malformed session data) defensively never escalates", () => {
+    assert.equal(
+      classifySessionOutcome({
+        cleanReps: 1,
+        bpm: 100,
+        requiredReps: 4,
+        practiceBPM: 100,
+        manualFail: false,
+        previousOutcome: "soft-miss",
+        previousCleanReps: undefined,
+      }),
+      "soft-miss"
+    );
+  });
+
+  test("a previous outcome of 'fail' (not 'soft-miss') never triggers escalation on its own", () => {
+    assert.equal(
+      classifySessionOutcome({
+        cleanReps: 1,
+        bpm: 100,
+        requiredReps: 4,
+        practiceBPM: 100,
+        manualFail: false,
+        previousOutcome: "fail",
+        previousCleanReps: 0,
+      }),
+      "soft-miss"
+    );
   });
 });

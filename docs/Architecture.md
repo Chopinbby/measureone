@@ -146,7 +146,7 @@ single-file Claude.ai artifact.
 | `TodayTab` | Composes `ScheduleBanner`, `FocusPanel`, `DayChecklist` (or all days in "View all" mode), `SectionRunThroughPanel`, `ReassessPanel`. **Since Pass 8 it has a second day-view branch**: once the piece has run past the end of its bounded plan, the "Day N of N" header becomes "Plan complete — maintenance, day N" and `DayChecklist` is replaced by an internal `DueReviewPanel` listing `computeDueReviews(...)` output. Prev/next day nav is disabled in that state (no bounded grid left to page through); "View all" still shows the whole original plan, so the plan stays reachable. Due items render through the same `ChecklistItem` the plan uses, keyed to the elapsed day number, so logging, undo and the ladder advance are the one code path either way. |
 | `RevivalEntryModal` | Collects `lastPlayedDate`, optional `performanceTempo`, and required `purpose` before a revival cycle starts. Styled like `Wizard`'s modal shell. |
 | `DeletePieceModal` | Confirms permanent deletion by requiring the piece's exact name to be typed back, rather than a single `window.confirm()` — deletion has no undo and takes all practice history with it. |
-| `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. `PieceCheckRow` is the shared checkbox-row list item both modals render. |
+| `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. `PieceCheckRow` is the shared checkbox-row list item both modals render. **Since Pass 13**, `ImportPiecesModal` also shows a small "keep what's here" / "use the imported version" chooser under any matched piece whose practice-ladder progress genuinely conflicts with what's already saved (`diffImportedPiece`, [Algorithms.md](Algorithms.md#import-merge)) — most matches never show it, since an updatedAt-based recency check already resolves the common cases automatically. |
 | `RandomStartPanel` | Revival-only: picks a uniformly random chunk, transition, or section and displays it (plus its memory anchor, if any) for a cold-start warm-up. |
 | `RevivalTab` | Composes the revival flow end to end: settings (performance tempo, tempo ladder start fraction), the embedded `PieceMapTab` reassessment pass, flagged-chunks summary (rough/lost, same field the Piece Map's run-through flag sets — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)), `RandomStartPanel`, and the generated plan (day-grouped `ChecklistItem`s with tempo ladders/memory anchors). See [Algorithms.md](Algorithms.md#revival). |
 | `ProgressTab` | Trend/diagnosis charts — rolling-window consistency, heatmap, actual-vs-planned, projected finish, tempo trend, effectiveness calibration, recent history. |
@@ -178,15 +178,28 @@ library.
   Data-Model.md and Decisions.md#scheduling.
 - `wizardOpen`, `switcherOpen`, `settingsEditing`, `activeTab`, `loaded`,
   `revivalModalOpen` — straightforward UI state.
+- `storageError` (a failed `localStorage` write) and `exportReminderDue` /
+  `exportReminderDismissed` (**Pass 12** — a day-plus since the last export,
+  or since first use if never exported; `isExportReminderDue`,
+  `lib/storage.js`) each drive their own dismissible banner above the main
+  content. `exportReminderDismissed` is plain in-memory state, not
+  persisted — a reload always re-shows a still-due reminder, so dismissing
+  it is per-session, not a permanent "don't ask again."
 - `navItems` — `NAV_BASE` with `REVIVAL_NAV_ITEM` spliced in (before
   Progress) only while `piece.revival.active` is true; the sidebar renders
   this instead of `NAV_BASE` directly.
 - Backup: `handleExportClick` opens `ExportPiecesModal` (pick which pieces
   to include, then `downloadBackup` on that subset — not an all-or-nothing
-  export); `handleImportClick`/`handleImportFile` open `ImportPiecesModal`,
-  and `handleConfirmImport` restores the selected pieces, matching by id or
-  by name+composer so re-importing a backup updates an existing piece
-  instead of duplicating it.
+  export); `handleConfirmExport` also records `saveLastExportedAt(Date.now())`
+  (**Pass 12**), which is what clears the export-reminder banner above and
+  resets its day-plus timer. `handleImportClick`/`handleImportFile` open
+  `ImportPiecesModal`, and `handleConfirmImport` restores the selected
+  pieces, matching by id or by name+composer so re-importing a backup
+  updates an existing piece instead of duplicating it. **Since Pass 13**,
+  it also re-derives each matched piece's ladder-state diff at confirm time
+  and threads the resolved side (automatic, or the user's pick from the
+  modal's divergence chooser) into `mergeImportedPiece`'s `ladderChoice`
+  parameter — see [Algorithms.md](Algorithms.md#import-merge).
 
 `chunkSet` and `timeline` are `useMemo`'d off `piece` — pure derivations,
 never stored in `piece` itself. Schedule-related state that must persist

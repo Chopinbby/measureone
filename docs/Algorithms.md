@@ -233,10 +233,11 @@ UI-only concern.
 
 ## Import merge
 
-`mergeImportedPiece(existing, imported)` (`lib/storage.js`) merges a
-freshly-imported piece into the existing piece `findMatchingPiece` matched it
-to. Most fields follow `preferPresent`/`preferByRecency` (below); a few are
-handled separately and documented at their own field in
+`mergeImportedPiece(existing, imported, ladderChoice = "existing")`
+(`lib/storage.js`) merges a freshly-imported piece into the existing piece
+`findMatchingPiece` matched it to. Most fields follow
+`preferPresent`/`preferByRecency` (below); a few are handled separately and
+documented at their own field in
 [Data-Model.md](Data-Model.md#the-piece-object) — `progress` (per-chunk,
 per-session merge, see below), `sections`/`recordings`/`bpmZones`
 (additive by id, `mergeById`), `revival` (an active revival always wins over
@@ -244,7 +245,7 @@ whatever the import has), and `id`/`createdAt` (never touched by a merge —
 the piece already exists).
 
 `preferByRecency(importedVal, existingVal, importIsStale)` governs
-everything else: `piece.status`, and — inside `mergeProgress` — a chunk's
+`piece.status`, and — inside `mergeProgress` — a chunk's
 `currentBPM`/`targetBPM`/`manualConfidence`. `importIsStale` is computed once
 per merge in `mergeImportedPiece`, from each side's `updatedAt`
 (`typeof x.updatedAt === "number" ? x.updatedAt : 0` — a missing timestamp,
@@ -255,22 +256,51 @@ the import only fills a gap the existing piece doesn't have — the same
 `preferPresent` logic as before, just with the two sides swapped. `merged.updatedAt`
 is set to `Math.max(importedUpdatedAt, existingUpdatedAt)`, so a stale
 import's own (older) timestamp can never make the merged piece look older
-than it actually is on a later comparison.
+than it actually is on a later comparison. Note `preferByRecency` treats
+"import is strictly newer" the same as "tied" — both take the *not-stale*
+branch, so on an exact `updatedAt` tie these three fields silently prefer the
+import. That's a different tie-breaking rule than ladder state uses (below),
+carried over unchanged from before Pass 13 — see
+[Decisions.md](Decisions.md#data-model) for why this inconsistency was
+found and deliberately left alone rather than fixed as a drive-by.
 
-**This is deliberately narrower than real conflict resolution.** It answers
-"is the import older than what's already here," not "which side actually has
-more practice history" — a chunk's *ladder* state (`stage`,
-`consecutivePasses`, `consecutiveStabilizingFails`, `practiceBPM`,
-`nextDueDate`, `tier1Done`) is untouched by this and still always keeps the
-existing piece's value unconditionally, same as before this fix (see
-[Decisions.md](Decisions.md#data-model)) — genuinely reconciling ladder state
-across two diverged copies needs either replaying merged session history or a
-real "choose which side to keep" UI, neither of which this builds. What this
-does fix: a plain older backup (the common case — re-importing your own
-earlier export, or accidentally re-importing an old file) can no longer
-silently revert `status` (e.g. un-pausing/un-archiving a piece) or a
-recently-logged `currentBPM`/`manualConfidence` with no warning in either
-direction.
+**A chunk's *ladder* state — `stage`, `consecutivePasses`,
+`consecutiveStabilizingFails`, `practiceBPM`, `nextDueDate`, `tier1Done` — is
+resolved separately, wholesale per piece, via `diffImportedPiece(existing,
+imported)` (Pass 13; previously this always kept the existing piece's value
+unconditionally — see [Decisions.md](Decisions.md#data-model) for that
+history).** `diffImportedPiece` compares `updatedAt` first — exactly the
+same `existingUpdatedAt`/`importedUpdatedAt` values `mergeImportedPiece`
+itself computes, but strict on both sides rather than folding a tie into
+"not stale": whichever side is *strictly* newer wins outright
+(`{ hasDivergence: false, resolution: "existing" | "imported" }`), no
+further input needed. Only when the two are exactly tied (including both
+missing `updatedAt` entirely) does it check whether the two sides'
+ladder-state fields actually disagree on any chunk **both** have progress on
+(`__consolidation__` excluded, `null`/`undefined` on a field treated as
+equivalent). If they do, it reports real divergence
+(`{ hasDivergence: true, resolution: null }`) instead of guessing.
+`ImportPiecesModal` surfaces a per-piece "keep what's here" / "use the
+imported version" picker exactly when `hasDivergence` is true (defaulting to
+"existing" until the user picks); `App.jsx`'s `handleConfirmImport`
+re-derives the diff at confirm time — same "re-check against current state,
+don't trust the modal's opening snapshot" pattern `findMatchingPiece` already
+uses — and passes the resolved side into `mergeImportedPiece`'s
+`ladderChoice` parameter. Inside `mergeProgress`, that parameter picks one
+side's ladder-state fields *wholesale* for every overlapping chunk in the
+piece (not a per-field or per-chunk merge — see
+[Decisions.md](Decisions.md#data-model) for why per-chunk granularity was
+deliberately not built) — `doneDays`/`sessions` still merge additively
+underneath regardless of which side "wins" the ladder fields, so practice
+history itself is never at risk either way.
+
+What this fixes, concretely: a plain older backup (the common case —
+re-importing your own earlier export, or accidentally re-importing an old
+file) can no longer silently revert `status` (e.g. un-pausing/un-archiving a
+piece), a recently-logged `currentBPM`/`manualConfidence`, or ladder state,
+with no warning in any direction — and restoring a *genuinely more-advanced*
+backup (e.g. from a second device) no longer silently loses that advanced
+ladder state to the "existing always wins" rule the way it used to.
 
 ## Adaptive review
 

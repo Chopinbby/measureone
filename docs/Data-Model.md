@@ -20,7 +20,14 @@
 
 Everything hangs off a **piece**. The app can hold multiple pieces; each is
 stored under its own `localStorage` key (`measureone-piece:<id>`), and
-`measureone-active_piece_id` tracks which one is currently open.
+`measureone-active_piece_id` tracks which one is currently open. Two more
+app-level (not per-piece) keys exist purely to drive the export-reminder
+banner (**Pass 12** — `lib/storage.js`; see
+[Decisions.md](Decisions.md#data-model)): `measureone-last_exported_at`
+(epoch ms, written whenever a backup export actually completes) and
+`measureone-first_use_at` (epoch ms, lazily seeded the first time anything
+reads it — the fallback anchor for "never exported yet," so upgrading into
+this feature doesn't make a long-time user look instantly overdue).
 
 ```js
 piece = {
@@ -99,6 +106,11 @@ piece = {
                          // (lib/storage.js) tell "this device has moved on since this
                          // backup was exported" apart from "this file really is the
                          // newer copy," when re-importing — see Decisions.md#data-model.
+                         // Since Pass 13, also the sole input to diffImportedPiece's
+                         // ladder-state divergence check (Algorithms.md#import-merge):
+                         // strictly newer wins outright on either side; only an exact
+                         // tie (or both missing) falls back to comparing actual
+                         // per-chunk ladder content.
                          // Missing on pieces saved before this field existed;
                          // backfilled to "now" on the next load (validateAndMigratePiece,
                          // lib/storage.js), the same one-time-backfill treatment
@@ -249,9 +261,13 @@ ChunkProgress = {
                               // (via the same clear-on-log rule above) the flag was applied after
                               // that session with nothing logged since, so undoing the session
                               // undoes the flag with it rather than leaving it pointing at a
-                              // ladder state that no longer exists. Backup-merge (storage.js's mergeProgress) treats
-                              // it like the other ladder fields below: the existing piece's value
-                              // always wins over an imported file's. handleSetFlag verifies all
+                              // ladder state that no longer exists. Backup-merge (storage.js's
+                              // mergeProgress) always keeps the existing piece's value here,
+                              // unconditionally — unlike the actual ladder fields below (since
+                              // Pass 13, those follow diffImportedPiece/ladderChoice instead, see
+                              // Algorithms.md#import-merge), this is undo-scratch data an imported
+                              // file was never meant to set, so there's no "which side should win"
+                              // question to resolve for it at all. handleSetFlag verifies all
                               // three fields are present before trusting a snapshot to restore
                               // from — on a malformed one it warns and skips the restore rather
                               // than writing undefined into stage/nextDueDate, since this is the

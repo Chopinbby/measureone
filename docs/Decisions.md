@@ -1452,10 +1452,54 @@ silently discarded.**
   doesn't.
 - **Scoped narrowly:** this surfaces the failure; it doesn't retry the write,
   free up space automatically, or change what triggers `QuotaExceededError`
-  in the first place (that's the auto-backup-reminder idea, a separate,
-  not-yet-built item).
+  in the first place — that was the separate auto-backup-reminder idea,
+  **built in Pass 12, below.**
 - Verified in-browser with a simulated quota failure (see the session that
   shipped this fix) as well as `test/storage.test.mjs`.
+
+**Decision: a recurring "back up your data" nudge (Pass 12), separate from
+the storage-error banner above — surfaced once a day-plus has passed since
+the last export (or since first use, if never exported), and dismissible
+only per-instance, not permanently.**
+
+- **Why:** the storage-error banner above only fires *after* a write has
+  already failed — useful, but reactive. With no server-side persistence at
+  all, a backup that's stale or has never been taken is a real risk before
+  anything actually breaks, not just after. This is the item the previous
+  entry above deferred as "a separate, not-yet-built item."
+- **Approach:** a single app-level `measureone-last_exported_at` timestamp
+  (not per-piece — one export already bundles every piece together), with
+  `measureone-first_use_at` as a lazily-seeded fallback anchor for a
+  piece/app that's never been exported at all, so upgrading into this
+  feature doesn't retroactively treat a long-time never-exported user as
+  instantly overdue. `isExportReminderDue` (`lib/storage.js`) is a pure
+  function over those two anchors plus "now," kept separate from the
+  localStorage reads themselves so it's cheaply unit-testable the same way
+  the rest of this file's pure functions are.
+- **Dismissible without being permanently silenceable:** the dismissed flag
+  is plain in-memory React state, never persisted — reloading the page (or
+  the reminder becoming due again later) always re-surfaces it. Deliberately
+  not a "don't show again" checkbox — a recurring reminder about a real,
+  ongoing risk (no server-side backup) shouldn't be quietly opt-out-able
+  once, the same reasoning behind the storage-error banner above never
+  offering a permanent dismissal either.
+- **Found and fixed in the same session's code review, before this was
+  first committed:** the banner's "Export backup" action originally had no
+  guard against a piece-less state — reachable (unlike the pre-existing
+  Settings export button, which only ever renders once a piece exists) the
+  moment `exportReminderDue` goes true on a fresh install with nothing
+  created yet, or after deleting a last remaining piece. Fixed by gating the
+  banner on `pieceList.length > 0`. Separately, `handleConfirmExport`
+  originally ignored whether `saveLastExportedAt` actually succeeded — a
+  quota failure there would have silently claimed "you're backed up" for
+  the rest of the session. Fixed by checking the result and setting the
+  existing `storageError` flag on failure, reusing the mechanism above
+  rather than inventing a second one.
+- Verified: `test/storage.test.mjs` (the reminder-due cadence — stale,
+  recent, missing, and boundary-exact cases) plus a manual in-browser pass
+  forcing an old `lastExportedAt`, confirming the banner appears, dismisses
+  per-instance but returns on reload, and clears (with the timer reset) once
+  a real export completes.
 
 ## Multi-movement works
 
@@ -1657,3 +1701,22 @@ oversight to silently fix; surface it instead.
   "what's due" query replacing `timeline.days[]` indexing) that isn't
   designed either. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
+- **On an exact `updatedAt` tie during import merge, ladder state and
+  status/BPM/confidence resolve in opposite directions.** Found in code
+  review after Pass 13 shipped `diffImportedPiece` (see
+  [Data model](#data-model) above). `preferByRecency` (governing
+  `piece.status` and a chunk's `currentBPM`/`targetBPM`/`manualConfidence`)
+  treats "import is strictly newer" and "exactly tied" the same way — both
+  take the not-stale branch, so a tie silently prefers the import.
+  `diffImportedPiece` (governing ladder state) treats a tie as genuinely
+  ambiguous — it either surfaces the picker (if the two sides' ladder state
+  actually differs) or defaults to keeping the existing side. So the same
+  merge, on the same tied timestamp, can silently prefer the import for one
+  field family and default to "keep what's here" (or ask) for another.
+  Deliberately not fixed same-session: reachable only when both sides carry
+  the literal same millisecond `updatedAt` — in practice this needs either
+  hand-crafted data or two saves landing on the exact same instant, not
+  something normal use is expected to hit — and reviewed live with the
+  user, who judged it not worth chasing given how narrow the trigger is.
+  Worth unifying if `preferByRecency` and `diffImportedPiece` are ever
+  revisited together, rather than independently again.

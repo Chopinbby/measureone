@@ -596,10 +596,12 @@ two distinct records instead of one silently replacing the other.
 
 **Session undo (`handleUnlogSession`, `App.jsx`) fully reverses the ladder
 — Pass 10, built.** Every session `handleLogSession` writes now also
-carries a `session.ladderSnapshot`: the six ladder fields
+carries a `session.ladderSnapshot`: the ladder fields
 (`stage`/`consecutivePasses`/`consecutiveStabilizingFails`/`practiceBPM`/
-`nextDueDate`/`tier1Done`) exactly as they stood *immediately before* that
-session — the same snapshot-and-restore shape `flagSnapshot` already used
+`nextDueDate`/`tier1Done`, plus `needsRelearning` since Pass 11 and
+`currentBPM` since Pass 14 — both optional, so older snapshots still
+restore rather than failing validation) exactly as they stood
+*immediately before* that session — the same snapshot-and-restore shape `flagSnapshot` already used
 for rough/lost flags (below), just never extended to session logging until
 now. `handleUnlogSession` restores that snapshot when undoing a session,
 **but only when the session being undone is the chunk's most recent

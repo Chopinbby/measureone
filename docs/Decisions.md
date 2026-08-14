@@ -1309,6 +1309,55 @@ repeats.**
   asymmetric-repeat cases above. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two).
 
+**Decision (Pass 14): `currentBPM` joins `ladderSnapshot` and is reverted by
+session undo — the contained patch, not the larger "remove the field and
+derive it from `sessions`" rewrite.**
+
+- **The bug (previously logged as an open question, now closed):**
+  `currentBPM` (the tempo last actually *played*, distinct from the
+  ladder's `practiceBPM`) wasn't one of the six fields Pass 10's
+  `ladderSnapshot` captured — "six small fields" was a deliberate scope
+  call then, not an oversight. The consequence: after undoing a chunk's
+  only session, `stage`/`practiceBPM`/`sessions` all correctly read as
+  untouched, but `currentBPM` still held the undone session's value, and
+  `computeAutoConfidence` reads it directly — so a fully-reverted chunk
+  could still show a nonzero confidence score off a tempo no remaining
+  session justified.
+- **Two routes were possible, and the user picked the contained one:** add
+  `currentBPM` to the snapshot (done), versus deleting the stored field
+  entirely and deriving it from `sessions` (last session's `bpm`, or
+  absent). The second is cleaner in principle — it removes this whole
+  class of bug rather than patching one instance — but it touches every
+  consumer of `currentBPM` (`computeAutoConfidence`, Progress's tempo-trend
+  sparkline, the import merge's field-level recency rules) and wants its
+  own pass with its own verification. Still available as a future
+  simplification; nothing here forecloses it.
+- **Backward compatibility was the real trap, and is the reason this
+  wasn't a two-line change.** `handleUnlogSession` gates the full restore
+  behind an `isValidSnapshot` check that requires specific keys to be
+  present. Adding `currentBPM` to that check would have made *every
+  already-saved session* fail validation at once, silently downgrading all
+  existing logged sessions to record-only removal — a real regression on
+  live data, in the exact code path that exists to protect it. Instead
+  `currentBPM` follows `needsRelearning`'s established precedent: restored
+  when present, deliberately *not* part of the validity check.
+- **Unlike `needsRelearning`, there's no correct constant to fall back
+  to.** An older snapshot restores `needsRelearning` as `false` because
+  `false` was true of every such snapshot (the flag didn't exist yet to be
+  set). No equivalent exists for a tempo — an older snapshot simply never
+  recorded it. Reconstructing it from the remaining sessions was rejected
+  as a guess: `currentBPM` can also be set by hand through
+  `handleUpdateBPM`, so the last remaining session's `bpm` isn't reliably
+  what the field held. A snapshot missing the key therefore leaves
+  `currentBPM` untouched — exactly the pre-Pass-14 behavior, no better and
+  no worse — consistent with the same "does not guess or reconstruct" rule
+  the non-latest-session fallback already follows.
+- Verified with new tests in `test/session-undo.test.mjs`: undoing a
+  chunk's only session clears `currentBPM`, undoing the latest of several
+  restores the previous session's tempo, and a regression test proves an
+  older snapshot without the key still restores the six original fields
+  instead of failing validation.
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -1741,20 +1790,10 @@ oversight to silently fix; surface it instead.
   next logged session, and reordering that function preemptively carries
   more risk than the symptom warrants. Revisit if it actually shows up in
   real use.
-- **A full session undo doesn't revert `currentBPM`.** `currentBPM` (last
-  actually-played tempo, distinct from the ladder's `practiceBPM`) isn't
-  one of the six fields `ladderSnapshot` captures, by original design (see
-  the "session undo should fully reverse the ladder" entry below — "six
-  small fields" was deliberate, not an oversight at the time). Found as a
-  real consequence in this session's review: after undoing a chunk's only
-  session, `stage`/`practiceBPM`/`sessions` all correctly read as
-  untouched, but `currentBPM` still holds the undone session's value, and
-  `computeAutoConfidence` reads it directly — so a fully-reverted chunk can
-  still show a nonzero confidence score. Deferred, not fixed: reverting it
-  would need either a 7th snapshot field or a decision that `currentBPM`
-  should just be derived from `sessions` (last session's `bpm`, or absent)
-  rather than stored separately — the latter would remove the field
-  entirely rather than patch around it, worth deciding deliberately.
+- ~~**A full session undo doesn't revert `currentBPM`.**~~ **Resolved
+  (Pass 14)** — see the dedicated decision in
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance) above.
+  `currentBPM` is now captured in `ladderSnapshot` and restored on undo.
 - **Should `computeConfidence` and `computeProgressTier` be unified?** They
   currently measure different things (weighted session history vs. the
   spaced-repetition ladder's `stage`, as of Pass 6 — see

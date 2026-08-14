@@ -191,8 +191,9 @@ ChunkProgress = {
                             // lib/confidence.js's sessionOutcome(), not migrated in place.
                             // ladderSnapshot ({ stage, consecutivePasses,
                             // consecutiveStabilizingFails, practiceBPM, nextDueDate, tier1Done,
-                            // needsRelearning } | undefined, Pass 10, needsRelearning added Pass 11)
-                            // — the seven ladder fields below, captured as they
+                            // needsRelearning, currentBPM } | undefined, Pass 10; needsRelearning
+                            // added Pass 11, currentBPM added Pass 14)
+                            // — the eight ladder fields below, captured as they
                             // stood immediately BEFORE this session was logged. Stored per-session
                             // (not on the chunk entry) so same-day multi-session logging keeps
                             // each session's own "before" picture distinct — same
@@ -204,11 +205,15 @@ ChunkProgress = {
                             // logged before this field existed, which carries no snapshot) falls
                             // back to removing the record only. The validity check that gates this
                             // restore still only requires the original six fields (not
-                            // needsRelearning) — a snapshot missing needsRelearning entirely (any
-                            // session logged before Pass 11) restores it as false rather than
-                            // failing validation, since false was correct for every such snapshot
-                            // anyway (the flag didn't exist yet to be true). See
-                            // Decisions.md#spaced-repetition--maintenance.
+                            // needsRelearning, not currentBPM) — a snapshot missing needsRelearning
+                            // entirely (any session logged before Pass 11) restores it as false
+                            // rather than failing validation, since false was correct for every
+                            // such snapshot anyway (the flag didn't exist yet to be true).
+                            // currentBPM (Pass 14) is optional for the same backward-compatibility
+                            // reason but has NO correct constant to fall back to — an older
+                            // snapshot simply never recorded the pre-session tempo — so a snapshot
+                            // missing it leaves currentBPM untouched rather than inventing a value.
+                            // See Decisions.md#spaced-repetition--maintenance.
   currentBPM,               // number | undefined — last logged tempo (what was actually played)
   targetBPM,                // number | undefined — explicit per-chunk override;
                              // falls back to piece.targetBPM / bpmZones if unset

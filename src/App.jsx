@@ -458,6 +458,16 @@ export default function App() {
         nextDueDate: prevEntry.nextDueDate ?? null,
         tier1Done: prevEntry.tier1Done ?? false,
         needsRelearning: prevEntry.needsRelearning ?? false,
+        // currentBPM (the last tempo actually played, distinct from the
+        // ladder's practiceBPM) was originally left out of this snapshot —
+        // "six small fields" was a deliberate scope call in Pass 10, but the
+        // consequence was that undoing a chunk's only session left
+        // currentBPM holding the undone session's tempo, and
+        // computeAutoConfidence reads it directly, so a fully-reverted
+        // chunk could still show a nonzero confidence score. Captured here
+        // so undo reverses it too. See docs/Decisions.md's "session undo
+        // should fully reverse the ladder" entry.
+        currentBPM: prevEntry.currentBPM ?? null,
       };
       const sessions = [
         ...(prevEntry.sessions || []),
@@ -586,6 +596,20 @@ export default function App() {
             // false is the correct restore, not a validity failure like
             // the six fields checked above.
             needsRelearning: "needsRelearning" in snapshot ? snapshot.needsRelearning : false,
+            // currentBPM joined the snapshot shape after Pass 10 (see
+            // handleLogSession above). Same backward-compatible treatment as
+            // needsRelearning — optional, deliberately NOT part of the
+            // isValidSnapshot check above, so sessions logged before this
+            // existed keep undoing exactly as well as they did before rather
+            // than all failing validation at once. But unlike
+            // needsRelearning there's no correct constant to fall back to:
+            // an older snapshot simply never recorded the pre-session tempo,
+            // and reconstructing it from the remaining sessions would be a
+            // guess (currentBPM can also be set by hand via handleUpdateBPM).
+            // So an older snapshot leaves the field untouched — exactly
+            // today's behavior — instead of inventing a value, same
+            // "never reconstruct" rule the fallback branch below follows.
+            ...("currentBPM" in snapshot ? { currentBPM: snapshot.currentBPM } : {}),
           };
           // A rough/lost flag still carrying its flagSnapshot can only have
           // been applied AFTER this session, with nothing logged since —

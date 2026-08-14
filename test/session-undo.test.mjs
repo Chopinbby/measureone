@@ -41,6 +41,7 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
     practiceBPM: prevEntry.practiceBPM ?? null,
     nextDueDate: prevEntry.nextDueDate ?? null,
     tier1Done: prevEntry.tier1Done ?? false,
+    currentBPM: prevEntry.currentBPM ?? null,
   };
   const sessions = [
     ...(prevEntry.sessions || []),
@@ -114,6 +115,9 @@ function unlogSession(progress, chunkId, day) {
         practiceBPM: snapshot.practiceBPM,
         nextDueDate: snapshot.nextDueDate,
         tier1Done: snapshot.tier1Done,
+        // Optional, exactly as in App.jsx: an older snapshot without the
+        // key leaves currentBPM untouched rather than guessing a value.
+        ...("currentBPM" in snapshot ? { currentBPM: snapshot.currentBPM } : {}),
       };
       // A flag whose flagSnapshot is still present can only have been
       // applied after this session (handleLogSession always clears
@@ -298,6 +302,76 @@ describe("Fallback behavior — record removed only, ladder state untouched", ()
     assert.equal(progress.c1.stage, "stabilizing");
     assert.equal(progress.c1.practiceBPM, 82);
     assert.equal(progress.c1.nextDueDate, "2026-01-05");
+  });
+});
+
+// currentBPM is the last tempo actually PLAYED, distinct from the ladder's
+// practiceBPM (the tempo currently being asked for). It was deliberately
+// left out of Pass 10's six-field snapshot; the consequence, logged as an
+// open question in docs/Decisions.md and fixed here, was that
+// computeAutoConfidence reads currentBPM directly, so a fully-undone chunk
+// could still show a nonzero confidence score off a tempo it no longer had
+// any session to justify.
+describe("Undo reverses currentBPM too, not just the ladder fields", () => {
+  test("undoing a chunk's ONLY session clears currentBPM back to its pre-session value (null)", () => {
+    let progress = {};
+    progress = logSession(progress, "c1", 1, { cleanReps: 4, bpm: 80, outcome: "pass", durationSeconds: 0, targetBPM: 120 }, 1000);
+    assert.equal(progress.c1.currentBPM, 80, "sanity: logging sets currentBPM to the played tempo");
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.currentBPM, null, "a chunk with no sessions left must not still hold a played tempo");
+    assert.equal(progress.c1.sessions.length, 0);
+  });
+
+  test("undoing the latest of several sessions restores the PREVIOUS session's tempo, not null", () => {
+    let progress = { c1: { doneDays: [], sessions: [], tier1Done: false } };
+    progress = logSession(progress, "c1", 1, { cleanReps: 4, bpm: 80, outcome: "pass", durationSeconds: 0, targetBPM: 120 }, 1000);
+    progress = logSession(progress, "c1", 2, { cleanReps: 4, bpm: 95, outcome: "pass", durationSeconds: 0, targetBPM: 120 }, 2000);
+    assert.equal(progress.c1.currentBPM, 95);
+
+    progress = unlogSession(progress, "c1", 2);
+    assert.equal(progress.c1.currentBPM, 80, "rolls back to the tempo the remaining session was played at");
+  });
+
+  test("[regression] an older snapshot missing currentBPM still restores the six original fields — it does not fail validation", () => {
+    // The exact backward-compatibility trap this fix had to avoid: adding a
+    // seventh key to the strict isValidSnapshot check would have made every
+    // already-saved session fail it at once, silently downgrading them all
+    // to record-only removal.
+    let progress = {
+      c1: {
+        doneDays: [1],
+        sessions: [
+          {
+            day: 1,
+            loggedAt: 1000,
+            cleanReps: 4,
+            bpm: 90,
+            outcome: "pass",
+            ladderSnapshot: {
+              stage: "stabilizing",
+              consecutivePasses: 1,
+              consecutiveStabilizingFails: 0,
+              practiceBPM: 82,
+              nextDueDate: "2026-01-05",
+              tier1Done: false,
+              // no currentBPM — logged before this fix existed
+            },
+          },
+        ],
+        stage: "settling",
+        consecutivePasses: 2,
+        practiceBPM: 92,
+        currentBPM: 90,
+      },
+    };
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.stage, "stabilizing", "the six original fields still restore normally");
+    assert.equal(progress.c1.practiceBPM, 82);
+    assert.equal(progress.c1.nextDueDate, "2026-01-05");
+    // Left untouched rather than guessed at — the old snapshot never recorded it.
+    assert.equal(progress.c1.currentBPM, 90);
   });
 });
 

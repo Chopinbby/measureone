@@ -486,6 +486,64 @@ function mergeSessionArrays(existingSessions, importedSessions) {
   });
 }
 
+// Ladder-state fields a chunk carries once it's on the spaced-repetition
+// ladder (Repertoire-Lifecycle.md's "The ladder: three stages"). Ladder
+// state is *derived* from practice history (computeLadderAdvance,
+// lib/ladder.js), not something anyone hand-edits in an exported file the
+// way minutesPerDay might be, so mergeProgress below never per-field-merges
+// it the way it does most other fields — it's always taken wholesale from
+// one side or the other (see `ladderChoice` on mergeProgress/
+// mergeImportedPiece and `diffImportedPiece` below for how that side gets
+// picked). "__consolidation__" (Pass 6 run-through sessions) isn't a real
+// chunk and carries none of these, so callers skip it rather than compare it.
+const LADDER_STATE_FIELDS = ["stage", "consecutivePasses", "consecutiveStabilizingFails", "practiceBPM", "nextDueDate", "tier1Done"];
+
+// True when the existing piece and a freshly-imported candidate actually
+// disagree on ladder state for some chunk *both* sides have progress on —
+// the one situation `diffImportedPiece` (below) can't resolve by `updatedAt`
+// alone. A chunk only one side has touched is never a conflict (mergeProgress
+// just takes that side's entry outright, same as it always has), so only
+// chunks present on both sides are compared. `null`/`undefined` on a field
+// are treated as the same "not set" value so a field that's merely absent on
+// one side (e.g. an older export) doesn't register as a false conflict.
+function ladderStateDiffers(existingProgress, importedProgress) {
+  const existing = existingProgress || {};
+  const imported = importedProgress || {};
+  return Object.keys(existing).some((chunkId) => {
+    if (chunkId === "__consolidation__") return false;
+    const e = existing[chunkId];
+    const i = imported[chunkId];
+    if (!e || !i) return false;
+    return LADDER_STATE_FIELDS.some((field) => (e[field] ?? null) !== (i[field] ?? null));
+  });
+}
+
+// Pass 13: resolves the open question logged in Decisions.md — a chunk's
+// ladder state used to always keep the existing piece's value on import,
+// silently wrong when the *imported* backup was actually the more-advanced
+// copy (e.g. restoring from a second device practiced on more recently).
+// Whenever `updatedAt` alone can tell which side is ahead, that's a "clean"
+// case (one side is unambiguously a stale copy of the other) and is resolved
+// automatically here — same spirit as `preferByRecency` already applies to
+// status/BPM/confidence, just extended to ladder state, which that mechanism
+// never covered. Only a genuine tie (including both sides missing
+// `updatedAt` entirely) combined with real per-chunk ladder differences
+// counts as actual divergence: `resolution` comes back null, and the caller
+// (ImportPiecesModal) is expected to ask the user which side to keep rather
+// than silently picking one.
+export function diffImportedPiece(existing, imported) {
+  const existingUpdatedAt = typeof existing.updatedAt === "number" ? existing.updatedAt : 0;
+  const importedUpdatedAt = typeof imported.updatedAt === "number" ? imported.updatedAt : 0;
+
+  if (importedUpdatedAt < existingUpdatedAt) return { hasDivergence: false, resolution: "existing" };
+  if (importedUpdatedAt > existingUpdatedAt) return { hasDivergence: false, resolution: "imported" };
+
+  if (ladderStateDiffers(existing.progress, imported.progress)) {
+    return { hasDivergence: true, resolution: null };
+  }
+  return { hasDivergence: false, resolution: "existing" };
+}
+
 // Practice history is the one thing that must never silently disappear, so
 // it merges per chunk and per session rather than one side replacing the
 // other outright — e.g. sessions logged in the app after a backup was
@@ -496,7 +554,15 @@ function mergeSessionArrays(existingSessions, importedSessions) {
 // mergeImportedPiece — those three are the per-chunk fields a stale import
 // could otherwise silently roll back (e.g. a manual confidence override set
 // today, reverted by re-importing last month's export).
-function mergeProgress(existingProgress, importedProgress, importIsStale) {
+//
+// `ladderChoice` ("existing" or "imported") says which side's whole-piece
+// ladder state (see LADDER_STATE_FIELDS above) wins for every chunk both
+// sides have progress on — resolved automatically by `diffImportedPiece`
+// when updatedAt alone can decide it, or by the user's explicit pick in
+// ImportPiecesModal when it's real divergence. It's a single per-piece
+// choice, not per chunk (see Decisions.md — deliberately not built more
+// granular than that).
+function mergeProgress(existingProgress, importedProgress, importIsStale, ladderChoice) {
   const existing = existingProgress || {};
   const imported = importedProgress || {};
   const merged = {};
@@ -505,6 +571,7 @@ function mergeProgress(existingProgress, importedProgress, importIsStale) {
     const i = imported[chunkId];
     if (!e) { merged[chunkId] = i; return; }
     if (!i) { merged[chunkId] = e; return; }
+    const ladderSource = ladderChoice === "imported" ? i : e;
     merged[chunkId] = {
       ...e,
       ...i,
@@ -514,31 +581,16 @@ function mergeProgress(existingProgress, importedProgress, importIsStale) {
       targetBPM: preferByRecency(i.targetBPM, e.targetBPM, importIsStale),
       manualConfidence: preferByRecency(i.manualConfidence, e.manualConfidence, importIsStale),
       flag: i.flag !== undefined ? i.flag : e.flag,
-      // Ladder state is *derived* from practice history (computeLadderAdvance,
-      // lib/ladder.js), not something anyone hand-edits in an exported file
-      // the way minutesPerDay might be — there's no legitimate "intentional
-      // edit in the export should win" case for it the way there is for the
-      // fields above. So unlike those, the import never overwrites it: the
-      // existing piece's ladder progress always wins over whatever snapshot
-      // happened to be sitting in the imported file, the same "must never
-      // silently disappear" treatment doneDays/sessions already get above.
-      // Known limitation: this means restoring a backup from a genuinely
-      // more-advanced *other* device/browser (rather than re-importing an
-      // older copy of the same piece) would keep this device's less-advanced
-      // state instead of the more-advanced import — correctly recovering
-      // that case would mean recomputing ladder state from the merged
-      // session history instead of preferring either snapshot outright,
-      // which is a bigger change than this fix; flagging, not building now.
-      stage: e.stage,
-      consecutivePasses: e.consecutivePasses,
-      consecutiveStabilizingFails: e.consecutiveStabilizingFails,
-      practiceBPM: e.practiceBPM,
-      nextDueDate: e.nextDueDate,
-      tier1Done: e.tier1Done,
-      // Same reasoning as the ladder fields above: undo-scratch data for
-      // "revert this chunk's schedule if the flag gets cleared" (see
-      // App.jsx's handleSetFlag), not something an exported file should
-      // be trusted to set.
+      stage: ladderSource.stage,
+      consecutivePasses: ladderSource.consecutivePasses,
+      consecutiveStabilizingFails: ladderSource.consecutiveStabilizingFails,
+      practiceBPM: ladderSource.practiceBPM,
+      nextDueDate: ladderSource.nextDueDate,
+      tier1Done: ladderSource.tier1Done,
+      // Undo-scratch data for "revert this chunk's schedule if the flag gets
+      // cleared" (see App.jsx's handleSetFlag) — always the existing side,
+      // not something an exported file should be trusted to set, and not
+      // part of "ladder state" a user would consciously choose between.
       flagSnapshot: e.flagSnapshot,
     };
   });
@@ -568,7 +620,13 @@ const MERGE_FIELDS_HANDLED_SEPARATELY = [
 // mode — previously *any* field the import had a value for won outright,
 // including piece.status (silently un-pausing/un-archiving a piece) and
 // per-chunk currentBPM/targetBPM/manualConfidence.
-export function mergeImportedPiece(existing, imported) {
+//
+// ladderChoice ("existing" or "imported", default "existing"): which side's
+// ladder state wins for chunks both sides have progress on — see
+// diffImportedPiece/mergeProgress above. Defaults to "existing" so a caller
+// that doesn't pass one at all (including every pre-Pass-13 call site and
+// test) gets exactly the behavior this function always had.
+export function mergeImportedPiece(existing, imported, ladderChoice = "existing") {
   const importedUpdatedAt = typeof imported.updatedAt === "number" ? imported.updatedAt : 0;
   const existingUpdatedAt = typeof existing.updatedAt === "number" ? existing.updatedAt : 0;
   const importIsStale = importedUpdatedAt < existingUpdatedAt;
@@ -596,7 +654,7 @@ export function mergeImportedPiece(existing, imported) {
   merged.recordings = mergeById(existing.recordings, imported.recordings);
   merged.bpmZones = mergeById(existing.bpmZones, imported.bpmZones);
   merged.memoryAnchors = { ...(existing.memoryAnchors || {}), ...(imported.memoryAnchors || {}) };
-  merged.progress = mergeProgress(existing.progress, imported.progress, importIsStale);
+  merged.progress = mergeProgress(existing.progress, imported.progress, importIsStale, ladderChoice);
   // An in-progress revival is live session state — protect it from being
   // overwritten by a stale import even if the import's revival looks
   // "present" by the generic rule above.

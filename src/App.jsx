@@ -37,6 +37,7 @@ import {
   parseBackupPieces,
   findMatchingPiece,
   mergeImportedPiece,
+  diffImportedPiece,
   validateAndMigratePiece,
   loadLastExportedAt,
   saveLastExportedAt,
@@ -271,7 +272,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleConfirmImport = (selectedIndices) => {
+  const handleConfirmImport = (selectedIndices, ladderChoices = {}) => {
     const next = { ...pieces };
     let firstNewId = null;
     let updatedCount = 0;
@@ -298,6 +299,17 @@ export default function App() {
       // to day 1 if the exported file happened to be missing that field.
       const match = findMatchingPiece(next, p);
       if (match) {
+        // Re-derived here (not trusted from ImportPiecesModal's earlier
+        // preview) for the same reason `match` itself is re-derived above —
+        // "the real check happens again on confirm, against whatever
+        // `pieces` looks like at that moment." When updatedAt alone can tell
+        // which side is ahead, that's the ladder-state winner outright and
+        // needs no input from the user; only real divergence (resolution:
+        // null) falls back to whatever the user picked in the modal — or
+        // "existing" (today's original, safer default) if they never
+        // interacted with that particular picker.
+        const diff = diffImportedPiece(match, p);
+        const ladderChoice = diff.hasDivergence ? (ladderChoices[index] === "imported" ? "imported" : "existing") : diff.resolution;
         // validateAndMigratePiece (not just reconcileMinutesPerDaySchedule)
         // so an imported piece gets the same full backfill a stored piece
         // gets on load — most importantly here, a ladderConfig missing
@@ -305,7 +317,7 @@ export default function App() {
         // merged with defaults rather than reaching computeLadderAdvance
         // incomplete and throwing on the next logged session. See storage.js.
         const merged = validateAndMigratePiece(ensureWorkId({
-          ...mergeImportedPiece(match, p),
+          ...mergeImportedPiece(match, p, ladderChoice),
           rescheduleMarker: null,
         }));
         next[match.id] = merged;

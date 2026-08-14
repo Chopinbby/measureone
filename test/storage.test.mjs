@@ -5,7 +5,7 @@
 // silently drop data. See docs/AI-GUIDELINES.md and CLAUDE.md for context.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue } from "../src/lib/storage.js";
+import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue, diffImportedPiece } from "../src/lib/storage.js";
 
 const fresh = {
   id: "p_fresh",
@@ -492,5 +492,154 @@ describe("isExportReminderDue — Pass 12 export reminder cadence", () => {
   test("defaults `now` to Date.now() when omitted", () => {
     const lastExportedAt = Date.now() - ONE_DAY_MS - 5000;
     assert.equal(isExportReminderDue(lastExportedAt, null), true);
+  });
+});
+
+// Pass 13: resolves the Decisions.md open question that a chunk's ladder
+// state on import was always resolved by a silent "existing wins" rule.
+// diffImportedPiece now tells apart "clean staleness" (updatedAt alone
+// decides a winner, no user input needed) from "real divergence" (tied/
+// unknown updatedAt plus an actual difference on a shared chunk — needs the
+// ImportPiecesModal picker).
+describe("diffImportedPiece — Pass 13 import divergence detection", () => {
+  // A full six-field ladder-state chunk, with sane defaults so each test
+  // only has to spell out the field(s) it actually cares about.
+  function ladderChunk(overrides) {
+    return {
+      stage: "settling",
+      consecutivePasses: 2,
+      consecutiveStabilizingFails: 0,
+      practiceBPM: 90,
+      nextDueDate: "2026-07-10",
+      tier1Done: true,
+      ...overrides,
+    };
+  }
+
+  test("clean staleness: import strictly older wins automatically for the existing side, no divergence", () => {
+    const existing = { updatedAt: 5000, progress: { c1: ladderChunk({ stage: "settling" }) } };
+    const imported = { updatedAt: 1000, progress: { c1: ladderChunk({ stage: "stabilizing" }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("clean staleness reversed: import strictly newer wins automatically for the imported side, no divergence (the historically-buggy 'opposite case')", () => {
+    const existing = { updatedAt: 1000, progress: { c1: ladderChunk({ stage: "stabilizing" }) } };
+    const imported = { updatedAt: 5000, progress: { c1: ladderChunk({ stage: "settling" }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "imported" });
+  });
+
+  test("real divergence: tied updatedAt plus an actual difference on a shared chunk needs the picker", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ stage: "settling", practiceBPM: 90 }) } };
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({ stage: "stabilizing", practiceBPM: 60 }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: true, resolution: null });
+  });
+
+  test("real divergence: both sides missing updatedAt entirely plus an actual difference also needs the picker", () => {
+    const existing = { progress: { c1: ladderChunk({ consecutivePasses: 3 }) } };
+    const imported = { progress: { c1: ladderChunk({ consecutivePasses: 0 }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: true, resolution: null });
+  });
+
+  test("tied updatedAt but identical ladder state on the shared chunk: no conflict to resolve, defaults to existing", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk() } };
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk() } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("tied updatedAt, differing chunks that don't overlap: not a conflict (nothing to compare)", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ stage: "settling" }) } };
+    const imported = { updatedAt: 3000, progress: { c2: ladderChunk({ stage: "stabilizing" }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("null and undefined on the same field are treated as equivalent, not a false divergence", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ nextDueDate: null }) } };
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({ nextDueDate: undefined }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("the synthetic __consolidation__ entry is never compared, even if it differs", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk(), __consolidation__: { doneDays: [1] } } };
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk(), __consolidation__: { doneDays: [1, 2] } } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+});
+
+describe("mergeImportedPiece — Pass 13 ladderChoice wiring", () => {
+  const existing = {
+    id: "p_ladder",
+    name: "Ballade",
+    totalMeasures: 40,
+    startDate: "2026-01-01",
+    updatedAt: 3000,
+    progress: {
+      c1: {
+        doneDays: [1],
+        sessions: [{ day: 1, loggedDate: "2026-01-01", cleanReps: 4, bpm: 90, outcome: "pass" }],
+        stage: "settling",
+        consecutivePasses: 3,
+        consecutiveStabilizingFails: 0,
+        practiceBPM: 90,
+        nextDueDate: "2026-07-10",
+        tier1Done: true,
+      },
+    },
+  };
+  const imported = {
+    id: "p_ladder",
+    name: "Ballade",
+    totalMeasures: 40,
+    startDate: "2026-01-01",
+    updatedAt: 3000,
+    progress: {
+      c1: {
+        doneDays: [1],
+        sessions: [{ day: 1, loggedDate: "2026-01-01", cleanReps: 4, bpm: 90, outcome: "pass" }],
+        stage: "stabilizing",
+        consecutivePasses: 0,
+        consecutiveStabilizingFails: 1,
+        practiceBPM: 60,
+        nextDueDate: "2026-07-01",
+        tier1Done: false,
+      },
+    },
+  };
+
+  test("no ladderChoice argument at all keeps the pre-Pass-13 default (existing wins) — backward compatible with every existing call site", () => {
+    const merged = mergeImportedPiece(existing, imported);
+    assert.equal(merged.progress.c1.stage, "settling");
+    assert.equal(merged.progress.c1.practiceBPM, 90);
+  });
+
+  test("explicit ladderChoice 'existing' behaves the same as omitting it", () => {
+    const merged = mergeImportedPiece(existing, imported, "existing");
+    assert.equal(merged.progress.c1.stage, "settling");
+    assert.equal(merged.progress.c1.nextDueDate, "2026-07-10");
+  });
+
+  test("explicit ladderChoice 'imported' switches the whole piece's ladder state to the imported side", () => {
+    const merged = mergeImportedPiece(existing, imported, "imported");
+    assert.equal(merged.progress.c1.stage, "stabilizing");
+    assert.equal(merged.progress.c1.consecutivePasses, 0);
+    assert.equal(merged.progress.c1.consecutiveStabilizingFails, 1);
+    assert.equal(merged.progress.c1.practiceBPM, 60);
+    assert.equal(merged.progress.c1.nextDueDate, "2026-07-01");
+    assert.equal(merged.progress.c1.tier1Done, false);
+  });
+
+  test("ladderChoice 'imported' still merges sessions/doneDays additively, not a wholesale swap of the chunk", () => {
+    const withExtraSession = {
+      ...imported,
+      progress: {
+        c1: {
+          ...imported.progress.c1,
+          doneDays: [1, 2],
+          sessions: [...imported.progress.c1.sessions, { day: 2, loggedDate: "2026-01-02", cleanReps: 5, bpm: 65, outcome: "pass" }],
+        },
+      },
+    };
+    const merged = mergeImportedPiece(existing, withExtraSession, "imported");
+    assert.deepEqual(merged.progress.c1.doneDays, [1, 2]);
+    assert.equal(merged.progress.c1.sessions.length, 2);
   });
 });

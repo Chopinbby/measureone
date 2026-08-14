@@ -1331,10 +1331,10 @@ match, instead of always creating a new piece.**
   device/session that never had the chance to collide on id but is
   obviously "the same song."
 
-**Decision: on import, a chunk's ladder state (stage, consecutive-pass
-streak, current practice tempo, next review date) always keeps the
-existing piece's value over the imported one, rather than picking
-whichever is actually more advanced.**
+**Decision (superseded by Pass 13, below): on import, a chunk's ladder
+state (stage, consecutive-pass streak, current practice tempo, next
+review date) always keeps the existing piece's value over the imported
+one, rather than picking whichever is actually more advanced.**
 
 - **Why:** `mergeProgress` (`lib/storage.js`) was found silently
   regressing this exact state — re-importing an older backup rolled a
@@ -1346,20 +1346,60 @@ whichever is actually more advanced.**
   exported JSON file, so protecting it outright — rather than letting an
   import's value win whenever it's merely "present," the way
   `preferPresent` treats other fields — was judged the safer default.
-- **Known issue, deliberately deferred: this is a blunt rule, not real
-  conflict resolution.** It fixes the common case (re-importing an older
-  copy of the *same* piece) but "existing always wins" is wrong for the
-  opposite case — restoring a backup that's genuinely more advanced than
-  what's on this device (e.g. importing from a second device practiced on
-  more recently). In that case the import's more-advanced state is
-  silently discarded instead, still with no warning shown either way. The
-  correct fix needs the app to actually know which side is ahead — most
-  likely by rebuilding ladder state from the merged, deduplicated session
-  history (`sessions` already merges correctly today) rather than
-  trusting either side's stored snapshot outright — and/or a real
-  "choose which history to keep" step shown to the user when both sides
-  have genuinely diverged, instead of a silent rule in either direction.
-  Not built; planned for a later pass.
+- **Known issue, since resolved by Pass 13 (below):** this was a blunt
+  rule, not real conflict resolution. It fixed the common case
+  (re-importing an older copy of the *same* piece) but "existing always
+  wins" was wrong for the opposite case — restoring a backup that's
+  genuinely more advanced than what's on this device (e.g. importing from
+  a second device practiced on more recently) — where the import's
+  more-advanced state was silently discarded instead, with no warning
+  shown either way.
+
+**Decision: Pass 13 replaces that blunt rule with `diffImportedPiece`
+(`lib/storage.js`) — updatedAt alone resolves the common "one side is
+cleanly the older copy" cases automatically (in *either* direction, fixing
+the "opposite case" gap above along the way), and only a genuine
+tie/unknown-timestamp combined with real per-chunk ladder differences
+counts as actual divergence, surfaced to the user as a "keep what's here"
+vs. "use the imported version" picker in `ImportPiecesModal`.**
+
+- **Why:** the blunt rule above was safe but wrong roughly half the time
+  it mattered; the alternative sketched at the time this was deferred
+  (rebuild ladder state from merged session history instead of trusting
+  either snapshot) would have meant recomputing `computeLadderAdvance`
+  fresh from every merged session — a much larger change, and still
+  wouldn't resolve the case where the two sides *genuinely* diverged
+  (both progressed independently since a common point) rather than one
+  simply being stale. A real user choice, only asked for when there's
+  actually something to choose between, was judged the more direct fix.
+- **Approach:** `diffImportedPiece(existing, imported)` compares
+  `updatedAt` first — whichever side is strictly newer wins outright, no
+  picker shown, same spirit as `preferByRecency` already applies to
+  status/BPM/confidence (see above) but now extended to ladder state,
+  which that mechanism never covered. Only when `updatedAt` is tied
+  (including both sides missing it entirely) *and* the two sides'
+  `stage`/`consecutivePasses`/`consecutiveStabilizingFails`/`practiceBPM`/
+  `nextDueDate`/`tier1Done` actually differ on some chunk both have
+  progress on does it report real divergence — `ImportPiecesModal` then
+  shows the picker per matched piece, and `App.jsx`'s
+  `handleConfirmImport` re-derives the diff at confirm time (same
+  "re-check against current state, don't trust the modal's opening
+  snapshot" pattern `findMatchingPiece` already uses) and passes the
+  resolved side into `mergeImportedPiece`'s new `ladderChoice` parameter.
+- **Deliberately scoped to one whole-piece choice, not per chunk** —
+  matches the original framing of this question ("choose which history
+  to keep"), and a piece with genuine divergence on multiple chunks
+  simultaneously is expected to be rare enough that per-chunk granularity
+  wasn't worth the added UI. Flagged as a possible future refinement, not
+  built.
+- **Not addressed by this pass:** `flagSnapshot` (undo-scratch data) and
+  `flag` itself are unaffected — neither is "ladder state" in the sense
+  this question was ever about. `needsRelearning` (Pass 11) is also not
+  part of the divergence comparison or the picker's resolution — it isn't
+  in `mergeProgress`'s existing protected-fields list either, so it was
+  left exactly as it already behaved (plain "imported wins if present")
+  rather than silently folding it into this fix. Worth a deliberate look
+  in a later pass.
 
 **Decision: `piece.status` and a chunk's `currentBPM`/`targetBPM`/
 `manualConfidence` are protected from a stale re-import by a real recency
@@ -1382,14 +1422,15 @@ have a value.**
   as the older side) and threads it into a new `preferByRecency` helper,
   which `preferPresent`'s callers for these specific fields now use instead.
   Full mechanics: [Algorithms.md](Algorithms.md#import-merge).
-- **Deliberately narrower than the ladder-state problem above:** this does
-  not touch ladder state at all (`stage`/`consecutivePasses`/`practiceBPM`/
-  `nextDueDate`/etc. still always keep the existing value, unconditionally,
-  exactly as the entry above describes) — genuinely reconciling *that* needs
-  either replaying merged session history or the "choose which history to
-  keep" UI, still not built. This fix only closes the narrower, blunter gap:
-  a plain older backup no longer wins by accident on fields where "present"
-  and "correct" used to be treated as the same thing.
+- **Deliberately narrower than the ladder-state problem above, at the time:**
+  this did not touch ladder state at all (`stage`/`consecutivePasses`/
+  `practiceBPM`/`nextDueDate`/etc. still always kept the existing value,
+  unconditionally). This fix only closed the narrower, blunter gap: a plain
+  older backup no longer won by accident on fields where "present" and
+  "correct" used to be treated as the same thing. Ladder state itself was
+  left unconditional until Pass 13 (below), which extends this same
+  recency-based idea to it and adds a real "choose which history to keep"
+  picker for the cases recency alone can't resolve.
 - Regression-tested: `test/storage.test.mjs`.
 
 **Decision: a failed `localStorage` write is surfaced to the user, not
@@ -1616,19 +1657,3 @@ oversight to silently fix; surface it instead.
   "what's due" query replacing `timeline.days[]` indexing) that isn't
   designed either. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
-- **Import/backup merge conflicts, for a chunk's *ladder* state specifically,
-  are still resolved by a fixed rule, not a real user choice.** When both
-  the existing piece and an imported backup have progress on the same
-  chunk, ladder state (stage, tempo, next review date) always keeps the
-  existing value — correct for the common "re-importing an older copy of
-  the same piece" case, silently wrong for the opposite one (restoring a
-  genuinely more-advanced backup from another device). No warning is shown
-  either way today. Planned fix: a "choose which history to keep" step
-  surfaced to the user when the two sides have actually diverged, rather
-  than a silent rule in either direction — not built yet. **Narrower than it
-  used to be:** `piece.status` and a chunk's `currentBPM`/`targetBPM`/
-  `manualConfidence` are no longer part of this gap — they're now
-  recency-gated via `piece.updatedAt` instead of a fixed rule (see
-  [Data model](#data-model) above) — but that fix is still a timestamp
-  comparison, not the "choose which side to keep" UI this question is
-  ultimately asking for, and ladder state itself is untouched by it.

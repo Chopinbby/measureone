@@ -398,6 +398,23 @@ called from `ChecklistItem` before logging, not from `handleLogSession`
 itself (it needs the full chunk's `difficultyLabel` and the piece's
 `bpmZones` to resolve `requiredReps`/the effective target, neither of
 which the handler has from just a chunk id):
+
+`requiredReps` itself is resolved by `resolveRequiredReps(chunk)`
+(`lib/confidence.js`, Pass 27) — normally `REQUIRED_REPS[chunk.difficultyLabel]`
+(3/4/5), but a flat **2** for `chunk.kind === "section-runthrough"` or
+`"section-transition"` (a whole section, or two combined sections, played
+straight through), regardless of difficulty label. A run-through's
+`difficultyLabel` is a *weighted average* across its whole span
+(`computeSectionRunThroughs`, `lib/chunking.js`), so gating it through the
+normal table would ask for *more* reps the longer/harder-averaging the
+run-through gets — backwards for a drill whose difficulty is already the
+span's length, not its rep count. Reps only; the tempo side
+(`practiceBPM`/`clearsTempo`) is untouched for these chunks. The
+whole-piece `"__consolidation__"` run-through (the plan's final "Full
+run-through" day) never reaches `resolveRequiredReps` or
+`classifySessionOutcome` at all — `handleLogRunThrough` (`App.jsx`) logs a
+`stopCount` against a synthetic progress key, not `cleanReps`, and isn't a
+real chunk object either.
 - `manualFail` (the UI's "needs more work" checkbox — the folded-in
   replacement for the old effectiveness input) always wins as `"fail"`.
 - Zero clean reps is always `"fail"`.

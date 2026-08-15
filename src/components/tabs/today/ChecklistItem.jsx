@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
 import { formatRange, formatDuration, todayISODate } from "../../../lib/utils";
-import { ROLE_LABEL, DIFFICULTY_META, REQUIRED_REPS, SESSION_OUTCOME_META } from "../../../lib/constants";
+import { ROLE_LABEL, DIFFICULTY_META, SESSION_OUTCOME_META } from "../../../lib/constants";
 import {
   computeConfidence,
   suggestMethods,
@@ -10,6 +10,7 @@ import {
   getDefaultTargetBPM,
   getSuggestedStartingBPM,
   formatLadderStatus,
+  resolveRequiredReps,
 } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
 
@@ -62,8 +63,12 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   // AND submitLog's classification call, so the number the learner reads
   // before logging always matches the number that's actually judged
   // against (previously computed separately in each place, with a subtly
-  // different fallback for an unrecognized difficultyLabel).
-  const requiredReps = REQUIRED_REPS[chunk.difficultyLabel] || 4;
+  // different fallback for an unrecognized difficultyLabel). Pass 27 moved
+  // the actual resolution (including the run-through flat-rep override)
+  // into resolveRequiredReps (lib/confidence.js) — this component has no
+  // JSX-free test path of its own, and that logic needs to be unit
+  // testable on its own.
+  const requiredReps = resolveRequiredReps(chunk);
   const outcomeMeta = session && SESSION_OUTCOME_META[sessionOutcome(session)];
   // First encounter = nothing has ever been logged for this chunk yet, i.e.
   // there's no user-selected starting tempo (practiceBPM) or session history

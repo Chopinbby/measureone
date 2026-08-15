@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { getSuggestedStartingBPM, computeConfidence, classifySessionOutcome } from "../src/lib/confidence.js";
+import { getSuggestedStartingBPM, computeConfidence, classifySessionOutcome, resolveRequiredReps } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
   return { id: "c1", start: 1, end: 8, difficultyLabel: "medium", ...overrides };
@@ -335,5 +335,60 @@ describe("classifySessionOutcome — the false-fail fix (Pass 14)", () => {
       }),
       "soft-miss"
     );
+  });
+});
+
+describe("resolveRequiredReps — Pass 27's flat run-through rep count", () => {
+  test("a run-through-kind chunk (section-runthrough or section-transition) always resolves to 2, regardless of difficulty label", () => {
+    for (const kind of ["section-runthrough", "section-transition"]) {
+      for (const difficultyLabel of ["easy", "medium", "hard"]) {
+        assert.equal(resolveRequiredReps({ kind, difficultyLabel }), 2, `${kind} at ${difficultyLabel} should resolve to a flat 2`);
+      }
+    }
+  });
+
+  test("an ordinary practice chunk, plain transition, or combo of the same difficulty is unaffected — still its normal REQUIRED_REPS count", () => {
+    assert.equal(resolveRequiredReps({ kind: "section", difficultyLabel: "easy" }), 3);
+    assert.equal(resolveRequiredReps({ kind: "section", difficultyLabel: "medium" }), 4);
+    assert.equal(resolveRequiredReps({ kind: "section", difficultyLabel: "hard" }), 5);
+    assert.equal(
+      resolveRequiredReps({ kind: "transition", difficultyLabel: "hard" }),
+      5,
+      "a plain chunk-to-chunk transition (kind 'transition', not 'section-transition') is unaffected"
+    );
+    assert.equal(resolveRequiredReps({ kind: "combo", difficultyLabel: "hard" }), 5, "a focus-block combo is unaffected");
+  });
+
+  test("a run-through-kind chunk with exactly 2 clean reps classifies as a full pass, regardless of difficulty label", () => {
+    for (const difficultyLabel of ["easy", "medium", "hard"]) {
+      const chunk = { kind: "section-runthrough", difficultyLabel };
+      const requiredReps = resolveRequiredReps(chunk);
+      const outcome = classifySessionOutcome({
+        cleanReps: 2,
+        bpm: 100,
+        requiredReps,
+        practiceBPM: null, // not yet seeded — isolates the reps threshold from the tempo gate
+        manualFail: false,
+        previousOutcome: null,
+        previousCleanReps: null,
+      });
+      assert.equal(outcome, "pass", `a ${difficultyLabel} run-through with 2 clean reps should be a full pass`);
+    }
+  });
+
+  test("the same 2-rep session on an ordinary hard practice chunk does NOT count as a full pass (needs 5)", () => {
+    const chunk = { kind: "section", difficultyLabel: "hard" };
+    const requiredReps = resolveRequiredReps(chunk);
+    assert.equal(requiredReps, 5);
+    const outcome = classifySessionOutcome({
+      cleanReps: 2,
+      bpm: 100,
+      requiredReps,
+      practiceBPM: null,
+      manualFail: false,
+      previousOutcome: null,
+      previousCleanReps: null,
+    });
+    assert.equal(outcome, "soft-miss", "2 of 5 required reps on an ordinary hard chunk reads as a soft-miss, not a full pass");
   });
 });

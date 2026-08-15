@@ -72,6 +72,41 @@ export function getSuggestedStartingBPM(piece, chunk) {
   return Math.round(curve.base * Math.pow(targetBPM / 100, curve.k));
 }
 
+// Chunk kinds representing a continuity run-through — a whole section, or
+// two combined sections, played straight through — rather than a normal
+// practice rep. See resolveRequiredReps below. Deliberately excludes plain
+// "transition" (an ordinary two-chunk seam) and "combo" (a focus block) —
+// only the two run-through kinds get the flat override.
+const RUN_THROUGH_KINDS = ["section-runthrough", "section-transition"];
+const RUN_THROUGH_REQUIRED_REPS = 2;
+
+// How many clean reps `chunk` actually needs to count as a full pass —
+// single source of truth for ChecklistItem's requirement display, its
+// input field's label, AND its classifySessionOutcome call (Pass 15's
+// comment on `requiredReps` there), so what the learner reads before
+// logging always matches what's actually judged against.
+//
+// Run-through kinds (RUN_THROUGH_KINDS above) use a flat,
+// difficulty-independent count instead of REQUIRED_REPS[difficultyLabel] —
+// Pass 27. The point of a run-through is continuity over a much longer
+// span, not the same rep count a single chunk needs; its difficultyLabel is
+// a weighted average across that whole span (computeSectionRunThroughs,
+// lib/chunking.js), so gating it through the normal table would ask for
+// MORE reps on a longer, harder-averaging run-through — backwards for a
+// drill that's already a bigger ask by virtue of its length alone. Reps
+// only, per this pass's scope — the tempo side (practiceBPM/clearsTempo,
+// below) is unchanged for these chunks.
+//
+// The whole-piece "__consolidation__" run-through (the plan's final "Full
+// run-through" day) never reaches this at all: handleLogRunThrough
+// (App.jsx) logs a stopCount against a synthetic progress key, never
+// cleanReps, and never calls classifySessionOutcome — confirmed by reading
+// the code, not assumed, since there's no requiredReps to resolve there in
+// the first place, and no chunk object either (it isn't a real chunk).
+export function resolveRequiredReps(chunk) {
+  return RUN_THROUGH_KINDS.includes(chunk.kind) ? RUN_THROUGH_REQUIRED_REPS : REQUIRED_REPS[chunk.difficultyLabel] || 4;
+}
+
 // Classifies one logged attempt into the three-tier outcome model
 // (Repertoire-Lifecycle.md's "Session outcomes: three tiers, not two"):
 // - full pass: required clean reps hit, at/above the tempo currently asked

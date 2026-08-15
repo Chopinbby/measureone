@@ -5,7 +5,13 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateAllChunks } from "../src/lib/chunking.js";
-import { computeTimeline, getEffectiveTimeline, computeScheduleStatus, computeDaysNeededForMinutesPerDay } from "../src/lib/scheduling.js";
+import {
+  computeTimeline,
+  getEffectiveTimeline,
+  computeScheduleStatus,
+  computeDaysNeededForMinutesPerDay,
+  shouldShowScheduleBanner,
+} from "../src/lib/scheduling.js";
 
 function basePiece(overrides) {
   return {
@@ -218,6 +224,31 @@ describe("Tier 2 — flexes under budget contention, rolls forward, never drops 
     // trigger "behind schedule" off review timing.
     const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, 12);
     assert.equal(status.missedCount, 0, "chunks with a logged session are never counted as missed, regardless of review lateness/rolling");
+  });
+});
+
+describe("Pass 16 — shouldShowScheduleBanner suppresses the banner once a piece has run past its plan", () => {
+  const timeline = { days: Array(10) }; // a 10-day plan; only .days.length is read
+
+  test("elapsedDay past the plan length hides the banner even with a real missedCount", () => {
+    assert.equal(shouldShowScheduleBanner(11, timeline, 3), false, "one day past the plan, 3 chunks missed — still hidden");
+    assert.equal(shouldShowScheduleBanner(40, timeline, 1), false, "long past the plan, 1 chunk missed — still hidden");
+  });
+
+  test("elapsedDay past the plan length with nothing missed stays hidden (unaffected either way)", () => {
+    assert.equal(shouldShowScheduleBanner(11, timeline, 0), false);
+  });
+
+  test("still within the plan, a real missedCount shows the banner (unchanged behavior)", () => {
+    assert.equal(shouldShowScheduleBanner(5, timeline, 2), true);
+  });
+
+  test("still within the plan, nothing missed hides the banner (unchanged behavior)", () => {
+    assert.equal(shouldShowScheduleBanner(5, timeline, 0), false);
+  });
+
+  test("boundary: elapsedDay exactly at the plan's last day is not yet 'past' it — missedCount still governs", () => {
+    assert.equal(shouldShowScheduleBanner(10, timeline, 2), true, "day 10 of a 10-day plan is still in the plan, not past it");
   });
 });
 

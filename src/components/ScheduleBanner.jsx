@@ -1,5 +1,6 @@
 import { RotateCcw } from "lucide-react";
-import { computeScheduleStatus } from "../lib/scheduling";
+import { computeScheduleStatus, shouldShowScheduleBanner } from "../lib/scheduling";
+import { elapsedDay } from "../lib/utils";
 
 /* ------------------------------------------------------------------ */
 /*  Schedule banner (shared by Overview + Today)                      */
@@ -7,7 +8,11 @@ import { computeScheduleStatus } from "../lib/scheduling";
 
 export function ScheduleBanner({ piece, practiceChunks, timeline, currentDay, onReschedule }) {
   const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
-  if (status.missedCount === 0) return null;
+  // Pass 16 — currentDay is clamped into the plan (App.jsx's realCurrentDay),
+  // so it alone can't tell "still in the plan" from "plan's over, currentDay
+  // just stuck at the last day" apart. elapsedDay(piece) is the unclamped
+  // read that can.
+  if (!shouldShowScheduleBanner(elapsedDay(piece), timeline, status.missedCount)) return null;
   return (
     <div className="schedule-banner">
       <div>

@@ -447,3 +447,23 @@ export function computeScheduleStatus(piece, practiceChunks, timeline, currentDa
   });
   return { missedCount, remainingChunkIds };
 }
+
+// Whether the schedule-behind-schedule banner (ScheduleBanner.jsx) should
+// render at all — Pass 16. `currentDay` (App.jsx's realCurrentDay, fed into
+// computeScheduleStatus above) is clamped to timeline.days.length via
+// getCurrentDay (lib/utils.js), so once a piece runs past its own plan it
+// stays pinned at the last day forever — and computeScheduleStatus keeps
+// finding chunks introduced before that pinned day with zero sessions,
+// reporting a nonzero missedCount indefinitely. "Behind schedule" stops
+// being a meaningful question once the plan itself is over: the piece has
+// moved into ongoing maintenance (computeDueReviews, lib/maintenance.js),
+// the same condition TodayTab.jsx already uses (its own `pastPlan`) to
+// switch into that mode. Takes `elapsedDay` as an already-computed number
+// (lib/utils.js's elapsedDay(piece), read once by the caller) rather than
+// `piece` itself, so this stays a pure function of its inputs like every
+// other export here (computeScheduleStatus above takes `currentDay` the
+// same way) instead of reaching for the real clock internally.
+export function shouldShowScheduleBanner(elapsedDay, timeline, missedCount) {
+  if (elapsedDay > timeline.days.length) return false;
+  return missedCount > 0;
+}

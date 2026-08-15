@@ -1,5 +1,5 @@
-import { clamp, rangesOverlap } from "./utils";
-import { REQUIRED_REPS } from "./constants";
+import { clamp, rangesOverlap, daysBetweenInclusive } from "./utils";
+import { REQUIRED_REPS, STAGE_LABEL } from "./constants";
 import { STAGES } from "./ladder";
 
 // A measure-range tempo target set in Settings (or the whole-piece default)
@@ -264,6 +264,81 @@ export function computeProgressTier(chunk, piece) {
     console.warn(`computeProgressTier: chunk ${chunk.id} has unrecognized stage "${entry.stage}" — defaulting to "learned"`);
   }
   return "learned";
+}
+
+// Plain-language summary of a chunk's position on the spaced-repetition
+// maintenance ladder (lib/ladder.js) — Pass 15, the first UI surface for
+// stage/consecutivePasses/nextDueDate (previously computed and persisted on
+// every logged session but never displayed anywhere, per lib/ladder.js's own
+// header comment). One shared function so PieceMapTab's chunk-detail modal
+// and ChecklistItem's tip line can't drift on the graduation math or the
+// due-date phrasing. Returns null only when the chunk has no session history
+// at all — callers read that as truly "not started." A chunk with real
+// history but no recorded stage (see hasHistory below) still gets a status,
+// not null.
+//
+// `asOfDate` is an explicit "YYYY-MM-DD" param rather than an internal
+// todayISODate() call — this file already threads currentDay/asOfDay through
+// explicitly everywhere else (computeConfidenceAsOf above), same reason
+// computeDueReviews (lib/maintenance.js) takes asOfDate rather than reading
+// the clock itself.
+//
+// Found in review: a chunk practiced before the ladder feature existed has
+// real sessions but `stage: null` (backfillProgressLadderState, storage.js,
+// leaves it null rather than guessing at unrecoverable history) — the
+// original version of this function read that as "never touched" and showed
+// "Not started" right beside a nonzero "Sessions logged" count. Fixed by
+// checking session history, same signal computeProgressTier above already
+// uses to tell the two cases apart, and falling back to "stabilizing" for
+// display — the exact default computeLadderAdvance/applyRunThroughFlag
+// (lib/ladder.js) already use for this same shape the moment a new session
+// gets logged, so this reads as "about to start," not a guess at history
+// that can't be reconstructed.
+//
+// needsRelearning gets special handling: its nextDueDate is still a real
+// stored date (pinned to the day the flag turned on), but Algorithms.md/
+// Data-Model.md are explicit that this value is "never actually surfaced
+// anywhere while the flag is set" — computeDueReviews and computeTimeline
+// both skip the chunk outright regardless of what it holds. Showing the raw
+// date here would read as "overdue," which is wrong: review isn't late,
+// it's paused. dueLabel reports that instead of the date. stageLabel/
+// progressLabel are unaffected — consecutivePasses is genuinely 0/graduationPasses
+// while flagged (any fail resets it), so showing it is accurate, not a leak.
+export function formatLadderStatus(entry, ladderConfig, asOfDate) {
+  if (!entry) return null;
+  const hasHistory = (entry.sessions || []).length > 0;
+  if (!STAGES.includes(entry.stage) && !hasHistory) return null;
+  const stage = STAGES.includes(entry.stage) ? entry.stage : "stabilizing";
+  const consecutivePasses = entry.consecutivePasses || 0;
+  const nextStage = STAGES[STAGES.indexOf(stage) + 1] || null;
+  const graduationPasses = ladderConfig && ladderConfig[stage] ? ladderConfig[stage].graduationPasses : null;
+
+  // Holding has no next stage (STAGES' ceiling) and no graduationPasses in
+  // DEFAULT_LADDER_CONFIG — "N consecutive passes" instead of a fraction
+  // that would divide by nothing to progress toward.
+  const progressLabel =
+    nextStage && graduationPasses != null
+      ? `${consecutivePasses}/${graduationPasses} to ${STAGE_LABEL[nextStage]}`
+      : `${consecutivePasses} consecutive pass${consecutivePasses === 1 ? "" : "es"}`;
+
+  let dueLabel = null;
+  if (entry.needsRelearning) {
+    dueLabel = "paused — needs reinforcement";
+  } else if (entry.nextDueDate) {
+    // Same daysOverdue direction/off-by-one as computeDueReviews
+    // (lib/maintenance.js), reused rather than reinvented so "N days" means
+    // the same thing in both places.
+    const daysOverdue = daysBetweenInclusive(entry.nextDueDate, asOfDate) - 1;
+    const dateLabel = new Date(`${entry.nextDueDate}T00:00:00`).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+    if (daysOverdue > 0) dueLabel = `was due ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} ago (${dateLabel})`;
+    else if (daysOverdue === 0) dueLabel = `due today (${dateLabel})`;
+    else dueLabel = `in ${-daysOverdue} day${daysOverdue === -1 ? "" : "s"} (${dateLabel})`;
+  }
+
+  return { stageLabel: STAGE_LABEL[stage], progressLabel, dueLabel };
 }
 
 export function isManualConfidence(chunk, progress) {

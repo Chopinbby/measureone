@@ -64,6 +64,23 @@ export const PIECE_STATUS_LABEL = {
   archived: "Archived",
 };
 
+// Display labels for progress[id].stage (lib/ladder.js's STAGES) — Pass 15,
+// the first place Settling/Holding are shown to a learner at all (grep
+// confirmed neither appeared anywhere before this). Plain capitalized stage
+// names, NOT run through the same plain-language translation the Pass 26
+// follow-up gave "Stabilizing" ("the Introductory phase") — that rename was
+// scoped to one leaked mid-sentence hint ("...rebuilds consistency in
+// Stabilizing"), not a general ban on the stage names themselves, and here
+// they're shown as short labeled stats ("Stage: Settling"), not prose. Left
+// as-is rather than guessed at a matching plain-language set for all three —
+// flagged for the user to confirm, same as every other display-label
+// decision in this codebase.
+export const STAGE_LABEL = {
+  stabilizing: "Stabilizing",
+  settling: "Settling",
+  holding: "Holding",
+};
+
 export const REVIVAL_PURPOSE_OPTIONS = [
   { value: "performance", label: "Performance" },
   { value: "lesson", label: "Lesson" },

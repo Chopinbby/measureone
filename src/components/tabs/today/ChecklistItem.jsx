@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
-import { formatRange, formatDuration } from "../../../lib/utils";
+import { formatRange, formatDuration, todayISODate } from "../../../lib/utils";
 import { ROLE_LABEL, DIFFICULTY_META, REQUIRED_REPS, SESSION_OUTCOME_META } from "../../../lib/constants";
 import {
   computeConfidence,
@@ -9,6 +9,7 @@ import {
   sessionOutcome,
   getDefaultTargetBPM,
   getSuggestedStartingBPM,
+  formatLadderStatus,
 } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
 
@@ -85,6 +86,10 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
     practiceBPM != null
       ? `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} at ${practiceBPM}+ BPM to progress this chunk.`
       : `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} to progress this chunk.`;
+  // Pass 15 — surfaces stage/consecutivePasses/nextDueDate, computed and
+  // persisted on every logged session (lib/ladder.js) but never shown
+  // anywhere before now. null for a chunk with no session history yet.
+  const ladderStatus = formatLadderStatus(entry, piece.ladderConfig, todayISODate());
 
   const submitLog = () => {
     if (!canLog) return;
@@ -177,6 +182,14 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
         {!session && <p className="tip-line">Try: {tips.join(", ")}</p>}
         {memoryAnchor && <p className="tip-line"><strong>Memory anchor:</strong> {memoryAnchor}</p>}
         <p className="tip-line"><strong>{requirementText}</strong></p>
+        <p className="tip-line">
+          Ladder:{" "}
+          {ladderStatus
+            ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
+                ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
+              }`
+            : "not started yet"}
+        </p>
         {practiceBPM == null && targetBPM ? (
           <p className="tip-line">Target tempo: {targetBPM} BPM</p>
         ) : null}

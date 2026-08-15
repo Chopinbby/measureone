@@ -2,9 +2,15 @@ import { useState } from "react";
 import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
-import { clamp, formatRange } from "../../lib/utils";
+import { clamp, formatRange, todayISODate } from "../../lib/utils";
 import { DIFFICULTY_META, CONFIDENCE_PRESETS } from "../../lib/constants";
-import { computeConfidence, computeAutoConfidence, isManualConfidence, getDefaultTargetBPM } from "../../lib/confidence";
+import {
+  computeConfidence,
+  computeAutoConfidence,
+  isManualConfidence,
+  getDefaultTargetBPM,
+  formatLadderStatus,
+} from "../../lib/confidence";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
 // logging"): undefined ("untouched") -> 'rough' -> 'lost' -> undefined.
@@ -40,6 +46,10 @@ export function PieceMapTab({
   const selectedIsManual = selectedChunk ? isManualConfidence(selectedChunk, piece.progress) : false;
   const selectedFlag = selectedEntry.flag || "untouched";
   const selectedIdx = selectedChunk ? chunks.findIndex((c) => c.id === selected) : -1;
+  // Pass 15 — surfaces stage/consecutivePasses/nextDueDate, computed and
+  // persisted on every logged session (lib/ladder.js) but never shown
+  // anywhere before now. null for a chunk with no session history yet.
+  const ladderStatus = selectedChunk ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate()) : null;
 
   return (
     <div className="tab-pane">
@@ -111,6 +121,15 @@ export function PieceMapTab({
                   </span>
                 </div>
                 <div><span className="lbl">Sessions logged</span><span className="val mono">{(selectedEntry.doneDays || []).length}</span></div>
+                <div>
+                  <span className="lbl">Stage</span>
+                  <span className="val">
+                    {ladderStatus ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}` : "Not started"}
+                  </span>
+                </div>
+                {ladderStatus && ladderStatus.dueLabel && (
+                  <div><span className="lbl">Next review</span><span className="val">{ladderStatus.dueLabel}</span></div>
+                )}
                 {selectedChunk.recurringNote && <div><span className="lbl">Repeats</span><span className="val">{selectedChunk.recurringNote}</span></div>}
               </div>
 

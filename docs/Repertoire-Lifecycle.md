@@ -246,8 +246,23 @@ ambiguity concrete:
 - Stage lengths, graduation pass-counts, tempo floors, **and the
   practiceBPM ratchet step sizes below** are **piece-level tunable data,
   not hardcoded constants** (a future per-chunk override is explicitly
-  flagged as a want, not built yet). No editing UI exists yet — the values
-  just need to be stored so UI can be additive later.
+  flagged as a want, not built yet).
+- **Editing UI built (Pass 17).** `LadderConfigEditor`
+  (`src/components/fields/LadderConfigEditor.jsx`), wired into
+  `SettingsTab`'s edit view only (not the Wizard — no setup-time use case
+  for a ladder a piece hasn't joined yet), exposes every field above
+  through the same `{draft, set}` pattern `BpmZonesEditor`/`ScheduleFields`
+  already use. `lib/storage.js`'s `mergeLadderConfig` needed no change — its
+  existing field-by-field partial-override merge (built for the
+  incomplete-migrated-data case) turned out to be exactly what a Settings
+  edit needs too, confirmed with a new test rather than assumed. This pass
+  deliberately didn't re-derive or validate the defaults themselves — see
+  [Research.md](Research.md) — only made them adjustable. The one nullable
+  field (`stabilizing.tempoFloorFraction`, default `null` — "no floor")
+  gets a "Clear (no floor)" button next to it, the same pattern
+  `PieceMapTab`'s manual-confidence override already uses to get back to
+  `null`, since a plain `NumberInput` can't commit a cleared field to
+  `null` on its own.
 
 ### Introduction-window review scheduling: Tier 1 / Tier 2
 

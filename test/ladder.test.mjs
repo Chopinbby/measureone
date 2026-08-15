@@ -4,6 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { computeLadderAdvance, computeDemonstratedTempoBaseline } from "../src/lib/ladder.js";
+import { mergeLadderConfig } from "../src/lib/storage.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
 const LADDER_CONFIG = {
@@ -533,5 +534,26 @@ describe("Per-stage entry-BPM tempo reset on a real fail", () => {
       { s: 40, se: 50, h: 60 },
       "a pass that doesn't graduate never touches any recorded entry tempo"
     );
+  });
+});
+
+describe("ladderConfig editing (Settings' LadderConfigEditor) actually changes ladder behavior, not just the stored shape", () => {
+  test("an edited interval survives mergeLadderConfig's partial-override merge, and a subsequent computeLadderAdvance call uses it over the default", () => {
+    // Same shape LadderConfigEditor writes: a piece-level partial override
+    // (only the one field the user touched), same input mergeLadderConfig
+    // already handles for import/migration — confirming that existing
+    // support is sufficient for a Settings edit too, not just those paths.
+    const edited = mergeLadderConfig({ stabilizing: { intervalDays: 10 } });
+    assert.equal(edited.stabilizing.intervalDays, 10, "the edited value persists");
+    assert.equal(edited.stabilizing.graduationPasses, 4, "an untouched sibling field keeps its default");
+    assert.equal(edited.settling.intervalDays, 7, "an untouched stage keeps its defaults entirely");
+
+    // A full pass that doesn't graduate (only 1 of 4 required) schedules its
+    // next review at asOfDate + the stage's intervalDays — proving the
+    // EDITED value (10) drives computeLadderAdvance's actual output, not
+    // LADDER_CONFIG's default (4).
+    const r = computeLadderAdvance(baseState({ consecutivePasses: 0 }), { result: "pass", asOfDate: "2026-01-01" }, edited);
+    assert.equal(r.stage, "stabilizing", "only 1 of 4 required passes — doesn't graduate");
+    assert.equal(r.nextDueDate, "2026-01-11", "10 days out (the edited interval), not 4 (the default)");
   });
 });

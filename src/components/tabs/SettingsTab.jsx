@@ -5,6 +5,7 @@ import { DifficultyEditor } from "../fields/DifficultyEditor";
 import { RecurringEditor } from "../fields/RecurringEditor";
 import { ScheduleFields } from "../fields/ScheduleFields";
 import { BpmZonesEditor } from "../fields/BpmZonesEditor";
+import { LadderConfigEditor } from "../fields/LadderConfigEditor";
 import { RecordingsEditor } from "../fields/RecordingsEditor";
 import { RecordingsList } from "../fields/RecordingsList";
 import { autoChunkSize } from "../../lib/chunking";
@@ -126,6 +127,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
       <div className="panel"><h3>Recurring material</h3><RecurringEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Schedule</h3><ScheduleFields draft={editDraft} set={setEditDraft} isRevival={!!editDraft.revival?.active} /></div>
       <div className="panel"><h3>Tempo zones</h3><BpmZonesEditor draft={editDraft} set={setEditDraft} /></div>
+      <div className="panel"><h3>Maintenance ladder</h3><LadderConfigEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Recordings</h3><RecordingsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="edit-actions">
         <button className="ghost-btn" onClick={onDiscard}>Discard changes</button>

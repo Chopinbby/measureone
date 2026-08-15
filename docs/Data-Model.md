@@ -191,9 +191,10 @@ ChunkProgress = {
                             // lib/confidence.js's sessionOutcome(), not migrated in place.
                             // ladderSnapshot ({ stage, consecutivePasses,
                             // consecutiveStabilizingFails, practiceBPM, nextDueDate, tier1Done,
-                            // needsRelearning, currentBPM } | undefined, Pass 10; needsRelearning
-                            // added Pass 11, currentBPM added Pass 14)
-                            // — the eight ladder fields below, captured as they
+                            // needsRelearning, currentBPM, stabilizingEntryBPM, settlingEntryBPM,
+                            // holdingEntryBPM } | undefined, Pass 10; needsRelearning added Pass 11,
+                            // currentBPM added Pass 14, the three entry-BPM fields added Pass 26
+                            // follow-up) — the eleven ladder fields below, captured as they
                             // stood immediately BEFORE this session was logged. Stored per-session
                             // (not on the chunk entry) so same-day multi-session logging keeps
                             // each session's own "before" picture distinct — same
@@ -205,15 +206,16 @@ ChunkProgress = {
                             // logged before this field existed, which carries no snapshot) falls
                             // back to removing the record only. The validity check that gates this
                             // restore still only requires the original six fields (not
-                            // needsRelearning, not currentBPM) — a snapshot missing needsRelearning
-                            // entirely (any session logged before Pass 11) restores it as false
-                            // rather than failing validation, since false was correct for every
-                            // such snapshot anyway (the flag didn't exist yet to be true).
-                            // currentBPM (Pass 14) is optional for the same backward-compatibility
-                            // reason but has NO correct constant to fall back to — an older
-                            // snapshot simply never recorded the pre-session tempo — so a snapshot
-                            // missing it leaves currentBPM untouched rather than inventing a value.
-                            // See Decisions.md#spaced-repetition--maintenance.
+                            // needsRelearning, currentBPM, or the three entry-BPM fields) — a
+                            // snapshot missing needsRelearning entirely (any session logged before
+                            // Pass 11) restores it as false rather than failing validation, since
+                            // false was correct for every such snapshot anyway (the flag didn't
+                            // exist yet to be true). currentBPM (Pass 14) and the three entry-BPM
+                            // fields (Pass 26 follow-up) are optional for the same
+                            // backward-compatibility reason but have NO correct constant to fall
+                            // back to — an older snapshot simply never recorded them — so a
+                            // snapshot missing any of them leaves that field untouched rather than
+                            // inventing a value. See Decisions.md#spaced-repetition--maintenance.
   currentBPM,               // number | undefined — last logged tempo (what was actually played)
   targetBPM,                // number | undefined — explicit per-chunk override;
                              // falls back to piece.targetBPM / bpmZones if unset
@@ -327,11 +329,32 @@ ChunkProgress = {
                                // fail) on every logged session — except a session with 3+ clean
                                // reps at a bpm above the current value jumps practiceBPM straight
                                // to that bpm instead (computeDemonstratedTempoBaseline,
-                               // lib/ladder.js), the third ("demonstrated") tempo concept. One more
-                               // exception (Pass 11): the exact fail that turns needsRelearning on
-                               // resets practiceBPM to getSuggestedStartingBPM instead of the normal
-                               // -2 step, when that suggestion is available (a piece with no target
-                               // BPM has nothing to suggest, so the normal step still applies then).
+                               // lib/ladder.js), the third ("demonstrated") tempo concept.
+                               // Two more exceptions on a real fail: (Pass 11) the exact fail that
+                               // turns needsRelearning on resets practiceBPM to
+                               // getSuggestedStartingBPM instead, when that suggestion is available;
+                               // otherwise (Pass 26 follow-up) a real fail resets practiceBPM to
+                               // stabilizingEntryBPM/settlingEntryBPM/holdingEntryBPM (below) for
+                               // whichever stage it demotes INTO, falling back to the ordinary -2
+                               // step only when nothing's recorded there yet. Rule priority:
+                               // needsRelearning's reset wins outright over the entry-tempo one when
+                               // both would apply.
+  stabilizingEntryBPM,         // number | null, default null (Pass 26 follow-up) — the practiceBPM
+  settlingEntryBPM,            // this chunk had the moment it most recently, freshly entered each
+  holdingEntryBPM,             // named stage (via promotion, or the chunk's very first-ever session
+                                // for stabilizingEntryBPM specifically — that call IS Stabilizing's
+                                // first entry). A real fail resets practiceBPM to the value recorded
+                                // here for the stage it demotes INTO — see practiceBPM above and
+                                // lib/ladder.js's computeLadderAdvance. Three flat scalar fields, not
+                                // one nested object: storage.js's ladderStateDiffers/mergeProgress
+                                // compare every ladder field with `!==`, which is reference equality
+                                // for an object (always "different" across a fresh JSON parse even
+                                // with identical contents) — flat scalars compare correctly by value,
+                                // same as every other ladder field already does. A piece migrated
+                                // from before this field existed backfills each null except the one
+                                // matching its current stage, seeded from its current practiceBPM —
+                                // see storage.js's backfillProgressLadderState. See
+                                // Decisions.md#spaced-repetition--maintenance.
   nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
                                 // review, recomputed on every logged session. Load-bearing since
                                 // Pass 5: computeTimeline reads this directly to place the chunk's

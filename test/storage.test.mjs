@@ -237,6 +237,86 @@ describe("validateAndMigratePiece — representative old piece shapes", () => {
   });
 });
 
+// Pass 26 follow-up — per-stage tempo baselines (lib/ladder.js). No real
+// per-stage history exists to reconstruct for a piece saved before this
+// field existed, so the backfill treats "right now" as if the chunk just
+// freshly entered whatever stage it's currently at.
+describe("validateAndMigratePiece — per-stage entry-BPM backfill (Pass 26 follow-up)", () => {
+  test("a chunk with no ladder state at all (pre-ladder history) backfills all three to null — there's no practiceBPM to seed from either", () => {
+    const m = validateAndMigratePiece(midPlan);
+    assert.equal(m.progress.c1.stabilizingEntryBPM, null);
+    assert.equal(m.progress.c1.settlingEntryBPM, null);
+    assert.equal(m.progress.c1.holdingEntryBPM, null);
+  });
+
+  test("a chunk already on the ladder in Settling, migrated before this field existed, backfills ONLY settlingEntryBPM from its current practiceBPM", () => {
+    const custom = {
+      id: "p_settling",
+      name: "Étude",
+      totalMeasures: 40,
+      startDate: "2026-07-01",
+      progress: {
+        c1: {
+          doneDays: [1],
+          sessions: [],
+          stage: "settling",
+          consecutivePasses: 2,
+          practiceBPM: 75,
+        },
+      },
+    };
+    const m = validateAndMigratePiece(custom);
+    assert.equal(m.progress.c1.settlingEntryBPM, 75, "treated as if it just freshly entered Settling at its current tempo");
+    assert.equal(m.progress.c1.stabilizingEntryBPM, null, "no fabricated history for a stage it isn't currently at");
+    assert.equal(m.progress.c1.holdingEntryBPM, null);
+  });
+
+  test("a chunk already on the ladder in Holding backfills ONLY holdingEntryBPM", () => {
+    const custom = {
+      id: "p_holding",
+      name: "Fugue",
+      totalMeasures: 40,
+      startDate: "2026-07-01",
+      progress: {
+        c1: { doneDays: [1], sessions: [], stage: "holding", practiceBPM: 118 },
+      },
+    };
+    const m = validateAndMigratePiece(custom);
+    assert.equal(m.progress.c1.holdingEntryBPM, 118);
+    assert.equal(m.progress.c1.stabilizingEntryBPM, null);
+    assert.equal(m.progress.c1.settlingEntryBPM, null);
+  });
+
+  test("explicit values already on a chunk (a piece saved by an app version that already has this feature) are never clobbered by the backfill", () => {
+    const custom = {
+      id: "p_already",
+      name: "Waltz",
+      totalMeasures: 40,
+      startDate: "2026-07-01",
+      progress: {
+        c1: {
+          doneDays: [1],
+          sessions: [],
+          stage: "holding",
+          practiceBPM: 118,
+          stabilizingEntryBPM: 40,
+          settlingEntryBPM: 60,
+          holdingEntryBPM: 90,
+        },
+      },
+    };
+    const m = validateAndMigratePiece(custom);
+    assert.equal(m.progress.c1.stabilizingEntryBPM, 40);
+    assert.equal(m.progress.c1.settlingEntryBPM, 60);
+    assert.equal(m.progress.c1.holdingEntryBPM, 90, "the chunk's own recorded value wins, not a re-derived one from its current practiceBPM (118)");
+  });
+
+  test("the synthetic __consolidation__ entry is left alone, not given these fields either", () => {
+    const m = validateAndMigratePiece(midPlan);
+    assert.equal("stabilizingEntryBPM" in m.progress.__consolidation__, false);
+  });
+});
+
 describe("mergeLadderConfig — the P1 crash fix (field-by-field merge, not all-or-nothing)", () => {
   test("a piece with an existing but INCOMPLETE ladderConfig (missing bpmSteps) gets it merged in", () => {
     // Real scenario, not hypothetical: any piece saved between the

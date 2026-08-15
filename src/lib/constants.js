@@ -36,10 +36,25 @@ export const ROLE_LABEL = {
 // itself per Decisions.md#spaced-repetition--maintenance. Labels/colors for
 // `session.outcome` (lib/confidence.js's classifySessionOutcome), reused by
 // both the logging UI (ChecklistItem) and Progress's outcome breakdown.
+//
+// The internal values stay "soft-miss"/"fail" (matched throughout
+// confidence.js/ladder.js/scheduling.js) — only the DISPLAY labels changed
+// (Pass 26, confirmed with the user; see
+// docs/Decisions.md#spaced-repetition--maintenance):
+// - "soft-miss" -> "Partial pass". Chosen over "Not yet" and "Close, not
+//   yet" for reading as a plain, literal statement of what happened rather
+//   than an editorialized one.
+// - "fail" -> "Needs rework" (was "Real fail"). "Real fail" only named the
+//   tempo pullback a learner would notice, not that it also demotes the
+//   chunk a stage on the maintenance ladder (never below Stabilizing) and,
+//   on a second consecutive fail while already in Stabilizing, resets
+//   practiceBPM outright (needsRelearning) — "Needs rework" doesn't spell
+//   that mechanism out either, but was confirmed acceptable: seeing the
+//   chunk again soon isn't a surprise once it's read as needing rework.
 export const SESSION_OUTCOME_META = {
   pass: { label: "Full pass", color: "var(--teal)" },
-  "soft-miss": { label: "Soft miss", color: "var(--brass)" },
-  fail: { label: "Real fail", color: "var(--brick)" },
+  "soft-miss": { label: "Partial pass", color: "var(--brass)" },
+  fail: { label: "Needs rework", color: "var(--brick)" },
 };
 
 // Labels for piece.status values other than the default "active" — active

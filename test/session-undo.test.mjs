@@ -42,6 +42,9 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
     nextDueDate: prevEntry.nextDueDate ?? null,
     tier1Done: prevEntry.tier1Done ?? false,
     currentBPM: prevEntry.currentBPM ?? null,
+    stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
+    settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
+    holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
   };
   const sessions = [
     ...(prevEntry.sessions || []),
@@ -59,6 +62,9 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
       practiceBPM: seededPracticeBPM,
       targetBPM,
       tier1Done: prevEntry.tier1Done,
+      stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
+      settlingEntryBPM: prevEntry.settlingEntryBPM,
+      holdingEntryBPM: prevEntry.holdingEntryBPM,
     },
     { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
     LADDER_CONFIG
@@ -77,6 +83,9 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
       practiceBPM: advance.practiceBPM,
       nextDueDate: advance.nextDueDate,
       tier1Done: advance.tier1Done,
+      stabilizingEntryBPM: advance.stabilizingEntryBPM,
+      settlingEntryBPM: advance.settlingEntryBPM,
+      holdingEntryBPM: advance.holdingEntryBPM,
       flagSnapshot: undefined,
     },
   };
@@ -118,6 +127,9 @@ function unlogSession(progress, chunkId, day) {
         // Optional, exactly as in App.jsx: an older snapshot without the
         // key leaves currentBPM untouched rather than guessing a value.
         ...("currentBPM" in snapshot ? { currentBPM: snapshot.currentBPM } : {}),
+        ...("stabilizingEntryBPM" in snapshot ? { stabilizingEntryBPM: snapshot.stabilizingEntryBPM } : {}),
+        ...("settlingEntryBPM" in snapshot ? { settlingEntryBPM: snapshot.settlingEntryBPM } : {}),
+        ...("holdingEntryBPM" in snapshot ? { holdingEntryBPM: snapshot.holdingEntryBPM } : {}),
       };
       // A flag whose flagSnapshot is still present can only have been
       // applied after this session (handleLogSession always clears
@@ -372,6 +384,75 @@ describe("Undo reverses currentBPM too, not just the ladder fields", () => {
     assert.equal(progress.c1.nextDueDate, "2026-01-05");
     // Left untouched rather than guessed at — the old snapshot never recorded it.
     assert.equal(progress.c1.currentBPM, 90);
+  });
+});
+
+// Pass 26 follow-up (lib/ladder.js) — the per-stage entry-BPM fields join
+// ladderSnapshot the same way currentBPM did above: a fail can rewrite
+// stabilizingEntryBPM/settlingEntryBPM/holdingEntryBPM (whenever it causes
+// a genuine stage transition), so undoing that fail must roll them back
+// too, or a later fail into the same stage would reset to a baseline that
+// was only ever real because of the session that got undone.
+describe("Undo reverses the per-stage entry-BPM fields too", () => {
+  test("undoing the pass that graduated a chunk into Settling also reverses the freshly-recorded settlingEntryBPM", () => {
+    let progress = { c1: { doneDays: [], sessions: [], tier1Done: true, consecutivePasses: 3, stage: "stabilizing", practiceBPM: 40 } };
+    progress = logSession(progress, "c1", 1, { cleanReps: 4, bpm: 40, outcome: "pass", durationSeconds: 0, targetBPM: 100 }, 1000);
+    assert.equal(progress.c1.stage, "settling", "sanity: the 4th consecutive pass graduated it");
+    assert.equal(progress.c1.settlingEntryBPM, 42, "sanity: Settling's entry tempo was just recorded as the graduating tempo");
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.stage, "stabilizing");
+    assert.equal(progress.c1.settlingEntryBPM, null, "no Settling entry was ever recorded before this now-undone graduation");
+  });
+
+  test("undoing a fail that reset practiceBPM to a recorded stage-entry tempo restores the PRE-fail practiceBPM, not the reset value", () => {
+    let progress = {
+      c1: { doneDays: [], sessions: [], tier1Done: true, stage: "stabilizing", practiceBPM: 90, stabilizingEntryBPM: 40 },
+    };
+    progress = logSession(progress, "c1", 1, { cleanReps: 0, bpm: 0, outcome: "fail", durationSeconds: 0, targetBPM: 100 }, 1000);
+    assert.equal(progress.c1.practiceBPM, 40, "sanity: the fail reset all the way back to the recorded Stabilizing baseline");
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.practiceBPM, 90, "restores the tempo the chunk actually had before this fail, not the reset value");
+    assert.equal(progress.c1.stabilizingEntryBPM, 40, "the baseline itself is unchanged either way — this fail never touched it (no stage transition)");
+  });
+
+  test("[regression] an older snapshot missing the three entry-BPM keys still restores normally, not a validation failure", () => {
+    let progress = {
+      c1: {
+        doneDays: [1],
+        sessions: [
+          {
+            day: 1,
+            loggedAt: 1000,
+            cleanReps: 4,
+            bpm: 90,
+            outcome: "pass",
+            ladderSnapshot: {
+              stage: "stabilizing",
+              consecutivePasses: 1,
+              consecutiveStabilizingFails: 0,
+              practiceBPM: 82,
+              nextDueDate: "2026-01-05",
+              tier1Done: false,
+              // no entry-BPM keys — logged before this fix existed
+            },
+          },
+        ],
+        stage: "settling",
+        consecutivePasses: 2,
+        practiceBPM: 92,
+        stabilizingEntryBPM: 40,
+        settlingEntryBPM: 92,
+      },
+    };
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.stage, "stabilizing", "the original fields still restore normally");
+    assert.equal(progress.c1.practiceBPM, 82);
+    // Left untouched rather than guessed at — the old snapshot never recorded them.
+    assert.equal(progress.c1.stabilizingEntryBPM, 40);
+    assert.equal(progress.c1.settlingEntryBPM, 92);
   });
 });
 

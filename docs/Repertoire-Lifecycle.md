@@ -371,17 +371,27 @@ evidence.
   the baseline outright (3+ clean reps at a bpm above the current value,
   on a pass or soft-miss) instead of the usual +2-per-pass ratchet.
 - Step sizes (`ladderConfig.bpmSteps`, tunable, defaults): **+2 BPM** on a
-  full pass, **−2 BPM** on a soft miss, **−2 BPM** pullback on a real fail
-  too — not the steeper ~8-10 BPM drop originally sketched here. Confirmed
-  with the user while building the ladder engine (`lib/ladder.js`): a real
-  fail should cost the same as the other two outcomes, not a distinctly
-  larger penalty. See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+  full pass, **−2 BPM** on a soft miss — not the steeper ~8-10 BPM drop
+  originally sketched here. Confirmed with the user while building the
+  ladder engine (`lib/ladder.js`): a soft miss's cost shouldn't be a
+  distinctly larger penalty than a pass's gain.
+  **Superseded (Pass 26 follow-up):** a real fail no longer uses this flat
+  step at all — it resets `practiceBPM` to the recorded tempo the chunk
+  had the last time it freshly entered the stage the fail demotes it
+  INTO (`stabilizingEntryBPM`/`settlingEntryBPM`/`holdingEntryBPM`),
+  falling back to the old −2 step only when nothing's recorded for that
+  stage yet. Reopened at the user's explicit request; see
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+  three options presented and why this one needed new persisted state.
 - **What actually shipped, different from the original sketch above:**
   `ChecklistItem.jsx` kept free-text "clean reps" and "BPM achieved"
   `NumberInput` fields rather than replacing them with a fixed "attempt at
-  `practiceBPM`" action — `practiceBPM` (when set) only shows as the BPM
-  field's placeholder/suggestion, and as a "Practice tempo: N BPM" tip
-  line. `classifySessionOutcome` reads whatever the learner actually typed
+  `practiceBPM`" action — `practiceBPM` (when set) shows as the BPM
+  field's placeholder/suggestion, and (Pass 26) as part of the task card's
+  stated requirement, "Need N clean reps at `practiceBPM`+ BPM to progress
+  this chunk" (superseding an earlier plain "Practice tempo: N BPM" tip
+  line — see "Session outcomes: three tiers, not two" above).
+  `classifySessionOutcome` reads whatever the learner actually typed
   against `practiceBPM`, so the free-text field already doubles as the
   "lightweight manual override" this bullet asked for — a separate
   override control was never needed. Progress's tempo-trend sparkline
@@ -430,6 +440,85 @@ called from `ChecklistItem.jsx` on every log and passed to
    [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
    options considered and why this one was chosen over delaying the
    threshold or removing BPM from the pass/fail gate entirely.
+
+**Implemented (Pass 26) — task card clarity: the requirement stated up
+front, a confirm step before an under-logged attempt saves silently, and
+plainer display labels.** Three separate, display-only changes (the
+classification above is unchanged):
+
+- **The task card states its actual requirement before logging**
+  (`ChecklistItem.jsx`): "Need N clean reps at M+ BPM to progress this
+  chunk," reusing the exact `requiredReps`/`practiceBPM` values
+  `classifySessionOutcome` itself judges against — no separate,
+  independently-maintained copy of the number to drift out of sync. No
+  tempo clause when `practiceBPM` hasn't been seeded yet (a first attempt
+  genuinely has no tempo floor to clear — see
+  [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder)),
+  so the stated requirement never claims a floor that isn't actually being
+  enforced.
+- **A shortfall on reps, or on tempo alone with reps otherwise met, now
+  confirms before saving** instead of saving silently — "You logged 2 of
+  the 3 reps needed... Save anyway?" or, for a tempo-only shortfall, "You
+  logged 3 clean reps at 90 BPM — under the 102+ BPM needed... Save
+  anyway?" A clarity checkpoint, not a gate: confirming saves exactly what
+  was entered, same as before this pass. Deliberately does NOT fire on a
+  zero-rep attempt (already unambiguous) or on an attempt that already
+  meets/exceeds the requirement in full (nothing to confirm), and
+  deliberately does NOT fire when the "needs more work" manual-fail
+  checkbox is already checked — that checkbox is itself already an
+  explicit "this counts as a fail" choice, so a second confirmation on top
+  of it would be friction, not clarity.
+
+  **Widened immediately after shipping, same day:** the tempo-only case
+  was originally left out on purpose — reasoned at the time that the
+  requirement line above already states the tempo floor, so nothing new
+  needed surfacing. The user disagreed and asked for it to be added too:
+  it's easy to log a tempo a little under `practiceBPM` without registering
+  that doing so is what turns a `"pass"` into a `"soft-miss"`/"Partial
+  pass," and the requirement line being visible beforehand doesn't
+  guarantee it was actually read. Both shortfall types now share one
+  `window.confirm` gate in `submitLog`, mutually exclusive by construction
+  (a reps shortfall can't also be a tempo-only shortfall, since the reps
+  check runs first) — see [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+- **Display labels only, not the internal outcome values** (which stay
+  `"soft-miss"`/`"fail"` everywhere in code): `SESSION_OUTCOME_META`
+  (`src/lib/constants.js`) now shows "Partial pass" where it used to show
+  "Soft miss," and "Needs rework" where it used to show "Real fail" —
+  confirmed with the user rather than guessed, since the request that
+  scoped this pass didn't name a replacement. "Real fail" only named the
+  consequence a learner would directly notice (the tempo pullback); it
+  didn't name that a fail also demotes the chunk a stage on the
+  maintenance ladder, which "Needs rework" doesn't spell out literally
+  either, but was confirmed as acceptable on the reasoning that seeing the
+  chunk again soon isn't a surprise once it reads as needing rework. Both
+  labels are read dynamically everywhere they're shown
+  (`ChecklistItem.jsx`'s logged-session line, `ProgressTab.jsx`'s outcome
+  breakdown) — no other file had a second, hardcoded copy of either
+  string. See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+  full option sets presented for each rename.
+- **`PieceMapTab.jsx`'s needs-relearning hint renamed too, same day:** the
+  internal ladder-stage name "Stabilizing" was leaking directly into the
+  one place it's shown to a learner ("...rebuilds consistency in
+  Stabilizing") — flagged as a finding when this pass shipped, not fixed
+  at the time since it read as a separate wording question. The user
+  settled it immediately after: display text now reads "the Introductory
+  phase." Display-only, same pattern as the outcome-label renames above —
+  `STAGES`/`stage: "stabilizing"` and every other internal reference stay
+  exactly as they are; the string literal only changed in the one JSX
+  line that renders it, since grep confirms nothing else displays a stage
+  name to the learner at all (`"Settling"`/`"Holding"` never appear as
+  user-facing text anywhere in the app today).
+- **Flagged when this pass shipped, resolved the same day:** picking
+  distinct labels for "Partial pass" and "Needs rework" made a
+  pre-existing asymmetry visible that the old "Soft miss"/"Real fail"
+  labels didn't surface as clearly — both outcomes used to step
+  `practiceBPM` down by the identical flat amount. The user asked to
+  revisit this — see the next section, "Per-chunk tempo target:
+  practiceBPM," for what a real fail does now, and
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+  three options presented and why the chosen one needed new persisted
+  state.
 
 Plateau (reps consistently met, `practiceBPM` not climbing) should be rare
 by construction now, since tempo increase is built into what a full pass

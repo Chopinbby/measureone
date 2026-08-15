@@ -56,7 +56,13 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   const canLog = reps !== "" && bpm !== "";
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   const practiceBPM = entry.practiceBPM ?? null;
-  const suggestedReps = REQUIRED_REPS[chunk.difficultyLabel];
+  // Single source of truth for "how many reps does this chunk actually
+  // need" — reused by the requirement line below, the input field's label,
+  // AND submitLog's classification call, so the number the learner reads
+  // before logging always matches the number that's actually judged
+  // against (previously computed separately in each place, with a subtly
+  // different fallback for an unrecognized difficultyLabel).
+  const requiredReps = REQUIRED_REPS[chunk.difficultyLabel] || 4;
   const outcomeMeta = session && SESSION_OUTCOME_META[sessionOutcome(session)];
   // First encounter = nothing has ever been logged for this chunk yet, i.e.
   // there's no user-selected starting tempo (practiceBPM) or session history
@@ -68,15 +74,48 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   // a chunk can be flagged for re-learning well past its first encounter,
   // and the tempo it resets to at that moment is this same suggestion.
   const suggestedStartingBPM = getSuggestedStartingBPM(piece, chunk);
+  // Pass 26 — the task card states its actual requirement in plain
+  // language before logging (docs/Repertoire-Lifecycle.md's "Session
+  // outcomes: three tiers, not two"). No tempo clause when practiceBPM
+  // isn't seeded yet: classifySessionOutcome treats a null practiceBPM as
+  // already-cleared (lib/confidence.js), so a first attempt genuinely only
+  // has a reps requirement, not a tempo one — stating a BPM floor that
+  // isn't actually being enforced yet would be misleading, not clarifying.
+  const requirementText =
+    practiceBPM != null
+      ? `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} at ${practiceBPM}+ BPM to progress this chunk.`
+      : `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} to progress this chunk.`;
 
   const submitLog = () => {
     if (!canLog) return;
-    const requiredReps = REQUIRED_REPS[chunk.difficultyLabel] || 4;
+    const cleanReps = Number(reps);
+    const bpmAttempted = Number(bpm);
+    // Pass 26 — a clarity checkpoint, not a hard block: an attempt that
+    // falls short (on reps, or on tempo alone with reps otherwise met —
+    // widened post-Pass-26 per the user: a tempo-only shortfall still
+    // counts as a Partial pass, not a Full pass, and it's easy to log a
+    // slightly-under tempo without noticing that's what just happened)
+    // gets confirmed before it saves silently. Zero reps is excluded —
+    // already unambiguous. Skipped when manualFail is already checked —
+    // that checkbox is itself already an explicit, deliberate "this counts
+    // as a fail" choice, so a second confirmation on top of it would be
+    // redundant friction, not additional clarity. Confirming (or
+    // cancelling) never changes what gets saved — classification below
+    // runs unchanged either way.
+    const clearsTempo = practiceBPM == null || bpmAttempted >= practiceBPM;
+    const isRepsShortfall = cleanReps > 0 && cleanReps < requiredReps;
+    const isTempoOnlyShortfall = cleanReps >= requiredReps && !clearsTempo;
+    if ((isRepsShortfall || isTempoOnlyShortfall) && !manualFail) {
+      const confirmMessage = isRepsShortfall
+        ? practiceBPM != null
+          ? `You logged ${cleanReps} of the ${requiredReps} reps needed at ${practiceBPM}+ BPM to progress this chunk. Save anyway?`
+          : `You logged ${cleanReps} of the ${requiredReps} reps needed to progress this chunk. Save anyway?`
+        : `You logged ${cleanReps} clean reps at ${bpmAttempted} BPM — under the ${practiceBPM}+ BPM needed to progress this chunk. Save anyway?`;
+      if (!window.confirm(confirmMessage)) return;
+    }
     const priorSessions = entry.sessions || [];
     const previousSession = priorSessions.length ? priorSessions[priorSessions.length - 1] : null;
     const previousOutcome = previousSession ? sessionOutcome(previousSession) : null;
-    const cleanReps = Number(reps);
-    const bpmAttempted = Number(bpm);
     const outcome = classifySessionOutcome({
       cleanReps,
       bpm: bpmAttempted,
@@ -137,9 +176,8 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
         )}
         {!session && <p className="tip-line">Try: {tips.join(", ")}</p>}
         {memoryAnchor && <p className="tip-line"><strong>Memory anchor:</strong> {memoryAnchor}</p>}
-        {practiceBPM != null ? (
-          <p className="tip-line">Practice tempo: {practiceBPM} BPM</p>
-        ) : targetBPM ? (
+        <p className="tip-line"><strong>{requirementText}</strong></p>
+        {practiceBPM == null && targetBPM ? (
           <p className="tip-line">Target tempo: {targetBPM} BPM</p>
         ) : null}
         {tempoLadder && tempoLadder.length > 0 && (
@@ -167,8 +205,8 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
 
         <div className="log-row">
           <label>
-            <span>Clean reps (aim {suggestedReps})</span>
-            <NumberInput value={reps} min={0} onCommit={(n) => setReps(n)} placeholder={String(suggestedReps)} />
+            <span>Clean reps (aim {requiredReps})</span>
+            <NumberInput value={reps} min={0} onCommit={(n) => setReps(n)} placeholder={String(requiredReps)} />
           </label>
           <label>
             <span>BPM achieved</span>

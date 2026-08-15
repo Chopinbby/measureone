@@ -129,6 +129,35 @@ function backfillProgressLadderState(progress, startDate) {
       practiceBPM: entry.practiceBPM !== undefined ? entry.practiceBPM : null,
       nextDueDate: entry.nextDueDate !== undefined ? entry.nextDueDate : null,
       tier1Done: entry.tier1Done !== undefined ? entry.tier1Done : false,
+      // Per-stage tempo baselines (Pass 26 follow-up, lib/ladder.js) — no
+      // real per-stage history exists to reconstruct for a piece saved
+      // before this field existed, so the backfill treats "right now" as
+      // if the chunk just freshly entered whatever stage it's currently
+      // sitting at (its own current practiceBPM), same non-destructive,
+      // no-real-history-to-lose spirit as the rest of this migration. The
+      // other two stages stay null — the ordinary bpmSteps.fail step
+      // covers a fail into either of those until a real entry gets
+      // recorded going forward. `entry.stage == null` (not yet on the
+      // ladder at all) defaults to Stabilizing, same as `stage` itself
+      // does everywhere else in this migration.
+      stabilizingEntryBPM:
+        entry.stabilizingEntryBPM !== undefined
+          ? entry.stabilizingEntryBPM
+          : entry.stage === "stabilizing" || entry.stage == null
+          ? entry.practiceBPM ?? null
+          : null,
+      settlingEntryBPM:
+        entry.settlingEntryBPM !== undefined
+          ? entry.settlingEntryBPM
+          : entry.stage === "settling"
+          ? entry.practiceBPM ?? null
+          : null,
+      holdingEntryBPM:
+        entry.holdingEntryBPM !== undefined
+          ? entry.holdingEntryBPM
+          : entry.stage === "holding"
+          ? entry.practiceBPM ?? null
+          : null,
     };
   });
   return result;
@@ -496,7 +525,19 @@ function mergeSessionArrays(existingSessions, importedSessions) {
 // mergeImportedPiece and `diffImportedPiece` below for how that side gets
 // picked). "__consolidation__" (Pass 6 run-through sessions) isn't a real
 // chunk and carries none of these, so callers skip it rather than compare it.
-const LADDER_STATE_FIELDS = ["stage", "consecutivePasses", "consecutiveStabilizingFails", "practiceBPM", "nextDueDate", "tier1Done"];
+const LADDER_STATE_FIELDS = [
+  "stage",
+  "consecutivePasses",
+  "consecutiveStabilizingFails",
+  "practiceBPM",
+  "nextDueDate",
+  "tier1Done",
+  // Pass 26 follow-up (lib/ladder.js) — flat scalars, so `!==` below still
+  // does a correct comparison, unlike it would for a nested object.
+  "stabilizingEntryBPM",
+  "settlingEntryBPM",
+  "holdingEntryBPM",
+];
 
 // True when the existing piece and a freshly-imported candidate actually
 // disagree on ladder state for some chunk *both* sides have progress on —
@@ -587,6 +628,9 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
       practiceBPM: ladderSource.practiceBPM,
       nextDueDate: ladderSource.nextDueDate,
       tier1Done: ladderSource.tier1Done,
+      stabilizingEntryBPM: ladderSource.stabilizingEntryBPM,
+      settlingEntryBPM: ladderSource.settlingEntryBPM,
+      holdingEntryBPM: ladderSource.holdingEntryBPM,
       // Undo-scratch data for "revert this chunk's schedule if the flag gets
       // cleared" (see App.jsx's handleSetFlag) — always the existing side,
       // not something an exported file should be trusted to set, and not

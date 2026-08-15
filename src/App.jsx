@@ -468,6 +468,14 @@ export default function App() {
         // so undo reverses it too. See docs/Decisions.md's "session undo
         // should fully reverse the ladder" entry.
         currentBPM: prevEntry.currentBPM ?? null,
+        // Per-stage tempo baselines (Pass 26 follow-up, lib/ladder.js) —
+        // same reasoning as currentBPM above: without these in the
+        // snapshot, undoing the one session that just recorded a fresh
+        // stage-entry baseline would leave that baseline standing even
+        // though the promotion/demotion that set it was itself undone.
+        stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
+        settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
+        holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
       };
       const sessions = [
         ...(prevEntry.sessions || []),
@@ -507,6 +515,9 @@ export default function App() {
           tier1Done: prevEntry.tier1Done,
           needsRelearning: prevEntry.needsRelearning,
           suggestedStartingBPM,
+          stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
+          settlingEntryBPM: prevEntry.settlingEntryBPM,
+          holdingEntryBPM: prevEntry.holdingEntryBPM,
         },
         { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
         p.ladderConfig
@@ -524,6 +535,9 @@ export default function App() {
         nextDueDate: advance.nextDueDate,
         tier1Done: advance.tier1Done,
         needsRelearning: advance.needsRelearning,
+        stabilizingEntryBPM: advance.stabilizingEntryBPM,
+        settlingEntryBPM: advance.settlingEntryBPM,
+        holdingEntryBPM: advance.holdingEntryBPM,
         // A real logged session moves the ladder forward for real —
         // clears any pending flagSnapshot (see handleSetFlag below) so
         // later clearing a rough/lost flag can't discard this genuine
@@ -610,6 +624,14 @@ export default function App() {
             // today's behavior — instead of inventing a value, same
             // "never reconstruct" rule the fallback branch below follows.
             ...("currentBPM" in snapshot ? { currentBPM: snapshot.currentBPM } : {}),
+            // Per-stage tempo baselines (Pass 26 follow-up) — same
+            // optional, not-part-of-isValidSnapshot treatment as
+            // currentBPM directly above, and for the same reason: an
+            // older snapshot never recorded them, and there's no correct
+            // constant to invent in their place.
+            ...("stabilizingEntryBPM" in snapshot ? { stabilizingEntryBPM: snapshot.stabilizingEntryBPM } : {}),
+            ...("settlingEntryBPM" in snapshot ? { settlingEntryBPM: snapshot.settlingEntryBPM } : {}),
+            ...("holdingEntryBPM" in snapshot ? { holdingEntryBPM: snapshot.holdingEntryBPM } : {}),
           };
           // A rough/lost flag still carrying its flagSnapshot can only have
           // been applied AFTER this session, with nothing logged since —

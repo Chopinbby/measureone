@@ -443,10 +443,25 @@ Settling → Holding stages:
   resets, stage does not change — unless this session also clears the
   demonstrated-tempo override below, in which case `practiceBPM` still
   jumps up despite the overall miss (see rationale below).
-- **Real fail:** `practiceBPM` steps down (default −2 — deliberately the
-  same magnitude as the other two steps, not the steeper pullback an
-  earlier design sketch had), demotes exactly one stage (never below
-  Stabilizing), and — specifically for a *second consecutive* fail while
+- **Real fail:** `practiceBPM` resets to the recorded entry tempo for the
+  stage this fail demotes INTO —
+  `stabilizingEntryBPM`/`settlingEntryBPM`/`holdingEntryBPM`, whichever the
+  new stage is (Pass 26 follow-up, reopening an earlier decision at the
+  user's request; see [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+  for the three options presented and why this one needed new persisted
+  state). Falls back to the flat −2 step (deliberately the same magnitude
+  as a soft-miss, not the steeper pullback an earlier design sketch had)
+  only when nothing's recorded for that stage yet — a chunk migrated in
+  without this history, for instance. This covers the ordinary
+  already-in-Stabilizing fail too, not just a fail that actually crosses
+  stages: `demote("stabilizing")` returns `"stabilizing"` (no stage
+  change), so the reset target is Stabilizing's own recorded entry tempo.
+  A chunk's very first-ever session seeds `stabilizingEntryBPM` from
+  whatever tempo the learner just chose — that session IS Stabilizing's
+  first entry, nothing earlier to record. A graduating pass records the
+  new stage's entry tempo the same way, so a later fail back down has a
+  real value to reset to. This fail also demotes exactly one stage (never
+  below Stabilizing), and — specifically for a *second consecutive* fail while
   still in Stabilizing — turns on `needsRelearning`. As of Pass 11 this is
   a **persisted, sticky boolean**, not just a per-call informational
   return value: `computeLadderAdvance` reads it back in via
@@ -462,10 +477,14 @@ Settling → Holding stages:
   `practiceBPM`/`consecutiveStabilizingFails`), and `practiceBPM` resets
   to the caller-supplied `chunkLadderState.suggestedStartingBPM`
   (`getSuggestedStartingBPM(piece, chunk)`, concept 1 below) instead of
-  the normal −2 step, when that suggestion is available — a piece with no
-  target BPM configured has nothing to suggest, so `computeLadderAdvance`
-  falls back to the ordinary step in that case rather than resetting to
-  nothing. While flagged, `computeTimeline` and `computeDueReviews` both
+  the entry-tempo reset described above, when that suggestion is
+  available — this rule wins outright over the entry-tempo one, a
+  stale/broken chunk getting flagged being a bigger, more deliberate reset
+  than "go back to where this stage last was." A piece with no target BPM
+  configured has nothing to suggest, so `computeLadderAdvance` falls back
+  to the entry-tempo reset (or its own −2 fallback) in that case rather
+  than resetting to nothing. While flagged, `computeTimeline` and
+  `computeDueReviews` both
   skip the chunk outright — see
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built)
   for the full four-rule design and

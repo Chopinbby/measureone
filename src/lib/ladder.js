@@ -30,6 +30,18 @@
 /*  combo/chunks, 60+ days untouched); this signal stays chunk-scoped, so */
 /*  folding it into Revival isn't part of that design. Confirmed with the */
 /*  user while building this; see Decisions.md#spaced-repetition--maintenance. */
+/*                                                                     */
+/*  stabilizingEntryBPM/settlingEntryBPM/holdingEntryBPM (Pass 26         */
+/*  follow-up) persist the practiceBPM a chunk had the moment it most     */
+/*  recently, freshly entered each stage. A real fail resets practiceBPM  */
+/*  to the recorded entry tempo for the stage it demotes INTO, replacing  */
+/*  the flat bpmSteps.fail step for any chunk that has one recorded —     */
+/*  three flat scalar fields, not one nested object, so storage.js's      */
+/*  ladderStateDiffers/mergeProgress can compare each by `!==` like every */
+/*  other ladder field, rather than needing deep-equality handling for an */
+/*  object. Reused by the caller the same way targetBPM/suggestedStartingBPM */
+/*  are — chunkLadderState in, and the (possibly updated) value back out. */
+/*  See Decisions.md#spaced-repetition--maintenance.                      */
 /* ------------------------------------------------------------------ */
 
 export const STAGES = ["stabilizing", "settling", "holding"];
@@ -207,6 +219,9 @@ export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
 //                                 // to this value then, not the normal -2 step). Computing it
 //                                 // requires the full piece/chunk, which this pure module doesn't
 //                                 // have — same reason targetBPM above is caller-resolved.
+//   stabilizingEntryBPM,          // number | null — practiceBPM the last time this chunk freshly
+//   settlingEntryBPM,             // entered each named stage (Pass 26 follow-up, see header note).
+//   holdingEntryBPM,              // Defensively treated as null if absent (pre-existing chunks).
 // }
 // outcome = {
 //   result,        // 'pass' | 'soft-miss' | 'fail' — already classified by the caller
@@ -226,6 +241,26 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   const wasFlagged = !!chunkLadderState.needsRelearning;
   const { practiceBPM, targetBPM, tier1Done, suggestedStartingBPM } = chunkLadderState;
 
+  // Pass 26 follow-up (see header note): a local lookup grouping the three
+  // flat entry-BPM fields by stage name, purely for convenience inside
+  // this function — inputs/outputs stay flat scalars.
+  let entryBPM = {
+    stabilizing: chunkLadderState.stabilizingEntryBPM ?? null,
+    settling: chunkLadderState.settlingEntryBPM ?? null,
+    holding: chunkLadderState.holdingEntryBPM ?? null,
+  };
+  // The chunk's raw incoming stage (not the `stage` const above, which
+  // already defaults null to "stabilizing") is null exactly when this is
+  // the very first call for this chunk — either a brand-new chunk, or one
+  // migrating in with real history from before the ladder existed (same
+  // "not on the ladder yet" convention documented on the chunkLadderState
+  // shape below). Either way, this call itself IS Stabilizing's first
+  // entry, so its baseline is whatever practiceBPM was just seeded to —
+  // there's no earlier moment to have recorded.
+  if (chunkLadderState.stage == null && entryBPM.stabilizing == null) {
+    entryBPM = { ...entryBPM, stabilizing: practiceBPM };
+  }
+
   if (outcome.result === "fail") {
     const newStage = demote(stage);
     const newFailStreak = stage === "stabilizing" ? consecutiveStabilizingFails + 1 : 0;
@@ -234,17 +269,33 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
     // already in Stabilizing — not re-fired on every fail thereafter.
     const becomesFlagged = !wasFlagged && stage === "stabilizing" && newFailStreak >= 2;
     const newNeedsRelearning = wasFlagged || becomesFlagged;
+    // The stage this fail demotes INTO already has a recorded entry tempo
+    // (set the last time the chunk freshly arrived there — including the
+    // common case where a Stabilizing fail doesn't actually change stage
+    // at all, so this is just Stabilizing's own baseline) — reset there
+    // instead of the flat bpmSteps.fail step. Falls back to the old step
+    // when nothing's recorded yet (a chunk migrated in without this field).
+    // Rule 4 still wins outright when it applies — a stale/broken chunk
+    // getting flagged is a bigger, more deliberate reset than "go back to
+    // where this stage last was."
+    const resetTarget = entryBPM[newStage];
+    const newPracticeBPM =
+      becomesFlagged && suggestedStartingBPM != null
+        ? suggestedStartingBPM
+        : resetTarget != null
+        ? resetTarget
+        : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.fail);
+    // A genuine stage change re-baselines that stage's entry tempo to what
+    // the chunk now actually has, for a LATER demotion back into it. When
+    // the stage doesn't change (the ordinary already-in-Stabilizing fail),
+    // this is a no-op — newPracticeBPM just equals the value already
+    // recorded there.
+    const newEntryBPM = newStage !== stage ? { ...entryBPM, [newStage]: newPracticeBPM } : entryBPM;
     return {
       stage: newStage,
       consecutivePasses: 0,
       consecutiveStabilizingFails: newFailStreak,
-      // Rule 4: practiceBPM resets to the suggested starting tempo at the
-      // exact moment the flag turns on, instead of the normal -2 step —
-      // never re-applied on later fails while already flagged.
-      practiceBPM:
-        becomesFlagged && suggestedStartingBPM != null
-          ? suggestedStartingBPM
-          : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.fail),
+      practiceBPM: newPracticeBPM,
       // Rule 3: reuses applyRunThroughFlag's 'lost' pin-to-today semantics
       // at the moment of flagging (newStage is already 'stabilizing' here,
       // since only a fail already in Stabilizing can trigger this) —
@@ -255,6 +306,9 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
         ? outcome.asOfDate
         : addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, 0, outcome.effectiveness)),
       tier1Done,
+      stabilizingEntryBPM: newEntryBPM.stabilizing,
+      settlingEntryBPM: newEntryBPM.settling,
+      holdingEntryBPM: newEntryBPM.holding,
       graduated: false,
       demoted: true,
       needsRelearning: newNeedsRelearning,
@@ -276,6 +330,9 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
       practiceBPM: demonstrated != null ? demonstrated : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.softMiss),
       nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(stage, ladderConfig, consecutivePasses, outcome.effectiveness)),
       tier1Done,
+      stabilizingEntryBPM: entryBPM.stabilizing,
+      settlingEntryBPM: entryBPM.settling,
+      holdingEntryBPM: entryBPM.holding,
       graduated: false,
       demoted: false,
       // Neither sets nor clears the flag — a soft-miss isn't a fail (so it
@@ -299,14 +356,23 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
     practiceBPM,
     targetBPM,
   });
+  const newPracticeBPM =
+    demonstratedOnPass != null ? demonstratedOnPass : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.pass);
+  // Graduating into a new stage records its fresh entry tempo, same as a
+  // fail-driven demotion does above — this is what a LATER fail out of
+  // that stage will reset back to.
+  const newEntryBPM = shouldGraduate ? { ...entryBPM, [newStage]: newPracticeBPM } : entryBPM;
 
   return {
     stage: newStage,
     consecutivePasses: passesAfter,
     consecutiveStabilizingFails: 0,
-    practiceBPM: demonstratedOnPass != null ? demonstratedOnPass : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.pass),
+    practiceBPM: newPracticeBPM,
     nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, passesAfter, outcome.effectiveness)),
     tier1Done,
+    stabilizingEntryBPM: newEntryBPM.stabilizing,
+    settlingEntryBPM: newEntryBPM.settling,
+    holdingEntryBPM: newEntryBPM.holding,
     graduated: shouldGraduate,
     demoted: false,
     // Rule 2's auto exit: graduating out of Stabilizing (the only stage a

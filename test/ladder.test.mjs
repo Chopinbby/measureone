@@ -426,3 +426,112 @@ describe("computeLadderAdvance wires the demonstrated-tempo override into practi
     assert.equal(r.practiceBPM, 77);
   });
 });
+
+// Pass 26 follow-up (docs/Decisions.md#spaced-repetition--maintenance): a
+// real fail resets practiceBPM to the recorded entry tempo for the stage
+// it demotes INTO, instead of the flat bpmSteps.fail step — reopening a
+// decision made once already while this file was first built ("a real
+// fail costs practiceBPM the same 2 BPM as a soft-miss"), at the user's
+// explicit request.
+describe("Per-stage entry-BPM tempo reset on a real fail", () => {
+  test("a chunk's very first session (stage: null) seeds stabilizingEntryBPM from the just-seeded practiceBPM", () => {
+    const r = computeLadderAdvance(baseState({ stage: null, practiceBPM: 45 }), { result: "fail", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(r.stabilizingEntryBPM, 45);
+    // Seeded AND reset to the same value in the same call — a fail that IS
+    // the chunk's first-ever entry has no earlier tempo to fall back to.
+    assert.equal(r.practiceBPM, 45, "no earlier baseline exists yet, so this fail doesn't step down at all");
+  });
+
+  test("once a Stabilizing entry tempo is recorded, a later fail resets to it instead of stepping -2", () => {
+    // Seed the baseline via the first-ever session, then climb well past it.
+    const seeded = computeLadderAdvance(baseState({ stage: null, practiceBPM: 40 }), { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(seeded.stabilizingEntryBPM, 40);
+    assert.equal(seeded.practiceBPM, 42);
+    let state = seeded;
+    for (let i = 0; i < 5; i++) {
+      state = computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    }
+    assert.ok(state.practiceBPM > 50, "sanity check: practiceBPM has actually climbed well past the recorded baseline");
+
+    const failed = computeLadderAdvance(state, { result: "fail", asOfDate: "2026-01-10" }, LADDER_CONFIG);
+    assert.equal(failed.practiceBPM, 40, "resets all the way back to Stabilizing's recorded entry tempo, not a -2 step off the climbed value");
+    assert.equal(failed.stabilizingEntryBPM, 40, "the baseline itself is unchanged — no stage transition happened");
+  });
+
+  test("the full round trip: promote to Settling at one tempo, climb further, fail back down — resets to Settling's OWN entry tempo, not Stabilizing's", () => {
+    // Graduate Stabilizing -> Settling. LADDER_CONFIG requires 4 consecutive
+    // passes; land the 4th exactly at a chosen practiceBPM so Settling's
+    // entry tempo is a known, distinct value from Stabilizing's.
+    let state = baseState({ stage: null, practiceBPM: 40, consecutivePasses: 3 });
+    const graduating = computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(graduating.stage, "settling");
+    assert.equal(graduating.graduated, true);
+    assert.equal(graduating.practiceBPM, 42, "sanity: the graduating pass still steps +2 like any other pass");
+    assert.equal(graduating.settlingEntryBPM, 42, "Settling's entry tempo is recorded as the tempo the chunk graduated in AT");
+    assert.equal(graduating.stabilizingEntryBPM, 40, "Stabilizing's own entry tempo (from earlier) is untouched by this graduation");
+
+    // Climb well past 42 while in Settling. computeLadderAdvance's return
+    // value deliberately doesn't echo caller-resolved inputs like
+    // targetBPM back (same reason the header note above targetBPM in the
+    // chunkLadderState shape gives) — a real caller re-reads it fresh from
+    // the chunk/piece every call, so the loop here must too, or Settling's
+    // tempo floor silently stops being gated at all (targetBPM undefined
+    // reads as "no floor to check" — see clearsStageFloor).
+    state = { ...graduating, targetBPM: 100 };
+    for (let i = 0; i < 6; i++) {
+      state = { ...computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG), targetBPM: 100 };
+    }
+    assert.ok(state.practiceBPM > 50, "sanity: climbed well past Settling's recorded entry tempo");
+    assert.equal(state.stage, "settling", "still in Settling — this LADDER_CONFIG's Settling floor keeps it from graduating further here");
+
+    // Now fail — demotes Settling -> Stabilizing. Per the user's decision,
+    // this must reset to STABILIZING's recorded entry tempo (40, from the
+    // very first session), not Settling's (42) and not a flat -2 off the
+    // climbed value.
+    const failedFromSettling = computeLadderAdvance(state, { result: "fail", asOfDate: "2026-02-01" }, LADDER_CONFIG);
+    assert.equal(failedFromSettling.stage, "stabilizing");
+    assert.equal(failedFromSettling.practiceBPM, 40, "resets to the STAGE IT'S DEMOTED INTO's entry tempo (Stabilizing's, 40) — not Settling's (42)");
+  });
+
+  test("rule 4 (needsRelearning's suggestedStartingBPM reset) still wins outright over the entry-tempo reset", () => {
+    const flagging = baseState({
+      stage: "stabilizing",
+      consecutiveStabilizingFails: 1,
+      practiceBPM: 90,
+      stabilizingEntryBPM: 70,
+      suggestedStartingBPM: 30,
+    });
+    const r = computeLadderAdvance(flagging, { result: "fail", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(r.needsRelearning, true);
+    assert.equal(r.practiceBPM, 30, "the flagging fail's rule-4 reset (30) wins over the recorded entry tempo (70)");
+  });
+
+  test("with no entry tempo recorded for the demoted-into stage (pre-existing/migrated chunk), a fail falls back to the ordinary -2 step", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "settling", practiceBPM: 80, stabilizingEntryBPM: null }),
+      { result: "fail", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "stabilizing");
+    assert.equal(r.practiceBPM, 78, "no recorded Stabilizing entry tempo to reset to, so the flat -2 step still applies");
+  });
+
+  test("soft-miss and a non-graduating pass pass the three entry-BPM fields through unchanged", () => {
+    const state = baseState({ stabilizingEntryBPM: 40, settlingEntryBPM: 50, holdingEntryBPM: 60 });
+    const softMiss = computeLadderAdvance(state, { result: "soft-miss", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.deepEqual(
+      { s: softMiss.stabilizingEntryBPM, se: softMiss.settlingEntryBPM, h: softMiss.holdingEntryBPM },
+      { s: 40, se: 50, h: 60 }
+    );
+    const nonGraduatingPass = computeLadderAdvance(
+      baseState({ ...state, consecutivePasses: 0 }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.deepEqual(
+      { s: nonGraduatingPass.stabilizingEntryBPM, se: nonGraduatingPass.settlingEntryBPM, h: nonGraduatingPass.holdingEntryBPM },
+      { s: 40, se: 50, h: 60 },
+      "a pass that doesn't graduate never touches any recorded entry tempo"
+    );
+  });
+});

@@ -1358,6 +1358,181 @@ derive it from `sessions`" rewrite.**
   older snapshot without the key still restores the six original fields
   instead of failing validation.
 
+**Decision (Pass 26): task-card clarity is display/confirmation-only —
+state the requirement up front, confirm before an under-logged attempt
+saves silently, and rename the "soft-miss"/"fail" display labels. No
+change to `classifySessionOutcome` or `computeLadderAdvance` — Pass 14's
+classification stands exactly as shipped.**
+
+- **Requirement line and confirm-before-save:** implemented as scoped, no
+  open questions. See the build note in
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two)
+  for the exact mechanics and the deliberate exclusions (zero-rep attempts,
+  attempts already meeting the requirement, and attempts where
+  `manualFail` is already checked all skip the confirm step).
+- **The label renames were an explicit user decision, not a guess** — the
+  request that scoped this pass named the requirement ("rename soft-miss")
+  but cut off before naming a replacement, so implementation paused and
+  presented options rather than picking one:
+  - `"soft-miss"` → **"Partial pass"**, chosen from
+    {"Partial pass", "Not yet", "Close, not yet"} — picked for reading as a
+    plain, literal statement of what happened (matching "Full pass"/"Real
+    fail" as one consistent naming pattern) rather than an editorialized
+    one.
+  - `"fail"` → **"Needs rework"** (was "Real fail") — raised mid-pass, not
+    originally in scope: the user's first suggestion for this label
+    ("try again next time at a slower tempo") was checked against what a
+    real fail actually does and found to describe only the tempo pullback,
+    not that a fail *also* demotes the chunk a stage on the ladder (and,
+    on a second consecutive fail while already in Stabilizing, resets
+    `practiceBPM` outright via `needsRelearning`) — exactly the kind of
+    "chunk doesn't progress without the learner knowing why" gap this pass
+    exists to catch. Re-presented as {"Step back", "Needs rework", keep
+    "Real fail"}; "Needs rework" chosen. It doesn't spell out the stage
+    demotion any more literally than "Real fail" did, but was confirmed
+    acceptable — seeing the chunk again soon isn't a surprise once it
+    reads as needing rework.
+  - Both are display-label-only changes. The internal outcome values
+    stay `"soft-miss"`/`"fail"` everywhere in code (`classifySessionOutcome`'s
+    return value, `computeLadderAdvance`'s branches, `session.outcome`
+    persisted on every session record) — renaming those would be a
+    classification-adjacent change, explicitly deferred, and unnecessary
+    besides: `SESSION_OUTCOME_META` (`src/lib/constants.js`) is the only
+    place either display string lived, read dynamically by both
+    `ChecklistItem.jsx` and `ProgressTab.jsx` — confirmed by grep, not
+    assumed.
+- **Flagged during this pass, resolved the same day — see the dedicated
+  decision below:** choosing two distinct labels made an existing
+  asymmetry visible that the old "Soft miss"/"Real fail" pairing didn't
+  surface as clearly: a partial pass and a real fail step `practiceBPM`
+  down by the *same* amount. The user asked for this to be looked into —
+  see "Decision (Pass 26 follow-up): a real fail resets practiceBPM to the
+  recorded tempo..." below for the three options presented and the one
+  chosen.
+- **Other technical wording reviewed at the time, one item acted on the
+  same day:** `PieceMapTab.jsx`'s needs-relearning hint read "...rebuilds
+  consistency in Stabilizing" — an internal ladder-stage name leaking
+  directly into user-facing copy. Flagged, not fixed, when this pass
+  shipped (renaming it read as a separate wording question). The user
+  settled it immediately after — see "Decision (Pass 26 follow-up):
+  rename the Piece Map's stage-name leak" below. Separately, and NOT
+  revisited: a tempo-only shortfall (full reps, under `practiceBPM`)
+  originally didn't trigger the confirm step, reasoned at the time that
+  the requirement line already states the tempo floor up front — the user
+  disagreed and asked for it to be added; see the same follow-up decision.
+
+**Decision (Pass 26 follow-up, same day): widen the confirm-before-save
+step to also cover a tempo-only shortfall, and rename the Piece Map's
+"Stabilizing" leak to "the Introductory phase."**
+
+- **Confirm step widened:** `submitLog` (`ChecklistItem.jsx`) now also
+  confirms when reps fully meet the requirement but the achieved tempo is
+  under `practiceBPM` — "You logged 3 clean reps at 90 BPM — under the
+  102+ BPM needed to progress this chunk. Save anyway?" Reverses the
+  original Pass 26 reasoning above ("the requirement line already states
+  the tempo floor, nothing new to surface") on the user's explicit
+  pushback: stating a requirement up front doesn't guarantee it was read
+  or registered in the moment, and it's easy to log a tempo a little under
+  target without noticing that doing so is what turns the session into a
+  `"soft-miss"`. The two shortfall checks (reps, tempo-only) are mutually
+  exclusive by construction — a reps shortfall is checked and handled
+  first, so an attempt that's short on *both* still only sees the reps
+  message, unchanged from the original Pass 26 behavior. Still skipped
+  when `manualFail` is checked or on a zero-rep attempt, same reasoning as
+  the original bullet. Still display/confirmation-only — no change to
+  `classifySessionOutcome`.
+- **"Stabilizing" renamed:** the literal string in
+  `PieceMapTab.jsx`'s needs-relearning hint changed from "Stabilizing" to
+  "the Introductory phase." Confirmed by grep that this was the only
+  user-facing occurrence of any internal stage name anywhere in the app —
+  `STAGES`, every `stage: "stabilizing"` value, and every code comment
+  stay exactly as they are; only the one rendered JSX string changed. No
+  `STAGE_LABEL`-style lookup table was introduced for this — "Settling"
+  and "Holding" aren't displayed to a learner anywhere today, so building
+  a mapping for values that don't have a second use yet would be
+  speculative, not requested.
+- Verified in-browser against a piece with real ladder state (two
+  consecutive manual fails to trigger `needsRelearning: true`, confirmed
+  in `localStorage` before checking the UI): the Piece Map's chunk detail
+  modal shows the new phrase, and `npm test` stays at 223/223 (neither
+  change touches tested pure functions).
+
+**Decision (Pass 26 follow-up): a real fail resets `practiceBPM` to the
+recorded tempo the chunk had the last time it freshly entered the stage
+the fail demotes it INTO — not the flat −2 step a partial pass gets.**
+
+- **Reopens a decision made once already, at the user's explicit
+  request.** `lib/ladder.js` originally shipped with "a real fail costs
+  `practiceBPM` the same 2 BPM as a soft-miss, not the steeper ~8–10 BPM
+  pullback originally sketched" (see the dedicated decision earlier in
+  this section). The user asked to revisit it directly. Presented back
+  three concrete readings rather than guessing which one "the original
+  demoted stage's tempo" meant:
+  1. Reuse `getSuggestedStartingBPM` (the same reset `needsRelearning`'s
+     rule 4 already applies) on *every* real fail.
+  2. Restore something closer to the original pre-launch sketch: a flat,
+     steeper pullback (e.g. −8 to −10 BPM), not tied to any specific past
+     value.
+  3. Track and restore the `practiceBPM` a chunk had the last time it was
+     newly *at* the stage a fail demotes it *into*.
+  The user picked **option 3** — the most literal reading, and the only
+  one of the three that needed new persisted state, since nothing before
+  this recorded "tempo at stage entry."
+- **New fields: `stabilizingEntryBPM` / `settlingEntryBPM` /
+  `holdingEntryBPM` on `ChunkProgress`** — the `practiceBPM` a chunk had
+  the moment it most recently, freshly entered each named stage. Three
+  flat scalar fields, not one nested `stageEntryBPM` object — deliberately,
+  not an oversight: `storage.js`'s `ladderStateDiffers`/`mergeProgress`
+  compare every ladder field with `!==`, which does *reference* equality
+  on an object (two freshly-parsed JSON objects with identical contents
+  are never `===`), so a nested object would have made every chunk with
+  this field look like a false-positive import conflict. Flat scalars
+  compare correctly by value, same as every other ladder field already
+  does — caught in review before it shipped, not found as a bug after.
+- **The mechanics (`lib/ladder.js`'s `computeLadderAdvance`):** a real
+  fail looks up the recorded entry tempo for the stage it demotes INTO —
+  `entryBPM[newStage]` — and resets `practiceBPM` there when a value is
+  recorded, falling back to the ordinary −2 step when nothing's recorded
+  yet (a chunk migrated in without history for that stage). This covers
+  the ordinary case too, not just a "real" demotion between different
+  stages: a fail while already in Stabilizing (`demote("stabilizing")`
+  returns `"stabilizing"` — no stage change) resets to Stabilizing's own
+  recorded entry tempo, which is exactly what you'd want a fail there to
+  do. A chunk's very first-ever session seeds `stabilizingEntryBPM` from
+  the just-chosen starting tempo, since that session IS Stabilizing's
+  first entry — there's no earlier moment to have recorded. A graduating
+  pass records the new stage's entry tempo the same way a fail-driven
+  demotion does, so a later fail back down has something real to reset to.
+  Rule 4 (`needsRelearning`'s `suggestedStartingBPM` reset) still wins
+  outright over this — a stale/broken chunk getting flagged is a bigger,
+  more deliberate reset than "go back to where this stage last was," and
+  the two mechanisms were kept independent rather than merged.
+- **Migration:** `backfillProgressLadderState` (`storage.js`) has no real
+  per-stage history to reconstruct for a piece saved before this existed,
+  so it treats "right now" as if the chunk just froze-entered whichever
+  stage it's currently at — its current `practiceBPM` becomes that one
+  stage's entry tempo; the other two stay `null` until a real transition
+  gets recorded going forward. Same non-destructive, no-history-to-lose
+  spirit as the rest of this migration.
+- **Undo:** the three fields joined `ladderSnapshot`
+  (`App.jsx`'s `handleLogSession`/`handleUnlogSession`) the same way
+  `currentBPM` did earlier this pass — optional, not part of the
+  `isValidSnapshot` gate, so a session logged before this existed still
+  fully undoes rather than silently downgrading to record-only removal.
+- Verified with new tests in `test/ladder.test.mjs` (including the full
+  round trip: graduate into Settling at one tempo, climb well past it,
+  fail back down to Stabilizing, confirm it resets to Stabilizing's own
+  recorded entry tempo — not Settling's, and not a flat −2 off the climbed
+  value), `test/storage.test.mjs` (migration backfill), and
+  `test/session-undo.test.mjs` (full reversal, plus the same
+  backward-compatibility regression `currentBPM` got: an older snapshot
+  missing the new keys still restores everything else normally). Also
+  verified manually in-browser against the real UI end to end — graduated
+  a live chunk into Settling, climbed further, triggered the fail, and
+  confirmed `practiceBPM` reset to the recorded Stabilizing entry tempo
+  (not Settling's, not a flat step), then confirmed undo fully restored
+  the pre-fail state. `npm test`: 237/237.
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below

@@ -131,7 +131,7 @@ export function PieceMapTab({
                   <div className="manual-conf-row">
                     <p className="wizard-hint relearning-hint" style={{ margin: 0, flex: 1 }}>
                       <RotateCcw size={13} /> Needs reinforcement — review is paused while this chunk rebuilds
-                      consistency in Stabilizing. Clears automatically after 4 consecutive full passes.
+                      consistency in the Introductory phase. Clears automatically after 4 consecutive full passes.
                     </p>
                     <button className="ghost-btn" onClick={() => onClearRelearning(selectedChunk.id)}>
                       Clear, resume review

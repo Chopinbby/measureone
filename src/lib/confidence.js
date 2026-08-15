@@ -175,7 +175,15 @@ export function computeAutoConfidence(chunk, piece, currentDay) {
   const doneDays = entry.doneDays || [];
   if (doneDays.length === 0 && !entry.currentBPM) return 0;
 
-  const requiredReps = REQUIRED_REPS[chunk.difficultyLabel] || 4;
+  // Pass 27 follow-up: was its own separate REQUIRED_REPS[difficultyLabel]
+  // lookup, which disagreed with the pass/fail judgment for run-through
+  // kinds once those got a flat 2-rep requirement (resolveRequiredReps
+  // above) — a run-through logged with 2 clean reps at full tempo was
+  // classified a "Full pass" but still scored confidence as if 2 reps out
+  // of 5 were needed. Confirmed with the user rather than left silently
+  // divergent: this now reads the same resolved value classifySessionOutcome
+  // judges against, so a run-through that passes also scores as fully done.
+  const requiredReps = resolveRequiredReps(chunk);
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   const sessions = entry.sessions || [];
 

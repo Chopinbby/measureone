@@ -1,6 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { getSuggestedStartingBPM, computeConfidence, classifySessionOutcome, resolveRequiredReps } from "../src/lib/confidence.js";
+import {
+  getSuggestedStartingBPM,
+  computeConfidence,
+  computeAutoConfidence,
+  classifySessionOutcome,
+  resolveRequiredReps,
+} from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
   return { id: "c1", start: 1, end: 8, difficultyLabel: "medium", ...overrides };
@@ -390,5 +396,38 @@ describe("resolveRequiredReps — Pass 27's flat run-through rep count", () => {
       previousCleanReps: null,
     });
     assert.equal(outcome, "soft-miss", "2 of 5 required reps on an ordinary hard chunk reads as a soft-miss, not a full pass");
+  });
+});
+
+describe("computeAutoConfidence uses resolveRequiredReps too, not its own separate REQUIRED_REPS lookup (Pass 27 follow-up)", () => {
+  test("a hard run-through logged at its own full requirement (2 reps) scores confidence the same as an ordinary chunk completed at ITS full requirement", () => {
+    const runThrough = { id: "sr_s1", kind: "section-runthrough", difficultyLabel: "hard", start: 1, end: 8, recurring: false };
+    const ordinary = { id: "c1", kind: "section", difficultyLabel: "hard", start: 1, end: 4, recurring: false };
+    const piece = {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: {
+        sr_s1: { doneDays: [1], currentBPM: 100, sessions: [{ day: 1, cleanReps: 2, bpm: 100, outcome: "pass" }] },
+        c1: { doneDays: [1], currentBPM: 100, sessions: [{ day: 1, cleanReps: 5, bpm: 100, outcome: "pass" }] },
+      },
+    };
+    const runThroughConfidence = computeAutoConfidence(runThrough, piece, 1);
+    const ordinaryConfidence = computeAutoConfidence(ordinary, piece, 1);
+    assert.equal(
+      runThroughConfidence,
+      ordinaryConfidence,
+      "a run-through 'fully done' at 2 reps and an ordinary chunk 'fully done' at 5 reps should score identically — before this fix the run-through scored lower (54% vs 65%) despite both being a full pass"
+    );
+  });
+
+  test("logging fewer than the run-through's own 2-rep requirement still scores partial credit, not full", () => {
+    const runThrough = { id: "sr_s1", kind: "section-runthrough", difficultyLabel: "hard", start: 1, end: 8, recurring: false };
+    const piece = {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: { sr_s1: { doneDays: [1], currentBPM: 100, sessions: [{ day: 1, cleanReps: 1, bpm: 100, outcome: "soft-miss" }] } },
+    };
+    const confidence = computeAutoConfidence(runThrough, piece, 1);
+    assert.ok(confidence < 65, "1 of 2 required reps should score below the 'fully done' 65%");
   });
 });

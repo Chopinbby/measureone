@@ -64,21 +64,21 @@ export const PIECE_STATUS_LABEL = {
   archived: "Archived",
 };
 
-// Display labels for progress[id].stage (lib/ladder.js's STAGES) — Pass 15,
-// the first place Settling/Holding are shown to a learner at all (grep
-// confirmed neither appeared anywhere before this). Plain capitalized stage
-// names, NOT run through the same plain-language translation the Pass 26
-// follow-up gave "Stabilizing" ("the Introductory phase") — that rename was
-// scoped to one leaked mid-sentence hint ("...rebuilds consistency in
-// Stabilizing"), not a general ban on the stage names themselves, and here
-// they're shown as short labeled stats ("Stage: Settling"), not prose. Left
-// as-is rather than guessed at a matching plain-language set for all three —
-// flagged for the user to confirm, same as every other display-label
-// decision in this codebase.
+// Display labels for progress[id].stage (lib/ladder.js's STAGES) — Pass 15
+// shipped these as the raw internal names (Stabilizing/Settling/Holding),
+// flagged for the user to confirm rather than guessed. Confirmed: plain-
+// language replacements, chosen by the user from a set of proposed options
+// (mixed across two of the three sets offered). "Introductory" matches the
+// wording already shipped in one other spot — PieceMapTab's needsRelearning
+// hint ("...rebuilds consistency in the Introductory phase") — which is
+// still its own separate hardcoded string, not sourced from this map; it
+// happens to read consistently with this choice, not wired together.
+// Internal `stage` values ("stabilizing"/"settling"/"holding") are
+// unchanged — display-only, same as every other rename in this codebase.
 export const STAGE_LABEL = {
-  stabilizing: "Stabilizing",
-  settling: "Settling",
-  holding: "Holding",
+  stabilizing: "Introductory",
+  settling: "Building",
+  holding: "Steady",
 };
 
 export const REVIVAL_PURPOSE_OPTIONS = [

@@ -393,17 +393,25 @@ self-report with an objective three-tier judgment, and advances a
 per-chunk spaced-repetition ladder on every logged session.
 
 `classifySessionOutcome({ cleanReps, bpm, requiredReps, practiceBPM,
-manualFail, previousOutcome })` (`lib/confidence.js`) — called from
-`ChecklistItem` before logging, not from `handleLogSession` itself (it
-needs the full chunk's `difficultyLabel` and the piece's `bpmZones` to
-resolve `requiredReps`/the effective target, neither of which the handler
-has from just a chunk id):
+manualFail, previousOutcome, previousCleanReps })` (`lib/confidence.js`) —
+called from `ChecklistItem` before logging, not from `handleLogSession`
+itself (it needs the full chunk's `difficultyLabel` and the piece's
+`bpmZones` to resolve `requiredReps`/the effective target, neither of
+which the handler has from just a chunk id):
 - `manualFail` (the UI's "needs more work" checkbox — the folded-in
   replacement for the old effectiveness input) always wins as `"fail"`.
 - Zero clean reps is always `"fail"`.
 - Required reps hit **and** at/above `practiceBPM` is `"pass"`.
-- A repeat `"soft-miss"` right after the previous one (some reps, but not
-  enough, twice in a row) escalates to `"fail"`.
+- A repeat `"soft-miss"` escalates to `"fail"` **only when both the
+  current and the previous shortfall were reps-driven** (`cleanReps` below
+  `requiredReps` in both sessions, checked via the new `previousCleanReps`
+  param) — a tempo-only shortfall (required reps hit, just under
+  `practiceBPM`) can never be the fail trigger, in either session of the
+  pair, no matter how many times it repeats. Fixed a false-fail case in
+  Pass 14: the original rule escalated off `previousOutcome`'s label alone,
+  which couldn't distinguish a genuine reps shortfall from a learner who
+  kept meeting required reps but logged a little under an already-adjusting
+  `practiceBPM`. See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - Anything else with at least one clean rep is `"soft-miss"`.
 
 `sessionOutcome(session)` (`lib/confidence.js`) reads `session.outcome` if
@@ -429,16 +437,19 @@ Settling → Holding stages:
   Graduating resets the pass counter and moves to the next stage (Holding
   has no ceiling — it just keeps accruing passes, which drives its own
   escalating tempo floor and interval growth, below).
-  **Known gap, not yet fixed:** because the floor check runs against the
+  **Known gap, re-reviewed in Pass 14 and deliberately left open (the
+  user's explicit call):** because the floor check runs against the
   *pre-session* `practiceBPM`, a session whose demonstrated-tempo jump
   would clearly clear the floor doesn't get credit toward graduation in
   that same call — e.g. `practiceBPM` jumping 50→100 against a 70 floor
   still evaluates the floor at 50 and fails it. Confirmed by direct
   reproduction, not just inferred. Not corrupting — the chunk graduates
-  one session later than it should — but a real inconsistency between
-  "demonstrated tempo replaces the baseline outright" and "that same
-  session should also count toward graduation." See
-  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+  one session later than it should, self-correcting on the next logged
+  session — but a real inconsistency between "demonstrated tempo replaces
+  the baseline outright" and "that same session should also count toward
+  graduation." Reordering `computeLadderAdvance` to fix it was judged not
+  worth the risk relative to the symptom; revisit if it actually shows up
+  in real use. See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - **Soft miss:** `practiceBPM` steps down (default −2), the pass counter
   resets, stage does not change — unless this session also clears the
   demonstrated-tempo override below, in which case `practiceBPM` still
@@ -617,12 +628,14 @@ two distinct records instead of one silently replacing the other.
 — Pass 10, built.** Every session `handleLogSession` writes now also
 carries a `session.ladderSnapshot`: the ladder fields
 (`stage`/`consecutivePasses`/`consecutiveStabilizingFails`/`practiceBPM`/
-`nextDueDate`/`tier1Done`, plus `needsRelearning` since Pass 11 and
-`currentBPM` since Pass 14 — both optional, so older snapshots still
-restore rather than failing validation) exactly as they stood
-*immediately before* that session — the same snapshot-and-restore shape `flagSnapshot` already used
-for rough/lost flags (below), just never extended to session logging until
-now. `handleUnlogSession` restores that snapshot when undoing a session,
+`nextDueDate`/`tier1Done`, plus `needsRelearning` since Pass 11,
+`currentBPM` since Pass 14, and `stabilizingEntryBPM`/`settlingEntryBPM`/
+`holdingEntryBPM` since the Pass 26 follow-up — all four optional, so
+older snapshots still restore rather than failing validation) exactly as
+they stood *immediately before* that session — the same
+snapshot-and-restore shape `flagSnapshot` already used for rough/lost
+flags (below), just never extended to session logging until now.
+`handleUnlogSession` restores that snapshot when undoing a session,
 **but only when the session being undone is the chunk's most recent
 session overall** (`lastIdx === sessions.length - 1` against the *entire*
 `sessions` array, not just the sessions on the `day` being undone —
@@ -633,7 +646,9 @@ session's effects too — out of scope by design (see
 [Decisions.md](Decisions.md#spaced-repetition--maintenance)); it falls
 back to removing the record only, same as a session logged before this
 field existed (no snapshot to restore from) or a snapshot missing one of
-the six fields (defensive, warns rather than partially restoring).
+the original six required fields (defensive, warns rather than partially
+restoring — the four optional fields above are deliberately not part of
+that requirement).
 `ChecklistItem`'s undo control recomputes this same
 latest-session-plus-valid-snapshot check client-side and shows distinct
 copy/tooltips *before* the click ("Undo most recent log" vs. "Remove most
@@ -649,13 +664,14 @@ see [Decisions.md](Decisions.md#spaced-repetition--maintenance) for how
 this is proven safe (reusing the existing "a real session log always
 clears `flagSnapshot`" invariant, not a new check).
 
-**Known gap, not yet fixed:** a full undo does not revert `currentBPM` (the
-"what was last actually played" display field, distinct from the ladder's
-`practiceBPM`) — it's not one of the six snapshotted fields. After undoing
-a chunk's only session, `computeAutoConfidence` can still read a stale,
-nonzero `currentBPM` and produce a nonzero confidence score for a chunk
-that otherwise looks fully untouched (`stage: null`, no sessions). Found in
-review, not fixed; see
+**Resolved:** a full undo now also reverts `currentBPM` (the "what was
+last actually played" display field, distinct from the ladder's
+`practiceBPM`) — found as a gap in review, then fixed the same session by
+adding it to `ladderSnapshot` (see the optional fields listed above).
+Before the fix, undoing a chunk's only session could leave
+`computeAutoConfidence` reading a stale, nonzero `currentBPM` and
+producing a nonzero confidence score for a chunk that otherwise looked
+fully untouched (`stage: null`, no sessions). See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 `computeProgressTier(chunk, piece)` is a **separate, simpler** score from

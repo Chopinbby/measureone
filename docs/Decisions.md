@@ -654,7 +654,8 @@ piece-level tunable data from the start, with no editing UI built yet.**
   `ladderConfig` once the user asked for them to be tunable too, same as
   everything else on this list.
 
-**Decision: a real fail costs `practiceBPM` the same 2 BPM as a soft-miss
+**Decision (superseded — see the Pass 26 follow-up decision later in this
+section): a real fail costs `practiceBPM` the same 2 BPM as a soft-miss
 or the step a full pass gains — not the ~8–10 BPM pullback originally
 sketched in [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#per-chunk-tempo-target-practicebpm).**
 
@@ -666,6 +667,13 @@ sketched in [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#per-chunk-tempo-ta
 - **Consequence:** since it's stored as tunable data (see decision above),
   a future per-piece override could still reintroduce a steeper fail
   penalty without a code change if that turns out to matter in practice.
+- **Superseded:** the user asked to revisit this after Pass 26 shipped —
+  a real fail no longer uses this flat step at all; it resets `practiceBPM`
+  to the recorded per-stage entry tempo instead, falling back to this
+  `-2` step only when no entry tempo is recorded yet for the stage it
+  demotes into. `.softMiss` and `.pass` are unaffected — this decision
+  still governs those two. See the "Decision (Pass 26 follow-up): a real
+  fail resets practiceBPM..." entry later in this section.
 
 **Decision: Holding's interval-growth math reuses the existing 0.6×/1×/1.4×
 effectiveness multiplier (the same one `adaptiveReviewOffsets` already

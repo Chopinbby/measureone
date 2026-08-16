@@ -132,7 +132,7 @@ piece = {
                          // in the same map, not a documented exception until now.
   rescheduleMarker,      // null | { asOfDay, remainingChunkOrder } — see Algorithms.md#rescheduling
   lastPlayedDate,        // string ("YYYY-MM-DD") | null — collected at revival entry; purely
-                         // informational (displayed on Overview), not used by any automatic
+                         // informational (displayed on Piece Overview), not used by any automatic
                          // staleness detection — see Repertoire-Lifecycle.md and #revival below.
   lastLoggedAt,          // string ("YYYY-MM-DD") | null — most recent session.loggedDate across
                          // every progress entry (INCLUDING "__consolidation__"'s run-through
@@ -240,7 +240,7 @@ ChunkProgress = {
                               // via Math.min rather than either overriding the other. Indirectly affects
                               // computeProgressTier too, via the `stage` demotion above rather
                               // than reading `flag` itself — a flagged chunk drops a Practice
-                              // Progress tier on Overview through the same mechanism, not a
+                              // Progress tier on Piece Overview through the same mechanism, not a
                               // separate check. Persists independently of any
                               // revival cycle; computeRevivalPlan prioritizes any flagged chunk
                               // first (rough and lost treated alike for that ordering, not a
@@ -569,8 +569,16 @@ under `piece.revival`:
 
 ```js
 revival = {
-  active,                    // boolean — an entry/reassessment/plan cycle is in progress
-  startedAt,                 // epoch ms | null
+  active,                    // boolean — an entry/reassessment/plan cycle is in progress.
+                              // NEVER read this field directly to ask "is this piece in
+                              // revival" — call isInRevival(piece) (lib/revival.js), the
+                              // single source of truth every gate in the app routes
+                              // through. See Algorithms.md#isinrevival--one-definition-of-in-revival
+  startedAt,                 // epoch ms | null — a TIMESTAMP, not a second in-revival flag.
+                              // Set and cleared in lockstep with `active`, but its actual
+                              // job is being the cutoff computeComboEscalations uses to
+                              // decide which logged sessions belong to the current run.
+                              // That is the only thing that should read it
   purpose,                   // 'performance' | 'lesson' | 'enjoyment' | 'checking' | null
   performanceTempo,          // number | null — piece-wide tempo override collected at entry;
                               // see getRevivalTargetBPM in Algorithms.md#revival for precedence
@@ -583,10 +591,23 @@ revival = {
 }
 ```
 
-`handleEndRevival` resets this object back to its `active: false` defaults;
-it does **not** clear `progress[id].flag`, `progress[id].manualConfidence`,
-or `piece.memoryAnchors` — those are treated as durable chunk metadata, not
+`handleEndRevival` resets this object back to its `active: false` defaults
+(clearing `startedAt` in the same write); it does **not** clear
+`progress[id].flag`, `progress[id].manualConfidence`, or
+`piece.memoryAnchors` — those are treated as durable chunk metadata, not
 scoped to a single revival cycle.
+
+**`active` and `startedAt` always move together** — `handleStartRevival`
+sets both, `handleEndRevival` clears both — so no code should ever need to
+check both, and none does. `isInRevival(piece)` is the one function that
+answers "is this piece in revival"; `startedAt` is read only as a
+timestamp, by `computeComboEscalations`. One caveat worth knowing before
+touching migration: `validateAndMigratePiece` restores this object
+**all-or-nothing** (`piece.revival || {…defaults}`), unlike `ladderConfig`,
+which gets a field-by-field `mergeLadderConfig`. A *partial* `revival`
+object therefore keeps its holes. Not reachable through normal use, but
+logged as an open issue — see
+[Decisions.md](Decisions.md#open-questions).
 
 There is deliberately no separate "reassessment confidence" field: the
 revival reassessment pass **is** `progress[id].manualConfidence`, exposed

@@ -52,7 +52,7 @@ though, since it's scoped to "take this off my daily agenda" regardless.
 
 **Fold Analytics into Progress and remove the Analytics tab.** This was
 agreed on but not yet executed — as of this writing `AnalyticsTab` still
-exists and is still wired into the sidebar `NAV`. Scope, per the original
+exists and is still wired into the sidebar `NAV_BASE`. Scope, per the original
 decision (see [Decisions.md](Decisions.md)):
 
 - Move the confidence-by-difficulty panel and the recurring-material-payoff

@@ -90,7 +90,7 @@ after Stage 2 has produced *some* practice history worth reassessing, but
 nothing enforces that.
 
 Two entry points, both landing in the same reassessment flow:
-- **Manually from the Overview dashboard**, whenever the user decides an
+- **Manually from the Piece Overview dashboard**, whenever the user decides an
   existing piece needs it — the original entry point. As of Pass 7, this
   same button can also be proactively *suggested*: a banner surfaces above
   it whenever `computeRevivalTriggers` (see "Revival auto-triggers" below)
@@ -103,8 +103,8 @@ Two entry points, both landing in the same reassessment flow:
   already knew before ever using the app — Setup still runs in full (a
   chunk structure is required regardless, since revival planning reuses
   `generateAllChunks`/`effort`), but completion opens the revival entry
-  modal immediately instead of landing on Overview, so the piece starts in
-  revival mode with zero practice history — reassessment works the same
+  modal immediately instead of landing on Piece Overview, so the piece
+  starts in revival mode with zero practice history — reassessment works the same
   either way, since it only reads `piece.progress` (empty is a valid start).
 
 Scoped deliberately narrow for this pass — explicitly **not** built as part
@@ -170,12 +170,14 @@ off it** (Pass 5 — see "Introduction-window review scheduling: Tier 1 /
 Tier 2" below). **Post-run-through logging — stop count and the rough/lost
 flag mode — is also now built** (Pass 6, see that subsection below), **and
 so are Revival's three auto-triggers that consume that stop-count/lost-flag
-data** (Pass 7 — see "Revival auto-triggers" below). What's *not* built yet
-is a live "what's due" query that works beyond the current plan's bounded
-`daysToLearn` window — **now scoped** (Master Agenda + Today tab, one
-shared query — Pass 8) but not implemented; see "Explicitly not
-designed/built here" below. See each subsection below for what's actually
-implemented today vs. still just designed.
+data** (Pass 7 — see "Revival auto-triggers" below). **The live "what's
+due" query that works beyond the current plan's bounded `daysToLearn`
+window is also built** — `computeDueReviews` (`lib/maintenance.js`),
+shared by Master Agenda and the Today tab, Pass 8; see "How maintenance
+surfaces in the UI" below. What remains unbuilt at this stage is the
+piece-level "learned" rollup itself (Stage 3) and Stage 5 rotation. See
+each subsection below for what's actually implemented today vs. still just
+designed.
 
 ### The unifying idea
 
@@ -893,9 +895,13 @@ Due maintenance surfaces in **two places, both calling one shared query**
 (`computeDueReviews` — [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query)),
 rather than a new tab or Master Agenda alone:
 
-- **Master Agenda** — a per-piece summary card alongside its existing
-  cross-piece daily list: merged measure ranges under a "Due" tag, plus a
-  count and a time estimate.
+- **Master Agenda** — a per-piece summary card: merged measure ranges under
+  a "Due" tag, plus a count and a time estimate. **Since Pass 19 this lives
+  in its own "Maintenance due" subtab**, separate from "Learning phase" and
+  "Revival," rather than intermixed in one cross-piece list. That split is
+  presentational only — both card types still come from the same
+  `agendaData` computation, partitioned on the flag that already
+  distinguished them, and the combined count is unchanged.
 - **The per-piece Today tab** — full detail. Once a piece runs past its
   plan, "Day N of N" becomes "Plan complete — maintenance, day N" and the
   day checklist is replaced by the due list. Day nav is disabled there (no
@@ -934,9 +940,12 @@ record for that and for the known duplication it left behind.
 - Revival's internal structure/pacing beyond the trigger conditions and
   combo-handling above — those are the first concrete pieces of that spec,
   not the whole of it.
-- Manual UI for tuning stage lengths / tempo floors / step sizes — stored
-  as tunable data so UI can be additive later, but no editing interface is
-  planned for this pass.
+- ~~Manual UI for tuning stage lengths / tempo floors / step sizes~~ —
+  **built in Pass 17**, moved out of this list. `LadderConfigEditor`
+  (`src/components/fields/LadderConfigEditor.jsx`) renders under a
+  "Maintenance ladder" panel in `SettingsTab`, editing `piece.ladderConfig`
+  directly. The "stored as tunable data so UI can be additive later"
+  prediction held — no data-model change was needed to add it.
 - A second Tier 1 rung — not built preemptively; ship the single-touch
   version and monitor per the plan above.
 - ~~How maintenance surfaces in the UI~~ — **built in Pass 8**, moved out

@@ -17,8 +17,9 @@
 
 ## Glanceable state vs. diagnostic trend are different screens
 
-The Overview tab answers "where do things stand right now" in about three
-seconds — four stat cards, a progress bar, a preview of the first week. It
+The Piece Overview tab answers "where do things stand right now" in about
+three seconds — four stat cards, a progress bar, a preview of the first
+week. It
 deliberately does **not** try to also show trend, history, or diagnosis.
 That's the Progress tab's job: rolling-window consistency, a consistency
 heatmap, tempo trend sparklines, effectiveness calibration, actual-vs-planned

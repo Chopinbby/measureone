@@ -49,8 +49,8 @@ answer they know is wrong.
 to turn it into "here's what to do today," and to keep the day-to-day view
 uncluttered:
 
-- The Overview tab is a glanceable, point-in-time read (four numbers, three
-  seconds) — trend and diagnosis are deliberately pushed to a separate
+- The Piece Overview tab is a glanceable, point-in-time read (four numbers,
+  three seconds) — trend and diagnosis are deliberately pushed to a separate
   Progress tab rather than crammed into the dashboard. See
   [UX-Principles.md](UX-Principles.md).
 - `FocusPanel` answers "what needs the most work right now" directly, so the

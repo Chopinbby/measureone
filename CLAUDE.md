@@ -118,7 +118,8 @@ chunking, scheduling, and confidence are actually computed, see
 ## Revival
 
 MeasureOne includes a Revival workflow — recovering a piece that was
-learned once and has gone stale (entry point on Overview → `RevivalTab`).
+learned once and has gone stale (entry point on Piece Overview →
+`RevivalTab`).
 It's built additively on top of the existing data model, not a parallel
 one: reassessment **is** `progress[id].manualConfidence` (exposed through a
 fast preset UI), weak-spot flagging is a new `progress[id].weakSpot`
@@ -159,8 +160,11 @@ persisted, sticky per-chunk flag that replaces review entirely (zero due
 reviews from either `computeTimeline` or `computeDueReviews` while set),
 exits on 4 consecutive passes or a manual override, reuses the `lost`
 demote-and-pin mechanism under the label "Needs reinforcement," and resets
-`practiceBPM` to `getSuggestedStartingBPM`. Still not built: any editing UI
-for `ladderConfig`, a second Tier 1 rung, and Stage 5 repertoire rotation.
+`practiceBPM` to `getSuggestedStartingBPM`. A Settings editor for
+`ladderConfig` is built too (Pass 17 — `LadderConfigEditor`, under
+SettingsTab's "Maintenance ladder" panel). Still not built: the
+piece-level "learned" rollup (nothing queries "every chunk at Holding"
+yet), a second Tier 1 rung, and Stage 5 repertoire rotation.
 If you're about to touch scheduling, confidence,
 or the practice-logging UI, check
 [`docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)

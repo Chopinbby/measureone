@@ -706,7 +706,7 @@ original most-recently-logged-session clean-rep-count bucketing
 chunk demoted by a rough/lost flag ([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging))
 now drops a tier here too, through the same `stage` write every other
 consumer reads, rather than needing its own separate check. It drives
-the Overview tab's "Practice progress" bar and `PartSwitcher`'s
+the Piece Overview tab's "Practice progress" bar and `PartSwitcher`'s
 untouched-measure count for multi-movement works. **Defensive, not
 silent**: a `stage` value outside the known set (`null`, `'stabilizing'`,
 `'settling'`, `'holding'`) still falls through to "learned" rather than
@@ -741,15 +741,52 @@ for the real today).
 
 - a **paused or archived** piece, consistent with pause/archive already
   meaning "off my daily plate" for schedule pressure generally; and
-- a piece with an **active revival** (`piece.revival.startedAt` set), since
-  revival is already "something's wrong, working through it" mode and
-  routine maintenance shown alongside it would compete for attention with
-  no clear priority.
+- a piece with an **active revival** — tested via `isInRevival(piece)`
+  ([below](#isinrevival--one-definition-of-in-revival)), not by reading a
+  `piece.revival` field directly — since revival is already "something's
+  wrong, working through it" mode and routine maintenance shown alongside
+  it would compete for attention with no clear priority.
 
 Both call sites (`MasterAgendaTab`, `TodayTab`) use this one function
 rather than each running its own query — Master Agenda just renders less of
 the same result. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+### `isInRevival` — one definition of "in revival"
+
+`isInRevival(piece)` (`lib/revival.js`) is the **single source of truth**
+for whether a piece is currently in revival, and returns a real boolean
+(never a truthy object) for any input, including `null`.
+
+`piece.revival` records an in-progress run two ways — the `active` boolean
+and the `startedAt` timestamp — always set and cleared together by
+`handleStartRevival` / `handleEndRevival` (`App.jsx`). Because both were
+live, call sites had drifted into checking different ones: most of the UI
+read `active`, while `computeDueReviews` and `TodayTab` read `startedAt`.
+They could not disagree through any path the app itself takes, so this was
+never a live bug — but the same rule was written down twice, in two
+shapes, with nothing keeping them in step.
+
+**Standardized on `active`**, because answering this yes/no question is
+that field's entire job. `startedAt` has a real second one: it is the
+cutoff `computeComboEscalations` uses to decide which logged sessions
+belong to the current run, and that function still reads it directly — as
+a timestamp, not as a flag. Each field now does only what it is for.
+
+Every boolean revival gate routes through this function: `App.jsx` (nav
+item, revival tab render, `handleOpenRevival`), `OverviewTab`, `TodayTab`,
+`MasterAgendaTab`, `computeDueReviews`, `getRevivalTargetBPM`, and
+`storage.js`'s `mergeImportedPiece`. Behaviour is unchanged at every one.
+See [Decisions.md](Decisions.md#revival).
+
+> **Known gap, not fixed:** `validateAndMigratePiece` restores
+> `piece.revival` all-or-nothing (`piece.revival || {…defaults}`), so a
+> *partial* revival object never has its missing sub-fields filled in —
+> the same shape-gap `mergeLadderConfig` exists to fix for ladder settings.
+> Unreachable through normal use (both fields always move together), but a
+> hand-edited backup carrying only one of them would now resolve
+> differently than before. Logged in
+> [Decisions.md](Decisions.md#open-questions).
 
 ### Detecting that a piece has run past its plan
 
@@ -925,6 +962,41 @@ practice decay) stays correct. There is intentionally no revival-specific
 session-day numbering — see
 [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about) generally for why this
 codebase avoids parallel data model concepts.
+
+#### Surfacing revival on Master Agenda (highest-priority items)
+
+Master Agenda's Revival subtab shows chunk-level detail, matching the
+granularity of its other two subtabs — but it **cannot show "today's
+work,"** and this is the load-bearing consequence of the paragraph above.
+The learning and maintenance subtabs can, because a learning plan is dated
+(day 1, day 2, day 3) and due-ness is a calendar comparison. A revival
+plan is neither: its day numbers are pacing buckets, and everything in it
+is loggable any day in any order. There is no "today's revival measures"
+to compute.
+
+It therefore surfaces the **highest-priority items**, labelled *Start
+here* rather than with a date-implying tag. The first plan day already
+*is* the top-priority block, since `computeRevivalPlan` sorts flagged
+first, then weakest confidence, then packs greedily to the daily budget —
+so this is `planDays[0].itemIds`, run through the same `mergeRanges` the
+other subtabs use to collapse adjacent chunks into contiguous measure
+ranges.
+
+Which plan it reads depends on whether one exists yet:
+
+- **Plan generated** → the **stored** `piece.revival.plan.days`, so Master
+  Agenda agrees with what `RevivalTab` displays rather than silently
+  diverging if progress has moved on since the plan was generated.
+- **Mid-reassessment** (no plan yet) → a live `computeRevivalPlan(piece,
+  chunkSet, currentDay)` call. This works because that function is a pure
+  function of `progress` + `chunkSet` and never reads `revival.plan`, so
+  it yields the same priority order off partially-reassessed data. The
+  card says "Reassessment in progress" above the items.
+
+Revival cards deliberately carry **no time estimate**, and revival minutes
+stay out of the "Total planned" banner: that number means committed daily
+work, and revival items are explicitly not scheduled to a day. Showing a
+time would imply a commitment the plan does not make.
 
 Reassessment itself does not have a dedicated compute function — it *is*
 `progress[id].manualConfidence`, set through `PieceMapTab`'s existing

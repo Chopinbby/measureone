@@ -41,7 +41,7 @@ MeasureOne.jsx/
 ├── vite.config.js
 └── src/
     ├── main.jsx                 # ReactDOM entry point, just mounts <App />
-    ├── App.jsx                  # state + layout only — ~1,510 lines; renders
+    ├── App.jsx                  # state + layout only — ~1,620 lines; renders
     │                            # the sidebar and whichever tab is active,
     │                            # owns updatePiece and every handler passed
     │                            # down as props. The CSS string also still
@@ -63,7 +63,15 @@ MeasureOne.jsx/
     │   ├── revival.js                  # computeRevivalPlan, computeComboEscalations,
     │   │                                # and computeRevivalTriggers (Pass 7's three
     │   │                                # independent auto-trigger conditions, read by
-    │   │                                # OverviewTab — see Repertoire-Lifecycle.md#revival-auto-triggers)
+    │   │                                # OverviewTab — see Repertoire-Lifecycle.md#revival-auto-triggers).
+    │   │                                # Also isInRevival(piece) — the single source of
+    │   │                                # truth for "is this piece in revival", reading
+    │   │                                # revival.active. EVERY boolean revival gate in
+    │   │                                # the app routes through it (App.jsx, OverviewTab,
+    │   │                                # TodayTab, MasterAgendaTab, computeDueReviews,
+    │   │                                # storage.js's mergeImportedPiece); the rule used
+    │   │                                # to be written twice against two different
+    │   │                                # fields — see Decisions.md#revival
     │   ├── ladder.js                     # computeLadderAdvance — spaced-repetition
     │   │                                  # maintenance stage math; called from
     │   │                                  # App.jsx's handleLogSession on every
@@ -138,7 +146,7 @@ single-file Claude.ai artifact.
 | `NumberInput` | Every numeric field uses this instead of a raw `<input type="number">` — decouples displayed text from committed value (commits on blur/Enter) to avoid a controlled-input bug where clearing a field to retype gets fought by React re-rendering the old value mid-keystroke. Always use this for numeric fields. |
 | `ManuscriptDoodle` / `ManuscriptStrip` | Decorative SVG staff/clef band and the colored horizontal strip of practice chunks shown on the dashboard and wizard review step. `ManuscriptStrip` uses a custom tooltip, not native `title`. |
 | `BasicsFields`, `SectionsEditor`, `DifficultyEditor`, `RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor` | Shared field-editor components, used in both `Wizard` and Settings — see [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows). Add new piece-level fields to one of these rather than duplicating markup. |
-| `RecordingsList` | Renders `piece.recordings` as clickable links; used on the Overview dashboard. |
+| `RecordingsList` | Renders `piece.recordings` as clickable links; used on the Piece Overview dashboard. |
 | `PartSwitcher` | Strip of sibling movements on the Overview of any piece belonging to a multi-movement work, plus "Add a movement". Shows each movement's own measures-touched percentage — deliberately not a combined work total, see [Decisions.md](Decisions.md#multi-movement-works). |
 | `Wizard` | Multi-step modal for creating a new piece (create-only — see [User-Flows.md](User-Flows.md#1-setting-up-a-new-piece)). |
 | `ScheduleBanner` | The "N chunks behind schedule" banner (Overview, Today). |
@@ -157,8 +165,8 @@ single-file Claude.ai artifact.
 | `RandomStartPanel` | Revival-only: picks a uniformly random chunk, transition, or section and displays it (plus its memory anchor, if any) for a cold-start warm-up. |
 | `RevivalTab` | Composes the revival flow end to end: settings (performance tempo, tempo ladder start fraction), the embedded `PieceMapTab` reassessment pass, flagged-chunks summary (rough/lost, same field the Piece Map's run-through flag sets — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)), `RandomStartPanel`, and the generated plan (day-grouped `ChecklistItem`s with tempo ladders/memory anchors). See [Algorithms.md](Algorithms.md#revival). |
 | `ProgressTab` | Trend/diagnosis charts — rolling-window consistency, heatmap, actual-vs-planned, projected finish, tempo trend, effectiveness calibration, recent history. |
-| `AnalyticsTab` | Confidence-by-difficulty, recurring-material payoff. **Slated to be folded into `ProgressTab` and removed** — not yet done; see [Roadmap.md](Roadmap.md). Check the sidebar `NAV` array for current truth before assuming either state. |
-| `MasterAgendaTab` | Cross-piece daily view — aggregates every *active* piece's scheduled tasks for a selected date (date-navigable, not locked to today) into one list, so a multi-piece user isn't switching between pieces to see the whole day. For a piece still inside its plan it reads `getEffectiveTimeline(...).days[dayNumber - 1]` directly, the same fixed-length, `daysToLearn`-bounded indexing `TodayTab` uses. **Since Pass 8, a piece that has run past its plan no longer falls out of that indexing** — it renders a due-maintenance summary from `computeDueReviews` (`lib/maintenance.js`) instead: merged measure ranges under a "Due" tag, plus a count. That branch only ever fires for the real today, since due-ness is strictly "as of today" and the date picker must not become a forward-looking window. |
+| `AnalyticsTab` | Confidence-by-difficulty, recurring-material payoff. **Slated to be folded into `ProgressTab` and removed** — not yet done; see [Roadmap.md](Roadmap.md). Check the sidebar `NAV_BASE` array for current truth before assuming either state. |
+| `MasterAgendaTab` | Cross-piece daily view — aggregates every *active* piece's scheduled tasks for a selected date (date-navigable, not locked to today) into one list, so a multi-piece user isn't switching between pieces to see the whole day. **First item in the sidebar as of Pass 18.** For a piece still inside its plan it reads `getEffectiveTimeline(...).days[dayNumber - 1]` directly, the same fixed-length, `daysToLearn`-bounded indexing `TodayTab` uses. **Since Pass 8, a piece that has run past its plan no longer falls out of that indexing** — it renders a due-maintenance summary from `computeDueReviews` (`lib/maintenance.js`) instead: merged measure ranges under a "Due" tag, plus a count. That branch only ever fires for the real today, since due-ness is strictly "as of today" and the date picker must not become a forward-looking window. **Since Pass 19 the content is split across three subtabs** — Learning phase / Maintenance due / Revival — with counts in the labels. The first two are a pure presentation split of the same `agendaData.items` array, partitioned on the `isDueList` flag that already distinguished the two card shapes; no new computation, and the combined count is unchanged. The Revival subtab is *not* such a split: pieces in revival are skipped when building the other two lists (`isInRevival`), so each piece appears in exactly one subtab, and revival cards are built from a separate derivation — status (reassessment in progress / plan ready) plus the **highest-priority items** as merged measure ranges under a "Start here" tag. Not "today's work": a revival plan is priority-ordered, not dated. Uses `piece.revival.plan` when one exists (so it agrees with `RevivalTab`) and falls back to a live `computeRevivalPlan` call mid-reassessment. Revival cards deliberately carry no time estimate and contribute nothing to the "Total planned" banner. The selected subtab persists across tab switches via a module-level variable (not state, not `localStorage`) — a fresh page load starts on Learning phase. See [Decisions.md](Decisions.md#revival). |
 | `SettingsTab` | View mode: read-only summary + Edit/Delete/Add-new-piece/Export/Import. Edit mode reuses the shared field-editor components. |
 | `App` | Root component. Owns all state and renders the sidebar + active tab, or the empty-state/loading screens. |
 
@@ -193,8 +201,14 @@ library.
   persisted — a reload always re-shows a still-due reminder, so dismissing
   it is per-session, not a permanent "don't ask again."
 - `navItems` — `NAV_BASE` with `REVIVAL_NAV_ITEM` spliced in (before
-  Progress) only while `piece.revival.active` is true; the sidebar renders
-  this instead of `NAV_BASE` directly.
+  Progress) only while `isInRevival(piece)` (`lib/revival.js`); the sidebar
+  renders this instead of `NAV_BASE` directly. The splice finds its
+  insertion point by `key` lookup, not by index, so reordering `NAV_BASE`
+  needs no change here — which is why **Pass 18**'s reorder (Master Agenda
+  moved to first) touched only the array itself. That pass also renamed the
+  `overview` entry's visible label to **"Piece Overview"**; its key and
+  route stay `"overview"`, so every `setActiveTab("overview")` call site is
+  unaffected.
 - Backup: `handleExportClick` opens `ExportPiecesModal` (pick which pieces
   to include, then `downloadBackup` on that subset — not an all-or-nothing
   export); `handleConfirmExport` also records `saveLastExportedAt(Date.now())`

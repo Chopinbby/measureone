@@ -1,4 +1,5 @@
 import { Sparkline } from "../Sparkline";
+import { computePracticeHistory } from "../../lib/history";
 import { formatRange } from "../../lib/utils";
 import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
 import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
@@ -108,16 +109,11 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
   const actualEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
   const minutesSaved = Math.round((fullEffort - actualEffort) * EFFORT_TO_MIN);
 
-  // Recent practice history — unchanged from before.
-  const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
-  const historyByDay = {};
-  Object.entries(piece.progress).forEach(([id, entry]) => {
-    (entry.doneDays || []).forEach((d) => {
-      if (!historyByDay[d]) historyByDay[d] = [];
-      historyByDay[d].push(id);
-    });
-  });
-  const historyDays = Object.keys(historyByDay).map(Number).sort((a, b) => b - a).slice(0, 10);
+  // Recent practice history. The work of matching persisted progress keys
+  // back to the freshly-derived chunk set lives in lib/history.js — see the
+  // block comment there for why an id can fail to resolve and what each
+  // case means.
+  const history = computePracticeHistory(piece, chunks);
 
   return (
     <div className="tab-pane">
@@ -243,25 +239,14 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
 
       <div className="panel">
         <h3>Recent practice history</h3>
-        {historyDays.length === 0 ? (
+        {history.length === 0 ? (
           <p className="wizard-hint">Nothing logged yet — check items off in Today's Practice.</p>
         ) : (
           <div className="history-list">
-            {historyDays.map((d) => (
-              <div key={d} className="history-row">
-                <span className="mono history-day">Day {d}</span>
-                <span className="history-items">
-                  {historyByDay[d]
-                    .map((id) => {
-                      if (id !== "__consolidation__") return formatRange(chunkById[id].start, chunkById[id].end);
-                      const sessions = ((piece.progress.__consolidation__ || {}).sessions || []).filter((s) => s.day === d);
-                      const last = sessions[sessions.length - 1];
-                      return last && last.stopCount != null
-                        ? `Full run-through (stopped ${last.stopCount}x)`
-                        : "Full run-through";
-                    })
-                    .join(", ")}
-                </span>
+            {history.map(({ day, label }) => (
+              <div key={day} className="history-row">
+                <span className="mono history-day">Day {day}</span>
+                <span className="history-items">{label}</span>
               </div>
             ))}
           </div>

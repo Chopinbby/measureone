@@ -1970,14 +1970,22 @@ definition, `isInRevival(piece)` in `lib/revival.js`, standardized on
   Locked with regression tests in `test/revival.test.mjs`, including one
   asserting `computeDueReviews` suppresses maintenance for exactly the
   pieces `isInRevival` reports.
-- **Verification gap, stated plainly:** the consolidation was verified by
-  unit test and by exercising the app with no piece in revival — *not* by
-  running an actual revival end-to-end in the browser, which would have
-  meant writing revival state into real saved data. The five UI gates this
-  touched (`App.jsx`'s nav item and tab render, `OverviewTab`'s button
-  label, `TodayTab`'s suppression copy, `MasterAgendaTab`'s filter) are
-  therefore covered at the function level but not the wiring level. Worth
-  one deliberate manual pass on a throwaway piece.
+- **Manually verified end-to-end (follow-up).** Initially this shipped
+  covered by unit test only, with the five UI gates unverified at the
+  wiring level. That gap has since been closed: a throwaway piece was
+  created, driven into revival, and each gate checked in both states —
+  `App.jsx`'s nav item (absent → "Revival" appears), its revival tab
+  render, `OverviewTab`'s button ("Start revival" → "Continue revival"),
+  `TodayTab`'s suppression copy, and `MasterAgendaTab`'s filter (the piece
+  moving from the learning list to the revival list, with the total across
+  subtabs unchanged). All five correct. The throwaway was deleted and the
+  real saved piece confirmed byte-identical afterwards.
+- **Found while verifying:** `TodayTab`'s revival suppression copy is only
+  reachable once a piece is *past its plan*, since that message lives in
+  the past-plan branch. For a piece still inside its plan, an active
+  revival does not change the Today tab at all — it keeps showing the
+  normal day-by-day plan. See the open question on gating revival, below,
+  for why that matters.
 - **The scope note that produced this:** the fix touches `lib/maintenance.js`,
   which Pass 19 had explicitly placed out of scope ("no change to
   `computeDueReviews`"). It was flagged rather than folded into that pass,
@@ -2029,6 +2037,45 @@ directory rather than keeping it as a separate, un-tracked file.**
 
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
+
+- **Gate revival entry behind a piece being in maintenance — blocked until
+  "maintenance" is an actual mode.** Agreed in principle with the user
+  (Pass 19 follow-up): the "Start revival" entry point should not be
+  offered while a piece is still being learned. Revival would become
+  reachable only once a piece is in maintenance; a piece finished away
+  from the app would be moved into maintenance manually in Settings, and
+  *that* transition would prompt the revival sequence — which is also what
+  would place it on the Master Agenda under Revival.
+  - **Why it's wanted:** starting a revival mid-learning currently puts a
+    piece in a half-state. Master Agenda drops its learning card (the
+    piece moves to the Revival subtab, losing its day-by-day detail),
+    while the piece's own Today tab keeps showing the full learning plan
+    unchanged — the suppression copy there only exists in the past-plan
+    branch. So two surfaces disagree about whether that piece has daily
+    work. Confirmed by manual verification (see the `isInRevival` decision
+    above).
+  - **What blocks it:** there is no learning-vs-maintenance mode to gate
+    on. "Learned" *is* defined — every chunk reaching Holding (see
+    [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md)) — but nothing
+    queries that roll-up, and there is no first-class piece state for it.
+    Both the state and a Settings control to set it manually would have to
+    exist first. This is queued **behind** that work, not alongside it.
+  - **Three existing behaviours it must reconcile, none of which are
+    oversights:**
+    1. The Wizard deliberately allows starting a piece *directly* in
+       revival, for pieces learned before the user ever had this app — see
+       the decision on that in [Revival](#revival) above. A strict gate
+       breaks that path; the manual-Settings-transition idea is the
+       proposed replacement for it, and needs to actually cover that case.
+    2. Auto-trigger 3 (60+ days since anything was logged,
+       `computeRevivalTriggers`) fires for a piece *abandoned* mid-learning
+       — precisely the state a gate would forbid. Either the trigger stops
+       firing there, or the gate admits an exception.
+    3. Auto-triggers 1 and 2 read run-through data (stop count, chunks
+       flagged lost), which implies some learning already happened but not
+       necessarily completion.
+  - **Not started.** Recorded so the gate is designed *with* the
+    maintenance-mode work rather than bolted on afterwards.
 
 - **`piece.revival` is restored all-or-nothing on load, unlike
   `ladderConfig` — the same shape-gap that caused a documented P1 crash.**

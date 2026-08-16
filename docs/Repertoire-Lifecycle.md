@@ -51,6 +51,16 @@ queries "is every chunk's `stage` at `holding`" to actually compute a
 piece's "learned" flag — see
 [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
 
+**Queued behind this work:** gating revival entry so a revival can only be
+started once a piece is in maintenance (i.e. learned), with a manual
+Settings transition for pieces finished away from the app. Agreed in
+principle but explicitly blocked on the rollup above — there is no mode to
+gate on until it exists. It also has to reconcile with the Wizard's
+start-directly-in-revival path and with the staleness auto-trigger, which
+fires for pieces *abandoned* mid-learning. Design it together with this
+state rather than bolting it on afterwards; full detail in
+[Decisions.md](Decisions.md#open-questions).
+
 `computeProgressTier` (buckets a chunk into untouched/learned/comfortable/
 mastered) and `computeConfidence` (continuous 0–100 score) both continue
 to answer their own separate questions from this piece-level "learned"

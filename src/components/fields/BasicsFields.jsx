@@ -33,7 +33,7 @@ export function BasicsFields({ draft, set, lockWork = false, afterWorkMode = nul
           </div>
           {multiPart && (
             <p className="wizard-hint" style={{ marginTop: 8 }}>
-              Set up the first movement now, then add the rest from the piece overview page
+              Set up the first movement now, then add the rest from the Piece Overview tab
               whenever you're ready. Each movement will get its own practice plan, schedule, and
               progress to help you learn.
             </p>

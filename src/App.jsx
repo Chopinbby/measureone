@@ -67,8 +67,8 @@ import { SettingsTab } from "./components/tabs/SettingsTab";
 /* ------------------------------------------------------------------ */
 
 const NAV_BASE = [
-  { key: "overview", label: "Overview", icon: LayoutGrid },
   { key: "master-agenda", label: "Master Agenda", icon: Layers },
+  { key: "overview", label: "Piece Overview", icon: LayoutGrid },
   { key: "timeline", label: "Timeline", icon: CalendarDays },
   { key: "map", label: "Piece Map", icon: Music2 },
   { key: "today", label: "Today's Practice", icon: ListChecks },

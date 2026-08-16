@@ -3,9 +3,9 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
-import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
+import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { REVIVAL_PURPOSE_OPTIONS } from "../../lib/constants";
-import { isInRevival } from "../../lib/revival";
+import { isInRevival, computeRevivalPlan } from "../../lib/revival";
 
 // Which sub-view was last open. This component unmounts whenever you
 // navigate to another main tab, so plain useState would reset the choice
@@ -143,10 +143,24 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
     }
   }, [pieces, selectedDate]);
 
-  // Pieces currently mid-revival, for the Revival subtab — a lightweight,
-  // piece-level list (not per-chunk detail; see computeRevivalPlan/
-  // RevivalTab.jsx for the full plan) built straight off the same `pieces`
-  // prop agendaData already reads, not a new query into revival.js.
+  // Pieces currently mid-revival, for the Revival subtab.
+  //
+  // Shows the highest-priority items rather than "today's work": a revival
+  // plan is a priority-ordered list, not a dated schedule (RevivalTab says
+  // as much — everything in it is loggable any day, in any order), so
+  // there is no "today's revival measures" to display. The first plan day
+  // is exactly the top-priority block (computeRevivalPlan sorts flagged
+  // first, then weakest confidence, then packs to the daily budget), so
+  // that's what gets surfaced.
+  //
+  // Prefers the stored plan so this agrees with what RevivalTab shows.
+  // Before a plan is generated — i.e. mid-reassessment — computeRevivalPlan
+  // is still a pure function of progress + chunks, so the same priority
+  // order can be shown live off partially-reassessed data.
+  //
+  // Deliberately no time estimate on these cards, and revival minutes stay
+  // out of the "Total planned" banner: that number means committed daily
+  // work, and revival items explicitly aren't scheduled to a day.
   //
   // Guarded per-piece to the same standard as agendaData above: one piece
   // with malformed data gets skipped and logged, rather than throwing and
@@ -159,7 +173,22 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
           if (!piece) return;
           if ((piece.status || "active") !== "active") return;
           if (!isInRevival(piece)) return;
-          found.push({ pieceId, piece });
+
+          const chunkSet = generateAllChunks(piece);
+          const timeline = getEffectiveTimeline(piece, chunkSet);
+          const dayCount = (timeline && timeline.days && timeline.days.length) || 1;
+          const currentDay = getCurrentDay(piece, dayCount);
+
+          const storedDays = piece.revival.plan && piece.revival.plan.days;
+          const planDays = storedDays && storedDays.length
+            ? storedDays
+            : computeRevivalPlan(piece, chunkSet, currentDay).days;
+
+          const topIds = (planDays[0] && planDays[0].itemIds) || [];
+          const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
+          const priorityRanges = mergeRanges(topIds.map((id) => chunkById[id]).filter(Boolean));
+
+          found.push({ pieceId, piece, priorityRanges });
         } catch (e) {
           console.error(`Error processing revival piece ${pieceId}:`, e);
         }
@@ -350,7 +379,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
           </div>
         ) : (
           <div className="master-agenda-cards">
-            {revivalPieces.map(({ pieceId, piece }) => {
+            {revivalPieces.map(({ pieceId, piece, priorityRanges }) => {
               const revival = piece.revival || {};
               const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
               const statusText = !revival.reassessmentComplete
@@ -369,8 +398,20 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
                   <p className="day-card-note">
                     Bringing this piece back{purposeLabel ? ` for ${purposeLabel.label.toLowerCase()}` : ""}
                   </p>
-                  <div className="piece-footer">
-                    <span style={{ fontSize: "12px", color: "var(--ink-soft)" }}>{statusText}</span>
+                  <p className="day-card-note" style={{ marginTop: 4 }}>{statusText}</p>
+
+                  {priorityRanges.length > 0 && (
+                    <div className="day-card-group" style={{ marginTop: 10 }}>
+                      {/* "Start here", not "today" — a revival plan is
+                          priority-ordered, not scheduled to a date. */}
+                      <span className="day-card-tag special">Start here</span>
+                      {priorityRanges.map((r) => (
+                        <span key={`rev-${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="piece-footer" style={{ justifyContent: "flex-end" }}>
                     <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
                       Open piece →
                     </button>

@@ -1906,9 +1906,9 @@ not just from an existing piece via the Overview dashboard.**
   default — "zero sessions logged" was already a valid starting state, not
   a special case to build for.
 
-**Decision (built — Pass 19): Master Agenda's Revival subtab shows
-piece-level cards only, not per-chunk detail — with chunk-level detail
-explicitly left open to revisit.**
+**Decision (built — Pass 19, extended in a follow-up): Master Agenda's
+Revival subtab shipped as piece-level cards only, then gained chunk-level
+detail — shown as highest-priority items, not as "today's work."**
 
 - **Why this needed deciding at all:** Pass 19 was scoped as a pure
   presentation split of data Master Agenda already computed, into three
@@ -1918,21 +1918,37 @@ explicitly left open to revisit.**
   pieces in revival ("revival is already 'something's wrong' mode"), and
   such pieces are usually past their original plan window, so they simply
   didn't appear. There was no existing bucket to split out.
-- **Consequence:** rather than pull per-chunk items from
-  `computeRevivalPlan` (new computation, and squarely inside what the pass
-  had deferred), the subtab lists each in-revival piece with its purpose,
-  where it is in the flow (reassessment / plan ready), and a link into the
-  piece. `MasterAgendaTab` also now skips in-revival pieces when building
-  the other two lists, so a piece appears in exactly one subtab rather than
-  showing stale original-plan content alongside its revival card.
-- **Deliberately left open — revisit:** whether the Revival subtab should
-  eventually show **chunk-level detail** (the same granularity the other
-  two subtabs have), rather than a piece-level summary. Recorded at the
-  user's request when choosing the piece-level version, as a "not now, but
-  reconsider" — not a closed decision. Doing it would mean Master Agenda
-  reading `piece.revival.plan` / `computeRevivalPlan`, and would reopen the
-  attention-competition question that made revival suppress maintenance in
-  the first place.
+- **Consequence, as originally shipped:** rather than pull per-chunk items
+  from `computeRevivalPlan` (new computation, and squarely inside what the
+  pass had deferred), the subtab listed each in-revival piece with its
+  purpose, where it is in the flow (reassessment / plan ready), and a link
+  into the piece. `MasterAgendaTab` also skips in-revival pieces when
+  building the other two lists, so a piece appears in exactly one subtab
+  rather than showing stale original-plan content alongside its revival
+  card. That skip still stands; only the card's detail level changed.
+- **~~Deliberately left open — revisit~~ — resolved, built as a follow-up:**
+  the Revival subtab now *does* show chunk-level detail, matching the
+  granularity of the other two subtabs, per the user's call.
+  - **The mismatch that had to be resolved first:** the other subtabs show
+    "today's work" because a learning plan is dated — day 1, day 2, day 3.
+    A revival plan is not. It's a priority-ordered list, and RevivalTab
+    states outright that everything in it is loggable any day, in any
+    order. So there is no "today's revival measures" to display. Resolved
+    by showing the **highest-priority items** instead, labelled *Start
+    here* rather than a date-implying tag — the first plan day is exactly
+    the top-priority block, since `computeRevivalPlan` sorts flagged
+    first, then weakest confidence, then packs to the daily budget.
+  - **Mid-reassessment** (no plan generated yet) the card says
+    "Reassessment in progress" and then shows the same priority items,
+    computed live: `computeRevivalPlan` is a pure function of progress +
+    chunks and never reads `revival.plan`, so it works off
+    partially-reassessed data. Once a plan exists, the **stored** plan is
+    preferred, so this agrees with what RevivalTab shows rather than
+    silently diverging from it if progress has moved on since generation.
+  - **No time estimate on these cards, and revival minutes stay out of the
+    "Total planned" banner** — that number means committed daily work, and
+    revival items are explicitly not scheduled to a day. Showing a time
+    would imply a commitment the plan doesn't make.
 - **Known consequence of the skip, not yet decided:** starting a revival on
   a piece that is still mid-learning now hides that piece's ordinary
   plan-day card while the revival runs. Consistent with the existing

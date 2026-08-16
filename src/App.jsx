@@ -21,7 +21,7 @@ import {
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
@@ -97,7 +97,13 @@ export default function App() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleMessage, setRescheduleMessage] = useState("");
-  const [rescheduleStatus, setRescheduleStatus] = useState(null);
+  const [rescheduleTitle, setRescheduleTitle] = useState("");
+  // A list, not a single piece's status — the same confirmation covers both
+  // the per-piece Reschedule button (one entry) and Master Agenda's
+  // "Reschedule all" (one entry per behind-schedule piece). Each entry is
+  // { pieceId, marker }, with the marker already fully built by whichever
+  // handler opened the modal, so confirming is a plain write.
+  const [rescheduleTargets, setRescheduleTargets] = useState([]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -807,15 +813,41 @@ export default function App() {
     setActiveTab("revival");
   };
 
-  const handleConfirmReschedule = () => {
-    if (!rescheduleStatus) return;
-    updatePiece((p) => ({
-      ...p,
-      rescheduleMarker: { asOfDay: rescheduleStatus.asOfDay, remainingChunkOrder: rescheduleStatus.remainingChunkIds },
-    }));
+  const closeRescheduleModal = () => {
     setRescheduleModalOpen(false);
     setRescheduleMessage("");
-    setRescheduleStatus(null);
+    setRescheduleTitle("");
+    setRescheduleTargets([]);
+  };
+
+  // Writes every confirmed marker. Split deliberately in two: the active
+  // piece goes through updatePiece like every other piece mutation in this
+  // app (CLAUDE.md), and only the *other* pieces take the direct path —
+  // which also has to persist them by hand, because the save effect above
+  // only ever writes the active piece. Without that explicit save, a bulk
+  // reschedule would look right on screen and be gone on reload.
+  const handleConfirmReschedule = () => {
+    if (!rescheduleTargets.length) return;
+
+    const activeTarget = rescheduleTargets.find((t) => t.pieceId === activePieceId);
+    if (activeTarget) updatePiece((p) => ({ ...p, rescheduleMarker: activeTarget.marker }));
+
+    const otherUpdates = {};
+    rescheduleTargets
+      .filter((t) => t.pieceId !== activePieceId)
+      .forEach(({ pieceId, marker }) => {
+        const current = pieces[pieceId];
+        if (!current) return;
+        otherUpdates[pieceId] = { ...current, rescheduleMarker: marker, updatedAt: Date.now() };
+      });
+
+    if (Object.keys(otherUpdates).length) {
+      setPieces((prev) => ({ ...prev, ...otherUpdates }));
+      const anyFailed = Object.entries(otherUpdates).some(([id, p]) => !savePieceToStorage(id, p).ok);
+      if (anyFailed) setStorageError(true);
+    }
+
+    closeRescheduleModal();
   };
 
   const handleEndRevival = () => {
@@ -855,6 +887,13 @@ export default function App() {
     setActiveTab("today");
   };
 
+  const openRescheduleModal = (targets, title, message) => {
+    setRescheduleTargets(targets);
+    setRescheduleTitle(title);
+    setRescheduleMessage(message);
+    setRescheduleModalOpen(true);
+  };
+
   const handleReschedule = () => {
     const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
     if (status.remainingChunkIds.length === 0) return;
@@ -872,9 +911,35 @@ export default function App() {
       message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
     }
 
-    setRescheduleMessage(message);
-    setRescheduleStatus({ asOfDay: currentDay, remainingChunkIds: status.remainingChunkIds });
-    setRescheduleModalOpen(true);
+    openRescheduleModal(
+      [{ pieceId: activePieceId, marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds } }],
+      "Reschedule remaining chunks?",
+      message
+    );
+  };
+
+  // "Reschedule all" (Master Agenda) — the same operation, applied to every
+  // active piece that's behind schedule right now, behind a single
+  // confirmation that names them all. Deliberately no per-piece pace warning
+  // like the single-piece path's "you likely won't finish by your target
+  // date": that warning is a piece-specific judgement worth reading on its
+  // own, and stacking N of them into one dialog would just be noise. The
+  // per-piece button still gives it.
+  const handleRescheduleAll = () => {
+    const plans = planRescheduleForPieces(pieces);
+    if (!plans.length) return;
+
+    const names = plans.map((p) => p.piece.name || "Untitled piece").join(", ");
+    const totalChunks = plans.reduce((s, p) => s + p.marker.remainingChunkOrder.length, 0);
+    const message =
+      `${plans.length} piece${plans.length === 1 ? " is" : "s are"} behind schedule: ${names}.\n\n` +
+      `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are, and each piece keeps its own target date. Continue?`;
+
+    openRescheduleModal(
+      plans.map(({ pieceId, marker }) => ({ pieceId, marker })),
+      `Reschedule ${plans.length} piece${plans.length === 1 ? "" : "s"}?`,
+      message
+    );
   };
 
   const pieceList = Object.values(pieces).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -1047,6 +1112,7 @@ export default function App() {
                 pieces={pieces}
                 onSelectPiece={switchToPiece}
                 onSelectDay={handleSelectDay}
+                onRescheduleAll={handleRescheduleAll}
               />
             )}
             {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
@@ -1148,17 +1214,20 @@ export default function App() {
           <div className="modal" style={{ maxWidth: 560 }}>
             <div className="modal-head">
               <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 19, margin: 0 }}>
-                Reschedule remaining chunks?
+                {rescheduleTitle || "Reschedule remaining chunks?"}
               </h2>
-              <button className="icon-btn" onClick={() => setRescheduleModalOpen(false)} aria-label="Close">
+              <button className="icon-btn" onClick={closeRescheduleModal} aria-label="Close">
                 <X size={18} />
               </button>
             </div>
             <div className="modal-body">
-              <p style={{ fontSize: 14, lineHeight: 1.5, margin: 0 }}>{rescheduleMessage}</p>
+              {/* pre-line, not the default collapse: both messages use a
+                  blank line to separate the explanation from the actual
+                  question, and the bulk one lists the pieces above it. */}
+              <p style={{ fontSize: 14, lineHeight: 1.5, margin: 0, whiteSpace: "pre-line" }}>{rescheduleMessage}</p>
             </div>
             <div className="modal-foot">
-              <button className="ghost-btn" onClick={() => setRescheduleModalOpen(false)}>
+              <button className="ghost-btn" onClick={closeRescheduleModal}>
                 Cancel
               </button>
               <button className="primary-btn" onClick={handleConfirmReschedule}>

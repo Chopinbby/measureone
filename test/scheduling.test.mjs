@@ -11,7 +11,9 @@ import {
   computeScheduleStatus,
   computeDaysNeededForMinutesPerDay,
   shouldShowScheduleBanner,
+  planRescheduleForPieces,
 } from "../src/lib/scheduling.js";
+import { addDaysISO, todayISODate } from "../src/lib/utils.js";
 
 function basePiece(overrides) {
   return {
@@ -495,5 +497,127 @@ describe("[regression] getEffectiveTimeline must re-base introducedDay onto asOf
     }
     const wouldBe = computeScheduleStatus(rescheduled, chunkSet.practiceChunks, unshifted, CURRENT_DAY);
     assert.ok(wouldBe.missedCount > 0, "without the re-base, rescheduled chunks still read as behind — the symptom that made the button look broken");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Pass 21 — "Reschedule all" across every behind-schedule piece      */
+/* ------------------------------------------------------------------ */
+
+describe("planRescheduleForPieces — the multi-piece form of Reschedule", () => {
+  // These pieces are anchored to the *real* today, because
+  // planRescheduleForPieces asks each piece what day it's on (elapsedDay /
+  // getCurrentDay read the clock). A fixed startDate would make every
+  // assertion below drift as the calendar moves.
+  const startedDaysAgo = (n) => addDaysISO(todayISODate(), -n);
+
+  function behindPieceOnDay6(overrides) {
+    // 5 days elapsed before today => currentDay 6 of a 10-day plan, with
+    // nothing ever logged, so every chunk introduced on days 1-5 is behind.
+    return basePiece({ daysToLearn: 10, startDate: startedDaysAgo(5), ...overrides });
+  }
+
+  test("picks out behind-schedule active pieces and skips ones that are on track", () => {
+    const behind = behindPieceOnDay6({ name: "Behind" });
+    const onTrack = basePiece({ name: "On track", daysToLearn: 10, startDate: todayISODate() });
+
+    const plans = planRescheduleForPieces({ behind, onTrack });
+
+    assert.equal(plans.length, 1, "only the behind-schedule piece is included");
+    assert.equal(plans[0].pieceId, "behind");
+    assert.ok(plans[0].missedCount > 0);
+  });
+
+  test("each piece's marker is anchored to its own current day, not a shared one", () => {
+    // Two pieces started on different dates — the whole reason asOfDay is
+    // computed per piece rather than passed in once from the caller.
+    const older = behindPieceOnDay6({ name: "Older" });
+    const newer = basePiece({ name: "Newer", daysToLearn: 10, startDate: startedDaysAgo(2) });
+
+    const plans = planRescheduleForPieces({ older, newer });
+    const byId = Object.fromEntries(plans.map((p) => [p.pieceId, p]));
+
+    assert.equal(byId.older.marker.asOfDay, 6, "started 5 days ago => day 6");
+    assert.equal(byId.newer.marker.asOfDay, 3, "started 2 days ago => day 3");
+  });
+
+  test("the marker it builds matches what the single-piece path would have built", () => {
+    const piece = behindPieceOnDay6({ name: "Solo" });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, 6);
+
+    const [plan] = planRescheduleForPieces({ piece });
+
+    assert.deepEqual(plan.marker, { asOfDay: 6, remainingChunkOrder: remainingChunkIds });
+  });
+
+  test("paused and archived pieces are left alone", () => {
+    const paused = behindPieceOnDay6({ name: "Paused", status: "paused" });
+    const archived = behindPieceOnDay6({ name: "Archived", status: "archived" });
+    const active = behindPieceOnDay6({ name: "Active" });
+
+    const plans = planRescheduleForPieces({ paused, archived, active });
+
+    assert.deepEqual(plans.map((p) => p.pieceId), ["active"]);
+  });
+
+  test("a piece mid-revival is left alone — revival replaces the plan's pacing", () => {
+    const reviving = behindPieceOnDay6({
+      name: "Reviving",
+      revival: { active: true, startedAt: Date.now(), reassessmentComplete: false, plan: null },
+    });
+
+    assert.deepEqual(planRescheduleForPieces({ reviving }), []);
+  });
+
+  test("a piece past the end of its own plan is left alone", () => {
+    // The same boundary shouldShowScheduleBanner uses. Without it, every
+    // long-finished piece would be swept in forever: getCurrentDay clamps to
+    // the plan's last day, so computeScheduleStatus keeps reporting the same
+    // stale misses no matter how much later it's asked.
+    const finishedLongAgo = basePiece({ name: "Old", daysToLearn: 10, startDate: startedDaysAgo(100) });
+    const chunkSet = generateAllChunks(finishedLongAgo);
+    const timeline = getEffectiveTimeline(finishedLongAgo, chunkSet);
+    const { missedCount } = computeScheduleStatus(finishedLongAgo, chunkSet.practiceChunks, timeline, 10);
+    assert.ok(missedCount > 0, "computeScheduleStatus alone still calls this piece behind…");
+
+    assert.deepEqual(planRescheduleForPieces({ finishedLongAgo }), [], "…but a bulk reschedule must not touch it");
+  });
+
+  test("a piece with every chunk already practiced has nothing to reschedule", () => {
+    const piece = behindPieceOnDay6({ name: "Done" });
+    const chunkSet = generateAllChunks(piece);
+    piece.progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1] }]));
+
+    assert.deepEqual(planRescheduleForPieces({ piece }), []);
+  });
+
+  test("one malformed piece is skipped without taking the whole bulk action down", () => {
+    const good = behindPieceOnDay6({ name: "Good" });
+    // measureDifficulty null with real measures throws inside chunk
+    // generation — stands in for any corrupted record.
+    const broken = { name: "Broken", status: "active", totalMeasures: 12, measureDifficulty: null, progress: {} };
+
+    const realError = console.error;
+    console.error = () => {};
+    let plans;
+    try {
+      plans = planRescheduleForPieces({ broken, good });
+    } finally {
+      console.error = realError;
+    }
+
+    assert.deepEqual(plans.map((p) => p.pieceId), ["good"]);
+  });
+
+  test("furthest behind is listed first", () => {
+    const fewer = behindPieceOnDay6({ name: "Fewer", totalMeasures: 8, measureDifficulty: Array(8).fill(1) });
+    const more = behindPieceOnDay6({ name: "More", totalMeasures: 40, measureDifficulty: Array(40).fill(1) });
+
+    const plans = planRescheduleForPieces({ fewer, more });
+
+    assert.ok(plans[0].missedCount >= plans[plans.length - 1].missedCount);
+    assert.equal(plans[0].pieceId, "more");
   });
 });

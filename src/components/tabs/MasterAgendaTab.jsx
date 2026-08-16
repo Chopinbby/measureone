@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
+import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
@@ -15,7 +16,7 @@ import { isInRevival, computeRevivalPlan } from "../../lib/revival";
 // fresh page load starting back at Learning phase is the right default.
 let lastSubTab = "learning";
 
-export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
+export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onRescheduleAll }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
   const [subTab, setSubTabState] = useState(lastSubTab);
 
@@ -89,6 +90,10 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
               piece,
               isDueList: true,
               dueRanges: mergeRanges(dueItems.map((i) => i.chunk)),
+              // The unmerged chunks behind those display ranges — the
+              // random-start pool below picks one actual due spot, which a
+              // merged range can no longer identify.
+              dueChunks: dueItems.map((i) => i.chunk),
               // Counted off the items, not the merged display ranges —
               // two adjacent due chunks collapse into one chip but are
               // still two things to practice.
@@ -230,6 +235,38 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const learningItems = agendaData.items.filter((item) => !item.isDueList);
   const maintenanceItems = agendaData.items.filter((item) => item.isDueList);
 
+  // Every action below is about what to do *now*, so all three are gated on
+  // the picker actually showing today. Browsing to another date is a
+  // look-ahead/look-back view: rescheduling from it would act on today's
+  // real misses while the screen showed a different day's counts, and
+  // "practice this piece" for a day that isn't today is meaningless.
+  const isToday = selectedDate === todayISODate();
+
+  // Pieces the agenda is already flagging as behind on the cards below.
+  // This only decides whether to *offer* the button — App.jsx recomputes
+  // the real set (planRescheduleForPieces) before touching anything.
+  const behindItems = learningItems.filter((item) => item.missedCount > 0);
+
+  // Anything with work attached today: a scheduled learning day or due
+  // maintenance. Revival pieces are deliberately out, the same way they're
+  // out of the "Total planned" banner — their work isn't scheduled to a day,
+  // so "practice this today" doesn't apply to them.
+  const practiceablePieceIds = agendaData.items.map((item) => item.pieceId);
+
+  const pickRandomPiece = () => {
+    if (!practiceablePieceIds.length) return;
+    onSelectPiece(practiceablePieceIds[Math.floor(Math.random() * practiceablePieceIds.length)]);
+  };
+
+  // The maintenance random-start pool: every individual due spot across
+  // every piece with due work, each labelled with its piece since this list
+  // spans pieces (unlike the revival panel, which lives inside one piece).
+  const dueEntries = maintenanceItems.flatMap(({ piece, dueChunks }) =>
+    (dueChunks || []).map((c) =>
+      chunkEntry(c, piece.memoryAnchors && piece.memoryAnchors[c.id], piece.name || "Untitled piece")
+    )
+  );
+
   const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount, isDueList, dueRanges, dueCount, dueOverdueCount }) => (
     <div key={pieceId} className="piece-card">
       <div className="piece-card-head">
@@ -331,6 +368,16 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
         </div>
       </div>
 
+      {isToday && practiceablePieceIds.length > 1 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+          {/* Offered only from two pieces up — "picking at random" from a
+              single candidate is just a slower way to click its card. */}
+          <button className="ghost-btn" onClick={pickRandomPiece}>
+            <Shuffle size={14} /> Pick a random piece to practice
+          </button>
+        </div>
+      )}
+
       <div className="segmented" style={{ marginBottom: 16 }}>
         <button type="button" className={subTab === "learning" ? "active" : ""} onClick={() => setSubTab("learning")}>
           Learning phase ({learningItems.length})
@@ -342,6 +389,22 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
           Revival ({revivalPieces.length})
         </button>
       </div>
+
+      {subTab === "learning" && isToday && behindItems.length > 0 && onRescheduleAll && (
+        <div className="panel">
+          <h3>
+            {behindItems.length} piece{behindItems.length === 1 ? " is" : "s are"} behind schedule
+          </h3>
+          <p className="wizard-hint">
+            Rebalance what you haven't started yet across the days each plan has left — in one go, rather
+            than piece by piece. Chunks you've already practiced stay where they are, and every piece keeps
+            its own target date.
+          </p>
+          <button className="ghost-btn" onClick={onRescheduleAll}>
+            <RefreshCw size={14} /> Reschedule all
+          </button>
+        </div>
+      )}
 
       {subTab === "learning" && (
         learningItems.length === 0 ? (
@@ -365,7 +428,20 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
             </p>
           </div>
         ) : (
-          <div className="master-agenda-cards">{maintenanceItems.map(renderPieceCard)}</div>
+          <>
+            {/* The same panel the Revival tab uses, on the same reasoning:
+                left to yourself you start a review session at the top of the
+                list, so the same spots always get your freshest attention.
+                Pools every due spot across every piece — a due-review session
+                here spans pieces, so each pick names its piece too. */}
+            {dueEntries.length > 1 && (
+              <RandomStartPanel
+                entries={dueEntries}
+                hint="Start somewhere you wouldn't have picked yourself — otherwise the top of the list always gets your freshest attention. Picks from every spot due right now, across all your pieces."
+              />
+            )}
+            <div className="master-agenda-cards">{maintenanceItems.map(renderPieceCard)}</div>
+          </>
         )
       )}
 

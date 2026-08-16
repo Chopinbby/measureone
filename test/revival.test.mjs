@@ -4,7 +4,8 @@
 // cases below are as important as the "happy path" ones.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeComboEscalations, findComboUnderlyingChunks, computeRevivalTriggers } from "../src/lib/revival.js";
+import { computeComboEscalations, findComboUnderlyingChunks, computeRevivalTriggers, isInRevival } from "../src/lib/revival.js";
+import { computeDueReviews } from "../src/lib/maintenance.js";
 import { addDaysISO, todayISODate } from "../src/lib/utils.js";
 
 // chunks c1(1-4), c5(5-8, hard, the anchor), c9(9-12) — combo spans
@@ -286,5 +287,59 @@ describe("computeRevivalTriggers", () => {
     const result = computeRevivalTriggers(piece, chunkSet);
     assert.equal(result.triggered, true);
     assert.deepEqual(result.reasons.map((r) => r.key).sort(), ["largeChunksLost", "staleness", "stopCount"]);
+  });
+});
+
+// isInRevival — the single source of truth for "is this piece currently in
+// revival?". Before this existed, the same rule was written twice in two
+// shapes: most of the UI checked `revival.active`, while computeDueReviews
+// and TodayTab checked `revival.startedAt`. Both fields are set and cleared
+// together by handleStartRevival/handleEndRevival, so the two could never
+// disagree through any path the app itself takes — this was a consistency
+// fix, not a live bug. These tests exist so it stays that way.
+describe("isInRevival — one definition of 'in revival'", () => {
+  test("a piece mid-revival (both fields set, as the app always sets them) is in revival", () => {
+    assert.equal(isInRevival({ revival: { active: true, startedAt: REVIVAL_START } }), true);
+  });
+
+  test("a piece whose revival was ended (both cleared, as handleEndRevival clears them) is not", () => {
+    assert.equal(isInRevival({ revival: { active: false, startedAt: null } }), false);
+  });
+
+  test("a piece that has never had a revival is not", () => {
+    assert.equal(isInRevival({ revival: {} }), false);
+  });
+
+  test("missing revival object entirely (pre-revival saved data) is not — and does not throw", () => {
+    assert.equal(isInRevival({}), false);
+  });
+
+  test("null/undefined piece is not — and does not throw", () => {
+    assert.equal(isInRevival(null), false);
+    assert.equal(isInRevival(undefined), false);
+  });
+
+  test("always returns a real boolean, never a truthy object or undefined", () => {
+    assert.strictEqual(isInRevival({ revival: { active: true } }), true);
+    assert.strictEqual(isInRevival({}), false);
+  });
+
+  // The drift this consolidation exists to prevent: maintenance suppression
+  // and the rest of the app must agree on whether a piece is in revival.
+  test("[regression] computeDueReviews agrees with isInRevival — maintenance is suppressed for exactly the pieces isInRevival reports", () => {
+    const dueChunkSet = { all: [{ id: "c1", kind: "section", start: 1, end: 4, effort: 1 }] };
+    const progress = { c1: { nextDueDate: "2026-01-01" } };
+
+    const inRevival = { status: "active", revival: { active: true, startedAt: REVIVAL_START }, progress };
+    assert.equal(isInRevival(inRevival), true);
+    assert.deepEqual(computeDueReviews(inRevival, dueChunkSet, "2026-01-20"), [], "suppressed while in revival");
+
+    const notInRevival = { status: "active", revival: { active: false, startedAt: null }, progress };
+    assert.equal(isInRevival(notInRevival), false);
+    assert.equal(
+      computeDueReviews(notInRevival, dueChunkSet, "2026-01-20").length,
+      1,
+      "the same piece, not in revival, still surfaces its due review"
+    );
   });
 });

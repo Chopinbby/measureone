@@ -23,7 +23,7 @@ import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from ".
 import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "./lib/scheduling";
-import { computeRevivalPlan } from "./lib/revival";
+import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
@@ -172,11 +172,11 @@ export default function App() {
   const currentDay = dayOverride || realCurrentDay;
 
   const navItems = useMemo(() => {
-    if (!piece || !piece.revival || !piece.revival.active) return NAV_BASE;
+    if (!isInRevival(piece)) return NAV_BASE;
     const items = [...NAV_BASE];
     items.splice(items.findIndex((n) => n.key === "progress"), 0, REVIVAL_NAV_ITEM);
     return items;
-  }, [piece && piece.revival && piece.revival.active]);
+  }, [isInRevival(piece)]);
 
   const switchToPiece = (id) => {
     setActivePieceId(id);
@@ -788,7 +788,7 @@ export default function App() {
   };
 
   const handleOpenRevival = () => {
-    if (piece.revival && piece.revival.active) setActiveTab("revival");
+    if (isInRevival(piece)) setActiveTab("revival");
     else setRevivalModalOpen(true);
   };
 
@@ -1065,7 +1065,7 @@ export default function App() {
                 onClearRelearning={handleClearRelearning}
               />
             )}
-            {activeTab === "revival" && piece.revival && piece.revival.active && (
+            {activeTab === "revival" && isInRevival(piece) && (
               <RevivalTab
                 piece={piece}
                 chunkSet={chunkSet}

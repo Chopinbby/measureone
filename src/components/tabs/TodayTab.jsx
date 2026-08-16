@@ -7,6 +7,7 @@ import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
+import { isInRevival } from "../../lib/revival";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes } from "../../lib/utils";
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
@@ -26,7 +27,7 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession }) 
     const suppressed =
       status !== "active"
         ? `Maintenance reviews are paused while this piece is ${status}.`
-        : piece.revival && piece.revival.startedAt
+        : isInRevival(piece)
           ? "Maintenance reviews are set aside while a revival is running — the Revival tab has the plan."
           : null;
 

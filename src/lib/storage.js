@@ -1,6 +1,7 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
 import { todayISODate, addDaysISO } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
+import { isInRevival } from "./revival";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -702,7 +703,7 @@ export function mergeImportedPiece(existing, imported, ladderChoice = "existing"
   // An in-progress revival is live session state — protect it from being
   // overwritten by a stale import even if the import's revival looks
   // "present" by the generic rule above.
-  merged.revival = existing.revival && existing.revival.active ? existing.revival : (imported.revival || existing.revival);
+  merged.revival = isInRevival(existing) ? existing.revival : (imported.revival || existing.revival);
 
   merged.id = existing.id;
   merged.createdAt = existing.createdAt;

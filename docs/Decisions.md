@@ -1906,6 +1906,50 @@ not just from an existing piece via the Overview dashboard.**
   default — "zero sessions logged" was already a valid starting state, not
   a special case to build for.
 
+**Decision (built — Pass 19 follow-up): "is this piece in revival?" has one
+definition, `isInRevival(piece)` in `lib/revival.js`, standardized on
+`revival.active`.**
+
+- **Why:** `piece.revival` records an in-progress run two ways — the
+  `active` boolean and the `startedAt` timestamp — and both are set and
+  cleared together by `handleStartRevival`/`handleEndRevival` (App.jsx).
+  Because both were live, call sites drifted into checking different ones:
+  App.jsx's nav, `OverviewTab`, and `storage.js`'s import merge read
+  `active`, while `computeDueReviews` (`lib/maintenance.js`) and
+  `TodayTab`'s suppression copy read `startedAt`. **This was never a live
+  bug** — the two cannot disagree through any path the app itself takes —
+  but it left one rule written down twice, in two shapes, with nothing
+  keeping them in step. Caught in self-review while building Pass 19's
+  Master Agenda subtabs, which would otherwise have added a third copy.
+- **Why `active` and not `startedAt`:** answering this yes/no question is
+  `active`'s entire job, whereas `startedAt` has a real second one — it's
+  the cutoff `computeComboEscalations` uses to decide which logged sessions
+  belong to the current run. Each field now does only what it's for, and
+  `computeComboEscalations` deliberately still reads `startedAt` directly,
+  as a timestamp rather than as a flag.
+- **Consequence:** every boolean revival gate in the app now routes through
+  `isInRevival` — `App.jsx` (nav item, tab render, `handleOpenRevival`),
+  `OverviewTab`, `TodayTab`, `MasterAgendaTab`, `computeDueReviews`,
+  `getRevivalTargetBPM`, and `storage.js`'s `mergeImportedPiece`. Behaviour
+  is unchanged in every case; the only reachable difference would be
+  externally-produced data (a hand-edited backup) setting one field without
+  the other, which now resolves consistently instead of per-call-site.
+  Locked with regression tests in `test/revival.test.mjs`, including one
+  asserting `computeDueReviews` suppresses maintenance for exactly the
+  pieces `isInRevival` reports.
+- **Verification gap, stated plainly:** the consolidation was verified by
+  unit test and by exercising the app with no piece in revival — *not* by
+  running an actual revival end-to-end in the browser, which would have
+  meant writing revival state into real saved data. The five UI gates this
+  touched (`App.jsx`'s nav item and tab render, `OverviewTab`'s button
+  label, `TodayTab`'s suppression copy, `MasterAgendaTab`'s filter) are
+  therefore covered at the function level but not the wiring level. Worth
+  one deliberate manual pass on a throwaway piece.
+- **The scope note that produced this:** the fix touches `lib/maintenance.js`,
+  which Pass 19 had explicitly placed out of scope ("no change to
+  `computeDueReviews`"). It was flagged rather than folded into that pass,
+  and done separately once confirmed — the pass boundary held.
+
 ## Lifecycle
 
 **Decision: pause/archive (`piece.status`) is a manual, user-set toggle with
@@ -1953,6 +1997,25 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **`piece.revival` is restored all-or-nothing on load, unlike
+  `ladderConfig` — the same shape-gap that caused a documented P1 crash.**
+  `validateAndMigratePiece` (`lib/storage.js`) does
+  `revival: piece.revival || { …defaults }`, so a saved piece carrying a
+  *partial* revival object never gets its missing sub-fields filled in.
+  This is precisely the pattern `mergeLadderConfig` exists to fix for
+  ladder settings ("a missing `bpmSteps` throws on the very next logged
+  session — a real crash on real already-saved data"), and revival was
+  never given the same field-by-field treatment. Surfaced in review of the
+  Pass 19 follow-up above, because that change made `isInRevival` (and
+  therefore `computeDueReviews`) read `revival.active` where the
+  maintenance query previously read `revival.startedAt` — so for a piece
+  carrying only one of the two, suppression behaviour changes. Normal use
+  never produces that shape (both fields are set and cleared together), so
+  this is reachable only via externally-produced data: a hand-edited
+  backup, or a piece written by an app version predating one of the
+  fields. **Not fixed** — it's migration code touching every saved piece,
+  and the safe fix (mirror `mergeLadderConfig`) deserves its own pass with
+  its own verification rather than being folded into a UI change.
 - **Graduation's tempo-floor check uses `practiceBPM` from *before* the
   current session, even when that same session's demonstrated-tempo
   override (see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder))

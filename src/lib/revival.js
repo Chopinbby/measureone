@@ -9,6 +9,25 @@ import { computeConfidence, getDefaultTargetBPM, sessionOutcome } from "./confid
 /*  docs/Data-Model.md#revival and docs/Algorithms.md#revival.         */
 /* ------------------------------------------------------------------ */
 
+// The single source of truth for "is this piece currently in revival?".
+//
+// `piece.revival` records an in-progress run two ways — the `active`
+// boolean and the `startedAt` timestamp — always set and cleared together
+// (handleStartRevival / handleEndRevival, App.jsx). Because both were
+// live, call sites drifted into checking different ones: most of the UI
+// read `active`, while computeDueReviews and TodayTab read `startedAt`.
+// They can't disagree through any path the app itself takes, so this was
+// never a live bug — but it left the same rule written down twice, in two
+// shapes, with nothing keeping them in step.
+//
+// Standardized on `active`: answering this yes/no question is that
+// field's entire job, whereas `startedAt` has a real second one — it's
+// the cutoff computeComboEscalations uses to tell which logged sessions
+// belong to the current run. Each field now does only what it's for.
+export function isInRevival(piece) {
+  return !!(piece && piece.revival && piece.revival.active);
+}
+
 // During an active revival, a piece-wide performance tempo (collected at
 // revival entry) takes priority over whatever target was set while first
 // learning the piece — the point of revival is often to land at a real
@@ -16,7 +35,7 @@ import { computeConfidence, getDefaultTargetBPM, sessionOutcome } from "./confid
 // intent should win even where a chunk already has its own explicit target.
 export function getRevivalTargetBPM(piece, chunk) {
   const entry = piece.progress[chunk.id] || {};
-  if (piece.revival && piece.revival.active && piece.revival.performanceTempo) {
+  if (isInRevival(piece) && piece.revival.performanceTempo) {
     return piece.revival.performanceTempo;
   }
   return entry.targetBPM || getDefaultTargetBPM(piece, chunk);

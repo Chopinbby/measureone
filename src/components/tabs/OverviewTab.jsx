@@ -6,7 +6,7 @@ import { PartSwitcher } from "../PartSwitcher";
 import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib/utils";
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
-import { computeRevivalTriggers } from "../../lib/revival";
+import { computeRevivalTriggers, isInRevival } from "../../lib/revival";
 import { PIECE_STATUS_LABEL } from "../../lib/constants";
 
 export function OverviewTab({
@@ -24,7 +24,7 @@ export function OverviewTab({
   onAddPart,
   onSelectDay,
 }) {
-  const revivalActive = !!(piece.revival && piece.revival.active);
+  const revivalActive = isInRevival(piece);
   const revivalTriggers = !revivalActive && chunkSet ? computeRevivalTriggers(piece, chunkSet) : { triggered: false, reasons: [] };
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
@@ -43,7 +43,7 @@ export function OverviewTab({
     <div className="tab-pane">
       <div className="overview-top-row">
         <button className="ghost-btn" onClick={onStartRevival}>
-          <RefreshCw size={14} /> {piece.revival && piece.revival.active ? "Continue revival" : "Start revival"}
+          <RefreshCw size={14} /> {revivalActive ? "Continue revival" : "Start revival"}
         </button>
         <button className="ghost-btn" onClick={onAddPiece}>
           <Plus size={14} /> Add new piece

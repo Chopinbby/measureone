@@ -1,5 +1,6 @@
 import { EFFORT_TO_MIN } from "./constants";
 import { daysBetweenInclusive } from "./utils";
+import { isInRevival } from "./revival";
 
 /* ------------------------------------------------------------------ */
 /*  "What's due" — the live maintenance query.                         */
@@ -29,7 +30,7 @@ import { daysBetweenInclusive } from "./utils";
 //   * paused/archived pieces — pause/archive already means "off my daily
 //     plate" for schedule pressure generally, and maintenance is schedule
 //     pressure.
-//   * a piece with an active revival (`revival.startedAt` set) — revival
+//   * a piece with an active revival (isInRevival, lib/revival.js) — revival
 //     is already "something's wrong, working through it" mode; routine
 //     maintenance shown alongside it would compete for attention with no
 //     clear priority between the two.
@@ -39,7 +40,7 @@ import { daysBetweenInclusive } from "./utils";
 export function computeDueReviews(piece, chunkSet, asOfDate) {
   if (!piece || !chunkSet || !asOfDate) return [];
   if ((piece.status || "active") !== "active") return [];
-  if (piece.revival && piece.revival.startedAt) return [];
+  if (isInRevival(piece)) return [];
 
   const progress = piece.progress || {};
   const items = [];

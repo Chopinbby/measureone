@@ -82,9 +82,10 @@ short labels.
 `--teal` always means easy / confident / positive. `--brick` always means
 hard / needs-work / danger. `--brass` is the neutral primary accent (medium
 difficulty, primary actions). This mapping is used identically across the
-Piece Map, Progress charts, Analytics bars, and the practice-progress tier
-bar — a color should never be repurposed to mean something different in a
-new panel just because it's visually convenient.
+Piece Map, every Progress chart (including the confidence-by-difficulty and
+outcome-breakdown bars), and the practice-progress tier bar — a color should
+never be repurposed to mean something different in a new panel just because
+it's visually convenient.
 
 ## Editors are shared, so the UI can't drift from itself
 

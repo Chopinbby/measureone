@@ -19,7 +19,9 @@
 Setup wizard, chunking/timeline engine, Piece Map, Today's Practice (timer,
 reps/BPM/effectiveness logging), Progress tab (rolling-window consistency,
 consistency heatmap, actual-vs-planned, projected finish, tempo trend,
-effectiveness calibration), multi-piece support, rescheduling, section
+effectiveness calibration — plus, as of Pass 20, confidence-by-difficulty
+and recurring-material payoff, folded in when the separate Analytics tab
+was removed; see [Decisions.md](Decisions.md#ux)), multi-piece support, rescheduling, section
 run-throughs, reference recordings, multi-movement works (movements as
 self-contained sibling pieces sharing a `workId` — see
 [Decisions.md](Decisions.md#multi-movement-works)), backup export/import,
@@ -50,21 +52,12 @@ though, since it's scoped to "take this off my daily agenda" regardless.
 
 ## Immediate next action
 
-**Fold Analytics into Progress and remove the Analytics tab.** This was
-agreed on but not yet executed — as of this writing `AnalyticsTab` still
-exists and is still wired into the sidebar `NAV_BASE`. Scope, per the original
-decision (see [Decisions.md](Decisions.md)):
-
-- Move the confidence-by-difficulty panel and the recurring-material-payoff
-  panel into `ProgressTab`.
-- Remove the Analytics entry from `NAV` and delete `AnalyticsTab`.
-- While in the same pass: the old "Tempo progress" BPM-bars panel (if any
-  remnant remains) is superseded by Progress's tempo trend sparklines and
-  should not coexist with them.
-- Exact placement of the two folded-in panels within Progress's layout was
-  never pinned down precisely beyond "near the effectiveness calibration
-  panel, somewhere unobtrusive" — decide this when implementing rather than
-  guessing from this doc.
+Nothing is currently singled out here. The previous occupant — "fold
+Analytics into Progress and remove the Analytics tab" — **shipped in Pass
+20** (see the Done section above and
+[Decisions.md](Decisions.md#ux) for the pinned-down panel placement).
+Pick the next thing from the priority-ordered backlog below rather than
+assuming this section is stale.
 
 ## Priority-ordered backlog
 

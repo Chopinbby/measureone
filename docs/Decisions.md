@@ -1588,6 +1588,102 @@ UI is now the only option in the wizard and Settings.**
   forward, so pieces already saved with them keep working unchanged. See
   [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
 
+**Decision (Pass 20): the Analytics tab is gone. Its two panels now live in
+Progress, in this exact order — "Confidence by difficulty" immediately after
+"Outcome breakdown," then "Recurring material payoff," then "Recent practice
+history" last as before.**
+
+This pins down the placement that was previously agreed only as "near
+effectiveness calibration, somewhere unobtrusive" (the panel since renamed
+"Outcome breakdown" — see [Spaced repetition & maintenance](#spaced-repetition--maintenance)
+above). Progress's full panel order is now:
+
+1. Headline stat cards (consistency count, most improved)
+2. Consistency heatmap
+3. Actual vs. planned progress
+4. Projected finish
+5. Tempo trend
+6. Outcome breakdown
+7. **Confidence by difficulty** ← folded in
+8. **Recurring material payoff** ← folded in
+9. Recent practice history
+
+- **Why here:** "Confidence by difficulty" renders the same horizontal
+  distribution bars (`analytics-bars`) as "Outcome breakdown" — putting them
+  adjacent makes the page read as one group of "how is the work distributed"
+  charts, after the group of time-based trend charts (2–5) and before the raw
+  log (9). It also satisfies "unobtrusive" literally: both folded-in panels
+  are below the fold, after everything that answers *am I on track*.
+- **Why "Recurring material payoff" goes second of the pair:** it's a single
+  standing sentence about the plan, with no per-day or per-chunk dimension —
+  not a trend and not a distribution. Placing it after the charts keeps it
+  from splitting them, and keeps the raw practice log at the bottom of the
+  page where it belongs.
+- **Deliberately not done:** the metrics themselves were not redesigned.
+  This was pure relocation — same computations, same copy, same markup, only
+  the `<h1>Analytics</h1>` tab header dropped (Progress already has one).
+  Whether either panel is measuring the right thing is a separate question,
+  untouched here.
+- **Consequence:** `AnalyticsTab.jsx` is deleted and the `analytics` entry is
+  out of `NAV_BASE` (`src/App.jsx`). The `.analytics-*` CSS classes stay —
+  they were always shared with Progress's outcome bars and are not
+  Analytics-specific despite the name.
+
+**Decision (Pass 20): an unresolvable id in "Recent practice history" is
+handled by *category*, not by a blanket null check — and section
+run-throughs are a valid category, not a failure.**
+
+Found while verifying the fold-in above: Progress crashed outright on a real
+piece. `ProgressTab` did `chunkById[id].start` with no guard, so an
+unresolvable id threw and React unmounted the **whole tab** — every panel,
+not just the offending row.
+
+- **Why it mattered more than it looked:** the trigger wasn't corrupt data.
+  `sr_<sectionId>` run-through ids are written into `piece.progress` by
+  normal logging but are deliberately excluded from `generateAllChunks`'s
+  `all` array, so they are *never* resolvable through the chunk set on any
+  piece. **Every user who ever ticked off a section run-through had a dead
+  Progress tab.** Confirmed pre-existing by reverting `ProgressTab.jsx` to
+  its committed version and reproducing the identical crash.
+- **The rejected first fix:** guard the lookup and label everything
+  unresolvable as stale. This *worked* and *stopped the crash*, but was
+  wrong — it silently relabels a real, current run-through as a leftover
+  from an old plan. Caught only by checking the rendered output against
+  known data rather than trusting "no longer crashes" as success. **A guard
+  that stops an exception is not automatically a correct fix.**
+- **What shipped instead:** four ordered cases —
+  `__consolidation__`, live chunk, `sr_` resolved off `piece.sections`, then
+  genuinely stale. Full rules in
+  [Algorithms.md](Algorithms.md#practice-history-labels).
+- **Stale entries keep their day but never get invented measures.** The
+  practice really happened, so erasing the row would be a lie; naming
+  measures we can't derive would be a bigger one. They collapse into one
+  "N passages from an earlier version of this plan" note rather than
+  repeating per id.
+- **No `console.warn` on either unresolvable path.** Both are expected
+  states — unlike the malformed ladder snapshots in `App.jsx`, which do warn
+  because they indicate something genuinely wrong.
+
+**Decision (Pass 20): the history logic moved into `lib/history.js` and got
+22 tests, at the user's explicit request, after the fix was already
+working.**
+
+- **Why:** the fix was verified only by hand in a browser, because the test
+  suite is lib-level and there is no harness for rendering components —
+  so nothing would have caught a re-break. Rather than build a component
+  test setup, the logic moved to where testability already exists.
+  `computePracticeHistory(piece, chunks, limit)` returns
+  `[{ day, label, unresolvedCount }]`; `unresolvedCount` is exposed
+  specifically so tests can assert behavior without pinning display copy.
+- **The tests were verified to be capable of failing.** Both bugs were
+  deliberately re-introduced and the suite re-run: the unguarded lookup
+  produced 8 failures (exactly the run-through and stale-id tests), and
+  forcing section lookups to fail produced 3 (exactly the naming tests).
+  A test that passes without being able to fail proves nothing — this check
+  is worth repeating whenever a regression test is added here.
+- **Consequence / precedent:** this is the standing answer to "component
+  logic can't be tested." Move it to `lib/`. `npm test`: 256 → 278.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as
@@ -2054,6 +2150,20 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **Nothing prunes orphaned `piece.progress` entries after a piece edit, and
+  it's undecided whether anything should.** Surfaced in Pass 20 while fixing
+  the history crash (see [UX](#ux) above). Editing measures/sections/
+  difficulty regenerates chunk ids, leaving progress entries that no longer
+  match any chunk. Today they survive forever and Progress reports them
+  honestly as "N passages from an earlier version of this plan" — but they
+  also still count toward `allSessions` in the outcome breakdown and toward
+  the practiced-days set feeding the consistency stat, which is arguably
+  correct (the practice happened) or arguably double-counting against a plan
+  that no longer contains it. **Deliberately not resolved in Pass 20**,
+  which was a relocation pass: deciding this means deciding whether
+  orphaned history is data to preserve, migrate onto the new chunks, or
+  discard — a data-lifecycle question, and the discard option is
+  irreversible. Not urgent; the visible behavior is already honest.
 - **Gate revival entry behind a piece being in maintenance — blocked until
   "maintenance" is an actual mode.** Agreed in principle with the user
   (Pass 19 follow-up): the "Start revival" entry point should not be
@@ -2143,9 +2253,9 @@ oversight to silently fix; surface it instead.
   still disagree. It's not decided whether that's intentional (Overview
   wants something coarser) or drift that should be resolved. See
   [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
-- **Exact placement of the Analytics panels once folded into Progress** —
-  agreed in general terms ("near effectiveness calibration, somewhere
-  unobtrusive") but never pinned down. See [Roadmap.md](Roadmap.md).
+- ~~**Exact placement of the Analytics panels once folded into Progress**~~
+  — **Resolved (Pass 20)**: pinned down and built. See the dedicated
+  decision in [UX](#ux) above for the exact panel order and why.
 - **Should Progress's velocity-based "projected finish" stat (`ProgressTab`,
   `projectedDay`) ever show a real calendar date instead of staying in
   day-number terms?** Still open — day-number was chosen as the safer

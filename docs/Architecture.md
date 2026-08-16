@@ -39,6 +39,15 @@ MeasureOne.jsx/
 ├── index.html
 ├── package.json
 ├── vite.config.js
+├── test/                       # `npm test` — node:test, run against the
+│                               # real lib/ modules via a small loader hook
+│                               # (extensionless-loader.mjs) that lets Node
+│                               # resolve lib/'s extensionless imports.
+│                               # LIB-LEVEL ONLY: there is no harness for
+│                               # rendering components, so nothing under
+│                               # components/ is covered. Logic that needs
+│                               # protecting belongs in lib/ — that's why
+│                               # lib/history.js exists (Pass 20).
 └── src/
     ├── main.jsx                 # ReactDOM entry point, just mounts <App />
     ├── App.jsx                  # state + layout only — ~1,620 lines; renders
@@ -108,6 +117,18 @@ MeasureOne.jsx/
     │   │                                  # by both MasterAgendaTab and TodayTab
     │   │                                  # (plus totalDueMinutes, the shared
     │   │                                  # effort→minutes total for a due list)
+    │   ├── history.js                    # computePracticeHistory (Pass 20) —
+    │   │                                  # turns persisted progress keys back
+    │   │                                  # into readable day-by-day labels for
+    │   │                                  # ProgressTab's "Recent practice
+    │   │                                  # history". Lives in lib/ because it
+    │   │                                  # absorbs a real mismatch, not just
+    │   │                                  # formatting: piece.progress is
+    │   │                                  # PERSISTED and keyed by chunk id,
+    │   │                                  # while the chunk set is RE-DERIVED
+    │   │                                  # every render, so the two can
+    │   │                                  # disagree — see
+    │   │                                  # Algorithms.md#practice-history-labels
     │   ├── works.js                      # multi-movement grouping helpers
     │   └── storage.js                     # localStorage load/save/export/import
     └── components/
@@ -125,7 +146,7 @@ MeasureOne.jsx/
         │       RecordingsEditor.jsx, RecordingsList.jsx
         └── tabs/
             ├── OverviewTab.jsx, TimelineTab.jsx, PieceMapTab.jsx,
-            │   ProgressTab.jsx, AnalyticsTab.jsx, SettingsTab.jsx,
+            │   ProgressTab.jsx, SettingsTab.jsx,
             │   MasterAgendaTab.jsx
             ├── TodayTab.jsx
             │   └── today/  ChecklistItem.jsx, DayChecklist.jsx,
@@ -164,8 +185,7 @@ single-file Claude.ai artifact.
 | `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. `PieceCheckRow` is the shared checkbox-row list item both modals render. **Since Pass 13**, `ImportPiecesModal` also shows a small "keep what's here" / "use the imported version" chooser under any matched piece whose practice-ladder progress genuinely conflicts with what's already saved (`diffImportedPiece`, [Algorithms.md](Algorithms.md#import-merge)) — most matches never show it, since an updatedAt-based recency check already resolves the common cases automatically. |
 | `RandomStartPanel` | Revival-only: picks a uniformly random chunk, transition, or section and displays it (plus its memory anchor, if any) for a cold-start warm-up. |
 | `RevivalTab` | Composes the revival flow end to end: settings (performance tempo, tempo ladder start fraction), the embedded `PieceMapTab` reassessment pass, flagged-chunks summary (rough/lost, same field the Piece Map's run-through flag sets — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)), `RandomStartPanel`, and the generated plan (day-grouped `ChecklistItem`s with tempo ladders/memory anchors). See [Algorithms.md](Algorithms.md#revival). |
-| `ProgressTab` | Trend/diagnosis charts — rolling-window consistency, heatmap, actual-vs-planned, projected finish, tempo trend, effectiveness calibration, recent history. |
-| `AnalyticsTab` | Confidence-by-difficulty, recurring-material payoff. **Slated to be folded into `ProgressTab` and removed** — not yet done; see [Roadmap.md](Roadmap.md). Check the sidebar `NAV_BASE` array for current truth before assuming either state. |
+| `ProgressTab` | Trend/diagnosis charts, in render order: rolling-window consistency + most-improved stat cards, consistency heatmap, actual-vs-planned, projected finish, tempo trend, outcome breakdown, **confidence by difficulty**, **recurring material payoff**, recent practice history. The last two were folded in from the former `AnalyticsTab` in **Pass 20**, which removed that tab entirely (file deleted, `analytics` entry gone from `NAV_BASE`) — the panels were relocated verbatim, not redesigned. Their placement is pinned down rather than incidental; see [Decisions.md](Decisions.md#ux). The `.analytics-*` CSS classes survive the rename and are **not** Analytics-specific — Progress's outcome bars always shared them. Recent practice history's labels come from `computePracticeHistory` (`lib/history.js`), not from logic inline here. |
 | `MasterAgendaTab` | Cross-piece daily view — aggregates every *active* piece's scheduled tasks for a selected date (date-navigable, not locked to today) into one list, so a multi-piece user isn't switching between pieces to see the whole day. **First item in the sidebar as of Pass 18.** For a piece still inside its plan it reads `getEffectiveTimeline(...).days[dayNumber - 1]` directly, the same fixed-length, `daysToLearn`-bounded indexing `TodayTab` uses. **Since Pass 8, a piece that has run past its plan no longer falls out of that indexing** — it renders a due-maintenance summary from `computeDueReviews` (`lib/maintenance.js`) instead: merged measure ranges under a "Due" tag, plus a count. That branch only ever fires for the real today, since due-ness is strictly "as of today" and the date picker must not become a forward-looking window. **Since Pass 19 the content is split across three subtabs** — Learning phase / Maintenance due / Revival — with counts in the labels. The first two are a pure presentation split of the same `agendaData.items` array, partitioned on the `isDueList` flag that already distinguished the two card shapes; no new computation, and the combined count is unchanged. The Revival subtab is *not* such a split: pieces in revival are skipped when building the other two lists (`isInRevival`), so each piece appears in exactly one subtab, and revival cards are built from a separate derivation — status (reassessment in progress / plan ready) plus the **highest-priority items** as merged measure ranges under a "Start here" tag. Not "today's work": a revival plan is priority-ordered, not dated. Uses `piece.revival.plan` when one exists (so it agrees with `RevivalTab`) and falls back to a live `computeRevivalPlan` call mid-reassessment. Revival cards deliberately carry no time estimate and contribute nothing to the "Total planned" banner. The selected subtab persists across tab switches via a module-level variable (not state, not `localStorage`) — a fresh page load starts on Learning phase. See [Decisions.md](Decisions.md#revival). |
 | `SettingsTab` | View mode: read-only summary + Edit/Delete/Add-new-piece/Export/Import. Edit mode reuses the shared field-editor components. |
 | `App` | Root component. Owns all state and renders the sidebar + active tab, or the empty-state/loading screens. |

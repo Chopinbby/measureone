@@ -13,8 +13,8 @@
 > **Related:** [Algorithms.md](Algorithms.md) · [Architecture.md](Architecture.md)
 > **Update when:** A field is added, removed, or its meaning changes on
 > `piece` or `ChunkProgress`. This doc drifting from `defaultPiece()` in
-> `src/App.jsx` is the single most likely way these docs go stale — check it
-> first when auditing.
+> `src/components/Wizard.jsx` is the single most likely way these docs go
+> stale — check it first when auditing.
 
 ## The piece object
 
@@ -502,8 +502,36 @@ This distinction matters and is easy to get backwards:
 scheduling code iterates over; `practiceChunks` alone is what
 dashboard/timeline-coverage stats use. Section run-throughs and section
 transitions are **not** part of this return value — they're computed
-separately and only for display in Today's Practice, since they aren't
-scheduled to a specific day.
+separately by `computeSectionRunThroughs()`, since they aren't scheduled to
+a specific day.
+
+### `piece.progress` keys are not guaranteed to exist in the chunk set
+
+This is the trap that caused a real crash (Pass 20), and it follows directly
+from the split above. **`piece.progress` is persisted; the chunk set is
+re-derived from `piece` on every render.** So a key in `piece.progress` may
+have no matching entry in `generateAllChunks(...).all`, for three distinct
+reasons:
+
+- **`__consolidation__`** — a synthetic key for whole-piece run-throughs
+  (`handleLogRunThrough`), never a chunk at all. Long-established; most code
+  that walks `piece.progress` already special-cases it explicitly.
+- **`sr_<sectionId>`** — a section run-through. Logging one writes a normal
+  progress entry under this id, but per the paragraph above it is *never* in
+  `all`, on any piece. **This is not an edge case** — it happens the first
+  time any user ticks off a section run-through.
+- **Genuinely stale ids** — editing measures, sections, or difficulty
+  regenerates chunk ids, orphaning progress entries logged before the edit.
+  Nothing prunes them, deliberately: they're the only record that the
+  practice happened.
+
+**Any code that iterates `piece.progress` keys and looks them up against the
+chunk set must handle a miss.** Code that iterates `timeline.days[]` ids
+instead is safe by construction, since the timeline is derived from the same
+chunk set — that's why `TimelineTab`, `OverviewTab` and `DayChecklist` need
+no guard while `ProgressTab`'s history did. `computePracticeHistory`
+(`lib/history.js`) is the worked example of handling all three; see
+[Algorithms.md](Algorithms.md#practice-history-labels).
 
 ## The two "how good is this chunk" scores — don't conflate them
 
@@ -515,7 +543,7 @@ places, and they can disagree:
 | Shape | continuous 0–100 | one of `untouched / learned / comfortable / mastered` |
 | Inputs | full session history: reps, tempo vs. target, recency decay, self-reported effectiveness, difficulty/recurring adjustments, a rough/lost flag cap | the chunk's spaced-repetition ladder `stage` (as of Pass 6 — see below) |
 | Overridable | yes, via `manualConfidence` | no |
-| Used by | Piece Map, Focus Panel, Progress ("most improved"), Analytics | Overview's "Practice progress" bar, `PartSwitcher`'s untouched-measure count |
+| Used by | Piece Map, Focus Panel, Progress ("most improved" and the confidence-by-difficulty bars) | Overview's "Practice progress" bar, `PartSwitcher`'s untouched-measure count |
 
 This is a real open question, not a documented design decision — see
 [Decisions.md](Decisions.md#open-questions). If you're adding a new

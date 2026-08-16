@@ -626,8 +626,9 @@ doesn't distinguish which):
   toggle.
 - **Confidence cap, not a `stage`/ladder read.** Rough/lost flags must
   immediately affect displayed confidence everywhere it shows (Overview,
-  Progress, Piece Map, and everywhere else `computeConfidence` is called —
-  Analytics, the Today checklist's confidence pill, `FocusPanel`) — a
+  Progress — including its confidence-by-difficulty bars — Piece Map, and
+  everywhere else `computeConfidence` is called: the Today checklist's
+  confidence pill, `FocusPanel`) — a
   chunk just flagged "lost" showing an unchanged confidence number
   elsewhere would be a visible contradiction. Implemented as a cap inside
   `computeConfidence` itself (`lib/confidence.js`) — `Math.min(score, 55)`

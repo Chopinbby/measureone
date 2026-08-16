@@ -70,9 +70,9 @@ Entry point: the Today tab, or clicking a day card in Timeline
 "View all" mode on Today shows every day's checklist at once instead of just
 the current day.
 
-## 3. Checking in: Overview vs. Progress vs. Analytics
+## 3. Checking in: Overview vs. Progress
 
-These three tabs answer different questions and are not interchangeable —
+These two tabs answer different questions and are not interchangeable —
 see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are-different-screens):
 
 - **Overview**: "where do things stand right now" — measures/sections
@@ -80,14 +80,15 @@ see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are
   bar broken down by `computeProgressTier`.
 - **Progress**: "how is it actually going" — rolling-window consistency,
   consistency heatmap, most-improved-this-week, actual-vs-planned chart,
-  projected finish date, tempo trend sparklines, effectiveness calibration,
-  recent practice history.
-- **Analytics**: confidence-by-difficulty breakdown and recurring-material
-  time-savings estimate. **Note:** a decision to fold these two panels into
-  Progress and remove the Analytics tab entirely was agreed on but not yet
-  implemented — see [Roadmap.md](Roadmap.md). Don't assume Analytics is
-  permanent; don't assume it's already gone either — check the sidebar nav
-  in `App.jsx` for current truth.
+  projected finish date, tempo trend sparklines, outcome breakdown,
+  confidence-by-difficulty, recurring-material time savings, and recent
+  practice history.
+
+**There was a third tab, Analytics — it is gone as of Pass 20.** Its two
+panels (confidence-by-difficulty, recurring-material payoff) now sit near
+the bottom of Progress, after the outcome breakdown and before the practice
+log; the metrics were relocated unchanged, not redesigned. See
+[Decisions.md](Decisions.md#ux) for the placement reasoning.
 
 ## 4. Falling behind and rescheduling
 

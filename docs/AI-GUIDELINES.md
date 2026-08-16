@@ -79,6 +79,47 @@ That happened because a metric was added for one screen without checking
 whether an existing one already answered the same question. Don't repeat
 it without at least raising the question to the user.
 
+## A guard that stops an exception is not automatically a correct fix
+
+When you fix a crash, "it no longer throws" is evidence that it no longer
+throws — nothing more. Check what the code now *does* against data you
+actually understand, before calling it fixed.
+
+The worked example (Pass 20): Progress crashed because a logged id couldn't
+be found in the current chunk set. The obvious fix — guard the lookup, label
+anything unresolvable as leftover from an older version of the plan —
+stopped the crash completely and looked finished. It was wrong. Two quite
+different things land in "unresolvable," and the common one
+(`sr_<sectionId>` section run-throughs, which are valid and current but
+deliberately never in the chunk set) was being relabelled as stale junk.
+Nothing failed; no test went red; the tab rendered. It was caught only by
+reading the rendered output against a piece whose history was already known.
+
+The generalizable habit: when a fix hinges on a case you just discovered,
+ask whether that case is really one case. If an error path lumps together
+"expected but unusual" and "genuinely broken," the fix has to tell them
+apart — see
+[Data-Model.md](Data-Model.md#pieceprogress-keys-are-not-guaranteed-to-exist-in-the-chunk-set)
+for the three-way split this particular one needed.
+
+## Verify a regression test can actually fail
+
+After writing a test that guards a bug, re-introduce the bug and confirm the
+test goes red. Then revert. A test that asserts nothing and a test that
+guards everything look identical when both are green.
+
+This costs a couple of minutes and it has already earned its place: in Pass
+20 the two deliberate re-breaks failed exactly the expected tests (8 for the
+unguarded lookup, 3 for the mislabelling) and nothing else, which is what
+established that the suite actually covered both distinct failure modes
+rather than only the one that crashed.
+
+Related, and worth knowing before you decide something "can't be tested":
+the suite is **lib-level only** — `node:test` against `src/lib/*`, with no
+harness for rendering components. If logic that needs protecting is sitting
+in a component, the answer is to move it into `lib/`, not to skip the test.
+`lib/history.js` exists for exactly that reason.
+
 ## Avoid duplicate documentation
 
 Each concept has exactly one canonical home in this `docs/` set (see

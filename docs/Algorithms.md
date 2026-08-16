@@ -364,9 +364,10 @@ the same value as `lost` since it's the same underlying ladder state
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built).
 Both caps apply even on top of a manual override, so a stale "I know
 better than the algorithm" value from before the flag landed can't hide
-it. Every caller of `computeConfidence` (Overview, Progress, Piece Map,
-Analytics, the Today checklist, `FocusPanel`) gets this for free, since
-none of them compute confidence independently — this is deliberately a cap
+it. Every caller of `computeConfidence` (Overview, Progress — including
+its confidence-by-difficulty bars, folded in from the former Analytics tab
+in Pass 20 — Piece Map, the Today checklist, `FocusPanel`) gets this for
+free, since none of them compute confidence independently — this is deliberately a cap
 inside the shared function, not a per-tab display adjustment. Does not
 read `stage` — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
 on why ladder stage still doesn't feed into confidence.
@@ -833,6 +834,58 @@ date" in agreement.
 > The one visible artifact is a session logged *today, before the fix
 > landed* losing its checkmark. See
 > [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+## Practice history labels
+
+`computePracticeHistory(piece, chunks, limit = 10)` (`lib/history.js`,
+**Pass 20**) builds ProgressTab's "Recent practice history": it groups every
+`doneDays` entry across `piece.progress` by day, sorts newest-first, keeps
+the most recent `limit` days, and returns
+`[{ day, label, unresolvedCount }]`.
+
+This lives in `lib/` rather than in the component because it absorbs a real
+mismatch, not just formatting. **`piece.progress` is persisted and keyed by
+chunk id; the chunk set is re-derived on every render. The two can
+disagree**, and a logged id can fail to resolve for two quite different
+reasons. Each id is resolved in this order:
+
+1. **`__consolidation__`** — the synthetic whole-piece run-through key
+   (`handleLogRunThrough`, `App.jsx`), never a real chunk. Labelled "Full
+   run-through", with "(stopped Nx)" when that day's most recent session
+   carries a `stopCount`. A `stopCount` of **0** is shown, not treated as
+   absent — a clean run-through is the best outcome and must not read the
+   same as one that was never counted.
+2. **A live chunk id** — labelled with its measure range via `formatRange`.
+3. **A section run-through (`sr_<sectionId>`)** — resolved off
+   `piece.sections`, *not* the chunk set. These are valid, current items,
+   but `computeSectionRunThroughs` derives them fresh from live progress and
+   they are deliberately **not** part of `generateAllChunks`'s `all` array
+   (see [Section run-throughs](#section-run-throughs)), so they are *never*
+   in `chunks` on any piece. Labelled `Play through: <section> (mm. a–b)`,
+   using the same `start`-sorted ordering `computeSectionRunThroughs` uses,
+   so positional names ("Section 2") match what Today's Practice showed when
+   the session was logged.
+4. **Anything else** — genuinely stale. Editing a piece's measures,
+   sections, or difficulty regenerates chunk ids, so sessions logged before
+   that edit point at divisions that no longer exist. A deleted section
+   lands here too, via its now-unresolvable `sr_` id.
+
+Stale entries **keep their day** — the practice really happened — but are
+never given an invented measure range. They are counted and collapsed into
+one trailing note ("N passages from an earlier version of this plan")
+rather than repeated per id, which would swamp the row on a heavily-edited
+piece. `unresolvedCount` is returned alongside the label so callers and
+tests can reason about how many entries couldn't be named without parsing
+the copy back out. Deliberately **no `console.warn`** for either
+unresolvable case: unlike the malformed ladder snapshots in `App.jsx`, both
+are expected states, not a sign anything went wrong.
+
+> **This is the corrected behavior, not the original.** Before Pass 20 the
+> logic was inline in `ProgressTab` and did `chunkById[id].start` with no
+> guard — which threw on the undefined and crashed the **entire Progress
+> tab**, every panel, not just the history row. Case 3 above is not an edge
+> case: any piece with a logged section run-through hit it. See
+> [Decisions.md](Decisions.md#ux).
 
 ## Behind-schedule detection
 

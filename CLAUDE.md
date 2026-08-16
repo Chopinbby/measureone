@@ -114,6 +114,23 @@ chunking, scheduling, and confidence are actually computed, see
   `piece`), never persisted. If something schedule-related needs to persist
   (like the reschedule marker), it goes on `piece` as input data, and the
   derivation recomputes from it.
+- **A key in `piece.progress` may not exist in the chunk set — always
+  handle the miss.** `piece.progress` is persisted; the chunk set is
+  re-derived. Three kinds of key won't resolve: `__consolidation__`,
+  `sr_<sectionId>` section run-throughs (deliberately never in
+  `generateAllChunks(...).all`, so this is *routine*, not an edge case),
+  and ids orphaned when a piece edit regenerated chunk ids. An unguarded
+  `chunkById[id].start` on one of these crashed the whole Progress tab
+  (Pass 20). Iterating `timeline.days[]` ids instead is safe by
+  construction. See
+  [`docs/Data-Model.md`](docs/Data-Model.md#pieceprogress-keys-are-not-guaranteed-to-exist-in-the-chunk-set).
+- **Logic that needs a regression test belongs in `src/lib/`.** The test
+  suite (`npm test`, `node:test`) is lib-level only — there is no harness
+  for rendering components, so nothing in `components/` can be tested.
+  Move the logic rather than leaving it untested (`lib/history.js` exists
+  for exactly this reason). When you add a regression test, verify it can
+  actually *fail* by re-introducing the bug — see
+  [`docs/Decisions.md`](docs/Decisions.md#ux).
 
 ## Revival
 
@@ -143,8 +160,10 @@ learned" state yet — a definition is decided but not implemented, see
 
 ## Roadmap
 
-See [`docs/Roadmap.md`](docs/Roadmap.md) — the immediate next item is
-folding the Analytics tab into Progress (agreed, not yet implemented). The
+See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently
+singled out as "next"; pick from the priority-ordered backlog there. The
+Analytics fold-in that used to occupy that slot **shipped in Pass 20**:
+Analytics is gone as a tab and its two panels live in Progress. The
 biggest maintenance-ladder item is now **substantially built, not just
 designed**: a continuous Stabilizing/Settling/Holding cadence has replaced
 the old fixed `REVIEW_OFFSETS` review (`computeTimeline` now schedules

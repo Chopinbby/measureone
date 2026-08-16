@@ -1906,6 +1906,39 @@ not just from an existing piece via the Overview dashboard.**
   default — "zero sessions logged" was already a valid starting state, not
   a special case to build for.
 
+**Decision (built — Pass 19): Master Agenda's Revival subtab shows
+piece-level cards only, not per-chunk detail — with chunk-level detail
+explicitly left open to revisit.**
+
+- **Why this needed deciding at all:** Pass 19 was scoped as a pure
+  presentation split of data Master Agenda already computed, into three
+  subtabs (learning / maintenance / revival). The first two were exactly
+  that. The third was not: **Master Agenda computed no revival data at
+  all**, and by documented design never had — `computeDueReviews` excludes
+  pieces in revival ("revival is already 'something's wrong' mode"), and
+  such pieces are usually past their original plan window, so they simply
+  didn't appear. There was no existing bucket to split out.
+- **Consequence:** rather than pull per-chunk items from
+  `computeRevivalPlan` (new computation, and squarely inside what the pass
+  had deferred), the subtab lists each in-revival piece with its purpose,
+  where it is in the flow (reassessment / plan ready), and a link into the
+  piece. `MasterAgendaTab` also now skips in-revival pieces when building
+  the other two lists, so a piece appears in exactly one subtab rather than
+  showing stale original-plan content alongside its revival card.
+- **Deliberately left open — revisit:** whether the Revival subtab should
+  eventually show **chunk-level detail** (the same granularity the other
+  two subtabs have), rather than a piece-level summary. Recorded at the
+  user's request when choosing the piece-level version, as a "not now, but
+  reconsider" — not a closed decision. Doing it would mean Master Agenda
+  reading `piece.revival.plan` / `computeRevivalPlan`, and would reopen the
+  attention-competition question that made revival suppress maintenance in
+  the first place.
+- **Known consequence of the skip, not yet decided:** starting a revival on
+  a piece that is still mid-learning now hides that piece's ordinary
+  plan-day card while the revival runs. Consistent with the existing
+  suppression philosophy, but nothing prevents that combination today, and
+  it has not been confirmed as the wanted behaviour.
+
 **Decision (built — Pass 19 follow-up): "is this piece in revival?" has one
 definition, `isInRevival(piece)` in `lib/revival.js`, standardized on
 `revival.active`.**

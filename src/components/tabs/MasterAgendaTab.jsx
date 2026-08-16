@@ -4,9 +4,25 @@ import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
+import { REVIVAL_PURPOSE_OPTIONS } from "../../lib/constants";
+import { isInRevival } from "../../lib/revival";
+
+// Which sub-view was last open. This component unmounts whenever you
+// navigate to another main tab, so plain useState would reset the choice
+// every time you came back. Deliberately module-level rather than lifted
+// into App.jsx or written to localStorage: it's transient view state, not
+// piece data — it should survive tab switches within a session, but a
+// fresh page load starting back at Learning phase is the right default.
+let lastSubTab = "learning";
 
 export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
+  const [subTab, setSubTabState] = useState(lastSubTab);
+
+  const setSubTab = (next) => {
+    lastSubTab = next;
+    setSubTabState(next);
+  };
 
   // Compute aggregated data for all pieces on the selected date
   const agendaData = useMemo(() => {
@@ -32,6 +48,15 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
           // computeScheduleStatus, so this filter is really about visibility
           // here, not double-guarding the same rule.
           if ((piece.status || "active") !== "active") return;
+          // Pieces mid-revival get their own subtab below instead of a
+          // learning-phase or maintenance-due card — showing original
+          // plan-day content here would be stale (revival doesn't follow
+          // the bounded plan), and computeDueReviews already excludes
+          // these pieces from the maintenance-due side for the same
+          // "don't compete with revival for attention" reason
+          // (lib/maintenance.js). Without this, a piece could otherwise
+          // appear twice: once here with stale content, once in Revival.
+          if (isInRevival(piece)) return;
 
           const chunkSet = generateAllChunks(piece);
           const timeline = getEffectiveTimeline(piece, chunkSet);
@@ -118,6 +143,34 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
     }
   }, [pieces, selectedDate]);
 
+  // Pieces currently mid-revival, for the Revival subtab — a lightweight,
+  // piece-level list (not per-chunk detail; see computeRevivalPlan/
+  // RevivalTab.jsx for the full plan) built straight off the same `pieces`
+  // prop agendaData already reads, not a new query into revival.js.
+  //
+  // Guarded per-piece to the same standard as agendaData above: one piece
+  // with malformed data gets skipped and logged, rather than throwing and
+  // taking the whole tab down with it.
+  const revivalPieces = useMemo(() => {
+    try {
+      const found = [];
+      Object.entries(pieces).forEach(([pieceId, piece]) => {
+        try {
+          if (!piece) return;
+          if ((piece.status || "active") !== "active") return;
+          if (!isInRevival(piece)) return;
+          found.push({ pieceId, piece });
+        } catch (e) {
+          console.error(`Error processing revival piece ${pieceId}:`, e);
+        }
+      });
+      return found;
+    } catch (e) {
+      console.error("Error in revivalPieces computation:", e);
+      return [];
+    }
+  }, [pieces]);
+
   const handleDateChange = (days) => {
     setSelectedDate(addDaysISO(selectedDate, days));
   };
@@ -142,6 +195,83 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
         : agendaData.items.length > 0
           ? `Light — ${agendaData.items.length} pieces scheduled`
           : "Nothing scheduled";
+
+  // Same agendaData.items array, split by the one flag that already
+  // distinguishes the two shapes it produces — no new computation.
+  const learningItems = agendaData.items.filter((item) => !item.isDueList);
+  const maintenanceItems = agendaData.items.filter((item) => item.isDueList);
+
+  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount, isDueList, dueRanges, dueCount, dueOverdueCount }) => (
+    <div key={pieceId} className="piece-card">
+      <div className="piece-card-head">
+        <div>
+          <h3 className="piece-title">{piece.name}</h3>
+          {piece.composer && <p style={{ fontSize: "12px", color: "var(--ink-faint)", margin: "4px 0 0" }}>{piece.composer}</p>}
+        </div>
+        <div className="piece-meta">
+          {missedCount > 0 && <span className="badge busy">{missedCount} behind</span>}
+          <div className="piece-time">{formatMinutes(totalTime)}</div>
+        </div>
+      </div>
+
+      {isDueList ? (
+        <div className="day-card-group">
+          <span className="day-card-tag review">Due</span>
+          {dueRanges.map((r) => (
+            <span key={`due-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
+          ))}
+        </div>
+      ) : day.type === "consolidation" ? (
+        <p className="day-card-note">Full run-through of the piece</p>
+      ) : (
+        <>
+          {newRanges.length > 0 && (
+            <div className="day-card-group">
+              <span className="day-card-tag new">New</span>
+              {newRanges.map((r) => (
+                <span key={`new-${r.start}-${r.end}`} className="chip">{formatRange(r.start, r.end)}</span>
+              ))}
+            </div>
+          )}
+          {specialRanges.length > 0 && (
+            <div className="day-card-group">
+              <span className="day-card-tag special">{specialIsCombo ? "Focus" : "Review"}</span>
+              {specialRanges.map((r) => (
+                <span key={`special-${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
+              ))}
+            </div>
+          )}
+          {reviewRanges.length > 0 && (
+            <div className="day-card-group">
+              <span className="day-card-tag review">Review</span>
+              {reviewRanges.map((r) => (
+                <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
+              ))}
+            </div>
+          )}
+          {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 && (
+            <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
+          )}
+        </>
+      )}
+
+      <div className="piece-footer">
+        {/* A review arriving late is schedule slack, never a
+            failure — the due card states the count plainly and is
+            never styled as "behind". */}
+        <span style={{ fontSize: "12px", color: isDueList ? "var(--ink-soft)" : missedCount > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
+          {isDueList
+            ? `Maintenance — ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
+            : missedCount > 0
+              ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule`
+              : "On schedule"}
+        </span>
+        <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
+          Log practice →
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="tab-pane">
@@ -172,87 +302,84 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay }) {
         </div>
       </div>
 
-      {agendaData.items.length === 0 ? (
-        <div className="panel">
-          <h3>Nothing scheduled</h3>
-          <p className="wizard-hint" style={{ margin: 0 }}>
-            No active pieces have practice scheduled for this day.
-          </p>
-        </div>
-      ) : (
-        <div className="master-agenda-cards">
-          {agendaData.items.map(({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount, isDueList, dueRanges, dueCount, dueOverdueCount }) => (
-            <div key={pieceId} className="piece-card">
-              <div className="piece-card-head">
-                <div>
-                  <h3 className="piece-title">{piece.name}</h3>
-                  {piece.composer && <p style={{ fontSize: "12px", color: "var(--ink-faint)", margin: "4px 0 0" }}>{piece.composer}</p>}
-                </div>
-                <div className="piece-meta">
-                  {missedCount > 0 && <span className="badge busy">{missedCount} behind</span>}
-                  <div className="piece-time">{formatMinutes(totalTime)}</div>
-                </div>
-              </div>
+      <div className="segmented" style={{ marginBottom: 16 }}>
+        <button type="button" className={subTab === "learning" ? "active" : ""} onClick={() => setSubTab("learning")}>
+          Learning phase ({learningItems.length})
+        </button>
+        <button type="button" className={subTab === "maintenance" ? "active" : ""} onClick={() => setSubTab("maintenance")}>
+          Maintenance due ({maintenanceItems.length})
+        </button>
+        <button type="button" className={subTab === "revival" ? "active" : ""} onClick={() => setSubTab("revival")}>
+          Revival ({revivalPieces.length})
+        </button>
+      </div>
 
-              {isDueList ? (
-                <div className="day-card-group">
-                  <span className="day-card-tag review">Due</span>
-                  {dueRanges.map((r) => (
-                    <span key={`due-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
-                  ))}
-                </div>
-              ) : day.type === "consolidation" ? (
-                <p className="day-card-note">Full run-through of the piece</p>
-              ) : (
-                <>
-                  {newRanges.length > 0 && (
-                    <div className="day-card-group">
-                      <span className="day-card-tag new">New</span>
-                      {newRanges.map((r) => (
-                        <span key={`new-${r.start}-${r.end}`} className="chip">{formatRange(r.start, r.end)}</span>
-                      ))}
-                    </div>
-                  )}
-                  {specialRanges.length > 0 && (
-                    <div className="day-card-group">
-                      <span className="day-card-tag special">{specialIsCombo ? "Focus" : "Review"}</span>
-                      {specialRanges.map((r) => (
-                        <span key={`special-${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
-                      ))}
-                    </div>
-                  )}
-                  {reviewRanges.length > 0 && (
-                    <div className="day-card-group">
-                      <span className="day-card-tag review">Review</span>
-                      {reviewRanges.map((r) => (
-                        <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
-                      ))}
-                    </div>
-                  )}
-                  {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 && (
-                    <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
-                  )}
-                </>
-              )}
+      {subTab === "learning" && (
+        learningItems.length === 0 ? (
+          <div className="panel">
+            <h3>Nothing scheduled</h3>
+            <p className="wizard-hint" style={{ margin: 0 }}>
+              No active pieces have practice scheduled for this day.
+            </p>
+          </div>
+        ) : (
+          <div className="master-agenda-cards">{learningItems.map(renderPieceCard)}</div>
+        )
+      )}
 
-              <div className="piece-footer">
-                {/* A review arriving late is schedule slack, never a
-                    failure — the due card states the count plainly and is
-                    never styled as "behind". */}
-                <span style={{ fontSize: "12px", color: isDueList ? "var(--ink-soft)" : missedCount > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
-                  {isDueList
-                    ? `Maintenance — ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
-                    : missedCount > 0
-                      ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule`
-                      : "On schedule"}
-                </span>
-                <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
-                  Log practice →
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+      {subTab === "maintenance" && (
+        maintenanceItems.length === 0 ? (
+          <div className="panel">
+            <h3>Nothing due</h3>
+            <p className="wizard-hint" style={{ margin: 0 }}>
+              No maintenance reviews are due.
+            </p>
+          </div>
+        ) : (
+          <div className="master-agenda-cards">{maintenanceItems.map(renderPieceCard)}</div>
+        )
+      )}
+
+      {subTab === "revival" && (
+        revivalPieces.length === 0 ? (
+          <div className="panel">
+            <h3>No pieces in revival</h3>
+            <p className="wizard-hint" style={{ margin: 0 }}>
+              Start a revival from a piece's overview to see it here.
+            </p>
+          </div>
+        ) : (
+          <div className="master-agenda-cards">
+            {revivalPieces.map(({ pieceId, piece }) => {
+              const revival = piece.revival || {};
+              const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
+              const statusText = !revival.reassessmentComplete
+                ? "Reassessment in progress"
+                : revival.plan
+                  ? "Plan ready — resume practicing"
+                  : "Reassessment complete — plan not generated yet";
+              return (
+                <div key={pieceId} className="piece-card">
+                  <div className="piece-card-head">
+                    <div>
+                      <h3 className="piece-title">{piece.name}</h3>
+                      {piece.composer && <p style={{ fontSize: "12px", color: "var(--ink-faint)", margin: "4px 0 0" }}>{piece.composer}</p>}
+                    </div>
+                  </div>
+                  <p className="day-card-note">
+                    Bringing this piece back{purposeLabel ? ` for ${purposeLabel.label.toLowerCase()}` : ""}
+                  </p>
+                  <div className="piece-footer">
+                    <span style={{ fontSize: "12px", color: "var(--ink-soft)" }}>{statusText}</span>
+                    <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
+                      Open piece →
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
       )}
     </div>
   );

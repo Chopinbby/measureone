@@ -7,7 +7,6 @@ import {
   ListChecks,
   Layers,
   LineChart,
-  BarChart3,
   Settings as SettingsIcon,
   Plus,
   ChevronDown,
@@ -59,7 +58,6 @@ import { TodayTab } from "./components/tabs/TodayTab";
 import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
 import { RevivalTab } from "./components/tabs/RevivalTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
-import { AnalyticsTab } from "./components/tabs/AnalyticsTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
 
 /* ------------------------------------------------------------------ */
@@ -73,7 +71,6 @@ const NAV_BASE = [
   { key: "map", label: "Piece Map", icon: Music2 },
   { key: "today", label: "Today's Practice", icon: ListChecks },
   { key: "progress", label: "Progress", icon: LineChart },
-  { key: "analytics", label: "Analytics", icon: BarChart3 },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
 const REVIVAL_NAV_ITEM = { key: "revival", label: "Revival", icon: RefreshCw };
@@ -1102,7 +1099,6 @@ export default function App() {
               />
             )}
             {activeTab === "progress" && <ProgressTab piece={piece} chunks={chunks} timeline={timeline} currentDay={currentDay} />}
-            {activeTab === "analytics" && <AnalyticsTab piece={piece} chunks={chunks} currentDay={currentDay} />}
             {activeTab === "settings" && (
               <SettingsTab
                 piece={piece}

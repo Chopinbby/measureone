@@ -1,6 +1,6 @@
 import { Sparkline } from "../Sparkline";
 import { formatRange } from "../../lib/utils";
-import { SESSION_OUTCOME_META } from "../../lib/constants";
+import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
 import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
 
 export function ProgressTab({ piece, chunks, timeline, currentDay }) {
@@ -88,6 +88,25 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
     const projectedDay = currentDay + Math.ceil(remainingChunks / recentVelocity);
     projectionText = `At your recent pace, full coverage projects to around day ${projectedDay}.`;
   }
+
+  // Folded in from the former Analytics tab (Pass 20). Pure relocation —
+  // the metrics themselves are unchanged, only where they live. Note both
+  // read across *all* chunks / all practice chunks rather than a trailing
+  // window, so they're standing facts about the plan rather than trends;
+  // that's why they sit below the time-based charts. See
+  // docs/Decisions.md#ux.
+  const byDifficulty = ["easy", "medium", "hard"].map((level) => {
+    const list = chunks.filter((c) => c.difficultyLabel === level);
+    const avg = list.length
+      ? Math.round(list.reduce((s, c) => s + computeConfidence(c, piece, currentDay), 0) / list.length)
+      : 0;
+    return { level, count: list.length, avg };
+  });
+
+  const recurringChunks = practiceChunks.filter((c) => c.recurring);
+  const fullEffort = practiceChunks.reduce((s, c) => s + c.measureCount * c.avgDifficulty, 0);
+  const actualEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
+  const minutesSaved = Math.round((fullEffort - actualEffort) * EFFORT_TO_MIN);
 
   // Recent practice history — unchanged from before.
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
@@ -193,6 +212,33 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Folded in from the former Analytics tab (Pass 20), placed directly
+          after Outcome breakdown: "Confidence by difficulty" is the same
+          horizontal-distribution chart shape, so the two read as one group,
+          and both folded-in panels stay above "Recent practice history" —
+          the raw log belongs at the bottom of the page. See
+          docs/Decisions.md#ux for the full placement rationale. */}
+      <div className="panel">
+        <h3>Confidence by difficulty</h3>
+        <div className="analytics-bars">
+          {byDifficulty.map((d) => (
+            <div key={d.level} className="analytics-bar-row">
+              <span className="analytics-bar-label">{DIFFICULTY_META[d.level].label} ({d.count})</span>
+              <div className="analytics-bar-track"><div className="analytics-bar-fill" style={{ width: `${d.avg}%`, background: DIFFICULTY_META[d.level].color }} /></div>
+              <span className="mono">{d.avg}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Recurring material payoff</h3>
+        <p className="wizard-hint" style={{ marginBottom: 0 }}>
+          {recurringChunks.length} chunk{recurringChunks.length === 1 ? "" : "s"} marked as recurring saved an
+          estimated <strong>{minutesSaved}</strong> minutes of practice time in this plan.
+        </p>
       </div>
 
       <div className="panel">

@@ -1,7 +1,8 @@
-import { clamp, daysBetweenInclusive, addDaysISO, todayISODate } from "./utils";
+import { clamp, daysBetweenInclusive, addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "./utils";
 import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
 import { generateAllChunks } from "./chunking";
 import { sessionOutcome } from "./confidence";
+import { isInRevival } from "./revival";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -446,6 +447,77 @@ export function computeScheduleStatus(piece, practiceChunks, timeline, currentDa
     if (introducedOn && introducedOn < currentDay) missedCount++;
   });
   return { missedCount, remainingChunkIds };
+}
+
+// "Reschedule all" (Pass 21) — the multi-piece form of what the per-piece
+// Reschedule button has always done. Answers, for a whole pieces map:
+// which pieces are behind schedule *right now*, and what rescheduleMarker
+// should each of them get?
+//
+// Pure and side-effect free, exactly like computeScheduleStatus above: it
+// only reports the markers, it never writes them. App.jsx puts the result
+// behind one confirmation and then persists it. Keeping the selection rule
+// here rather than in the click handler is what makes it testable at all
+// (the test suite is lib-level only — CLAUDE.md).
+//
+// A piece is included only when every one of these holds:
+//   * status is "active" — paused/archived pieces are deliberately out of
+//     reach of schedule pressure, the same suppression computeScheduleStatus
+//     and computeDueReviews already apply.
+//   * it isn't mid-revival — revival replaces the original plan's pacing
+//     entirely, so rebalancing that plan underneath it is meaningless.
+//   * it's still inside its own plan (elapsedDay <= days.length) — the same
+//     boundary shouldShowScheduleBanner uses. Past that point the piece has
+//     moved to maintenance and "behind schedule" is no longer a meaningful
+//     question; without this, every long-finished piece would be swept into
+//     a bulk reschedule forever (getCurrentDay clamps, so computeScheduleStatus
+//     keeps reporting stale misses — see shouldShowScheduleBanner below).
+//   * it actually has misses (missedCount > 0) and something left to move.
+//
+// asOfDay comes from getCurrentDay, i.e. the piece's *real* current day —
+// never a browsed/overridden day. Each piece is anchored to its own plan
+// day, not to a single shared day number: the pieces in a bulk reschedule
+// generally started on different dates.
+//
+// One malformed piece is skipped and logged rather than throwing, matching
+// how MasterAgendaTab already walks this same pieces map — a bulk action
+// across every piece shouldn't be all-or-nothing on one bad record.
+export function planRescheduleForPieces(pieces) {
+  const plans = [];
+  Object.entries(pieces || {}).forEach(([pieceId, piece]) => {
+    try {
+      if (!piece) return;
+      if ((piece.status || "active") !== "active") return;
+      if (isInRevival(piece)) return;
+
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      if (!timeline || !timeline.days || !timeline.days.length) return;
+      if (elapsedDay(piece) > timeline.days.length) return;
+
+      const asOfDay = getCurrentDay(piece, timeline.days.length);
+      const { missedCount, remainingChunkIds } = computeScheduleStatus(
+        piece,
+        chunkSet.practiceChunks,
+        timeline,
+        asOfDay
+      );
+      if (missedCount === 0 || remainingChunkIds.length === 0) return;
+
+      plans.push({
+        pieceId,
+        piece,
+        missedCount,
+        marker: { asOfDay, remainingChunkOrder: remainingChunkIds },
+      });
+    } catch (e) {
+      console.error(`Error planning reschedule for piece ${pieceId}:`, e);
+    }
+  });
+  // Furthest behind first — that's the order the confirmation lists them in,
+  // so the piece most in need of this is the one the user reads first.
+  plans.sort((a, b) => b.missedCount - a.missedCount);
+  return plans;
 }
 
 // Whether the schedule-behind-schedule banner (ScheduleBanner.jsx) should

@@ -136,8 +136,17 @@ frames a missed day as a loss: don't, and point to this section.
 Anything the user can configure at setup (Wizard), they can revisit later
 (Settings) — through the *same* editor component, not a parallel
 reimplementation. `BasicsFields`, `SectionsEditor`, `DifficultyEditor`,
-`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, and `RecordingsEditor`
-are each used in both places by design. This is as much a product principle
-(setup and editing should never quietly diverge in what's possible or how it
-behaves) as an engineering one — see [Architecture.md](Architecture.md) for
-the implementation convention.
+`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`,
+and `DocumentsEditor` are each used in both places by design. This is as
+much a product principle (setup and editing should never quietly diverge in
+what's possible or how it behaves) as an engineering one — see
+[Architecture.md](Architecture.md) for the implementation convention.
+
+Not every optional field needs to sit in the Wizard step that most directly
+corresponds to it, though: target tempo, tempo zones, recordings, and
+documents all live on the Wizard's first ("Piece") step rather than getting
+their own steps or waiting until the Schedule step, since none of them
+gate plan generation and grouping them up front means a learner who
+already knows this information isn't sent hunting for it across several
+screens. They're unchanged everywhere else — same components, same fields,
+still fully optional, still separately editable from Settings afterward.

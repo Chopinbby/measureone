@@ -214,6 +214,72 @@ from the Wizard/Settings UI.**
   `computeTimeline`'s placement itself to hard-cap daily minutes was judged
   out of scope for this fix.
 
+**Decision (Pass 21): "Reschedule all" (Master Agenda) is the multi-piece
+form of the existing per-piece Reschedule button — same marker shape, same
+rebalancing logic, applied across every eligible piece behind a single
+confirmation.**
+
+- **`planRescheduleForPieces` (`lib/scheduling.js`)** selects the
+  behind-schedule pieces and builds each one's `rescheduleMarker` anchored
+  to *that piece's own* current day, not a single shared day number —
+  pieces in a bulk reschedule started on different dates. It deliberately
+  leaves alone: paused/archived pieces, pieces mid-revival (revival
+  replaces the plan's pacing entirely), pieces past the end of their own
+  plan (no meaningful "behind schedule" once a piece has moved to
+  maintenance), and pieces with every chunk already practiced. One
+  malformed piece is skipped rather than taking the whole bulk action
+  down. Results are ordered furthest-behind first.
+- **Follow-up fix, same pass:** the bulk confirmation originally gave
+  *less* information than doing the same pieces one at a time — the
+  per-piece dialog checks whether the not-yet-started work actually fits
+  in the days left and says so, the bulk path didn't. Fixed by lifting
+  that check into a shared `estimateRescheduleFit` (`lib/scheduling.js`)
+  used by both dialogs, so they can't drift apart; the bulk dialog names
+  the pieces that won't fit and points at the per-piece button for detail,
+  rather than stacking one full warning per piece.
+- **Follow-up fix, same pass — the more serious one:** non-active pieces
+  have to be saved to `localStorage` by hand during a bulk reschedule,
+  because the app's save effect only ever persists the *active* piece.
+  The original write happened *after* the in-memory state update and
+  reported failure through the storage-error banner — but that same state
+  change re-runs the save effect, which re-derives the banner purely from
+  the active piece's result, silently clearing a failure that belonged to
+  a different piece. A partly-failed bulk reschedule would look
+  successful on screen and revert on the next reload. Fixed: the
+  hand-written pieces are now saved *first*, only what actually saved is
+  applied to state, and a failure is reported via `window.alert` (which
+  the save effect can't overwrite) naming the piece that failed. Verified
+  by stubbing `localStorage` to reject one non-active piece mid-bulk-save.
+- **Consequence for later work:** the app only ever auto-persists the
+  active piece. Any future feature that writes to more than one piece at a
+  time (bulk archive, bulk status change, repertoire rotation) needs to
+  persist the others by hand the same way, or it will silently lose data
+  on reload. Worth solving once at the save-effect level if multi-piece
+  writes become common, rather than re-solving it per feature.
+
+**Decision (Pass 21): "Pick a random piece to practice" (Master Agenda)
+picks only from pieces with actual work today.**
+
+Eligible pool is every piece with a scheduled learning day or a due
+maintenance review as of the date being viewed — the same pieces already
+shown as cards on that day's agenda. Pieces mid-revival are excluded, same
+reasoning as everywhere else revival opts out of day-based scheduling:
+revival work isn't scheduled to a day, so "practice this today" doesn't
+apply to it. Offered only from two or more eligible pieces — picking "at
+random" from a single candidate is just a slower way to click its card.
+
+**Decision (Pass 21): `RandomStartPanel` (originally revival-only) now
+also covers a maintenance due-review session, on the same "don't let
+yourself choose the starting point" reasoning.**
+
+Generalized rather than duplicated: it accepts either a ready-made
+cross-piece pool (built via the exported `chunkEntry` helper, so labelling
+can't drift between the revival and maintenance callers) or the original
+single-piece props, which `RevivalTab` still passes unchanged. Sections
+stay in the pool only in the single-piece (revival) form — a section that
+isn't due isn't part of a due-review session, so including it there would
+misrepresent what's actually due.
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -1743,6 +1809,47 @@ time.
   information the model doesn't have. See the open question below on
   whether that boundary should move.
 
+**Decision (Pass 23): learning-phase logging (`ChecklistItem`) gets an
+inline, editable free-text note per chunk, reusing `piece.memoryAnchors`
+rather than a new field — and the field's visible label changes from
+"Memory anchor" to "Notes" everywhere it appears.**
+
+- **No new data shape.** `piece.memoryAnchors` was already a flat
+  `{ [id]: string }` map keyed by chunk/transition/section id, editable
+  only from the Piece Map modal and previously shown only during revival.
+  Confirmed against the actual code before writing anything new against
+  it (the pass's own first instruction) rather than trusting
+  Data-Model.md's existing description at face value. `lib/storage.js` is
+  untouched by this pass — nothing about the shape needed to change.
+- **The read became universal; the edit control did not.** `ChecklistItem`
+  now reads a chunk's note straight off `piece.memoryAnchors` unconditionally,
+  instead of requiring an explicit `memoryAnchor` prop from each caller.
+  Editing is offered only where a write handler (`onSetMemoryAnchor`) is
+  actually passed in — currently only `DayChecklist`, i.e. ordinary
+  learning-phase logging. **Side effect worth knowing:** because the read
+  is unconditional, notes now also surface (read-only) in the maintenance
+  due-review panel, which never showed them before. Not deliberately
+  scoped in — a consequence of reading straight off the piece rather than
+  threading a second prop through every caller. Harmless, but a change in
+  where this data is visible.
+- **"Notes," not "Memory anchor," in the UI — component/prop names
+  unchanged.** The data was never actually revival-specific (durable
+  per-chunk metadata, read during ordinary practice too per
+  Data-Model.md), but the old label described one *use* of the field (a
+  mnemonic recall hook) rather than the field itself, discouraging the
+  ordinary "watch this" observations that come up while learning. Renaming
+  the component/prop (`MemoryAnchorField`, `memoryAnchor`,
+  `onSetMemoryAnchor`) was deliberately left alone — that would touch every
+  call site for a cosmetic win, not the persisted key itself, so there's
+  no data-migration reason to do it now.
+- **Known, pre-existing quirk this pass extends rather than introduces:**
+  `ChecklistItem` is keyed by chunk id + role, not remounted on plan-day
+  navigation, so if the same chunk+role reappears the next day, React
+  reuses the component instance and the note editor's open/closed state
+  can carry over, showing stale unsaved text. Reps/BPM/timer inputs
+  already had this; the note editor is one more piece of state riding the
+  same pre-existing pattern, not a new one.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as
@@ -1965,6 +2072,96 @@ only per-instance, not permanently.**
   forcing an old `lastExportedAt`, confirming the banner appears, dismisses
   per-instance but returns on reload, and clears (with the timer reset) once
   a real export completes.
+
+**Decision (Pass 24): `piece.documents` — reference documents (sheet music
+PDF, fingerings, program notes) hosted elsewhere — follows `recordings`'
+shape and pattern exactly: `[{ id, label, url }]`, its own `DocumentsEditor`/
+`DocumentsList` pair modeled on (not sharing code with) `RecordingsEditor`/
+`RecordingsList`, migrated the same way (`documents: piece.documents || []`
+on load).**
+
+- **Not generalized into one shared component with recordings**, despite
+  being structurally identical (`{id, label, url}`, same add/update/remove
+  shape) — the pass's own instruction was to generalize only if it turned
+  out trivial, and recordings/documents are different enough in intent (a
+  reference to listen to vs. one to read) that sharing now would make a
+  later divergence — a document-type field, upload support — an awkward
+  prop-threading exercise instead of a local edit. Revisit if a third list
+  like this ever appears.
+- **Follow-up fix, same pass: documents now merge additively on import,
+  matching every other `{id, ...}` list.** Originally shipped without being
+  added to `MERGE_FIELDS_HANDLED_SEPARATELY` / given a `mergeById` call in
+  `mergeImportedPiece` (`lib/storage.js`) — found in review before this was
+  ever committed. Without the fix, an imported backup would silently
+  *replace* the existing documents list wholesale rather than merge it by
+  id, unlike `recordings`/`bpmZones`/`sections`. Fixed to match; regression
+  test added (`test/storage.test.mjs`) and verified capable of failing by
+  reverting the fix and re-running it.
+- **Explicitly deferred, not this pass:** actual file upload/storage of the
+  PDF itself, or any in-app viewing/annotation — a much larger feature
+  (real file storage, likely IndexedDB or a backend, not `localStorage`).
+  This field is purely a link out; the file is never fetched or stored by
+  the app.
+
+**Decision (Pass 24 follow-up, user-directed): Target tempo (BPM) moved
+from the "Schedule" step/panel to the "Piece" step/panel — genuinely
+relocated, not duplicated — and Tempo zones, Recordings, and Documents
+became directly reachable from the Wizard's first step too, without
+touching Settings.**
+
+- **What actually moved vs. what got added.** `targetBPM`'s `NumberInput`
+  moved out of `ScheduleFields` and into `BasicsFields` — since
+  `BasicsFields` is genuinely shared between `Wizard` and `SettingsTab`,
+  this single change relocated the field in *both* places at once: it now
+  lives in Settings' "Piece" panel (previously "Schedule"), and in the
+  Wizard's step 1 ("Piece," previously step 5 "Set your schedule").
+  Verified no duplication: exactly one panel in the edit form has the
+  field, not two.
+- **Tempo zones/Recordings/Documents were deliberately *not* folded into
+  `BasicsFields`** the same way, even though the ask was "add them on this
+  tab" for the wizard specifically. `BasicsFields` also renders inside
+  Settings' "Piece" panel — folding these three editors into it would have
+  made them render a *second* time there, on top of Settings' existing
+  dedicated "Tempo zones"/"Recordings"/"Documents" panels. Instead, all
+  three are rendered directly inside `Wizard.jsx`'s step-1 JSX, reusing the
+  exact same editor components Settings uses, so Settings is completely
+  unaffected — confirmed by reading the actual rendered panel list (9
+  panels, no duplicate titles) after the change.
+  All three stay fully optional; `canAdvance()` for step 1 never checked
+  them and still doesn't.
+- **Corrects a doc claim that was true in intent but false in the code.**
+  `CLAUDE.md`, `Architecture.md`, and `Product-Principles.md` all already
+  claimed `BpmZonesEditor` and `RecordingsEditor` were "shared, used in
+  both Wizard and Settings" — checked against the actual git history of
+  `Wizard.jsx` and found this was never true; neither component (nor
+  `ScheduleFields`'s BPM field, before this pass) had ever been rendered
+  in the wizard. Not a regression, just aspirational documentation that
+  outran the code. This pass is what makes the claim true, and the three
+  docs were updated to also list `DocumentsEditor`.
+- **Answers a question raised during this pass: what happens to tempo
+  tracking with no target BPM configured anywhere?** Traced through
+  `getDefaultTargetBPM`/`getSuggestedStartingBPM`/`clearsStageFloor`
+  (`lib/confidence.js`, `lib/ladder.js`) rather than guessed: the first
+  logged session always seeds a chunk's own `practiceBPM` regardless of
+  target, and every session after that is graded against that
+  self-referential value, not an absolute one. The one place an actual
+  target matters is the Settling/Holding stage's tempo-floor graduation
+  check — with no target anywhere, that check's math reduces to comparing
+  against zero, so it's satisfied automatically. Net effect: nothing
+  crashes without a target, but the floor safeguard silently becomes a
+  no-op, and the "suggested starting tempo" / "Target tempo: X BPM" hints
+  never appear. Independently confirmed by an existing test,
+  `test/ladder.test.mjs`'s "No targetBPM configured means no floor to gate
+  against — pass always counts". This is itself part of the argument for
+  moving the field somewhere more visible.
+- **Found and closed in the same pass, not left as debt:** the code review
+  before this landed found `docs/User-Flows.md` and `docs/UX-Principles.md`
+  state the same "shared editor components" list `CLAUDE.md`/
+  `Architecture.md`/`Product-Principles.md` do, but had been missed when
+  those three were updated — still only the original six editors. Closed:
+  both now list `DocumentsEditor` too, and `UX-Principles.md` gained a note
+  on the Tempo-zones/Recordings/Documents exception (rendered directly in
+  `Wizard.jsx`, not folded into the shared `BasicsFields` wrapper).
 
 ## Multi-movement works
 
@@ -2209,6 +2406,19 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
+  `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
+  resolution, so two rows added in the same millisecond would share an id.**
+  Surfaced in code review of Pass 24 (which copied the pattern faithfully
+  from the pre-existing `RecordingsEditor`, so this isn't new to that pass —
+  just now in two places instead of one). Not currently reachable through
+  normal clicking (the two add-buttons aren't rapid-fire in practice), and
+  `updateDocument`/`removeDocument`/their recordings equivalents operate by
+  array index, not by matching id, so a collision wouldn't corrupt data —
+  the only consequence would be React's `key` prop misrendering the two
+  rows if it ever happened. Low severity, narrow trigger; not fixed.
+  Worth switching to a proper unique-id generator if a third list ever
+  copies this pattern, rather than propagating it a third time.
 - **Should a piece in maintenance get a genuinely forward-looking week, and
   therefore the due-in-N-days query that was scoped out?** Surfaced by
   Pass 22's week view (see the two decisions in [UX](#ux) above). Inside a

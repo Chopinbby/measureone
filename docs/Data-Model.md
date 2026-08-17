@@ -163,8 +163,13 @@ piece = {
   memoryAnchors,         // { [id]: string } — free-text cue ("descending sequence", "watch
                          // left-hand leap") keyed by *either* a practice-chunk/transition id or a
                          // piece.sections id. One flat map because chunk ids (`c…`/`t_…`) and
-                         // section ids (`s…`) never collide. Editable from the Piece Map modal;
-                         // surfaced in ChecklistItem during both normal practice and revival.
+                         // section ids (`s…`) never collide. Editable from the Piece Map modal, and
+                         // (since Pass 23) inline from ChecklistItem during ordinary learning-phase
+                         // logging too — same field, same component (MemoryAnchorField), just a
+                         // second entry point. Labeled "Notes" in the UI as of Pass 23 (was "Memory
+                         // anchor"); the field/prop names on this object are unchanged. Read
+                         // (read-only where no write handler is passed) in ChecklistItem across every
+                         // caller — normal practice, maintenance due-review, and revival alike.
   revival,               // see #revival below
 }
 

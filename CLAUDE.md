@@ -93,9 +93,9 @@ chunking, scheduling, and confidence are actually computed, see
   mid-keystroke.
 - **Setup and editing share the same field-editor components**
   (`BasicsFields`, `SectionsEditor`, `DifficultyEditor`, `RecurringEditor`,
-  `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`) between `Wizard`
-  and `SettingsTab`. Add new piece-level fields to one of these, not to a
-  parallel implementation in each flow.
+  `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`, `DocumentsEditor`)
+  between `Wizard` and `SettingsTab`. Add new piece-level fields to one of
+  these, not to a parallel implementation in each flow.
 - **Two specific regressions to watch for** if you touch scheduling —
   full context in [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler)
   and [`docs/Decisions.md`](docs/Decisions.md#scheduling):

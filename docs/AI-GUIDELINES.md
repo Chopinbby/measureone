@@ -120,6 +120,40 @@ harness for rendering components. If logic that needs protecting is sitting
 in a component, the answer is to move it into `lib/`, not to skip the test.
 `lib/history.js` exists for exactly that reason.
 
+## A doc's claim about existing behavior is a claim, not a fact — check it
+
+When a doc states that something already works a certain way ("X and Y are
+shared between A and B," "this field is keyed by Z"), verify that against
+the actual code before writing new work on top of it, especially if the
+claim reads as "by design" or otherwise authoritative. Docs drift, and
+sometimes what's written down was always aspirational — a stated intention
+that the code never caught up to — rather than a description of what
+shipped.
+
+Two instances from the same session (Pass 23–24), with opposite outcomes,
+both worth the few minutes it took to check:
+
+- **Confirmed correct:** a pass's instructions assumed `piece.memoryAnchors`
+  was keyed by chunk id, matching Data-Model.md's description. Checked
+  against the actual `App.jsx`/`storage.js` code before writing anything —
+  it was accurate, so the pass proceeded as planned.
+- **Confirmed wrong:** `CLAUDE.md`, `Architecture.md`, and
+  `Product-Principles.md` all stated that `BpmZonesEditor` and
+  `RecordingsEditor` were "shared, used in both Wizard and Settings." A
+  user's question ("shouldn't these already be in the wizard?") prompted
+  checking the actual git history of `Wizard.jsx` — neither component, nor
+  even the wizard's own tempo-target field, had *ever* been rendered there.
+  The claim wasn't a regression to fix; it was documentation that had
+  outrun the code from the start. Knowing this changed the answer given to
+  the user (not "this broke," but "this was never true") and shaped how the
+  eventual fix was scoped (relocate what's genuinely shared into the shared
+  component; render what would otherwise duplicate directly in the wizard
+  instead — see [Decisions.md](Decisions.md#data-model)).
+
+Trusting the first claim without checking would have been fine by luck.
+Trusting the second would have meant asserting something false to the user
+and potentially building on a wrong premise. Check both kinds the same way.
+
 ## Avoid duplicate documentation
 
 Each concept has exactly one canonical home in this `docs/` set (see

@@ -96,6 +96,13 @@ piece = {
   bpmZones,              // [{ id, start, end, bpm }] — per-range tempo overrides
   recordings,            // [{ id, label, url }] — reference recordings (YouTube, Spotify, etc.),
                          // shown as links on the dashboard; purely referential, not embedded playback
+  documents,             // [{ id, label, url }] — same shape and purpose as recordings, for reference
+                         // documents (sheet music PDF, fingerings, program notes) hosted elsewhere —
+                         // Drive, Dropbox, IMSLP. Pass 24. Purely a link out: the file itself is never
+                         // fetched, stored, or rendered by the app — no upload, no in-app viewer, no
+                         // annotation. That's a separate, much larger feature (real file storage —
+                         // IndexedDB or a backend, not localStorage) deliberately deferred, not designed
+                         // here — see Roadmap.md if adding it later.
   createdAt,             // epoch ms — when this piece record was created in this
                          // browser/instance. Sort-order bookkeeping only (piece
                          // switcher, work grouping) — NOT the scheduling anchor;

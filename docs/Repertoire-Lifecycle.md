@@ -1033,6 +1033,23 @@ everything on today's plan.
   - `loggedSessions` (`lib/utils.js`) excludes a pending provisional
     session from confidence/progress-tab reads the same way it excludes a
     skipped one — it hasn't been judged yet either.
+  - **Narrowed by a later follow-up**: "resolve it whenever" above is no
+    longer unconditional. Leaving Interleaved mode itself — switching to
+    Day view/Week/View all, a different app tab, switching to a different
+    piece, opening the "Edit piece" settings, or finishing the "Add new
+    piece" wizard (the last two added on a subsequent review pass, after
+    being missed in the original build — same warning, same guard function,
+    just two more call sites) — while a provisional from the current
+    rotation is still pending now warns first ("Practice data is tracked
+    but not logged. Are you sure you want to leave before logging your
+    progress?") and, if confirmed, discards it. Resolving it *before*
+    leaving Interleaved mode is unaffected — nothing about ChecklistItem's
+    Confirm/Discard UI changed. See
+    [Decisions.md](Decisions.md#spaced-repetition--maintenance) for
+    the full mechanism, the deliberate scope (only while actively viewing
+    Interleaved mode, not any older pending provisional elsewhere in the
+    piece), and a real persistence bug this surfaced in `App.jsx`'s
+    piece-save effect.
 - **Deferred**: a configurable rotation interval; relaxing the ladder's
   consecutive-clean-reps requirement in early stages (a separate,
   unresolved design question); cross-piece interleaving (stays

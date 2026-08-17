@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
 import { clamp, formatRange, todayISODate } from "../../lib/utils";
@@ -10,6 +10,7 @@ import {
   isManualConfidence,
   getDefaultTargetBPM,
   formatLadderStatus,
+  hasClimbingTempo,
 } from "../../lib/confidence";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
@@ -50,6 +51,9 @@ export function PieceMapTab({
   // persisted on every logged session (lib/ladder.js) but never shown
   // anywhere before now. null for a chunk with no session history yet.
   const ladderStatus = selectedChunk ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate()) : null;
+  // Pass 30 — live-derived, same as the tile marker above; recomputed on
+  // every render from session history, no persisted "seen" state.
+  const selectedClimbing = selectedChunk ? hasClimbingTempo(selectedEntry) : false;
 
   return (
     <div className="tab-pane">
@@ -72,6 +76,7 @@ export function PieceMapTab({
           const manual = isManualConfidence(c, piece.progress);
           const flag = (piece.progress[c.id] || {}).flag;
           const needsRelearning = (piece.progress[c.id] || {}).needsRelearning;
+          const climbingTempo = hasClimbingTempo(piece.progress[c.id]);
           const tier = conf >= 67 ? "teal" : conf >= 34 ? "brass" : "brick";
           return (
             <button
@@ -84,6 +89,12 @@ export function PieceMapTab({
               <span className="map-cell-range mono">{formatRange(c.start, c.end)}</span>
               <span className="map-cell-conf mono">
                 {conf}%{manual && <Pencil size={9} className="manual-mark" title="Set manually" />}
+                {climbingTempo && (
+                  <>
+                    <Metronome size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
+                    <TrendingUp size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
+                  </>
+                )}
               </span>
               {c.recurring && <span className="map-cell-recurring" title="Recurring material">&#8635;</span>}
               {flag && (
@@ -235,6 +246,25 @@ export function PieceMapTab({
                     }}
                   />
                 </div>
+              )}
+              {selectedClimbing && (
+                <>
+                  {/* Pass 30 — a suggestion overlay only: doesn't touch
+                      practiceBPM or any ladder field, just a nudge next to
+                      the fields a learner would act on it with. */}
+                  <div className="climbing-hint">
+                    <Metronome size={13} />
+                    <TrendingUp size={13} />
+                    <span>
+                      Tempo's been climbing — try {(selectedEntry.currentBPM || 0) + 15}–
+                      {(selectedEntry.currentBPM || 0) + 30} BPM faster, once or twice.
+                    </span>
+                  </div>
+                  <p className="climbing-hint-note">
+                    Only try it at this speed a couple times. Extensive practice at BPM higher than you can play
+                    accurately will hurt your progress.
+                  </p>
+                </>
               )}
 
               <MemoryAnchorField

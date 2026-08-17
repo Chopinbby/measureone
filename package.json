@@ -13,7 +13,7 @@
     "test": "node --no-warnings --experimental-loader ./test/extensionless-loader.mjs --test test/*.test.mjs"
   },
   "dependencies": {
-    "lucide-react": "^0.383.0",
+    "lucide-react": "^0.577.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

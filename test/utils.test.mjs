@@ -11,7 +11,15 @@ process.env.TZ = "America/Denver";
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { daysBetweenInclusive, elapsedDay, getCurrentDay, todayISODate, loggedSessions, sumPracticeSeconds } from "../src/lib/utils.js";
+import {
+  daysBetweenInclusive,
+  elapsedDay,
+  getCurrentDay,
+  todayISODate,
+  loggedSessions,
+  sumPracticeSeconds,
+  hasPendingProvisionalSession,
+} from "../src/lib/utils.js";
 
 describe("loggedSessions (Pass 29) — filters out skipped sessions, keeps real ones", () => {
   test("drops sessions with skipped: true", () => {
@@ -41,6 +49,49 @@ describe("sumPracticeSeconds still counts skipped sessions' time — saving the 
       },
     };
     assert.equal(sumPracticeSeconds(piece), 180, "both the real session's and the skipped session's time count");
+  });
+});
+
+describe("hasPendingProvisionalSession — the 'leave Interleaved with an unresolved log' warning check", () => {
+  test("true when a session on the given day is still provisional", () => {
+    const entry = { sessions: [{ day: 5, cleanReps: 1, bpm: 80, outcome: "soft-miss", provisional: true }] };
+    assert.equal(hasPendingProvisionalSession(entry, 5), true);
+  });
+
+  test("false once that session has been confirmed (provisional: false)", () => {
+    const entry = { sessions: [{ day: 5, cleanReps: 1, bpm: 80, outcome: "soft-miss", provisional: false }] };
+    assert.equal(hasPendingProvisionalSession(entry, 5), false);
+  });
+
+  test("false for a normal, never-provisional session", () => {
+    const entry = { sessions: [{ day: 5, cleanReps: 4, bpm: 90, outcome: "pass" }] };
+    assert.equal(hasPendingProvisionalSession(entry, 5), false);
+  });
+
+  test("false for a skipped session (no provisional flag at all)", () => {
+    const entry = { sessions: [{ day: 5, skipped: true, durationSeconds: 60 }] };
+    assert.equal(hasPendingProvisionalSession(entry, 5), false);
+  });
+
+  test("only matches the specified day — a pending provisional from a different day doesn't count", () => {
+    const entry = { sessions: [{ day: 3, cleanReps: 1, bpm: 80, outcome: "soft-miss", provisional: true }] };
+    assert.equal(hasPendingProvisionalSession(entry, 5), false);
+  });
+
+  test("true if ANY session on that day is provisional, even alongside other resolved ones", () => {
+    const entry = {
+      sessions: [
+        { day: 5, cleanReps: 4, bpm: 90, outcome: "pass" },
+        { day: 5, cleanReps: 1, bpm: 70, outcome: "fail", provisional: true },
+      ],
+    };
+    assert.equal(hasPendingProvisionalSession(entry, 5), true);
+  });
+
+  test("handles a missing/null entry or missing sessions without throwing", () => {
+    assert.equal(hasPendingProvisionalSession(null, 5), false);
+    assert.equal(hasPendingProvisionalSession(undefined, 5), false);
+    assert.equal(hasPendingProvisionalSession({}, 5), false);
   });
 });
 

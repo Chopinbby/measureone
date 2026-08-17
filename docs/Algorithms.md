@@ -397,6 +397,91 @@ actually set.
 a chunk with no explicit per-chunk target: checks `piece.bpmZones` for a
 measure-range match first, then falls back to `piece.targetBPM`.
 
+### Tempo-climbing nudge (Pass 30)
+
+`hasClimbingTempo(entry)` (`lib/confidence.js`) is a pure, stateless
+predicate — true when a chunk's most recent *judged* sessions
+(`loggedSessions(entry.sessions)`, same helper `computeAutoConfidence`
+above uses to exclude a skipped or still-open provisional session — Pass
+29/29-follow-up) show a monotonic-ish rising BPM trend. It takes `entry`
+directly (`piece.progress[chunk.id]`), the same shape `formatLadderStatus`
+takes, rather than `(chunk, piece, currentDay)` — nothing here needs the
+chunk's own fields or a target to compare against, only session history.
+
+Three tunable constants sit above it in the file (`CLIMBING_TEMPO_WINDOW =
+4`, `CLIMBING_TEMPO_MIN_SESSIONS = 3`, `CLIMBING_TEMPO_MIN_RISE_BPM = 4`),
+hand-picked the same way every other constant of this kind in this file is
+(see `docs/Research.md`'s inventory — this one isn't added there yet; not
+in this pass's Touches list, see the pass summary rather than treating the
+omission as settled). The check itself, over the trailing `WINDOW`
+sessions with a numeric `bpm`:
+
+1. Fewer than `MIN_SESSIONS` such sessions → false. Two points can't show
+   a trend the way three-plus in a row can.
+2. Any consecutive pair where BPM *drops* → false outright. This is where
+   "monotonic-ish" stops short of "strictly monotonic": a same-BPM repeat
+   in the middle of an otherwise-rising run doesn't break it (real
+   practice rarely climbs on every single session), but an actual dip
+   does.
+3. The window's last BPM minus its first must be `>= MIN_RISE_BPM` → a
+   flat run (non-decreasing, but not rising) correctly reads as *not*
+   climbing; a monotonic-but-negligible rise (e.g. +1 BPM twice) does too.
+
+**Notification model, decided before writing any code (per the pass's own
+instruction to resolve this first):** a live-derived marker, not a
+dismissible toast — same pattern `progress[id].flag` and
+`progress[id].needsRelearning` already use for the Piece Map's tile icons.
+No new persisted field: the marker (`PieceMapTab`'s tile grid, an inline
+`TrendingUp` icon next to the confidence percentage — same slot the
+"manual override" pencil mark already occupies) and the chunk-detail
+modal's suggestion line both call `hasClimbingTempo` fresh on every
+render, so they appear exactly while the trend holds and disappear the
+moment it doesn't. Chosen over a one-time toast because the underlying
+condition is inherently transient — a dismissed toast could go stale
+(trend ends, dismissal lingers meaninglessly) or never resurface (trend
+restarts after being dismissed once), and a persisted "seen" flag adds
+real schema surface for a case the existing marker pattern already
+handles cleanly with none.
+
+**Placement note:** the Piece Map tile already uses all four corner slots
+(`map-cell-diff-dot` top-right, `map-cell-recurring` bottom-right,
+`map-cell-flag` bottom-left, `map-cell-relearning` top-left) — there was no
+fifth open corner to give this marker the same `position: absolute`
+treatment those four use. It's inline instead, in the same flow position
+the existing manual-override pencil mark already occupies (right after the
+confidence percentage) — same small-icon-plus-title visual language, just
+not literally a corner badge. Worth a look if a future pass wants the tile
+markers rationalized into one consistent placement system rather than
+"whichever slot was free when each one was added."
+
+The marker is two icons, not one (follow-up, same pass): a `Metronome`
+icon sits beside the `TrendingUp` arrow, in both the tile marker and the
+modal line, disambiguating what's climbing (tempo specifically, not
+confidence or anything else the arrow alone could imply). Briefly stood in
+as `Gauge` (a speedometer dial — the closest available metaphor at the
+time) because `lucide-react` didn't yet expose a real `Metronome` icon at
+the version this project had installed (`^0.383.0`); lucide added one in
+`0.575.0`, so the dependency was bumped to `^0.577.0` (the latest 0.x
+release — deliberately not the 1.x line, to pick up the new icon without
+also taking on an unrelated major-version bump) and the placeholder
+swapped for the real icon. Verified via `npx vite build` that every other
+`lucide-react` import already used across the app (32 distinct icons)
+still resolved after the bump, not just this one.
+
+The modal's suggestion (`selectedClimbing` in `PieceMapTab`) shows a
+target range of `currentBPM + 15` to `currentBPM + 30`, reading
+`entry.currentBPM` directly — the same field the "Current BPM" input right
+above it edits, not a separate computation. A second, fixed line of
+caution sits underneath it — "Only try it at this speed a couple times.
+Extensive practice at BPM higher than you can play accurately will hurt
+your progress." — reworded (follow-up, same pass) from an earlier draft
+that repeated "once or twice" verbatim from the suggestion line right
+above it; not conditioned on anything beyond the marker itself. This is a
+**suggestion overlay only**: nothing here reads into or writes
+`practiceBPM`, `computeLadderAdvance`, or any other ladder field — a chunk
+with a climbing trend is scored and advanced exactly as it would be
+without this function existing at all.
+
 ## Session outcomes & the maintenance ladder
 
 Data shapes: [Data-Model.md](Data-Model.md#the-piece-object) (`ChunkProgress.stage`

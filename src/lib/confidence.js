@@ -165,6 +165,52 @@ export function sessionOutcome(session) {
   return null;
 }
 
+// Tuning knobs for hasClimbingTempo below — hand-picked, not derived from
+// any study, same status as every other constant of this kind in this file
+// (see docs/Research.md's inventory of these; this one isn't added there
+// yet — Research.md wasn't in this pass's Touches list, flagged rather than
+// folded in, see the pass summary).
+//   WINDOW: how many of the chunk's most recent judged sessions to look at.
+//   MIN_SESSIONS: fewer than this can't show a trend at all — two points
+//     can't be told apart from noise the way three-plus in a row can.
+//   MIN_RISE_BPM: the window must climb by at least this many BPM
+//     end-to-end, so a flat run (which is non-decreasing but not "rising")
+//     doesn't trigger — see the non-decreasing-but-flat guard below.
+const CLIMBING_TEMPO_WINDOW = 4;
+const CLIMBING_TEMPO_MIN_SESSIONS = 3;
+const CLIMBING_TEMPO_MIN_RISE_BPM = 4;
+
+// True when a chunk's most recent judged sessions show a monotonic-ish
+// upward BPM trend — a live-derived signal (no new persisted field, same
+// pattern `progress[id].flag`/`needsRelearning` already use for the Piece
+// Map's tile markers), so it appears exactly while the trend holds and
+// disappears the moment it doesn't, without needing separate "seen" state.
+//
+// Reads straight off `entry` (piece.progress[chunk.id]), not chunk/piece —
+// same shape formatLadderStatus takes, since this only ever needs session
+// history, never the chunk's own fields. Only `loggedSessions(entry.sessions)`
+// counts: a skipped session (Pass 29) has no bpm at all, and a still-open
+// provisional one (Pass 29 follow-up) hasn't been judged yet — neither
+// should count as evidence of a real, resolved climb.
+//
+// "Monotonic-ish" rather than strictly monotonic: any real dip (a BPM
+// lower than the one right before it) breaks the trend outright — this
+// isn't trying to smooth out noise, just to avoid demanding a perfectly
+// unbroken climb when a same-BPM repeat in the middle of an otherwise
+// rising run is still obviously "climbing." A flat run (every session at
+// the same BPM) is non-decreasing but isn't a climb — MIN_RISE_BPM below
+// is what actually distinguishes the two.
+export function hasClimbingTempo(entry) {
+  if (!entry) return false;
+  const bpmSessions = loggedSessions(entry.sessions).filter((s) => typeof s.bpm === "number");
+  if (bpmSessions.length < CLIMBING_TEMPO_MIN_SESSIONS) return false;
+  const recent = bpmSessions.slice(-CLIMBING_TEMPO_WINDOW);
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].bpm < recent[i - 1].bpm) return false;
+  }
+  return recent[recent.length - 1].bpm - recent[0].bpm >= CLIMBING_TEMPO_MIN_RISE_BPM;
+}
+
 // Auto-computed confidence blends: how many clean reps were actually logged
 // relative to the target (not just that a session happened), how close the
 // achieved tempo was to the goal BPM, recency of last practice, the

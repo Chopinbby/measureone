@@ -97,6 +97,14 @@ export default function App() {
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleMessage, setRescheduleMessage] = useState("");
   const [rescheduleTitle, setRescheduleTitle] = useState("");
+  // User-directed follow-up (Interleaved mode's "leave with an unresolved
+  // provisional log" warning): { chunkIds, day } while TodayTab is actively
+  // showing Interleaved mode with at least one unconfirmed provisional
+  // session, else null. Reported by TodayTab itself (it owns viewMode and
+  // the eligible-chunk list) — App.jsx only needs the result, to gate
+  // navigation controls TodayTab has no say over (the sidebar, the piece
+  // switcher).
+  const [interleaveRisk, setInterleaveRisk] = useState(null);
   // A list, not a single piece's status — the same confirmation covers both
   // the per-piece Reschedule button (one entry) and Master Agenda's
   // "Reschedule all" (one entry per behind-schedule piece). Each entry is
@@ -120,17 +128,40 @@ export default function App() {
     setLoaded(true);
   }, []);
 
-  // Persist only the active piece when it changes. A failed write (most
-  // likely QuotaExceededError, since session history only ever grows — see
-  // storage.js) used to be swallowed silently, so a logged session could
-  // vanish with no sign anything went wrong. Surface it instead: a banner
-  // stays up until a save actually succeeds again, so recovering (e.g. after
-  // deleting an old piece to free up space) clears it on its own.
+  // Persists every piece in `pieces` whenever that object changes — not
+  // just the active one. Originally scoped to "only the active piece" on
+  // the assumption that nothing ever mutates a piece other than the one
+  // currently open; the discard-on-leave-Interleaved guard above
+  // (guardLeavingInterleaved/confirmAndDiscardProvisional) broke that
+  // assumption for the first time, and broke it silently: `switchToPiece`
+  // discards a provisional session on the piece being LEFT and reassigns
+  // `activePieceId` to the piece being entered inside the same event
+  // handler, so both `setPieces` (with the discard already applied) and
+  // `setActivePieceId` (the new piece) land in the same React batch — by
+  // the time this effect re-ran, `activePieceId` already pointed at the
+  // NEW piece, so `pieces[activePieceId]` was never the just-discarded
+  // one, and that discard was computed correctly in memory but never
+  // written to localStorage, silently reverting on next reload. Found via
+  // manual browser testing, not by inspection — the in-memory state looked
+  // right the whole time. Saving every piece here removes the assumption
+  // this depended on entirely, rather than special-casing this one call
+  // site (bulk reschedule, below, already had to work around the same
+  // "only active" gap in its own way, for the same underlying reason: nothing
+  // here was ever built to handle more than one piece's data changing in the
+  // same tick). A failed write (most likely QuotaExceededError, since session
+  // history only ever grows — see storage.js) used to be swallowed silently,
+  // so a logged session could vanish with no sign anything went wrong.
+  // Surface it instead: a banner stays up until a save actually succeeds
+  // again, so recovering (e.g. after deleting an old piece to free up space)
+  // clears it on its own.
   useEffect(() => {
-    if (!loaded || !activePieceId || !pieces[activePieceId]) return;
-    const result = savePieceToStorage(activePieceId, pieces[activePieceId]);
-    setStorageError(!result.ok);
-  }, [pieces, activePieceId, loaded]);
+    if (!loaded) return;
+    let anyFailed = false;
+    Object.entries(pieces).forEach(([id, p]) => {
+      if (!savePieceToStorage(id, p).ok) anyFailed = true;
+    });
+    setStorageError(anyFailed);
+  }, [pieces, loaded]);
 
   // Persist which piece is active.
   useEffect(() => {
@@ -181,6 +212,7 @@ export default function App() {
   }, [isInRevival(piece)]);
 
   const switchToPiece = (id) => {
+    if (!guardLeavingInterleaved()) return;
     setActivePieceId(id);
     setSwitcherOpen(false);
     setActiveTab("overview");
@@ -190,6 +222,7 @@ export default function App() {
   };
 
   const handleComplete = (finished, options = {}) => {
+    if (!guardLeavingInterleaved()) return;
     const id = `p_${Date.now()}`;
     const withId = ensureWorkId({ ...finished, id, updatedAt: Date.now() });
     setPieces((prev) => ({ ...prev, [id]: withId }));
@@ -353,6 +386,7 @@ export default function App() {
   // Editing state lives here, not inside SettingsTab, so switching tabs
   // mid-edit doesn't unmount (and lose) the in-progress draft.
   const startEditing = () => {
+    if (!guardLeavingInterleaved()) return;
     setEditDraftState((d) => {
       if (d) return d;
       // Pieces created before the deadline-date field existed only have
@@ -818,6 +852,35 @@ export default function App() {
     });
   };
 
+  // User-directed follow-up: the one place the "leave Interleaved mode with
+  // an unresolved provisional log" warning actually confirms and discards —
+  // called both from TodayTab itself (its own Day view/Week/View all
+  // buttons, via onConfirmLeaveInterleaved below) and from here in App.jsx
+  // (the sidebar nav and the piece switcher, via guardLeavingInterleaved),
+  // so the warning text and the discard behavior can't drift between the
+  // two call sites. `chunkIds` may contain more than one id (several
+  // chunks in the same rotation each left an unresolved attempt); each
+  // gets discarded independently, same as if the learner had discarded
+  // them one at a time from their own chunk cards.
+  const confirmAndDiscardProvisional = (chunkIds, day) => {
+    if (!chunkIds || chunkIds.length === 0) return true;
+    const ok = window.confirm(
+      "Practice data is tracked but not logged. Are you sure you want to leave before logging your progress?"
+    );
+    if (ok) chunkIds.forEach((id) => handleDiscardProvisionalSession(id, day));
+    return ok;
+  };
+
+  // Gates navigation App.jsx itself controls (sidebar tabs, switching
+  // pieces) — TodayTab reports the live risk via onInterleaveRiskChange
+  // (setInterleaveRisk) since it's the only thing that knows whether
+  // Interleaved mode is actually on screen right now. Returns true when
+  // it's safe to proceed (nothing pending, or the learner confirmed).
+  const guardLeavingInterleaved = () => {
+    if (!interleaveRisk) return true;
+    return confirmAndDiscardProvisional(interleaveRisk.chunkIds, interleaveRisk.day);
+  };
+
   const handleUpdateBPM = (chunkId, field, value) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
@@ -1264,7 +1327,7 @@ export default function App() {
                   <button
                     key={n.key}
                     className={`nav-item ${activeTab === n.key ? "active" : ""}`}
-                    onClick={() => setActiveTab(n.key)}
+                    onClick={() => { if (guardLeavingInterleaved()) setActiveTab(n.key); }}
                   >
                     <Icon size={17} />
                     <span>{n.label}</span>
@@ -1357,6 +1420,8 @@ export default function App() {
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
+                onInterleaveRiskChange={setInterleaveRisk}
+                onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
               />
             )}
             {activeTab === "progress" && <ProgressTab piece={piece} chunks={chunks} timeline={timeline} currentDay={currentDay} />}
@@ -1649,6 +1714,7 @@ const CSS = `
 .badge.archived { background: rgba(139,150,160,0.22); color: var(--ink-faint); }
 .piece-switcher-item.active .badge { background: rgba(255,255,255,0.3); color: inherit; }
 .manual-mark { margin-left: 4px; vertical-align: middle; opacity: 0.6; }
+.climbing-mark { margin-left: 4px; vertical-align: middle; color: var(--teal); }
 .manual-conf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .manual-conf-row input { width: 80px; flex-shrink: 0; }
 .derived-stat { font-size: 13px; color: var(--ink-soft); margin: 4px 0 0; }
@@ -1702,6 +1768,10 @@ const CSS = `
 
 .relearning-hint { display: flex; align-items: flex-start; gap: 6px; color: var(--brick); }
 .relearning-hint svg { flex-shrink: 0; margin-top: 1px; }
+
+.climbing-hint { display: flex; align-items: flex-start; gap: 6px; color: var(--teal); margin: 10px 0 0; }
+.climbing-hint svg { flex-shrink: 0; margin-top: 1px; }
+.climbing-hint-note { font-size: 12px; color: var(--ink-soft); margin: 4px 0 0 20px; }
 
 .detail-panel { border-color: var(--ink); }
 .detail-modal { max-width: 480px; }

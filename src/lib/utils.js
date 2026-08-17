@@ -92,6 +92,17 @@ export function loggedSessions(sessions) {
   return (sessions || []).filter((s) => !s.skipped && !s.provisional);
 }
 
+// True when `entry` has a session logged on `day` that's still sitting
+// provisional (Interleaved mode's deferred soft-miss/fail logging — see
+// App.jsx's handleLogSession `provisional` branch and
+// handleDiscardProvisionalSession). Used to warn — and, if confirmed,
+// discard — before leaving Interleaved mode with an unresolved attempt
+// still hanging, rather than letting it silently sit there forever with
+// no prompt either way.
+export function hasPendingProvisionalSession(entry, day) {
+  return ((entry && entry.sessions) || []).some((s) => s.day === day && s.provisional === true);
+}
+
 export function sumPracticeSeconds(piece) {
   return Object.values(piece.progress).reduce(
     (sum, entry) => sum + (entry.sessions || []).reduce((s, sess) => s + (sess.durationSeconds || 0), 0),

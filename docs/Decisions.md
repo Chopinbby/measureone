@@ -2760,3 +2760,36 @@ oversight to silently fix; surface it instead.
   user, who judged it not worth chasing given how narrow the trigger is.
   Worth unifying if `preferByRecency` and `diffImportedPiece` are ever
   revisited together, rather than independently again.
+- **`hasClimbingTempo` (Pass 30) can silently miss a real climb if a
+  session's `bpm` is `NaN`.** Found in critical review after the pass
+  shipped, not fixed. The function's `typeof s.bpm === "number"` guard lets
+  `NaN` through (`typeof NaN` really is `"number"`), and `NaN` comparisons
+  are always `false` — so a `NaN` landing at the start or end of the
+  trailing window can neither register as a dip nor contribute to a real
+  rise, silently suppressing the marker rather than showing a false
+  positive. Not reachable through the app's own UI (`NumberInput` never
+  commits a non-numeric BPM), only through hand-edited or corrupted
+  `localStorage` data. Wrong-but-conservative, not wrong-and-misleading; not
+  urgent, but worth a defensive `Number.isFinite` check if this function is
+  touched again.
+- **The tempo-climbing marker (Pass 30) doesn't know about a pending
+  provisional session (Pass 29 follow-up) on the same chunk.** Found in the
+  same review. `hasClimbingTempo` reads `loggedSessions`, which correctly
+  excludes an unconfirmed provisional — but that means a chunk can show
+  "tempo's climbing, try faster" while an unresolved rough attempt sits
+  right there in its history, and if the learner later confirms that
+  attempt, the "climbing" read could flip false immediately. Neither
+  feature is wrong on its own; they just don't cross-reference each other.
+  Not currently visible together on one screen — `PieceMapTab`'s
+  chunk-detail modal (where the climbing suggestion shows) doesn't surface
+  provisional confirm/discard UI at all, that's `ChecklistItem`-only — so
+  the practical exposure is narrow today, but worth knowing about before
+  either feature is extended.
+- **The broadened piece-save effect (Pass 29 follow-up — see the
+  persistence-bug fix above) re-writes every piece to `localStorage` on any
+  single piece's change, not just the one that changed.** Untested at
+  scale: fine for the handful of pieces one musician realistically has
+  open, unverified against a large piece count or a piece with a very long
+  session history. Not a correctness question, a performance one — worth
+  measuring if it's ever revisited, but not urgent enough to have gated
+  landing the correctness fix itself.

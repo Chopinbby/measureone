@@ -59,6 +59,20 @@ The test for "should this collapse into one action": would a second step
 ever change the user's mind, or is it just friction restating what they
 already did?
 
+That test cuts both ways — it's also the bar a *new* confirmation has to
+clear before adding one. **Since Pass 29 follow-up**, leaving Interleaved
+mode (switching view, tab, or piece) with an unresolved provisional log
+prompts a `window.confirm` first. This isn't an exception to the
+principle, it's what the test looks like when it says "keep the
+confirmation": the learner may not have realized a rough attempt was still
+sitting unresolved, so the prompt can genuinely change what they do next
+(go back and deal with it) rather than just restating a choice they
+already made on purpose. It's scoped narrowly for exactly this reason —
+only while a provisional is actually pending, never on ordinary
+navigation with nothing at stake — so the common case still gets zero
+friction. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
 ## Detail-on-demand uses a real modal, not inline expansion
 
 Piece Map chunk detail (BPM inputs, manual-confidence override) opens in a

@@ -192,3 +192,21 @@ around. One invariant from that design worth internalizing early: **a
 review arriving late is schedule slack, never a failure** — only the
 logged outcome (pass/soft-miss/fail) may ever affect the ladder, not
 timing.
+
+**Since Pass 29**, Today's Practice has a fourth view mode, **Interleaved**
+— rotates chunks past Stabilizing, with a "skip" action and a
+**provisional** logging state (a rough auto-classified attempt is saved
+but doesn't touch the ladder until confirmed or discarded) — see
+[`docs/Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29`](docs/Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29).
+Leaving Interleaved mode with an unconfirmed provisional now warns and, on
+confirmation, discards it — gated through one shared function
+(`confirmAndDiscardProvisional`/`guardLeavingInterleaved`, `App.jsx`) at
+every place `activeTab`/`activePieceId` can change, not just the obvious
+ones; two sidebar controls ("Edit piece," finishing the "Add new piece"
+wizard) were missed on the first pass and only caught on review — if you
+add another way to navigate away from Interleaved mode, route it through
+that same function rather than adding a new `setActiveTab`/
+`setActivePieceId` call site unguarded. **Since Pass 30**, Piece Map also
+surfaces a live-derived "tempo climbing" nudge (`hasClimbingTempo`,
+`lib/confidence.js`) — no new persisted state, same pattern as the
+existing flag/needsRelearning tile markers.

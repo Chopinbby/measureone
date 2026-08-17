@@ -34,6 +34,7 @@ comments.
 | effectiveness multipliers | 0.8× / 1× / 1.15× | confidence formula | Same |
 | `REQUIRED_REPS` | easy: 3, medium: 4, hard: 5 | confidence formula | Motor-learning research on repetitions-to-consolidation, likely instrument- and passage-dependent |
 | rough/lost confidence caps | 55 / 20 | `computeConfidence` (Pass 6) | Real data on how much a single rough/lost run-through should actually discount confidence, vs. these hand-picked values chosen to land the display in the Piece Map's existing "Developing"/"Needs work" tiers |
+| tempo-climbing trend window | last 4 judged sessions, min 3 to evaluate, min +4 BPM net rise to count as "climbing" | `hasClimbingTempo` (Pass 30, `lib/confidence.js`) | Real data on what window size and rise threshold actually separates a genuine tempo trend from ordinary session-to-session noise — picked as a plausible default, explicitly flagged in code as "a small tuning detail, not worth pre-deciding" at the time |
 
 `computeProgressTier`'s old ≥5/≥10 clean-rep thresholds (a hand-picked
 constant in this same spirit) no longer exist — Pass 6 replaced them with

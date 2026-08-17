@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { FocusPanel } from "./today/FocusPanel";
@@ -7,9 +7,11 @@ import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
 import { WeekView } from "./today/WeekView";
+import { InterleavePanel } from "./today/InterleavePanel";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
+import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival } from "../../lib/revival";
-import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes } from "../../lib/utils";
+import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, hasPendingProvisionalSession } from "../../lib/utils";
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
 // N" left to show — the plan grid is exhausted, but the maintenance ladder
@@ -17,7 +19,7 @@ import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes } from "..
 // day view becomes in that state: the live due list from
 // computeDueReviews, logged through exactly the same ChecklistItem the
 // bounded plan uses.
-function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession }) {
+function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, onConfirmProvisionalSession, onDiscardProvisionalSession }) {
   if (dueItems.length === 0) {
     // computeDueReviews returns [] both for "genuinely nothing due" and for
     // a suppressed piece (paused/archived/mid-revival), and those need
@@ -56,6 +58,8 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession }) 
             day={day}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
+            onConfirmProvisionalSession={onConfirmProvisionalSession}
+            onDiscardProvisionalSession={onDiscardProvisionalSession}
           />
         ))}
       </div>
@@ -82,11 +86,15 @@ export function TodayTab({
   onJumpToday,
   onLogSession,
   onUnlogSession,
+  onConfirmProvisionalSession,
+  onDiscardProvisionalSession,
   onLogRunThrough,
   onUnlogRunThrough,
   onReschedule,
   onReassessRange,
   onSetMemoryAnchor,
+  onInterleaveRiskChange,
+  onConfirmLeaveInterleaved,
 }) {
   const [viewMode, setViewMode] = useState("day");
   const day = timeline.days[currentDay - 1];
@@ -127,6 +135,78 @@ export function TodayTab({
     setViewMode("day");
   };
 
+  // Interleaved mode (Pass 29) reuses this exact "today" list rather than
+  // building a separate chunk-selection mechanism — just narrowed to
+  // chunks that have actually left Stabilizing (isInterleaveEligible,
+  // lib/ladder.js). A chunk can appear twice in todaysIds (e.g. a review
+  // id also present some other way); de-duped the same way todaysRanges
+  // already does below.
+  const interleaveItems = [...new Set(todaysIds)]
+    .map((id) => chunkById[id])
+    .filter(Boolean)
+    .filter((c) => isInterleaveEligible(piece.progress[c.id]))
+    .map((c) => ({ id: c.id, chunk: c }));
+
+  // User-directed follow-up: while actively in Interleaved mode, an
+  // unconfirmed provisional log (a rough interleaved attempt that hasn't
+  // been confirmed or discarded — see App.jsx's handleLogSession
+  // `provisional` branch) shouldn't be silently abandoned by navigating
+  // away. Scoped to today's day and the current rotation only — an older
+  // provisional from a previous session sitting unresolved elsewhere isn't
+  // "the current rotation" and deliberately doesn't trigger this.
+  const interleavePendingChunkIds =
+    viewMode === "interleave"
+      ? interleaveItems.filter((item) => hasPendingProvisionalSession(piece.progress[item.id], todaysDayNumber)).map((item) => item.id)
+      : [];
+
+  // Reports the live risk up to App.jsx, which needs it to gate leaving
+  // the tab entirely (sidebar nav, the piece switcher) — navigations this
+  // component has no say over.
+  //
+  // Keyed on `interleavePendingKey` (the chunk ids joined into one string)
+  // rather than the array itself: `interleavePendingChunkIds` is a new
+  // array *reference* every render even when its *contents* haven't
+  // changed, and this effect calls a state setter (App.jsx's
+  // setInterleaveRisk) — depending on the array directly, or omitting the
+  // dependency array to "always stay fresh," both send a new object up on
+  // every render regardless of content, which App.jsx's state setter sees
+  // as a real change, triggering a re-render, re-running this effect,
+  // sending yet another new object — an infinite loop (caught in manual
+  // testing as React's "Maximum update depth exceeded" warning, not
+  // theoretical). The joined-string key only changes when the actual
+  // pending-chunk-ids content changes, which is what should gate this.
+  const interleavePendingKey = interleavePendingChunkIds.join(",");
+  useEffect(() => {
+    if (typeof onInterleaveRiskChange !== "function") return;
+    onInterleaveRiskChange(
+      interleavePendingChunkIds.length > 0 ? { chunkIds: interleavePendingChunkIds, day: todaysDayNumber } : null
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interleavePendingKey, todaysDayNumber, onInterleaveRiskChange]);
+  // Defensive reset on unmount only (leaving the Today tab is already
+  // gated before this can unmount mid-risk, so this should be a no-op in
+  // practice — but a stale risk outliving the component it describes
+  // would be a strictly worse failure mode than a redundant reset).
+  useEffect(() => {
+    return () => {
+      if (typeof onInterleaveRiskChange === "function") onInterleaveRiskChange(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Shared by every way this component itself can leave Interleaved mode
+  // (currently just the segmented control below) — confirms and discards
+  // via the one function App.jsx owns (onConfirmLeaveInterleaved), so the
+  // warning text and discard behavior can't drift between this path and
+  // the sidebar/piece-switcher path, which reads the risk this component
+  // just reported above instead of recomputing it separately.
+  const leaveInterleaved = (nextMode) => {
+    if (interleavePendingChunkIds.length > 0 && typeof onConfirmLeaveInterleaved === "function") {
+      if (!onConfirmLeaveInterleaved(interleavePendingChunkIds, todaysDayNumber)) return;
+    }
+    setViewMode(nextMode);
+  };
+
   const todaysRanges = [...new Set(todaysIds)]
     .filter((id) => ((piece.progress[id] || {}).doneDays || []).includes(todaysDayNumber))
     .map((id) => chunkById[id])
@@ -148,9 +228,16 @@ export function TodayTab({
         </div>
         <div className="day-nav-controls">
           <div className="segmented">
-            <button className={viewMode === "day" ? "active" : ""} onClick={() => setViewMode("day")}>Day view</button>
-            <button className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
-            <button className={viewMode === "all" ? "active" : ""} onClick={() => setViewMode("all")}>View all</button>
+            <button className={viewMode === "day" ? "active" : ""} onClick={() => leaveInterleaved("day")}>Day view</button>
+            <button className={viewMode === "week" ? "active" : ""} onClick={() => leaveInterleaved("week")}>Week</button>
+            <button className={viewMode === "all" ? "active" : ""} onClick={() => leaveInterleaved("all")}>View all</button>
+            <button
+              className={viewMode === "interleave" ? "active" : ""}
+              disabled={interleaveItems.length === 0}
+              onClick={() => setViewMode("interleave")}
+            >
+              Interleaved
+            </button>
           </div>
           {viewMode === "day" && (
             <>
@@ -164,6 +251,12 @@ export function TodayTab({
           )}
         </div>
       </div>
+      {interleaveItems.length === 0 && (
+        <p className="wizard-hint" style={{ marginTop: -8 }}>
+          Interleaved mode unlocks once at least one chunk graduates past Stabilizing — no chunks have graduated past
+          Stabilizing yet.
+        </p>
+      )}
 
       <FocusPanel piece={piece} chunks={chunks} currentDay={currentDay} />
 
@@ -175,10 +268,33 @@ export function TodayTab({
             day={elapsedDay}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
+            onConfirmProvisionalSession={onConfirmProvisionalSession}
+            onDiscardProvisionalSession={onDiscardProvisionalSession}
           />
         ) : (
-          <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} onSetMemoryAnchor={onSetMemoryAnchor} />
+          <DayChecklist
+            piece={piece}
+            chunks={chunks}
+            day={day}
+            onLogSession={onLogSession}
+            onUnlogSession={onUnlogSession}
+            onConfirmProvisionalSession={onConfirmProvisionalSession}
+            onDiscardProvisionalSession={onDiscardProvisionalSession}
+            onLogRunThrough={onLogRunThrough}
+            onUnlogRunThrough={onUnlogRunThrough}
+            onSetMemoryAnchor={onSetMemoryAnchor}
+          />
         )
+      ) : viewMode === "interleave" ? (
+        <InterleavePanel
+          piece={piece}
+          day={todaysDayNumber}
+          items={interleaveItems}
+          ladderConfig={piece.ladderConfig}
+          onLogSession={onLogSession}
+          onConfirmProvisionalSession={onConfirmProvisionalSession}
+          onDiscardProvisionalSession={onDiscardProvisionalSession}
+        />
       ) : viewMode === "week" ? (
         <WeekView
           piece={piece}
@@ -193,7 +309,19 @@ export function TodayTab({
       ) : (
         <div className="view-all-list">
           {timeline.days.map((d) => (
-            <DayChecklist key={d.dayNumber} piece={piece} chunks={chunks} day={d} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} onSetMemoryAnchor={onSetMemoryAnchor} />
+            <DayChecklist
+              key={d.dayNumber}
+              piece={piece}
+              chunks={chunks}
+              day={d}
+              onLogSession={onLogSession}
+              onUnlogSession={onUnlogSession}
+              onConfirmProvisionalSession={onConfirmProvisionalSession}
+              onDiscardProvisionalSession={onDiscardProvisionalSession}
+              onLogRunThrough={onLogRunThrough}
+              onUnlogRunThrough={onUnlogRunThrough}
+              onSetMemoryAnchor={onSetMemoryAnchor}
+            />
           ))}
         </div>
       )}

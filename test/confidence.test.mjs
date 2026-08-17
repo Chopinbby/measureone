@@ -4,8 +4,11 @@ import {
   getSuggestedStartingBPM,
   computeConfidence,
   computeAutoConfidence,
+  computeProgressTier,
   classifySessionOutcome,
   resolveRequiredReps,
+  formatLadderStatus,
+  hasClimbingTempo,
 } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
@@ -429,5 +432,189 @@ describe("computeAutoConfidence uses resolveRequiredReps too, not its own separa
     };
     const confidence = computeAutoConfidence(runThrough, piece, 1);
     assert.ok(confidence < 65, "1 of 2 required reps should score below the 'fully done' 65%");
+  });
+});
+
+describe("A skipped session (Interleaved mode, Pass 29) is excluded wherever sessions are treated as judged practice", () => {
+  const chunk = { id: "c1", kind: "section", difficultyLabel: "medium", start: 1, end: 4, recurring: false };
+
+  test("computeAutoConfidence: a skip as the most recent session does NOT null out the real last outcome's pass/fail multiplier", () => {
+    const withoutSkip = {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: {
+        c1: { doneDays: [1], currentBPM: 90, sessions: [{ day: 1, cleanReps: 4, bpm: 90, outcome: "pass" }] },
+      },
+    };
+    const withTrailingSkip = {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: {
+        c1: {
+          // Same day, same doneDays — a skip never adds to doneDays (this
+          // pass's fix), so isolating the skip's effect means holding
+          // `currentDay` and `doneDays` identical between the two cases and
+          // varying only whether a skip record trails the real pass in
+          // `sessions`. Evaluating at different currentDay values instead
+          // would also move the (unrelated) recency term and produce a
+          // false positive here.
+          doneDays: [1],
+          currentBPM: 90,
+          sessions: [
+            { day: 1, cleanReps: 4, bpm: 90, outcome: "pass" },
+            { day: 1, skipped: true, durationSeconds: 120 },
+          ],
+        },
+      },
+    };
+    const confBefore = computeAutoConfidence(chunk, withoutSkip, 1);
+    const confAfter = computeAutoConfidence(chunk, withTrailingSkip, 1);
+    assert.equal(
+      confAfter,
+      confBefore,
+      "a trailing skip must not change the score the real 'pass' session already earned — it should read straight through the skip to that pass"
+    );
+  });
+
+  test("computeProgressTier: a chunk with only a skipped session (no real session ever) reads as 'untouched', not touched", () => {
+    const piece = {
+      progress: { c1: { doneDays: [], stage: null, sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] } },
+    };
+    assert.equal(computeProgressTier(chunk, piece), "untouched");
+  });
+
+  test("formatLadderStatus: a chunk with only a skipped session and no recognized stage returns null (same as truly no history)", () => {
+    const ladderConfig = {
+      stabilizing: { intervalDays: 4, graduationPasses: 4 },
+      settling: { intervalDays: 7, graduationPasses: 4 },
+      holding: { startIntervalDays: 14, maxIntervalDays: 70 },
+    };
+    const entry = { stage: null, sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] };
+    assert.equal(formatLadderStatus(entry, ladderConfig, "2026-08-16"), null);
+  });
+});
+
+// Pass 30 — the tempo-climbing nudge (Piece Map tile marker + modal
+// suggestion). bpmSession() below builds a minimal real (non-skipped,
+// non-provisional, judged) session record — only `bpm` matters to
+// hasClimbingTempo, but a realistic shape is used throughout rather than
+// bare `{ bpm }` objects, consistent with how sessions look elsewhere in
+// this file's tests.
+function bpmSession(bpm, day) {
+  return { day, cleanReps: 3, bpm, outcome: "pass", durationSeconds: 60 };
+}
+
+describe("hasClimbingTempo — Pass 30's tempo-climbing trend detection", () => {
+  test("several consecutive rising-BPM sessions triggers it", () => {
+    const entry = { sessions: [bpmSession(70, 1), bpmSession(75, 2), bpmSession(80, 3), bpmSession(85, 4)] };
+    assert.equal(hasClimbingTempo(entry), true);
+  });
+
+  test("flat BPM across sessions does NOT trigger it", () => {
+    const entry = { sessions: [bpmSession(80, 1), bpmSession(80, 2), bpmSession(80, 3), bpmSession(80, 4)] };
+    assert.equal(hasClimbingTempo(entry), false);
+  });
+
+  test("declining BPM does NOT trigger it", () => {
+    const entry = { sessions: [bpmSession(90, 1), bpmSession(85, 2), bpmSession(80, 3), bpmSession(75, 4)] };
+    assert.equal(hasClimbingTempo(entry), false);
+  });
+
+  test("a rise below the minimum-rise threshold does NOT trigger it (non-decreasing alone isn't enough)", () => {
+    const entry = { sessions: [bpmSession(80, 1), bpmSession(81, 2), bpmSession(82, 3)] };
+    assert.equal(hasClimbingTempo(entry), false);
+  });
+
+  test("a rise right at the minimum threshold DOES trigger it (boundary is inclusive)", () => {
+    const entry = { sessions: [bpmSession(80, 1), bpmSession(82, 2), bpmSession(84, 3)] };
+    assert.equal(hasClimbingTempo(entry), true);
+  });
+
+  test("too few sessions cannot show a trend, even if the only two rise sharply", () => {
+    const entry = { sessions: [bpmSession(70, 1), bpmSession(90, 2)] };
+    assert.equal(hasClimbingTempo(entry), false);
+  });
+
+  test("a plateau (repeated BPM) in the middle of an otherwise rising run still counts — 'monotonic-ish', not strictly monotonic", () => {
+    const entry = { sessions: [bpmSession(70, 1), bpmSession(75, 2), bpmSession(75, 3), bpmSession(85, 4)] };
+    assert.equal(hasClimbingTempo(entry), true);
+  });
+
+  test("any real dip breaks the trend outright, even with a big net rise overall", () => {
+    const entry = { sessions: [bpmSession(70, 1), bpmSession(90, 2), bpmSession(80, 3), bpmSession(95, 4)] };
+    assert.equal(hasClimbingTempo(entry), false, "90 -> 80 is a real dip between consecutive sessions");
+  });
+
+  test("only looks at the most recent WINDOW sessions — an old climb doesn't paper over a recent flat run", () => {
+    const entry = {
+      sessions: [
+        bpmSession(50, 1),
+        bpmSession(60, 2),
+        bpmSession(70, 3),
+        bpmSession(80, 4),
+        bpmSession(80, 5),
+        bpmSession(80, 6),
+        bpmSession(80, 7),
+      ],
+    };
+    assert.equal(
+      hasClimbingTempo(entry),
+      false,
+      "the climb from 50->80 is now outside the 4-session window — the most recent 4 (80,80,80,80) are flat"
+    );
+  });
+
+  test("skipped sessions (no bpm at all) are excluded and don't break an otherwise-climbing run", () => {
+    const entry = {
+      sessions: [
+        bpmSession(70, 1),
+        { day: 2, skipped: true, durationSeconds: 60 },
+        bpmSession(78, 3),
+        bpmSession(86, 4),
+      ],
+    };
+    assert.equal(hasClimbingTempo(entry), true);
+  });
+
+  test("a still-open provisional session is excluded — not yet judged, shouldn't count as evidence of a climb", () => {
+    const entry = {
+      sessions: [
+        bpmSession(70, 1),
+        bpmSession(75, 2),
+        bpmSession(80, 3),
+        { day: 4, cleanReps: 1, bpm: 200, outcome: "soft-miss", durationSeconds: 30, provisional: true },
+      ],
+    };
+    // Without excluding the provisional 200 BPM outlier this would read as
+    // a dramatic climb; with it correctly excluded, only 70/75/80 remain —
+    // a real climb, but on 3 sessions within the same window either way,
+    // so assert against a case where including it WOULD flip the answer.
+    assert.equal(hasClimbingTempo(entry), true, "judged on 70->75->80 only, not the unresolved 200 BPM provisional entry");
+  });
+
+  test("a provisional outlier that would otherwise break a flat run stays excluded, so the flat run still correctly does not trigger", () => {
+    const entry = {
+      sessions: [
+        bpmSession(80, 1),
+        bpmSession(80, 2),
+        bpmSession(80, 3),
+        { day: 4, cleanReps: 1, bpm: 40, outcome: "fail", durationSeconds: 30, provisional: true },
+      ],
+    };
+    assert.equal(hasClimbingTempo(entry), false, "the provisional session is excluded entirely, leaving the flat 80/80/80 run");
+  });
+
+  test("no entry, no sessions, or empty sessions all return false without throwing", () => {
+    assert.equal(hasClimbingTempo(null), false);
+    assert.equal(hasClimbingTempo(undefined), false);
+    assert.equal(hasClimbingTempo({}), false);
+    assert.equal(hasClimbingTempo({ sessions: [] }), false);
+  });
+
+  test("sessions with a missing/non-numeric bpm (e.g. a legacy or malformed record) are excluded, not treated as 0", () => {
+    const entry = {
+      sessions: [bpmSession(70, 1), { day: 2, cleanReps: 3, outcome: "pass", durationSeconds: 60 }, bpmSession(78, 3), bpmSession(86, 4)],
+    };
+    assert.equal(hasClimbingTempo(entry), true, "the bpm-less record is skipped over, not counted as a BPM of 0 (which would read as a huge dip)");
   });
 });

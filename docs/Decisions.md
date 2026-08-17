@@ -1607,6 +1607,179 @@ the fail demotes it INTO — not the flat −2 step a partial pass gets.**
   (not Settling's, not a flat step), then confirmed undo fully restored
   the pre-fail state. `npm test`: 237/237.
 
+**Decision: Interleaved mode's "skip, just save time" action gets a
+dedicated `skipped: true` branch inside `handleLogSession`, not a
+zero-rep/zero-BPM call through the normal path (Pass 29).**
+
+- **Why:** `classifySessionOutcome` treats a session with no clean reps as
+  a genuine fail (`!cleanReps` short-circuits to `"fail"`). Someone
+  declining to report an outcome mid-rotation is not the same event as a
+  reported failed attempt, and silently recording a fail (which demotes
+  the chunk's stage) would be actively wrong. The branch appends a session
+  record (time, `loggedDate`) and sets the piece's `lastLoggedAt`, but
+  returns before `computeLadderAdvance` runs — `stage`/`practiceBPM`/
+  `nextDueDate` are left exactly as they were.
+- **Alternative considered:** a separate handler
+  (`handleLogSkippedSession`) alongside `handleLogSession`. Rejected —
+  both write to the same `progress[id].sessions`/`doneDays` shape
+  `handleLogSession` already owns, and forking that into two functions
+  would mean two places could drift on that shape over time. One function,
+  one new early-return branch.
+- **Revised after code review, same pass — "log time without marking
+  completed" is a general rule, not an Interleaved-only quirk:** the first
+  version of this branch still added the day to `doneDays`, on the theory
+  that Recent Practice History needed it to be visible. Two problems, both
+  raised in review and fixed together rather than patched separately:
+  1. Marking a chunk "done" with no outcome recorded misrepresents what
+     happened — the user should be able to log time on any chunk without
+     that being treated as completing it, and decide separately, during or
+     outside Interleaved mode, whether/when to actually log a real
+     attempt. Fixed by dropping the `doneDays` write from the skip branch
+     entirely; a skip only ever appends to `sessions`.
+  2. That same `sessions` array is what `computeAutoConfidence`,
+     `computeProgressTier`, `formatLadderStatus`, and several Progress-tab
+     stats (consistency days, tempo trend, outcome breakdown) all read as
+     evidence of *judged* practice. A skipped record has no
+     `outcome`/`effectiveness`, so `sessionOutcome` returns `null` for it —
+     as the most recent session it silently muted `computeAutoConfidence`'s
+     last-outcome pass/fail multiplier, and it inflated the outcome
+     breakdown's denominator without landing in any of the three buckets,
+     pulling every real percentage down. Fixed with one shared predicate,
+     `loggedSessions(sessions)` (`lib/utils.js`, `!s.skipped`), read by
+     every one of those consumers instead of the raw `entry.sessions`.
+     `sumPracticeSeconds` deliberately does **not** use it — a skip's time
+     still counts toward total time practiced, since saving that time was
+     the whole point of the button.
+  3. (Caught in the same pass, not user-reported but a direct consequence
+     of the above.) `ChecklistItem` renders whichever session is most
+     recent for a given chunk/day regardless of which view surfaced it —
+     Day view, Week, View all, and the past-plan due-review panel all
+     share it. A skipped session has no `cleanReps`/`bpm`, so it rendered
+     literally `"Logged: undefined consecutive clean reps at undefined
+     BPM"` if that chunk/day was viewed anywhere outside Interleaved mode.
+     Fixed with a dedicated render branch for `session.skipped` ("Skipped
+     in Interleaved practice — not marked done").
+- Verified with `test/interleave-skip.test.mjs` (doneDays explicitly
+  asserted unchanged by a skip, both alone and followed by a real log the
+  same day), `test/confidence.test.mjs` (a trailing skip doesn't move
+  `computeAutoConfidence`'s score, `computeProgressTier` reads a
+  skip-only chunk as "untouched", `formatLadderStatus` treats it as no
+  history), `test/utils.test.mjs` (`loggedSessions` filters correctly;
+  `sumPracticeSeconds` still counts a skip's time), and
+  `test/old-piece-interleave-compat.test.mjs` (the whole path — real
+  `validateAndMigratePiece`, then eligibility, then a skip — run against a
+  piece shaped like a genuine pre-ladder save, not a fixture built to
+  already match this pass's assumptions). Every new test was confirmed to
+  actually fail when the corresponding fix was reverted, not just pass
+  against the fixed code. Also verified manually in-browser end to end
+  against a hand-seeded old-format piece (no `ladderConfig`, no `stage`,
+  legacy `effectiveness`-keyed sessions): migrated cleanly, showed the
+  correct backfilled time-practiced total, became Interleave-eligible once
+  advanced to Settling exactly like a native chunk, skip left `doneDays`/
+  confidence/ladder state untouched and correctly excluded the skip from
+  Recent Practice History and the outcome breakdown, the Day view
+  rendered the new "Skipped in Interleaved practice" line instead of the
+  old "undefined" text, and a follow-up real log then marked the day done
+  normally. `npm test`: 315/315.
+
+**Decision: a soft-miss/fail AUTO-classified during Interleaved practice is
+saved provisionally — real reps/BPM recorded, but not applied to the
+ladder until the learner confirms or discards it — rather than committing
+immediately like a normal logged session (Pass 29 follow-up).**
+
+- **Why:** raised directly by the user — interleaved retrieval practice
+  routinely produces worse-looking results than the same chunk would get
+  in focused, blocked practice, while still being the more effective
+  practice for long-term retention. Auto-demoting a chunk's stage the
+  instant a rougher-than-usual interleaved attempt lands would punish
+  exactly the practice this feature exists to encourage, and would cut
+  against [Product-Principles.md](Product-Principles.md)'s permanent "no
+  punishment mechanics" rule in a new, narrower way this codebase hadn't
+  had to consider before (existing punishment-avoidance work — "a review
+  arriving late is schedule slack, never a failure" — is about *timing*,
+  not about discounting a worse-than-usual *result*).
+- **Options considered, from the user directly:**
+  1. Block and prompt right when the rough result lands ("save as-is or
+     redo?"). Rejected — it interrupts the rotation's flow every time an
+     interleaved attempt comes out worse than blocked practice would,
+     which per the whole premise here is expected and common, not
+     exceptional.
+  2. Commit as-is, no special handling (today's behavior at the time).
+     Rejected — doesn't address the actual concern; a real fail still
+     demotes the chunk immediately regardless of context.
+  3. **Chosen: save the attempt, don't auto-commit it.** No blocking
+     dialog — the rotation keeps moving. Resolution happens later, on that
+     chunk's own card, wherever it's next viewed (Day view, Week, View
+     all, the due-review panel, Revival, or the same chunk's own turn
+     coming back around in Interleaved mode) — same "not marked completed
+     until resolved" shape the skip fix (above) already established, just
+     with real numbers attached instead of none.
+  A companion question — should a full PASS get the same provisional
+  treatment? — was asked and answered explicitly: no. Only soft-miss/fail
+  go provisional; a clean pass has nothing worth deferring a decision
+  about.
+- **Mechanism, reusing what already existed rather than inventing new
+  ladder semantics:** `handleLogSession` gets one more branch,
+  `provisional: true` (same shape as the `skipped` branch it sits beside —
+  save the record, return before `computeLadderAdvance`, don't touch
+  `doneDays`), and two small new handlers —
+  `handleConfirmProvisionalSession` (finally runs the saved outcome through
+  `computeLadderAdvance`, dated to the confirm moment, and stamps a
+  `ladderSnapshot` so the **existing, unmodified** `handleUnlogSession` can
+  still fully reverse it later) and `handleDiscardProvisionalSession`
+  (removes the record, no ladder snapshot needed since nothing was ever
+  applied). No new session-history data structure, no parallel logging
+  path, no changes to `computeLadderAdvance` or `classifySessionOutcome`
+  themselves.
+- **UI, threaded through the existing shared component rather than
+  built new:** `ChecklistItem` — used by Day view, Week, View all, the
+  due-review panel, and Revival — gets a third render branch alongside
+  the existing session/skip ones: reps/BPM logged, what outcome it would
+  register as, and Confirm/Discard buttons. `InterleavePanel` shows the
+  same summary inline (not a popup) if the currently-rotating chunk
+  already has an unresolved provisional session from an earlier turn, so
+  it isn't silently lost mid-session either. `SectionRunThroughPanel` was
+  deliberately left unwired — it only ever renders synthetic `sr_`-id
+  run-through chunks, which are excluded from `chunkSet.all` by design
+  (`CLAUDE.md`), so they can never reach Interleaved mode and can never
+  carry a provisional session; wiring props into an unreachable path
+  would be dead code, not defensiveness.
+- Verified with `test/interleave-provisional.test.mjs` (provisional save
+  leaves doneDays/stage/practiceBPM/nextDueDate untouched; confirm applies
+  the saved outcome and dates the ladder math to the confirm moment, not
+  the original attempt; confirm targets only the most recent *provisional*
+  session for that day, not an already-resolved one logged the same day;
+  discard removes cleanly with no ladder effect; both are no-ops with
+  nothing pending) — each test confirmed to actually fail when the
+  corresponding behavior was reverted. Also verified manually in-browser
+  end to end: logged a reps-shortfall attempt in Interleaved mode, confirmed
+  no blocking dialog appeared and the ladder (stage/practiceBPM/nextDueDate)
+  stayed untouched while the real reps/BPM were saved; saw the same
+  "Unresolved from earlier" summary in both InterleavePanel (the chunk's
+  next turn) and Day view (`ChecklistItem`); clicked Confirm and watched
+  `computeLadderAdvance` apply for real (consecutivePasses reset,
+  practiceBPM stepped down, nextDueDate rescheduled 7 days from the confirm
+  date, `doneDays` gained the original attempt day, a `ladderSnapshot` was
+  stamped) with the due-review item correctly dropping off today's list
+  once its due date moved to the future; seeded a second provisional
+  attempt and clicked Discard, confirming the record vanished with zero
+  effect on stage/practiceBPM and the Progress tab's outcome breakdown/
+  practice history reflecting only the two real, resolved sessions.
+  `npm test`: 324/324.
+
+**Decision: leaving Interleaved mode with an unconfirmed provisional log warns and, on confirmation, discards it — reversing the "resolve whenever, no deadline" model the provisional-logging decision above just established (user-directed follow-up, same lineage).**
+
+- **Why:** raised directly by the user, as a deliberate narrowing of the earlier design — an unresolved provisional session left open indefinitely was judged more likely to be silently forgotten than genuinely revisited later.
+- **Scope, decided narrowly rather than broadly (user's explicit choice between two offered options):** the warning fires only while Interleaved mode is *actively on screen* (`viewMode === "interleave"`) with a provisional from *that* rotation still pending — not for any older, unrelated provisional sitting unresolved elsewhere in the piece. Leaving means any of: switching to Day view/Week/View all, navigating to a different app tab, or switching to a different piece. Confirming discards every pending chunk in that rotation and lets the navigation proceed; cancelling blocks the navigation and touches nothing.
+- **A real technical ceiling, surfaced before writing any code:** modern browsers force their own generic wording on the native "close this tab" (`beforeunload`) dialog and ignore any custom message a page supplies — a limitation of the browser, not this app. Given that, the user chose (their explicit call, offered as a tradeoff) to only warn for in-app navigation, where the exact requested wording *does* show, and to not attempt a `beforeunload` handler that could only ever show generic browser text.
+- **Mechanism:** `TodayTab` (which owns `viewMode` and the eligible-chunk list) computes the live risk and reports it up to `App.jsx` via `onInterleaveRiskChange` (lifted `useState`, not a ref — see the implementation note below on why a ref-registration version of this was tried first and abandoned), since `App.jsx` is what actually owns sidebar/piece-switcher navigation (`CLAUDE.md`: "App.jsx: state + layout only"). One shared function, `confirmAndDiscardProvisional`, is used both by `App.jsx` itself (sidebar nav, `switchToPiece`) and passed down to `TodayTab` (its own segmented-control buttons) as `onConfirmLeaveInterleaved`, so the warning text and discard behavior can never drift between the two call sites.
+- **Two real bugs found and fixed while building this, both only surfaced by manual browser testing, not by code review:**
+  1. **An infinite render loop.** The first version of the risk-reporting effect ran on every render with no dependency array, and called `onInterleaveRiskChange` with a freshly-constructed `{ chunkIds, day }` object literal every time — a *new object reference* even when the actual chunk ids and day hadn't changed. React's state setter saw that as a real change every time, re-rendering, re-running the effect, sending yet another new object: `Maximum update depth exceeded`, reproduced live, not theoretical. Fixed by keying the effect's dependency array on `interleavePendingChunkIds.join(",")` (a stable string derived from the actual content) instead of either the raw array or no dependency array at all.
+  2. **A silent persistence bug**, found only by explicitly reloading the page after a piece-switch discard and checking whether it survived — the in-memory result looked correct the whole time, which is exactly why this needed a reload check, not just a post-click assertion. `switchToPiece` discards the *old* piece's provisional session and reassigns `activePieceId` to the *new* piece inside the same event handler, so both land in the same React batch. The auto-save `useEffect` (`App.jsx`) had been scoped to "persist only the active piece when it changes" since it was first written — a reasonable assumption right up until this pass, since nothing before it ever mutated a piece other than the currently-active one in the same tick a piece-switch also happened. By the time that effect re-ran, `activePieceId` already pointed at the *new* piece, so it saved the new piece and never separately re-saved the old one — the discard was computed correctly in `pieces` state but never reached `localStorage`, silently reverting on the next reload. Fixed at the root rather than special-cased for this one call site: the effect now saves every entry in `pieces` whenever that object changes, removing the "only active" assumption entirely rather than teaching one more handler to route around it (bulk reschedule, elsewhere in `App.jsx`, had already independently hit the same "only active" gap and worked around it locally — this fix is the generalized version of that same fix). Verified with an actual page reload after the discard, not just an immediate read. Trade-off, not fully load-tested: every piece in `pieces` is now re-serialized and re-written to `localStorage` on any single piece's change, not just the changed one — fine for the handful of pieces a musician realistically has open, untested at a large piece count or against a piece with a very long session history.
+- **A third gap, found on critical review after the above shipped, not during the original build: two more sidebar controls changed `activeTab`/`activePieceId` without going through the guard at all.** The "Edit piece" button (`startEditing`) and finishing the "+ Add new piece" wizard (`handleComplete`) both live in the persistent sidebar, visible from Interleaved mode same as the nav list and piece switcher, and both were missed in the original implementation because the review-then-build pass only exercised the three routes it had explicitly set out to test, not an exhaustive audit of every place `setActiveTab`/`setActivePieceId` is called in `App.jsx`. Not a data-loss bug — neither path discarded anything on its own, they just silently skipped the warning — but squarely inside what "a different app tab, or a different piece" was already understood to mean. Fixed the same way as the other three: one `if (!guardLeavingInterleaved()) return;` line at the top of each handler. For `handleComplete` specifically, gating at the very top means a cancelled leave attempt also skips creating the new piece — verified deliberately, not incidentally: the wizard modal stays open (`wizardOpen` is only set to `false` further down in the same function, which a `return` above it never reaches) with the learner's already-entered fields intact, so cancelling costs nothing beyond having to click "Generate my plan" again once the pending log is dealt with.
+- **Verification note:** the persistence bug specifically is not something a pure-function unit test would have caught or would meaningfully validate — it lived entirely in *React's state-batching order relative to an effect's dependency array*, not in any computable input/output logic. This repo has no React render harness (`CLAUDE.md`), so the real verification for all three bugs was live browser testing: reproducing the infinite loop via the console warning, then confirming it was gone; reproducing the lost discard via an actual reload, then confirming the reload preserved it after the fix; and for the two missed routes, confirming both the cancel path (nothing created/discarded, wizard data preserved) and the confirm path (discards, proceeds, survives a reload) same as the original three.
+- Verified with `test/utils.test.mjs` (`hasPendingProvisionalSession` — the day-scoped pending check) and `test/interleave-leave-warning.test.mjs` (mirrors of `confirmAndDiscardProvisional`/`guardLeavingInterleaved`, since both are closures inside `App.jsx`: prompts with the exact wording, discards every pending chunk id on confirm, discards *nothing* on cancel, no-ops with nothing pending). Both confirmed to actually fail when the corresponding behavior was reverted — this coverage is at the shared-function level, so it already covered the two routes found in review without needing new tests once they were wired to the same function. Manually verified in-browser, end to end, for all **five** leave routes (Today's Practice's own Day view/Week/View all buttons, the sidebar nav list, the piece switcher, the "Edit piece" button, and finishing the "Add new piece" wizard) — for each: the cancel path blocks the action and preserves the provisional; the confirm path shows the exact requested wording, discards, proceeds, and survives a real reload; and normal navigation with nothing pending proceeds with zero `confirm()` calls at all, confirmed via an instrumented call counter. `npm test`: 352/352.
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -2587,3 +2760,36 @@ oversight to silently fix; surface it instead.
   user, who judged it not worth chasing given how narrow the trigger is.
   Worth unifying if `preferByRecency` and `diffImportedPiece` are ever
   revisited together, rather than independently again.
+- **`hasClimbingTempo` (Pass 30) can silently miss a real climb if a
+  session's `bpm` is `NaN`.** Found in critical review after the pass
+  shipped, not fixed. The function's `typeof s.bpm === "number"` guard lets
+  `NaN` through (`typeof NaN` really is `"number"`), and `NaN` comparisons
+  are always `false` — so a `NaN` landing at the start or end of the
+  trailing window can neither register as a dip nor contribute to a real
+  rise, silently suppressing the marker rather than showing a false
+  positive. Not reachable through the app's own UI (`NumberInput` never
+  commits a non-numeric BPM), only through hand-edited or corrupted
+  `localStorage` data. Wrong-but-conservative, not wrong-and-misleading; not
+  urgent, but worth a defensive `Number.isFinite` check if this function is
+  touched again.
+- **The tempo-climbing marker (Pass 30) doesn't know about a pending
+  provisional session (Pass 29 follow-up) on the same chunk.** Found in the
+  same review. `hasClimbingTempo` reads `loggedSessions`, which correctly
+  excludes an unconfirmed provisional — but that means a chunk can show
+  "tempo's climbing, try faster" while an unresolved rough attempt sits
+  right there in its history, and if the learner later confirms that
+  attempt, the "climbing" read could flip false immediately. Neither
+  feature is wrong on its own; they just don't cross-reference each other.
+  Not currently visible together on one screen — `PieceMapTab`'s
+  chunk-detail modal (where the climbing suggestion shows) doesn't surface
+  provisional confirm/discard UI at all, that's `ChecklistItem`-only — so
+  the practical exposure is narrow today, but worth knowing about before
+  either feature is extended.
+- **The broadened piece-save effect (Pass 29 follow-up — see the
+  persistence-bug fix above) re-writes every piece to `localStorage` on any
+  single piece's change, not just the one that changed.** Untested at
+  scale: fine for the handful of pieces one musician realistically has
+  open, unverified against a large piece count or a piece with a very long
+  session history. Not a correctness question, a performance one — worth
+  measuring if it's ever revisited, but not urgent enough to have gated
+  landing the correctness fix itself.

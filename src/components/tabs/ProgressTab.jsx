@@ -1,6 +1,6 @@
 import { Sparkline } from "../Sparkline";
 import { computePracticeHistory } from "../../lib/history";
-import { formatRange } from "../../lib/utils";
+import { formatRange, loggedSessions } from "../../lib/utils";
 import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
 import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
 
@@ -11,7 +11,10 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
   // last N days with any logged activity, no "best ever" shown alongside it.
   const practicedDays = new Set();
   Object.entries(piece.progress).forEach(([id, entry]) => {
-    (entry.sessions || []).forEach((s) => practicedDays.add(s.day));
+    // Pass 29 — a skipped session (Interleaved mode) isn't counted as a
+    // day "practiced" here, same as everywhere else on this tab: it saved
+    // time but wasn't a judged attempt. See lib/utils.js's loggedSessions.
+    loggedSessions(entry.sessions).forEach((s) => practicedDays.add(s.day));
     if (id === "__consolidation__") (entry.doneDays || []).forEach((d) => practicedDays.add(d));
   });
   const consistencyWindow = Math.min(14, currentDay);
@@ -34,7 +37,9 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
   const tempoTrends = chunks
     .map((c) => {
       const entry = piece.progress[c.id] || {};
-      const sessions = [...(entry.sessions || [])].sort((a, b) => a.day - b.day);
+      // A skipped session has no bpm to plot — excluded so it can't show up
+      // as a bogus point on the tempo sparkline. See lib/utils.js.
+      const sessions = loggedSessions(entry.sessions).sort((a, b) => a.day - b.day);
       const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, c);
       return { chunk: c, sessions, targetBPM };
     })
@@ -44,8 +49,10 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
   // every logged session in the piece. Replaces the old free-standing
   // "how did it feel" self-report, folded into this same judgment — see
   // docs/Decisions.md#spaced-repetition--maintenance. sessionOutcome()
-  // also covers sessions logged before that change.
-  const allSessions = Object.values(piece.progress).flatMap((entry) => entry.sessions || []);
+  // also covers sessions logged before that change. Excludes skipped
+  // sessions entirely (Pass 29) — they weren't judged, so they shouldn't
+  // sit in the denominator pulling every real percentage down.
+  const allSessions = Object.values(piece.progress).flatMap((entry) => loggedSessions(entry.sessions));
   const outcomeBreakdown = Object.entries(SESSION_OUTCOME_META).map(([value, meta]) => {
     const count = allSessions.filter((s) => sessionOutcome(s) === value).length;
     return { value, ...meta, count, pct: allSessions.length ? Math.round((count / allSessions.length) * 100) : 0 };

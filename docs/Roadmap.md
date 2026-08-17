@@ -59,6 +59,23 @@ this is **not** Maintenance mode above, just a manual visibility toggle. The
 in design (see item 2 below) — Pause/Archive still doesn't need it answered,
 though, since it's scoped to "take this off my daily agenda" regardless.
 
+**Since Pass 29**, Today's Practice has a fourth view mode, **Interleaved
+practice** — rotates chunks that have graduated past Stabilizing
+(settling/holding), reusing the existing logging path; a "skip" action
+saves time without marking a day done or touching the ladder; an
+auto-classified soft-miss/fail logged mid-rotation is saved
+**provisionally** (real reps/BPM, ladder untouched) until confirmed or
+discarded, since interleaved retrieval often looks rougher than blocked
+practice while still being more effective. Leaving Interleaved mode with
+an unresolved provisional now warns and discards on confirmation. See
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
+and [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+**Since Pass 30**, Piece Map also surfaces a live-derived "tempo climbing"
+nudge (a tile marker plus a modal suggestion, +15–30 BPM) when a chunk's
+recent sessions show a real upward BPM trend — no new persisted state,
+suggestion overlay only, doesn't touch scoring or the ladder. See
+[Algorithms.md](Algorithms.md#tempo-climbing-nudge-pass-30).
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold

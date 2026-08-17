@@ -120,6 +120,44 @@ harness for rendering components. If logic that needs protecting is sitting
 in a component, the answer is to move it into `lib/`, not to skip the test.
 `lib/history.js` exists for exactly that reason.
 
+## An immediate post-action check is not the same as verifying persistence
+
+When manually testing anything that writes to `localStorage`, check it
+survives an actual page reload, not just that it reads back correctly right
+after the click. React state can be completely correct in memory while the
+write to disk silently failed or never happened — the two only look
+identical if you never reload.
+
+Worked example (Pass 29 follow-up): discarding a provisional Interleaved
+session while switching pieces looked fine every time it was checked
+immediately after the click — `pieces` state genuinely was updated
+correctly. It was only reloading the page afterward that revealed the
+discard hadn't actually reached `localStorage` at all, because `App.jsx`'s
+save effect had been scoped to "persist only the active piece," and by the
+time it re-ran, `activePieceId` already pointed at the *new* piece. A
+purely in-memory check would have called this done and shipped a real,
+silent data-loss bug. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for the fix.
+
+## A guard added for one navigation path needs auditing everywhere that path exists
+
+When you add a confirmation/guard before a state transition (leaving a
+screen, switching context, anything with "are you sure"), don't stop once
+the specific buttons you built the feature around are covered. Grep every
+call site of the state setter the guard is meant to protect, not just the
+ones you happened to exercise while building and testing.
+
+Worked example (Pass 29 follow-up): a "warn before leaving Interleaved mode
+with unresolved data" guard was built and verified against three routes —
+the view-mode buttons, the sidebar nav list, the piece switcher. A later
+review pass grepped every `setActiveTab`/`setActivePieceId` call site in
+`App.jsx` and found two more the sidebar can trigger ("Edit piece,"
+finishing the "Add new piece" wizard) that had simply never been
+considered, let alone tested, because they weren't part of the three
+routes the feature was scoped around while building it. Not a subtle bug —
+a `grep` would have caught it in seconds, if it had been run before calling
+the feature done rather than after.
+
 ## A doc's claim about existing behavior is a claim, not a fact — check it
 
 When a doc states that something already works a certain way ("X and Y are

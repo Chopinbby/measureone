@@ -1,4 +1,4 @@
-import { clamp, rangesOverlap, daysBetweenInclusive } from "./utils";
+import { clamp, rangesOverlap, daysBetweenInclusive, loggedSessions } from "./utils";
 import { REQUIRED_REPS, STAGE_LABEL } from "./constants";
 import { STAGES } from "./ladder";
 
@@ -165,6 +165,52 @@ export function sessionOutcome(session) {
   return null;
 }
 
+// Tuning knobs for hasClimbingTempo below — hand-picked, not derived from
+// any study, same status as every other constant of this kind in this file
+// (see docs/Research.md's inventory of these; this one isn't added there
+// yet — Research.md wasn't in this pass's Touches list, flagged rather than
+// folded in, see the pass summary).
+//   WINDOW: how many of the chunk's most recent judged sessions to look at.
+//   MIN_SESSIONS: fewer than this can't show a trend at all — two points
+//     can't be told apart from noise the way three-plus in a row can.
+//   MIN_RISE_BPM: the window must climb by at least this many BPM
+//     end-to-end, so a flat run (which is non-decreasing but not "rising")
+//     doesn't trigger — see the non-decreasing-but-flat guard below.
+const CLIMBING_TEMPO_WINDOW = 4;
+const CLIMBING_TEMPO_MIN_SESSIONS = 3;
+const CLIMBING_TEMPO_MIN_RISE_BPM = 4;
+
+// True when a chunk's most recent judged sessions show a monotonic-ish
+// upward BPM trend — a live-derived signal (no new persisted field, same
+// pattern `progress[id].flag`/`needsRelearning` already use for the Piece
+// Map's tile markers), so it appears exactly while the trend holds and
+// disappears the moment it doesn't, without needing separate "seen" state.
+//
+// Reads straight off `entry` (piece.progress[chunk.id]), not chunk/piece —
+// same shape formatLadderStatus takes, since this only ever needs session
+// history, never the chunk's own fields. Only `loggedSessions(entry.sessions)`
+// counts: a skipped session (Pass 29) has no bpm at all, and a still-open
+// provisional one (Pass 29 follow-up) hasn't been judged yet — neither
+// should count as evidence of a real, resolved climb.
+//
+// "Monotonic-ish" rather than strictly monotonic: any real dip (a BPM
+// lower than the one right before it) breaks the trend outright — this
+// isn't trying to smooth out noise, just to avoid demanding a perfectly
+// unbroken climb when a same-BPM repeat in the middle of an otherwise
+// rising run is still obviously "climbing." A flat run (every session at
+// the same BPM) is non-decreasing but isn't a climb — MIN_RISE_BPM below
+// is what actually distinguishes the two.
+export function hasClimbingTempo(entry) {
+  if (!entry) return false;
+  const bpmSessions = loggedSessions(entry.sessions).filter((s) => typeof s.bpm === "number");
+  if (bpmSessions.length < CLIMBING_TEMPO_MIN_SESSIONS) return false;
+  const recent = bpmSessions.slice(-CLIMBING_TEMPO_WINDOW);
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].bpm < recent[i - 1].bpm) return false;
+  }
+  return recent[recent.length - 1].bpm - recent[0].bpm >= CLIMBING_TEMPO_MIN_RISE_BPM;
+}
+
 // Auto-computed confidence blends: how many clean reps were actually logged
 // relative to the target (not just that a session happened), how close the
 // achieved tempo was to the goal BPM, recency of last practice, the
@@ -185,7 +231,13 @@ export function computeAutoConfidence(chunk, piece, currentDay) {
   // judges against, so a run-through that passes also scores as fully done.
   const requiredReps = resolveRequiredReps(chunk);
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
-  const sessions = entry.sessions || [];
+  // A skipped session (Interleaved mode, Pass 29) has no reps/BPM/outcome
+  // to score and was deliberately never "logged" in the judged sense — see
+  // lib/utils.js's loggedSessions. Without this, a skip as the most recent
+  // session would null out sessionOutcome() below (no outcome/effectiveness
+  // field), silently dropping the pass/fail multiplier a real last session
+  // would have applied.
+  const sessions = loggedSessions(entry.sessions);
 
   let repQuality = 0;
   sessions.forEach((s) => {
@@ -265,7 +317,7 @@ export function computeConfidenceAsOf(chunk, piece, asOfDay) {
   const filteredEntry = {
     ...entry,
     doneDays: (entry.doneDays || []).filter((d) => d <= asOfDay),
-    sessions: (entry.sessions || []).filter((s) => s.day <= asOfDay),
+    sessions: loggedSessions(entry.sessions).filter((s) => s.day <= asOfDay),
   };
   const asOfPiece = { ...piece, progress: { ...piece.progress, [chunk.id]: filteredEntry } };
   return computeConfidence(chunk, asOfPiece, asOfDay);
@@ -294,7 +346,7 @@ export const PROGRESS_TIER_META = {
 // stage, rather than "untouched" or jumping straight to "mastered."
 export function computeProgressTier(chunk, piece) {
   const entry = piece.progress[chunk.id] || {};
-  const sessions = entry.sessions || [];
+  const sessions = loggedSessions(entry.sessions);
   if (sessions.length === 0) return "untouched";
   if (entry.stage === "holding") return "mastered";
   if (entry.stage === "settling") return "comfortable";
@@ -349,7 +401,7 @@ export function computeProgressTier(chunk, piece) {
 // while flagged (any fail resets it), so showing it is accurate, not a leak.
 export function formatLadderStatus(entry, ladderConfig, asOfDate) {
   if (!entry) return null;
-  const hasHistory = (entry.sessions || []).length > 0;
+  const hasHistory = loggedSessions(entry.sessions).length > 0;
   if (!STAGES.includes(entry.stage) && !hasHistory) return null;
   const stage = STAGES.includes(entry.stage) ? entry.stage : "stabilizing";
   const consecutivePasses = entry.consecutivePasses || 0;

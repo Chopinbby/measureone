@@ -86,12 +86,23 @@ Entry point: the Today tab, or clicking a day card in Timeline
 5. `ReassessPanel` is available for re-rating difficulty on today's measure
    ranges after practicing them — see flow 5.
 
-Today has three view modes, not just one: **Day view** (the numbered steps
+Today has four view modes, not just one: **Day view** (the numbered steps
 above), **Week** (added Pass 22 — 7 day-cards, current day highlighted,
 read-only; click a day to jump into Day view for it — see
 [Decisions.md](Decisions.md#ux) for why it's navigation-only, never a second
-place to log), and **"View all"**, which shows every day's checklist at once
-instead of just the current day.
+place to log), **"View all"**, which shows every day's checklist at once
+instead of just the current day, and **Interleaved** (added Pass 29 —
+rotates through chunks that have graduated past Stabilizing, one at a time
+on a timer, reusing the same rep/BPM inputs as Day view; disabled with an
+inline reason if nothing qualifies yet). Interleaved mode adds two things
+Day view doesn't have: "Skip, just save time" (records the time without
+logging an outcome), and a rough auto-classified result gets saved
+*provisionally* — the learner confirms or discards it later, from that
+chunk's card anywhere it's shown, rather than it silently affecting the
+ladder right away. Leaving Interleaved mode with an unresolved provisional
+still pending (switching view, tab, or piece) prompts a confirmation first.
+See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
+for the full mechanism.
 
 ## 3. Checking in: Overview vs. Progress
 
@@ -164,6 +175,14 @@ The sidebar's piece-switcher trigger opens a list of every piece in
 `pieces`; selecting one calls `switchToPiece`, which updates `activePieceId`
 (and the persisted `measureone-active_piece_id` key). "Add new piece" is
 reachable from the switcher, the Overview top row, and Settings.
+
+**Since Pass 29 follow-up**, switching pieces (or navigating to a different
+sidebar tab, or clicking "Edit piece") while the piece you're leaving has
+Interleaved mode open with an unresolved provisional log first asks for
+confirmation — see flow 2 above and
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29).
+Every other case is unaffected: switching pieces with nothing pending still
+happens in one click, no confirmation.
 
 Movements of the same work are grouped under the work title in that list
 (`groupPiecesByWork`), and are additionally switchable from the `PartSwitcher`

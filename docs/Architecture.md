@@ -50,7 +50,7 @@ MeasureOne.jsx/
 │                               # lib/history.js exists (Pass 20).
 └── src/
     ├── main.jsx                 # ReactDOM entry point, just mounts <App />
-    ├── App.jsx                  # state + layout only — ~1,620 lines; renders
+    ├── App.jsx                  # state + layout only — ~1,950 lines; renders
     │                            # the sidebar and whichever tab is active,
     │                            # owns updatePiece and every handler passed
     │                            # down as props. The CSS string also still
@@ -152,7 +152,8 @@ MeasureOne.jsx/
             ├── TodayTab.jsx
             │   └── today/  ChecklistItem.jsx, DayChecklist.jsx,
             │                FocusPanel.jsx, SectionRunThroughPanel.jsx,
-            │                ReassessPanel.jsx, WeekView.jsx
+            │                ReassessPanel.jsx, WeekView.jsx,
+            │                InterleavePanel.jsx (Pass 29)
             └── RevivalTab.jsx
                 └── revival/  RandomStartPanel.jsx
 ```
@@ -180,8 +181,9 @@ single-file Claude.ai artifact.
 | `FocusPanel` | Ranks everything touched so far by confidence, independent of today's schedule. |
 | `SectionRunThroughPanel` | Surfaces unlocked section run-throughs/combined run-throughs — see [Algorithms.md](Algorithms.md#section-run-throughs). |
 | `ReassessPanel` | Re-rate difficulty for a measure range; Apply commits and closes in one action. |
-| `TodayTab` | Composes `ScheduleBanner`, `FocusPanel`, `DayChecklist` (or all days in "View all" mode), `SectionRunThroughPanel`, `ReassessPanel`. **Since Pass 8 it has a second day-view branch**: once the piece has run past the end of its bounded plan, the "Day N of N" header becomes "Plan complete — maintenance, day N" and `DayChecklist` is replaced by an internal `DueReviewPanel` listing `computeDueReviews(...)` output. Prev/next day nav is disabled in that state (no bounded grid left to page through); "View all" still shows the whole original plan, so the plan stays reachable. Due items render through the same `ChecklistItem` the plan uses, keyed to the elapsed day number, so logging, undo and the ladder advance are the one code path either way. **Since Pass 22, a third view mode ("Week", between "Day view" and "View all") renders `WeekView`** instead of `DayChecklist`/`DueReviewPanel` — see that component's own row below. |
+| `TodayTab` | Composes `ScheduleBanner`, `FocusPanel`, `DayChecklist` (or all days in "View all" mode), `SectionRunThroughPanel`, `ReassessPanel`. **Since Pass 8 it has a second day-view branch**: once the piece has run past the end of its bounded plan, the "Day N of N" header becomes "Plan complete — maintenance, day N" and `DayChecklist` is replaced by an internal `DueReviewPanel` listing `computeDueReviews(...)` output. Prev/next day nav is disabled in that state (no bounded grid left to page through); "View all" still shows the whole original plan, so the plan stays reachable. Due items render through the same `ChecklistItem` the plan uses, keyed to the elapsed day number, so logging, undo and the ladder advance are the one code path either way. **Since Pass 22, a third view mode ("Week", between "Day view" and "View all") renders `WeekView`** instead of `DayChecklist`/`DueReviewPanel` — see that component's own row below. **Since Pass 29, a fourth mode ("Interleaved") renders `InterleavePanel`** — disabled with an inline reason when nothing on today's list has graduated past Stabilizing, rather than switching into an empty rotation; see that component's own row below. |
 | `WeekView` | Pass 22. Read-only 7-day-card view for `TodayTab`'s "Week" mode — see [Decisions.md](Decisions.md#ux) for why it never logs (a session logged from a non-today cell would be keyed to the wrong day). Inside a bounded plan, the window slides to keep the current day centered (clamped at both ends) rather than paging fixed week blocks like `TimelineTab` does; each card is a link into `TodayTab`'s Day view for that day. Past the plan, it falls back to 7 calendar days around today, of which only today's cell can carry content (`computeDueReviews` has no forward-looking form) — the days ahead read "Not due yet" rather than sitting blank. |
+| `InterleavePanel` | Pass 29. `TodayTab`'s fourth view mode ("Interleaved") — rotates through chunks past Stabilizing on a mode-level timer (mirrors `ChecklistItem`'s own per-chunk timer pattern), reusing the same rep/BPM inputs and `onLogSession` call the regular checklist uses. Adds "Skip, just save time" and, when an auto-classified soft-miss/fail lands mid-rotation, saves it **provisionally** rather than committing it — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29). Leaving this mode with an unresolved provisional is gated by `App.jsx`'s `guardLeavingInterleaved`, reported up via `onInterleaveRiskChange` since `TodayTab` is the only thing that knows whether this panel is actually on screen. |
 | `RevivalEntryModal` | Collects `lastPlayedDate`, optional `performanceTempo`, and required `purpose` before a revival cycle starts. Styled like `Wizard`'s modal shell. |
 | `DeletePieceModal` | Confirms permanent deletion by requiring the piece's exact name to be typed back, rather than a single `window.confirm()` — deletion has no undo and takes all practice history with it. |
 | `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. `PieceCheckRow` is the shared checkbox-row list item both modals render. **Since Pass 13**, `ImportPiecesModal` also shows a small "keep what's here" / "use the imported version" chooser under any matched piece whose practice-ladder progress genuinely conflicts with what's already saved (`diffImportedPiece`, [Algorithms.md](Algorithms.md#import-merge)) — most matches never show it, since an updatedAt-based recency check already resolves the common cases automatically. |
@@ -202,7 +204,15 @@ library.
   derived, not stored separately.
 - `updatePiece(updaterFnOrValue)` — the one function every mutation goes
   through, always updating `pieces[activePieceId]`. **Use this, not
-  `setPieces` directly**, for any change to the active piece.
+  `setPieces` directly**, for any change to the active piece. Persistence
+  itself, though, is **not** scoped to just the active piece: the
+  auto-save `useEffect` writes every entry in `pieces` to `localStorage`
+  whenever that object changes (**Pass 29 follow-up** — it used to persist
+  only `pieces[activePieceId]`, which silently lost a discard applied to a
+  *different* piece than the one a handler switched to in the same event —
+  see [Decisions.md](Decisions.md#spaced-repetition--maintenance)). If you
+  add a handler that mutates a piece other than the currently active one,
+  it's already covered — nothing extra to remember at the call site.
 - `editDraft` (+ `setEditDraftState`) — lives at the `App` level so
   navigating away from Settings mid-edit and back doesn't lose in-progress
   changes (it used to live inside `SettingsTab`, which unmounts on tab
@@ -215,6 +225,14 @@ library.
   Data-Model.md and Decisions.md#scheduling.
 - `wizardOpen`, `switcherOpen`, `settingsEditing`, `activeTab`, `loaded`,
   `revivalModalOpen` — straightforward UI state.
+- `interleaveRisk` (**Pass 29 follow-up**) — `{ chunkIds, day } | null`,
+  reported up from `TodayTab` (via `onInterleaveRiskChange`) whenever
+  Interleaved mode is actively showing an unconfirmed provisional session.
+  `App.jsx` reads it to gate every place it owns that can navigate away
+  (sidebar nav, the piece switcher, "Edit piece," finishing the "Add new
+  piece" wizard) through one shared function,
+  `confirmAndDiscardProvisional`/`guardLeavingInterleaved` — see
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 - `storageError` (a failed `localStorage` write) and `exportReminderDue` /
   `exportReminderDismissed` (**Pass 12** — a day-plus since the last export,
   or since first use if never exported; `isExportReminderDue`,

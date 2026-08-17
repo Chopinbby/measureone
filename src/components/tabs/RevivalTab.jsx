@@ -28,6 +28,8 @@ export function RevivalTab({
   onSetTempoLadderFraction,
   onLogSession,
   onUnlogSession,
+  onConfirmProvisionalSession,
+  onDiscardProvisionalSession,
   onEndRevival,
 }) {
   const revival = piece.revival || {};
@@ -170,6 +172,8 @@ export function RevivalTab({
                       day={currentDay}
                       onLogSession={onLogSession}
                       onUnlogSession={onUnlogSession}
+                      onConfirmProvisionalSession={onConfirmProvisionalSession}
+                      onDiscardProvisionalSession={onDiscardProvisionalSession}
                       tempoLadder={ladder}
                       memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[combo.id]}
                     />
@@ -207,6 +211,8 @@ export function RevivalTab({
                             day={currentDay}
                             onLogSession={onLogSession}
                             onUnlogSession={onUnlogSession}
+                            onConfirmProvisionalSession={onConfirmProvisionalSession}
+                            onDiscardProvisionalSession={onDiscardProvisionalSession}
                             tempoLadder={ladder}
                             memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[id]}
                           />

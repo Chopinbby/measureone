@@ -180,10 +180,14 @@ ChunkProgress = {
                             // and is really showing days-touched, a pre-existing label that
                             // predates same-day multi-session support and hasn't been
                             // reworded — a known small inaccuracy, not a bug).
-  sessions: [{              // one entry per LOGGED ATTEMPT, most recent last. Multiple entries
-                            // can now share the same `day` (a Tier 1 touch, a due review, a
+  sessions: [{              // one entry per LOGGED ATTEMPT (see skipped/provisional below for
+                            // two exceptions to "judged attempt"), most recent last. Multiple
+                            // entries can now share the same `day` (a Tier 1 touch, a due review, a
                             // re-attempt) — never overwritten by day alone; see loggedAt below.
-    day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds, ladderSnapshot
+    day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds, ladderSnapshot,
+    skipped, provisional,  // both optional booleans, Pass 29/29-follow-up, Interleaved mode only —
+                            // see below and Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29.
+                            // Never both true on the same record.
   }],                       // durationSeconds comes from the ChecklistItem timer, or from
                             // the manual minutes field when the user typed one instead.
                             // loggedAt (epoch ms) is what actually distinguishes same-day
@@ -228,6 +232,26 @@ ChunkProgress = {
                             // back to — an older snapshot simply never recorded them — so a
                             // snapshot missing any of them leaves that field untouched rather than
                             // inventing a value. See Decisions.md#spaced-repetition--maintenance.
+                            //
+                            // `skipped: true` (Pass 29, Interleaved mode's "skip, just save time")
+                            // — no cleanReps/bpm/outcome/ladderSnapshot at all, just day/loggedAt/
+                            // loggedDate/durationSeconds. Records that time was spent without
+                            // judging it: does NOT add `day` to doneDays above, does NOT run
+                            // computeLadderAdvance. `provisional: true` (Pass 29 follow-up) — the
+                            // opposite trade: DOES carry a real cleanReps/bpm/outcome (an
+                            // auto-classified soft-miss/fail from an interleaved attempt), but
+                            // still doesn't touch doneDays or the ladder until
+                            // handleConfirmProvisionalSession flips it to `provisional: false` and
+                            // stamps a ladderSnapshot at that point (or
+                            // handleDiscardProvisionalSession removes the record outright).
+                            // Every reader that treats `sessions` as evidence of *judged* practice
+                            // — confidence scoring, ladder-status display, the Progress tab's
+                            // stats — reads through lib/utils.js's `loggedSessions(sessions)`
+                            // (`!s.skipped && !s.provisional`) rather than this raw array.
+                            // `sumPracticeSeconds` (total time practiced) deliberately does NOT
+                            // filter — a skipped or still-provisional session's time still counts.
+                            // See Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29
+                            // and Decisions.md#spaced-repetition--maintenance.
   currentBPM,               // number | undefined — last logged tempo (what was actually played)
   targetBPM,                // number | undefined — explicit per-chunk override;
                              // falls back to piece.targetBPM / bpmZones if unset

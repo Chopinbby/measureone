@@ -97,6 +97,14 @@ export default function App() {
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleMessage, setRescheduleMessage] = useState("");
   const [rescheduleTitle, setRescheduleTitle] = useState("");
+  // User-directed follow-up (Interleaved mode's "leave with an unresolved
+  // provisional log" warning): { chunkIds, day } while TodayTab is actively
+  // showing Interleaved mode with at least one unconfirmed provisional
+  // session, else null. Reported by TodayTab itself (it owns viewMode and
+  // the eligible-chunk list) — App.jsx only needs the result, to gate
+  // navigation controls TodayTab has no say over (the sidebar, the piece
+  // switcher).
+  const [interleaveRisk, setInterleaveRisk] = useState(null);
   // A list, not a single piece's status — the same confirmation covers both
   // the per-piece Reschedule button (one entry) and Master Agenda's
   // "Reschedule all" (one entry per behind-schedule piece). Each entry is
@@ -120,17 +128,40 @@ export default function App() {
     setLoaded(true);
   }, []);
 
-  // Persist only the active piece when it changes. A failed write (most
-  // likely QuotaExceededError, since session history only ever grows — see
-  // storage.js) used to be swallowed silently, so a logged session could
-  // vanish with no sign anything went wrong. Surface it instead: a banner
-  // stays up until a save actually succeeds again, so recovering (e.g. after
-  // deleting an old piece to free up space) clears it on its own.
+  // Persists every piece in `pieces` whenever that object changes — not
+  // just the active one. Originally scoped to "only the active piece" on
+  // the assumption that nothing ever mutates a piece other than the one
+  // currently open; the discard-on-leave-Interleaved guard above
+  // (guardLeavingInterleaved/confirmAndDiscardProvisional) broke that
+  // assumption for the first time, and broke it silently: `switchToPiece`
+  // discards a provisional session on the piece being LEFT and reassigns
+  // `activePieceId` to the piece being entered inside the same event
+  // handler, so both `setPieces` (with the discard already applied) and
+  // `setActivePieceId` (the new piece) land in the same React batch — by
+  // the time this effect re-ran, `activePieceId` already pointed at the
+  // NEW piece, so `pieces[activePieceId]` was never the just-discarded
+  // one, and that discard was computed correctly in memory but never
+  // written to localStorage, silently reverting on next reload. Found via
+  // manual browser testing, not by inspection — the in-memory state looked
+  // right the whole time. Saving every piece here removes the assumption
+  // this depended on entirely, rather than special-casing this one call
+  // site (bulk reschedule, below, already had to work around the same
+  // "only active" gap in its own way, for the same underlying reason: nothing
+  // here was ever built to handle more than one piece's data changing in the
+  // same tick). A failed write (most likely QuotaExceededError, since session
+  // history only ever grows — see storage.js) used to be swallowed silently,
+  // so a logged session could vanish with no sign anything went wrong.
+  // Surface it instead: a banner stays up until a save actually succeeds
+  // again, so recovering (e.g. after deleting an old piece to free up space)
+  // clears it on its own.
   useEffect(() => {
-    if (!loaded || !activePieceId || !pieces[activePieceId]) return;
-    const result = savePieceToStorage(activePieceId, pieces[activePieceId]);
-    setStorageError(!result.ok);
-  }, [pieces, activePieceId, loaded]);
+    if (!loaded) return;
+    let anyFailed = false;
+    Object.entries(pieces).forEach(([id, p]) => {
+      if (!savePieceToStorage(id, p).ok) anyFailed = true;
+    });
+    setStorageError(anyFailed);
+  }, [pieces, loaded]);
 
   // Persist which piece is active.
   useEffect(() => {
@@ -181,6 +212,7 @@ export default function App() {
   }, [isInRevival(piece)]);
 
   const switchToPiece = (id) => {
+    if (!guardLeavingInterleaved()) return;
     setActivePieceId(id);
     setSwitcherOpen(false);
     setActiveTab("overview");
@@ -190,6 +222,7 @@ export default function App() {
   };
 
   const handleComplete = (finished, options = {}) => {
+    if (!guardLeavingInterleaved()) return;
     const id = `p_${Date.now()}`;
     const withId = ensureWorkId({ ...finished, id, updatedAt: Date.now() });
     setPieces((prev) => ({ ...prev, [id]: withId }));
@@ -353,6 +386,7 @@ export default function App() {
   // Editing state lives here, not inside SettingsTab, so switching tabs
   // mid-edit doesn't unmount (and lose) the in-progress draft.
   const startEditing = () => {
+    if (!guardLeavingInterleaved()) return;
     setEditDraftState((d) => {
       if (d) return d;
       // Pieces created before the deadline-date field existed only have
@@ -435,13 +469,63 @@ export default function App() {
   // eventually wants — that needs Tier 1/Tier 2 scheduling, a later,
   // explicitly deferred pass.
   const handleLogSession = (chunkId, day, sessionInput) => {
-    const { cleanReps, bpm, outcome, durationSeconds, targetBPM, suggestedStartingBPM } = sessionInput;
+    const { cleanReps, bpm, outcome, durationSeconds, targetBPM, suggestedStartingBPM, skipped, provisional } = sessionInput;
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId] || { doneDays: [] };
-      const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
       const loggedDate = todayISODate();
       const loggedAt = Date.now();
+
+      // Pass 29 — Interleaved mode's "skip, just save time" action. A
+      // zero-rep session fed through the normal path below would classify
+      // as a real fail (classifySessionOutcome treats `!cleanReps` as
+      // "fail"), which would be wrong here: choosing not to report an
+      // outcome isn't the same as reporting a failed one. This branch
+      // records that time was spent — but, per user direction, does NOT
+      // add `day` to `doneDays`: a skip is explicitly not "marked
+      // completed," so the chunk still shows as open in the regular
+      // checklist and can be logged for real later, during or outside
+      // Interleaved mode. It returns before computeLadderAdvance runs, so
+      // stage/practiceBPM/nextDueDate are left exactly as they were. The
+      // session record itself carries `skipped: true` so every reader that
+      // treats `sessions` as evidence of judged practice — confidence
+      // scoring, Progress tab stats, ladder-status history — can exclude it
+      // via lib/utils.js's `loggedSessions` rather than silently counting
+      // it as a real attempt. Total time practiced (`sumPracticeSeconds`)
+      // deliberately still counts it — the time really was spent.
+      if (skipped) {
+        const sessions = [...(prevEntry.sessions || []), { day, loggedAt, loggedDate, skipped: true, durationSeconds }];
+        progress[chunkId] = { ...prevEntry, sessions };
+        return { ...p, progress, lastLoggedAt: loggedDate };
+      }
+
+      // Pass 29 follow-up — Interleaved mode's provisional logging. A
+      // retrieval attempt made mid-rotation often looks rougher than the
+      // same chunk would in focused, blocked practice, while still being
+      // the more effective long-term practice — so InterleavePanel routes
+      // an auto-classified soft-miss/fail (NOT a manual "needs more work"
+      // override, which is already an explicit, deliberate fail) through
+      // here instead of committing it immediately. The real reps/BPM/
+      // outcome ARE recorded, unlike a skip, but — same as skip — `day` is
+      // not added to `doneDays` and computeLadderAdvance does not run:
+      // nothing about this attempt affects the ladder until the user
+      // confirms it (handleConfirmProvisionalSession) or discards it
+      // (handleDiscardProvisionalSession), during or outside Interleaved
+      // mode. loggedSessions (lib/utils.js) excludes provisional sessions
+      // from confidence/progress-tab reads the same way it excludes
+      // skipped ones, for the same reason: neither is a resolved, judged
+      // attempt yet.
+      if (provisional) {
+        const sessions = [
+          ...(prevEntry.sessions || []),
+          { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds, provisional: true },
+        ];
+        progress[chunkId] = { ...prevEntry, sessions };
+        return { ...p, progress, lastLoggedAt: loggedDate };
+      }
+
+      const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
+
       // Snapshot the ladder state as it stood *before* this session, onto
       // the session record itself — not the chunk entry — so same-day
       // multi-session logging keeps each session's own "before" picture
@@ -655,6 +739,146 @@ export default function App() {
       progress[chunkId] = entry;
       return { ...p, progress };
     });
+  };
+
+  // Pass 29 follow-up — resolves a provisional session (see handleLogSession
+  // above) by finally running it through computeLadderAdvance, using the
+  // real reps/BPM/outcome it already recorded. Operates on the most recent
+  // session for `day` that still has `provisional: true` — not just the
+  // most recent session overall, since a provisional record can sit
+  // alongside other, already-resolved sessions on the same chunk/day (this
+  // app already allows multiple sessions per plan-day). `targetBPM`/
+  // `suggestedStartingBPM` are caller-resolved (ChecklistItem already
+  // computes both), same convention handleLogSession itself uses, since
+  // this handler only has a chunkId, not the chunk.
+  //
+  // Ladder math runs AS OF TODAY, not the original attempt's day — the
+  // interval a confirmed soft-miss/fail schedules should count from when
+  // the outcome was actually accepted, not backdated to a tentative
+  // attempt that might have sat unresolved for a while. `doneDays` still
+  // records the original attempt's plan-day, though: the practice really
+  // did happen then, confirmation just resolves what it counted as.
+  const handleConfirmProvisionalSession = (chunkId, day, { targetBPM, suggestedStartingBPM } = {}) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const sessions = [...(prevEntry.sessions || [])];
+      const idx = sessions.map((s) => s.day === day && !!s.provisional).lastIndexOf(true);
+      if (idx === -1) return p;
+      const target = sessions[idx];
+      const loggedDate = todayISODate();
+
+      // Same six-plus-per-stage-BPM snapshot handleLogSession captures,
+      // for the same reason: so undoing this confirmation later (via the
+      // existing handleUnlogSession — it needs no changes to support this,
+      // since it already restores from any session's ladderSnapshot) fully
+      // reverses the ladder change confirming makes, not just the record.
+      const ladderSnapshot = {
+        stage: prevEntry.stage ?? null,
+        consecutivePasses: prevEntry.consecutivePasses ?? 0,
+        consecutiveStabilizingFails: prevEntry.consecutiveStabilizingFails ?? 0,
+        practiceBPM: prevEntry.practiceBPM ?? null,
+        nextDueDate: prevEntry.nextDueDate ?? null,
+        tier1Done: prevEntry.tier1Done ?? false,
+        needsRelearning: prevEntry.needsRelearning ?? false,
+        currentBPM: prevEntry.currentBPM ?? null,
+        stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
+        settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
+        holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
+      };
+
+      const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : target.bpm;
+      const effectiveness = target.outcome === "fail" ? "low" : target.outcome === "pass" ? "high" : "good";
+      const advance = computeLadderAdvance(
+        {
+          stage: prevEntry.stage,
+          consecutivePasses: prevEntry.consecutivePasses,
+          consecutiveStabilizingFails: prevEntry.consecutiveStabilizingFails,
+          practiceBPM: seededPracticeBPM,
+          targetBPM,
+          tier1Done: prevEntry.tier1Done,
+          needsRelearning: prevEntry.needsRelearning,
+          suggestedStartingBPM,
+          stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
+          settlingEntryBPM: prevEntry.settlingEntryBPM,
+          holdingEntryBPM: prevEntry.holdingEntryBPM,
+        },
+        { result: target.outcome, effectiveness, asOfDate: loggedDate, cleanReps: target.cleanReps, bpm: target.bpm },
+        p.ladderConfig
+      );
+
+      sessions[idx] = { ...target, provisional: false, ladderSnapshot };
+      const doneDays = prevEntry.doneDays.includes(target.day) ? prevEntry.doneDays : [...prevEntry.doneDays, target.day];
+
+      progress[chunkId] = {
+        ...prevEntry,
+        doneDays,
+        sessions,
+        currentBPM: target.bpm,
+        stage: advance.stage,
+        consecutivePasses: advance.consecutivePasses,
+        consecutiveStabilizingFails: advance.consecutiveStabilizingFails,
+        practiceBPM: advance.practiceBPM,
+        nextDueDate: advance.nextDueDate,
+        tier1Done: advance.tier1Done,
+        needsRelearning: advance.needsRelearning,
+        stabilizingEntryBPM: advance.stabilizingEntryBPM,
+        settlingEntryBPM: advance.settlingEntryBPM,
+        holdingEntryBPM: advance.holdingEntryBPM,
+        flagSnapshot: undefined,
+      };
+      return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
+  // Pass 29 follow-up — discards a provisional session outright, as if it
+  // had never been logged. No ladder snapshot to restore: a provisional
+  // session never advanced the ladder in the first place, so there is
+  // nothing to reverse — just remove the record. This is also how a
+  // learner "redoes" a rough interleaved attempt: discard, then log a
+  // fresh one normally.
+  const handleDiscardProvisionalSession = (chunkId, day) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const sessions = [...(prevEntry.sessions || [])];
+      const idx = sessions.map((s) => s.day === day && !!s.provisional).lastIndexOf(true);
+      if (idx === -1) return p;
+      sessions.splice(idx, 1);
+      progress[chunkId] = { ...prevEntry, sessions };
+      return { ...p, progress };
+    });
+  };
+
+  // User-directed follow-up: the one place the "leave Interleaved mode with
+  // an unresolved provisional log" warning actually confirms and discards —
+  // called both from TodayTab itself (its own Day view/Week/View all
+  // buttons, via onConfirmLeaveInterleaved below) and from here in App.jsx
+  // (the sidebar nav and the piece switcher, via guardLeavingInterleaved),
+  // so the warning text and the discard behavior can't drift between the
+  // two call sites. `chunkIds` may contain more than one id (several
+  // chunks in the same rotation each left an unresolved attempt); each
+  // gets discarded independently, same as if the learner had discarded
+  // them one at a time from their own chunk cards.
+  const confirmAndDiscardProvisional = (chunkIds, day) => {
+    if (!chunkIds || chunkIds.length === 0) return true;
+    const ok = window.confirm(
+      "Practice data is tracked but not logged. Are you sure you want to leave before logging your progress?"
+    );
+    if (ok) chunkIds.forEach((id) => handleDiscardProvisionalSession(id, day));
+    return ok;
+  };
+
+  // Gates navigation App.jsx itself controls (sidebar tabs, switching
+  // pieces) — TodayTab reports the live risk via onInterleaveRiskChange
+  // (setInterleaveRisk) since it's the only thing that knows whether
+  // Interleaved mode is actually on screen right now. Returns true when
+  // it's safe to proceed (nothing pending, or the learner confirmed).
+  const guardLeavingInterleaved = () => {
+    if (!interleaveRisk) return true;
+    return confirmAndDiscardProvisional(interleaveRisk.chunkIds, interleaveRisk.day);
   };
 
   const handleUpdateBPM = (chunkId, field, value) => {
@@ -1103,7 +1327,7 @@ export default function App() {
                   <button
                     key={n.key}
                     className={`nav-item ${activeTab === n.key ? "active" : ""}`}
-                    onClick={() => setActiveTab(n.key)}
+                    onClick={() => { if (guardLeavingInterleaved()) setActiveTab(n.key); }}
                   >
                     <Icon size={17} />
                     <span>{n.label}</span>
@@ -1173,6 +1397,8 @@ export default function App() {
                 onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
+                onConfirmProvisionalSession={handleConfirmProvisionalSession}
+                onDiscardProvisionalSession={handleDiscardProvisionalSession}
                 onEndRevival={handleEndRevival}
               />
             )}
@@ -1187,11 +1413,15 @@ export default function App() {
                 onJumpToday={() => setDayOverride(null)}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
+                onConfirmProvisionalSession={handleConfirmProvisionalSession}
+                onDiscardProvisionalSession={handleDiscardProvisionalSession}
                 onLogRunThrough={handleLogRunThrough}
                 onUnlogRunThrough={handleUnlogRunThrough}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
+                onInterleaveRiskChange={setInterleaveRisk}
+                onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
               />
             )}
             {activeTab === "progress" && <ProgressTab piece={piece} chunks={chunks} timeline={timeline} currentDay={currentDay} />}
@@ -1484,6 +1714,7 @@ const CSS = `
 .badge.archived { background: rgba(139,150,160,0.22); color: var(--ink-faint); }
 .piece-switcher-item.active .badge { background: rgba(255,255,255,0.3); color: inherit; }
 .manual-mark { margin-left: 4px; vertical-align: middle; opacity: 0.6; }
+.climbing-mark { margin-left: 4px; vertical-align: middle; color: var(--teal); }
 .manual-conf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .manual-conf-row input { width: 80px; flex-shrink: 0; }
 .derived-stat { font-size: 13px; color: var(--ink-soft); margin: 4px 0 0; }
@@ -1537,6 +1768,10 @@ const CSS = `
 
 .relearning-hint { display: flex; align-items: flex-start; gap: 6px; color: var(--brick); }
 .relearning-hint svg { flex-shrink: 0; margin-top: 1px; }
+
+.climbing-hint { display: flex; align-items: flex-start; gap: 6px; color: var(--teal); margin: 10px 0 0; }
+.climbing-hint svg { flex-shrink: 0; margin-top: 1px; }
+.climbing-hint-note { font-size: 12px; color: var(--ink-soft); margin: 4px 0 0 20px; }
 
 .detail-panel { border-color: var(--ink); }
 .detail-modal { max-width: 480px; }

@@ -46,6 +46,18 @@
 
 export const STAGES = ["stabilizing", "settling", "holding"];
 
+// Interleaved practice mode (Pass 29, TodayTab) only rotates in chunks that
+// have actually left Stabilizing — a chunk still building its first
+// consecutive-pass streak (including one that hasn't cleared Tier 1 at
+// all, i.e. stage null/undefined) isn't solid enough yet to be quizzed
+// cold in rotation with others. A simple per-chunk lookup against
+// `piece.progress[id]`, not new state — kept here alongside STAGES since
+// it's the same stage ordering this eligibility rule is defined against.
+export function isInterleaveEligible(entry) {
+  const stage = entry && entry.stage;
+  return stage === "settling" || stage === "holding";
+}
+
 // Duplicated from adaptiveReviewOffsets (scheduling.js:94-100) rather than
 // imported — factoring it into a shared helper would mean editing
 // scheduling.js, which isn't in this pass's Touches list (new-file-only).

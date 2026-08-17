@@ -53,7 +53,18 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
   );
 }
 
-export function DayChecklist({ piece, chunks, day, onLogSession, onUnlogSession, onLogRunThrough, onUnlogRunThrough, onSetMemoryAnchor }) {
+export function DayChecklist({
+  piece,
+  chunks,
+  day,
+  onLogSession,
+  onUnlogSession,
+  onConfirmProvisionalSession,
+  onDiscardProvisionalSession,
+  onLogRunThrough,
+  onUnlogRunThrough,
+  onSetMemoryAnchor,
+}) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
 
   if (day.type === "consolidation") {
@@ -99,6 +110,8 @@ export function DayChecklist({ piece, chunks, day, onLogSession, onUnlogSession,
             day={day.dayNumber}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
+            onConfirmProvisionalSession={onConfirmProvisionalSession}
+            onDiscardProvisionalSession={onDiscardProvisionalSession}
             onSetMemoryAnchor={onSetMemoryAnchor}
           />
         ))}

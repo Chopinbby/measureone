@@ -12,6 +12,7 @@ import {
   computeDaysNeededForMinutesPerDay,
   shouldShowScheduleBanner,
   planRescheduleForPieces,
+  estimateRescheduleFit,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate } from "../src/lib/utils.js";
 
@@ -619,5 +620,66 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
 
     assert.ok(plans[0].missedCount >= plans[plans.length - 1].missedCount);
     assert.equal(plans[0].pieceId, "more");
+  });
+});
+
+describe("estimateRescheduleFit — the 'will this actually fit' warning", () => {
+  // Shared by the per-piece Reschedule dialog and the bulk "Reschedule all"
+  // confirmation. It decides only whether the user gets a heads-up — the
+  // reschedule itself packs things in as tightly as it can either way.
+  function fitFor(overrides, asOfDay) {
+    const piece = basePiece({ daysToLearn: 14, ...overrides });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, asOfDay);
+    return estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds);
+  }
+
+  test("plenty of time left: fits", () => {
+    const fit = fitFor({ totalMeasures: 8, measureDifficulty: Array(8).fill(1), minutesPerDay: 60 }, 2);
+    assert.equal(fit.fits, true);
+    assert.ok(fit.requiredDays <= fit.availableDays);
+  });
+
+  test("a lot of untouched work and almost no days left: does not fit", () => {
+    const fit = fitFor({ totalMeasures: 60, measureDifficulty: Array(60).fill(3), minutesPerDay: 10 }, 13);
+    assert.equal(fit.fits, false);
+    assert.ok(fit.requiredDays > fit.availableDays);
+  });
+
+  test("availableDays counts the current day itself, not the days after it", () => {
+    // Day 14 of a 14-day plan still leaves one day to work in, not zero.
+    const fit = fitFor({ totalMeasures: 8, measureDifficulty: Array(8).fill(1) }, 14);
+    assert.equal(fit.availableDays, 1);
+  });
+
+  test("both numbers floor at 1 — never zero or negative days", () => {
+    const past = fitFor({ totalMeasures: 8, measureDifficulty: Array(8).fill(1) }, 99);
+    assert.equal(past.availableDays, 1);
+    assert.ok(past.requiredDays >= 1);
+  });
+
+  test("chunks already practiced don't count toward what still has to fit", () => {
+    const piece = basePiece({ totalMeasures: 24, measureDifficulty: Array(24).fill(2), daysToLearn: 14, minutesPerDay: 20 });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const allIds = chunkSet.practiceChunks.map((c) => c.id);
+
+    const everything = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, 7, allIds);
+    const halfDone = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, 7, allIds.slice(0, 2));
+
+    assert.ok(halfDone.requiredDays < everything.requiredDays, "less left to do needs fewer days");
+    assert.equal(halfDone.availableDays, everything.availableDays, "days remaining is unaffected by what's done");
+  });
+
+  test("planRescheduleForPieces carries the same verdict per piece", () => {
+    const startedDaysAgo = (n) => addDaysISO(todayISODate(), -n);
+    const roomy = basePiece({ name: "Roomy", daysToLearn: 14, startDate: startedDaysAgo(2), totalMeasures: 8, measureDifficulty: Array(8).fill(1), minutesPerDay: 60 });
+    const crammed = basePiece({ name: "Crammed", daysToLearn: 14, startDate: startedDaysAgo(12), totalMeasures: 60, measureDifficulty: Array(60).fill(3), minutesPerDay: 10 });
+
+    const byId = Object.fromEntries(planRescheduleForPieces({ roomy, crammed }).map((p) => [p.pieceId, p]));
+
+    assert.equal(byId.roomy.fit.fits, true);
+    assert.equal(byId.crammed.fit.fits, false);
   });
 });

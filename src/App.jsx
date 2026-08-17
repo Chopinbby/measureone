@@ -19,9 +19,8 @@ import {
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
-import { EFFORT_TO_MIN } from "./lib/constants";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
@@ -826,28 +825,45 @@ export default function App() {
   // which also has to persist them by hand, because the save effect above
   // only ever writes the active piece. Without that explicit save, a bulk
   // reschedule would look right on screen and be gone on reload.
+  //
+  // Those hand-written pieces are saved *before* the state update, and only
+  // what actually saved gets applied. Order matters: showing a piece as
+  // rescheduled when its write failed is the silent-revert-on-reload bug
+  // this whole branch exists to avoid, just moved one step later.
+  //
+  // A failure is reported with an alert rather than the storage-error
+  // banner, which cannot carry this particular message: the save effect
+  // re-runs on this same state change and re-derives the banner purely from
+  // the *active* piece's result, so a failure belonging to a different piece
+  // would be cleared again within the same tick. (The banner still covers
+  // the active piece, via that effect, exactly as before.)
   const handleConfirmReschedule = () => {
     if (!rescheduleTargets.length) return;
 
     const activeTarget = rescheduleTargets.find((t) => t.pieceId === activePieceId);
     if (activeTarget) updatePiece((p) => ({ ...p, rescheduleMarker: activeTarget.marker }));
 
-    const otherUpdates = {};
+    const saved = {};
+    const failedNames = [];
     rescheduleTargets
       .filter((t) => t.pieceId !== activePieceId)
       .forEach(({ pieceId, marker }) => {
         const current = pieces[pieceId];
         if (!current) return;
-        otherUpdates[pieceId] = { ...current, rescheduleMarker: marker, updatedAt: Date.now() };
+        const next = { ...current, rescheduleMarker: marker, updatedAt: Date.now() };
+        if (savePieceToStorage(pieceId, next).ok) saved[pieceId] = next;
+        else failedNames.push(current.name || "Untitled piece");
       });
 
-    if (Object.keys(otherUpdates).length) {
-      setPieces((prev) => ({ ...prev, ...otherUpdates }));
-      const anyFailed = Object.entries(otherUpdates).some(([id, p]) => !savePieceToStorage(id, p).ok);
-      if (anyFailed) setStorageError(true);
-    }
+    if (Object.keys(saved).length) setPieces((prev) => ({ ...prev, ...saved }));
 
     closeRescheduleModal();
+
+    if (failedNames.length) {
+      window.alert(
+        `Couldn't save the new schedule for ${failedNames.join(", ")}. Your browser's storage is full or unavailable, so ${failedNames.length === 1 ? "that piece was left" : "those pieces were left"} exactly as before — nothing was lost.\n\nExport a backup, then free up space (deleting an old piece works) and try again.`
+      );
+    }
   };
 
   const handleEndRevival = () => {
@@ -898,16 +914,16 @@ export default function App() {
     const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
     if (status.remainingChunkIds.length === 0) return;
 
-    const remaining = practiceChunks.filter((c) => status.remainingChunkIds.includes(c.id));
-    const remainingEffort = remaining.reduce((s, c) => s + c.effort, 0);
-    const availableDays = Math.max(1, timeline.days.length - currentDay + 1);
-    const requiredDays = Math.max(
-      1,
-      Math.ceil(((remainingEffort * EFFORT_TO_MIN) / 0.65) / Math.max(5, piece.minutesPerDay))
+    const { availableDays, requiredDays, fits } = estimateRescheduleFit(
+      piece,
+      practiceChunks,
+      timeline,
+      currentDay,
+      status.remainingChunkIds
     );
 
     let message = `This will rebalance the ${status.remainingChunkIds.length} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`;
-    if (requiredDays > availableDays) {
+    if (!fits) {
       message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
     }
 
@@ -920,20 +936,33 @@ export default function App() {
 
   // "Reschedule all" (Master Agenda) — the same operation, applied to every
   // active piece that's behind schedule right now, behind a single
-  // confirmation that names them all. Deliberately no per-piece pace warning
-  // like the single-piece path's "you likely won't finish by your target
-  // date": that warning is a piece-specific judgement worth reading on its
-  // own, and stacking N of them into one dialog would just be noise. The
-  // per-piece button still gives it.
+  // confirmation that names them all.
+  //
+  // The bulk path deliberately doesn't repeat the single-piece dialog's full
+  // pace warning per piece — five of those paragraphs stacked in one dialog
+  // is a wall nobody reads. It does still have to *say* which pieces are in
+  // that state, though: otherwise the convenient button would hand you less
+  // information than doing the same thing one piece at a time, and the
+  // "On schedule" the cards flip to afterwards would read as "you're fine
+  // now" when the real situation is "this plan is now very tight". So: name
+  // them, and point at the per-piece button for the detail.
   const handleRescheduleAll = () => {
     const plans = planRescheduleForPieces(pieces);
     if (!plans.length) return;
 
-    const names = plans.map((p) => p.piece.name || "Untitled piece").join(", ");
+    const nameOf = (p) => p.piece.name || "Untitled piece";
+    const names = plans.map(nameOf).join(", ");
     const totalChunks = plans.reduce((s, p) => s + p.marker.remainingChunkOrder.length, 0);
+    const tight = plans.filter((p) => !p.fit.fits);
+
+    const warning = tight.length
+      ? `\n\nHeads up: at your current pace, ${tight.length === 1 ? "" : `${tight.length} of these — `}${tight.map(nameOf).join(", ")}${tight.length === 1 ? " probably won't" : " — probably won't"} fit in the days ${tight.length === 1 ? "its plan has" : "their plans have"} left. Rescheduling packs things in as tightly as possible either way; open ${tight.length === 1 ? "it" : "them"} individually for the details, or extend the timeline in Settings.`
+      : "";
+
     const message =
       `${plans.length} piece${plans.length === 1 ? " is" : "s are"} behind schedule: ${names}.\n\n` +
-      `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are, and each piece keeps its own target date. Continue?`;
+      `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are, and each piece keeps its own target date.` +
+      `${warning}\n\nContinue?`;
 
     openRescheduleModal(
       plans.map(({ pieceId, marker }) => ({ pieceId, marker })),

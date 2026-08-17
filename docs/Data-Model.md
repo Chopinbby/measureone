@@ -96,6 +96,13 @@ piece = {
   bpmZones,              // [{ id, start, end, bpm }] — per-range tempo overrides
   recordings,            // [{ id, label, url }] — reference recordings (YouTube, Spotify, etc.),
                          // shown as links on the dashboard; purely referential, not embedded playback
+  documents,             // [{ id, label, url }] — same shape and purpose as recordings, for reference
+                         // documents (sheet music PDF, fingerings, program notes) hosted elsewhere —
+                         // Drive, Dropbox, IMSLP. Pass 24. Purely a link out: the file itself is never
+                         // fetched, stored, or rendered by the app — no upload, no in-app viewer, no
+                         // annotation. That's a separate, much larger feature (real file storage —
+                         // IndexedDB or a backend, not localStorage) deliberately deferred, not designed
+                         // here — see Roadmap.md if adding it later.
   createdAt,             // epoch ms — when this piece record was created in this
                          // browser/instance. Sort-order bookkeeping only (piece
                          // switcher, work grouping) — NOT the scheduling anchor;
@@ -156,8 +163,13 @@ piece = {
   memoryAnchors,         // { [id]: string } — free-text cue ("descending sequence", "watch
                          // left-hand leap") keyed by *either* a practice-chunk/transition id or a
                          // piece.sections id. One flat map because chunk ids (`c…`/`t_…`) and
-                         // section ids (`s…`) never collide. Editable from the Piece Map modal;
-                         // surfaced in ChecklistItem during both normal practice and revival.
+                         // section ids (`s…`) never collide. Editable from the Piece Map modal, and
+                         // (since Pass 23) inline from ChecklistItem during ordinary learning-phase
+                         // logging too — same field, same component (MemoryAnchorField), just a
+                         // second entry point. Labeled "Notes" in the UI as of Pass 23 (was "Memory
+                         // anchor"); the field/prop names on this object are unchanged. Read
+                         // (read-only where no write handler is passed) in ChecklistItem across every
+                         // caller — normal practice, maintenance due-review, and revival alike.
   revival,               // see #revival below
 }
 

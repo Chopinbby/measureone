@@ -17,13 +17,22 @@
 ## Done
 
 Setup wizard, chunking/timeline engine, Piece Map, Today's Practice (timer,
-reps/BPM/effectiveness logging), Progress tab (rolling-window consistency,
-consistency heatmap, actual-vs-planned, projected finish, tempo trend,
-effectiveness calibration — plus, as of Pass 20, confidence-by-difficulty
-and recurring-material payoff, folded in when the separate Analytics tab
-was removed; see [Decisions.md](Decisions.md#ux)), multi-piece support, rescheduling, section
-run-throughs, reference recordings, multi-movement works (movements as
-self-contained sibling pieces sharing a `workId` — see
+reps/BPM/effectiveness logging — **since Pass 22** also a read-only "Week"
+view alongside Day view/View all, see
+[Decisions.md](Decisions.md#ux); **since Pass 23** a free-text note per
+chunk, editable inline during logging, not just from the Piece Map), Progress
+tab (rolling-window consistency, consistency heatmap, actual-vs-planned,
+projected finish, tempo trend, effectiveness calibration — plus, as of Pass
+20, confidence-by-difficulty and recurring-material payoff, folded in when
+the separate Analytics tab was removed; see [Decisions.md](Decisions.md#ux)),
+multi-piece support, rescheduling (**since Pass 21** also a multi-piece
+"Reschedule all" from Master Agenda, plus "Pick a random piece to practice"
+and a maintenance-due random-start panel — see
+[Decisions.md](Decisions.md#scheduling)), section run-throughs, reference
+recordings and (**since Pass 24**) reference documents (sheet music PDFs,
+fingerings — same shape and pattern as recordings; see
+[Data-Model.md](Data-Model.md#the-piece-object)), multi-movement works
+(movements as self-contained sibling pieces sharing a `workId` — see
 [Decisions.md](Decisions.md#multi-movement-works)), backup export/import,
 `computeConfidenceAsOf` (used by Progress's "most improved" stat), Revival
 (MVP slice — entry flow, chunk/transition reassessment reusing
@@ -61,9 +70,14 @@ assuming this section is stale.
 
 ## Priority-ordered backlog
 
-1. **Practice journal** — free-text notes per session (distinct from
-   `piece.notes`, which is about the piece as a whole, not a specific
-   session).
+1. **Practice journal** — free-text notes per *session* (distinct from
+   `piece.notes`, about the piece as a whole, and from the **now-built**
+   Pass 23 per-*chunk* note in `piece.memoryAnchors` — labeled "Notes,"
+   editable inline from `ChecklistItem` or the Piece Map. A chunk note is
+   one persistent string per chunk, shown the same way regardless of which
+   session it was written during or after; this item is still about a
+   note tied to one specific logged attempt, which nothing currently
+   captures. Not started.
 2. **Long-term / maintenance scheduling** — what happens after a piece is
    "learned." **Fully designed; the stage-math engine is built and live**:
    a continuous spaced-repetition ladder (Stabilizing → Settling →

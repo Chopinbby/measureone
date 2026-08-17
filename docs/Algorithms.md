@@ -936,10 +936,34 @@ correctly and the plan really had been rebalanced. `computeScheduleStatus`
 is the only external reader of `introducedDay`, which is why the symptom
 was confined to that banner.
 
-The feasibility check shown in the reschedule confirmation dialog
-(`handleReschedule` in the `App` component, not part of `getEffectiveTimeline`
-itself) estimates required vs. available days using `EFFORT_TO_MIN` and the
-0.65 efficiency constant — see [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
+The feasibility check shown in the reschedule confirmation dialog —
+`estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay,
+remainingChunkIds)` (`lib/scheduling.js`, not part of `getEffectiveTimeline`
+itself) — estimates required vs. available days using `EFFORT_TO_MIN` and
+the 0.65 efficiency constant — see
+[Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
+**Since Pass 21** this is a standalone function rather than inline logic in
+`App.jsx`'s `handleReschedule`, specifically so the multi-piece bulk
+reschedule below can reuse the exact same formula instead of a second copy
+drifting out of sync with it.
+
+**`planRescheduleForPieces(pieces)`** (Pass 21, `lib/scheduling.js`) is the
+multi-piece form of the flow above — Master Agenda's "Reschedule all". For
+every piece it builds the same `{ asOfDay, remainingChunkOrder }` marker
+`handleReschedule` would, anchored to *that piece's own* current day (not a
+single shared day number, since pieces in a bulk reschedule usually started
+on different dates), and calls `estimateRescheduleFit` per piece so the
+confirmation can name which ones probably won't fit. A piece is included
+only if it's active, not mid-revival, not past the end of its own plan
+(`elapsedDay(piece) <= timeline.days.length`), and actually has both a miss
+and remaining chunks; results are ordered furthest-behind first. One
+malformed piece is skipped (logged, not thrown) rather than failing the
+whole bulk action. `App.jsx`'s `handleConfirmReschedule` applies the
+resulting markers by writing the active piece through the normal
+`updatePiece` path and every other piece directly to `localStorage` (the
+save effect only ever persists the active piece) — see
+[Decisions.md](Decisions.md#scheduling) for why that ordering (save first,
+apply only what saved) matters and what it protects against.
 
 ## Revival
 

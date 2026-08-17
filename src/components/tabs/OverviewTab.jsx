@@ -2,6 +2,7 @@ import { Plus, RefreshCw } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { ManuscriptDoodle, ManuscriptStrip } from "../Manuscript";
 import { RecordingsList } from "../fields/RecordingsList";
+import { DocumentsList } from "../fields/DocumentsList";
 import { PartSwitcher } from "../PartSwitcher";
 import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib/utils";
 import { countLearnedSections } from "../../lib/chunking";
@@ -83,6 +84,7 @@ export function OverviewTab({
             {piece.lastPlayedDate ? ` · last played ${piece.lastPlayedDate}` : ""}
           </p>
           <RecordingsList recordings={piece.recordings} />
+          <DocumentsList documents={piece.documents} />
         </div>
       </div>
 

@@ -449,6 +449,27 @@ export function computeScheduleStatus(piece, practiceChunks, timeline, currentDa
   return { missedCount, remainingChunkIds };
 }
 
+// Will the not-yet-started work actually fit in the days this plan has
+// left? A rough sanity check on a reschedule, not a scheduling decision:
+// rescheduling packs things in as tightly as it can either way, so this
+// only ever decides whether the user gets a heads-up first.
+//
+// Lifted out of App.jsx's per-piece handler in Pass 21 so the bulk
+// "Reschedule all" path can ask the same question about each piece without
+// a second copy of the formula. The 0.65 is the same day-fill factor the
+// rest of the scheduler uses (see computeDaysNeededForMinutesPerDay), and
+// the 5-minute floor on minutesPerDay guards a divide-by-something-tiny.
+export function estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay, remainingChunkIds) {
+  const remaining = new Set(remainingChunkIds);
+  const remainingEffort = practiceChunks.reduce((s, c) => (remaining.has(c.id) ? s + c.effort : s), 0);
+  const availableDays = Math.max(1, timeline.days.length - asOfDay + 1);
+  const requiredDays = Math.max(
+    1,
+    Math.ceil(((remainingEffort * EFFORT_TO_MIN) / 0.65) / Math.max(5, piece.minutesPerDay))
+  );
+  return { availableDays, requiredDays, fits: requiredDays <= availableDays };
+}
+
 // "Reschedule all" (Pass 21) — the multi-piece form of what the per-piece
 // Reschedule button has always done. Answers, for a whole pieces map:
 // which pieces are behind schedule *right now*, and what rescheduleMarker
@@ -508,6 +529,11 @@ export function planRescheduleForPieces(pieces) {
         pieceId,
         piece,
         missedCount,
+        // Carried so the one bulk confirmation can name the pieces whose
+        // remaining work realistically won't fit — the per-piece button
+        // gives that warning in full, and the bulk path shouldn't be the
+        // less-informative way to do the same thing.
+        fit: estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds),
         marker: { asOfDay, remainingChunkOrder: remainingChunkIds },
       });
     } catch (e) {

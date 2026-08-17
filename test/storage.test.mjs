@@ -458,6 +458,39 @@ describe("Import path — validateAndMigratePiece protects imported pieces too",
     assert.equal(merged.progress.c9.practiceBPM, 82);
   });
 
+  // documents (Pass 24) must merge exactly like the other {id, ...} lists
+  // (sections, recordings, bpmZones) — additively by id, never a wholesale
+  // replace. Follow-up fix: documents originally fell through to the
+  // generic per-key preferByRecency merge below (missing from
+  // MERGE_FIELDS_HANDLED_SEPARATELY and with no mergeById call), so an
+  // import could silently drop a document the import didn't happen to
+  // repeat. recordings gets no equivalent test in this suite — this one
+  // stands in for both, since they now share the same merge call.
+  test("documents merge additively by id — an import doesn't drop an existing document, and overlays a shared id", () => {
+    const existingPiece = {
+      ...fresh,
+      id: "p_docs",
+      documents: [
+        { id: "d1", label: "Existing fingering chart", url: "https://existing.example/fingerings.pdf" },
+        { id: "d2", label: "Old label", url: "https://existing.example/notes.pdf" },
+      ],
+    };
+    const importedPiece = {
+      ...fresh,
+      id: "p_docs",
+      documents: [
+        { id: "d2", label: "Updated label from import", url: "https://existing.example/notes.pdf" },
+        { id: "d3", label: "New from import", url: "https://imported.example/score.pdf" },
+      ],
+    };
+    const merged = mergeImportedPiece(existingPiece, importedPiece);
+    const byId = Object.fromEntries(merged.documents.map((d) => [d.id, d]));
+    assert.equal(merged.documents.length, 3, "d1 (import-only-missing) survives, d2 overlays, d3 is added");
+    assert.equal(byId.d1.label, "Existing fingering chart", "an existing document absent from the import is not dropped");
+    assert.equal(byId.d2.label, "Updated label from import", "a shared id takes the import's fields");
+    assert.equal(byId.d3.label, "New from import");
+  });
+
   // Regression tests for the fix that follows the one above: mergeProgress
   // already protected the *ladder* fields unconditionally (stage,
   // consecutivePasses, etc. — never overwritten by an import at all), but

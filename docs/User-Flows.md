@@ -21,8 +21,9 @@ sidebar switcher, Settings).
 `Wizard` walks through six steps: **Piece → Sections → Difficulty → Repeats →
 Timeline → Review**. Each step's fields are the same shared editor components
 used later in Settings (`BasicsFields`, `SectionsEditor`, `DifficultyEditor`,
-`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`) —
-see [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows).
+`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`,
+`DocumentsEditor`) — see
+[Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows).
 The Review step shows a `ManuscriptStrip` preview of the generated chunks
 before the piece is created. Completing the wizard calls
 `generateAllChunks` + `computeTimeline` for the first time and persists the
@@ -33,6 +34,20 @@ movement of a larger work, and whether they're learning it fresh or reviving
 it. Both toggles are on the same step as the basics; the multi-movement one
 lives inside `BasicsFields` so Settings gets it too (a standalone piece can be
 promoted into a work later by typing a work title there).
+
+**Since Pass 24, step 1 also carries four optional extras that don't gate
+advancing past it:** target tempo (BPM) is now a `BasicsFields` field, so it
+moved here from the Timeline step; below it, three collapsible-by-scrolling
+panels offer Tempo zones (`BpmZonesEditor`), Recordings (`RecordingsEditor`),
+and Documents (`DocumentsEditor`) — the same components Settings uses,
+rendered directly in `Wizard.jsx` rather than folded into `BasicsFields`
+itself, specifically so they don't *also* duplicate into Settings' "Piece"
+panel (Settings keeps its own separate "Tempo zones"/"Recordings"/"Documents"
+panels, unchanged, for editing after setup). None of the four are required —
+`canAdvance()` for step 1 only checks name and total measures, same as
+before. The Timeline step no longer has a target-tempo field; it only sets
+the schedule itself (start date, deadline vs. minutes/day, practice days per
+week, chunk size).
 
 The Wizard is **create-only** — an existing piece is never edited through it;
 editing always goes through Settings instead.
@@ -57,18 +72,26 @@ Entry point: the Today tab, or clicking a day card in Timeline
    what's scheduled for today.
 3. `DayChecklist` lists today's actual scheduled items (new chunks, reviews,
    transitions, combos). Each `ChecklistItem` has a start/stop timer (or a
-   manual minutes field, which wins over the timer when filled) and
-   reps/BPM/effectiveness inputs; checking it off calls `submitLog()`
-   directly once those inputs are valid (see
+   manual minutes field, which wins over the timer when filled) and clean
+   reps / BPM-achieved inputs, auto-classified into a pass/soft-miss/fail
+   outcome (not a free-standing "effectiveness" rating); checking it off
+   calls `submitLog()` directly once those inputs are valid (see
    [UX-Principles.md](UX-Principles.md#direct-manipulation-over-confirmation-ceremony)).
+   **Since Pass 23**, each item also carries an inline, editable free-text
+   note (reusing `piece.memoryAnchors`, labeled "Notes" in the UI) — "+ Add
+   a note" / "Edit note," committing on blur.
 4. `SectionRunThroughPanel` appears once it has anything to show — see
    [Algorithms.md](Algorithms.md#section-run-throughs) for exactly when a
    run-through unlocks.
 5. `ReassessPanel` is available for re-rating difficulty on today's measure
    ranges after practicing them — see flow 5.
 
-"View all" mode on Today shows every day's checklist at once instead of just
-the current day.
+Today has three view modes, not just one: **Day view** (the numbered steps
+above), **Week** (added Pass 22 — 7 day-cards, current day highlighted,
+read-only; click a day to jump into Day view for it — see
+[Decisions.md](Decisions.md#ux) for why it's navigation-only, never a second
+place to log), and **"View all"**, which shows every day's checklist at once
+instead of just the current day.
 
 ## 3. Checking in: Overview vs. Progress
 
@@ -106,6 +129,25 @@ log; the metrics were relocated unchanged, not redesigned. See
 4. Confirming sets `piece.rescheduleMarker`; `getEffectiveTimeline` then
    keeps every already-passed day exactly as it was and repacks only the
    untouched chunks into the days that remain.
+
+**Since Pass 21, this also has a multi-piece form.** Master Agenda's
+Learning-phase tab shows a "Reschedule all" panel whenever one or more
+active pieces are behind, naming the count. Confirming it applies the same
+`rescheduleMarker` write to every eligible piece at once — each anchored to
+its *own* current day, not a shared one — behind a single confirmation that
+names which pieces (if any) probably won't fit at the current pace, same
+underlying `estimateRescheduleFit` check the single-piece dialog uses. See
+[Decisions.md](Decisions.md#scheduling) for the eligibility rules (paused/
+archived/mid-revival/past-plan pieces are left out) and the storage-safety
+fix behind it.
+
+**Also on Master Agenda, since Pass 21:** "Pick a random piece to practice"
+switches the active piece to a random one that has real work today
+(scheduled learning or a due maintenance review) — offered only once two or
+more pieces qualify. The Maintenance-due tab has a parallel "Random start"
+panel (the same mechanism `RevivalTab` already used to suggest a starting
+point) pooling every due spot across every piece, so a review session
+doesn't always start at the top of the same list.
 
 ## 5. Reassessing difficulty mid-practice
 

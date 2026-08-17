@@ -213,6 +213,11 @@ export function validateAndMigratePiece(piece) {
     sections: piece.sections || [{ id: "s1", name: "", start: 1, end: piece.totalMeasures }],
     bpmZones: piece.bpmZones || [],
     recordings: piece.recordings || [],
+    // { id, label, url } — same shape, same backfill-on-load rule, and
+    // (as of the Pass 24 follow-up) same additive-by-id import merge as
+    // recordings above — see MERGE_FIELDS_HANDLED_SEPARATELY and the
+    // mergeById call in mergeImportedPiece below.
+    documents: piece.documents || [],
     revival: piece.revival || {
       active: false,
       startedAt: null,
@@ -643,7 +648,7 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
 }
 
 const MERGE_FIELDS_HANDLED_SEPARATELY = [
-  "id", "createdAt", "workId", "progress", "sections", "recordings",
+  "id", "createdAt", "workId", "progress", "sections", "recordings", "documents",
   "bpmZones", "revival", "memoryAnchors", "measureDifficulty", "totalMeasures",
 ];
 
@@ -697,6 +702,7 @@ export function mergeImportedPiece(existing, imported, ladderChoice = "existing"
 
   merged.sections = mergeById(existing.sections, imported.sections);
   merged.recordings = mergeById(existing.recordings, imported.recordings);
+  merged.documents = mergeById(existing.documents, imported.documents);
   merged.bpmZones = mergeById(existing.bpmZones, imported.bpmZones);
   merged.memoryAnchors = { ...(existing.memoryAnchors || {}), ...(imported.memoryAnchors || {}) };
   merged.progress = mergeProgress(existing.progress, imported.progress, importIsStale, ladderChoice);

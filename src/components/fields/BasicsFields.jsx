@@ -89,6 +89,20 @@ export function BasicsFields({ draft, set, lockWork = false, afterWorkMode = nul
         />
       </label>
       <label className="field">
+        {/* Moved here from ScheduleFields (was step 4 in the Wizard) per
+            user request: this is the one number most of the app's tempo
+            math keys off (getDefaultTargetBPM/getSuggestedStartingBPM,
+            confidence.js), so it belongs with the piece's basic identity,
+            not buried in the scheduling step. Still fully optional — see
+            the comment on getDefaultTargetBPM for what's lost without it:
+            no suggested starting tempo, no "Target tempo" hint, and the
+            Settling/Holding stage's tempo-floor safety check becomes a
+            no-op (targetBPM * floorFraction reduces to 0, so the floor is
+            trivially satisfied) rather than blocking premature graduation. */}
+        <span>Target tempo (BPM) — optional</span>
+        <NumberInput value={draft.targetBPM || ""} min={20} max={400} onCommit={(n) => set({ targetBPM: n })} />
+      </label>
+      <label className="field">
         <span>Notes</span>
         <textarea
           placeholder="Context, history, teacher notes — anything worth remembering about this piece…"

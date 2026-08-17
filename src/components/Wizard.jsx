@@ -8,6 +8,9 @@ import { SectionsEditor } from "./fields/SectionsEditor";
 import { DifficultyEditor } from "./fields/DifficultyEditor";
 import { RecurringEditor } from "./fields/RecurringEditor";
 import { ScheduleFields } from "./fields/ScheduleFields";
+import { BpmZonesEditor } from "./fields/BpmZonesEditor";
+import { RecordingsEditor } from "./fields/RecordingsEditor";
+import { DocumentsEditor } from "./fields/DocumentsEditor";
 import { ManuscriptStrip } from "./Manuscript";
 
 export function defaultPiece() {
@@ -38,6 +41,7 @@ export function defaultPiece() {
     targetBPM: null,
     bpmZones: [],
     recordings: [],
+    documents: [],
     createdAt: null,
     progress: {},
     rescheduleMarker: null,
@@ -173,6 +177,27 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
                   </div>
                 }
               />
+
+              {/* Optional extras, all skippable — canAdvance() for step 0
+                  only checks name/totalMeasures, so none of these ever
+                  block moving on. Tempo zones/recordings/documents stay
+                  fully editable later from Settings too (their own
+                  dedicated panels there are unchanged) — this just means a
+                  learner who already knows their target tempo or has a
+                  reference link in hand doesn't have to detour through
+                  Settings right after finishing setup to enter it. */}
+              <div className="panel" style={{ marginTop: 20 }}>
+                <h3>Tempo zones — optional</h3>
+                <BpmZonesEditor draft={draft} set={set} />
+              </div>
+              <div className="panel" style={{ marginTop: 14 }}>
+                <h3>Recordings — optional</h3>
+                <RecordingsEditor draft={draft} set={set} />
+              </div>
+              <div className="panel" style={{ marginTop: 14 }}>
+                <h3>Documents — optional</h3>
+                <DocumentsEditor draft={draft} set={set} />
+              </div>
             </div>
           )}
           {step === 1 && (

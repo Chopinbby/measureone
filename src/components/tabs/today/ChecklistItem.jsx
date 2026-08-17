@@ -13,8 +13,9 @@ import {
   resolveRequiredReps,
 } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
+import { MemoryAnchorField } from "../../MemoryAnchorField";
 
-export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession, tempoLadder, memoryAnchor }) {
+export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession, tempoLadder, memoryAnchor, onSetMemoryAnchor }) {
   const entry = piece.progress[chunk.id] || {};
   const checked = (entry.doneDays || []).includes(day);
   // Multiple sessions can now legitimately share a plan-day (a Tier 1
@@ -48,6 +49,26 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
   const [manualFail, setManualFail] = useState(false);
   const [timerRunning, setTimerRunning] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
+  const [noteOpen, setNoteOpen] = useState(false);
+
+  // Read straight off the piece rather than requiring a prop. The note is
+  // durable per-chunk metadata keyed by chunk id in piece.memoryAnchors
+  // (docs/Data-Model.md — one flat map, chunk/transition ids and section
+  // ids never collide), and this component already has `piece`. The
+  // `memoryAnchor` prop stays as an explicit override for the callers that
+  // already pass it (RevivalTab) — both resolve to the same string, so the
+  // fallback is belt-and-braces, not two sources of truth.
+  //
+  // Before Pass 23 only RevivalTab passed that prop, so a note written on
+  // the Piece Map was invisible during ordinary practice — the one place
+  // it's most useful. Data-Model.md already claimed it surfaced "during
+  // both normal practice and revival"; reading it here is what makes that
+  // true.
+  const noteText = memoryAnchor || (piece.memoryAnchors || {})[chunk.id] || "";
+  // Editing is offered only where a write handler was actually passed
+  // (learning-phase logging, via DayChecklist). Everywhere else the note
+  // stays read-only, exactly as before.
+  const canEditNote = typeof onSetMemoryAnchor === "function";
 
   useEffect(() => {
     if (!timerRunning) return;
@@ -185,7 +206,35 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
           </p>
         )}
         {!session && <p className="tip-line">Try: {tips.join(", ")}</p>}
-        {memoryAnchor && <p className="tip-line"><strong>Memory anchor:</strong> {memoryAnchor}</p>}
+        {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
+        {canEditNote && (
+          noteOpen ? (
+            <MemoryAnchorField
+              key={chunk.id}
+              value={noteText}
+              // Commit-on-blur closes the editor too: focus leaving the
+              // textarea is the same gesture as "I'm done with this note",
+              // and the committed text reappears as the read-only line
+              // above, so nothing looks lost. Skips the write entirely when
+              // the text is unchanged — opening and closing the editor
+              // without typing shouldn't bump the piece's updatedAt, which
+              // import-merge reads as "this device has newer state".
+              onCommit={(text) => {
+                if (text !== noteText) onSetMemoryAnchor(chunk.id, text);
+                setNoteOpen(false);
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              className="link-btn"
+              style={{ alignSelf: "flex-start" }}
+              onClick={() => setNoteOpen(true)}
+            >
+              {noteText ? "Edit note" : "+ Add a note"}
+            </button>
+          )
+        )}
         <p className="tip-line"><strong>{requirementText}</strong></p>
         <p className="tip-line">
           Ladder:{" "}

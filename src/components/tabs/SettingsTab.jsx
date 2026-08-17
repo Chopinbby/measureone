@@ -8,6 +8,8 @@ import { BpmZonesEditor } from "../fields/BpmZonesEditor";
 import { LadderConfigEditor } from "../fields/LadderConfigEditor";
 import { RecordingsEditor } from "../fields/RecordingsEditor";
 import { RecordingsList } from "../fields/RecordingsList";
+import { DocumentsEditor } from "../fields/DocumentsEditor";
+import { DocumentsList } from "../fields/DocumentsList";
 import { autoChunkSize } from "../../lib/chunking";
 import { formatMinutes } from "../../lib/utils";
 
@@ -100,6 +102,12 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
               <RecordingsList recordings={piece.recordings} />
             </div>
           )}
+          {piece.documents && piece.documents.length > 0 && (
+            <div className="piece-notes">
+              <h4>Documents</h4>
+              <DocumentsList documents={piece.documents} />
+            </div>
+          )}
           <button className="primary-btn" onClick={onStartEdit}>
             <Pencil size={15} /> Edit piece
           </button>
@@ -129,6 +137,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
       <div className="panel"><h3>Tempo zones</h3><BpmZonesEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Maintenance ladder</h3><LadderConfigEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Recordings</h3><RecordingsEditor draft={editDraft} set={setEditDraft} /></div>
+      <div className="panel"><h3>Documents</h3><DocumentsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="edit-actions">
         <button className="ghost-btn" onClick={onDiscard}>Discard changes</button>
         <button className="primary-btn" onClick={() => onSave(editDraft)}>

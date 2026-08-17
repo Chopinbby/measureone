@@ -90,9 +90,21 @@ it's visually convenient.
 ## Editors are shared, so the UI can't drift from itself
 
 Because `BasicsFields`, `SectionsEditor`, `DifficultyEditor`,
-`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, and `RecordingsEditor`
-render identically in the Wizard and in Settings
+`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`,
+and `DocumentsEditor` render identically in the Wizard and in Settings
 (see [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows)),
 a user's mental model of "how do I set the tempo target" never has to be
-relearned between setup and editing. Treat any visual or behavioral
-divergence between the two as a bug, not a stylistic choice.
+relearned between setup and editing — target tempo lives on the "Piece"
+step/panel in both places (moved there from "Schedule" in Pass 24; see
+[Decisions.md](Decisions.md#data-model) for why). Treat any visual or
+behavioral divergence between the two as a bug, not a stylistic choice.
+
+**One deliberate exception, not a violation of this:** Tempo zones,
+Recordings, and Documents are reachable from the Wizard's first step too
+(Pass 24), using the same editor components Settings uses — but they're
+rendered directly in `Wizard.jsx`, not folded into the shared `BasicsFields`
+wrapper the way target tempo was. Folding them into `BasicsFields` would
+have made them render a second time inside Settings' "Piece" panel, on top
+of Settings' own dedicated panels for each. The component is still shared
+(same `{draft, set}` editor, same behavior); only which screen chooses to
+mount it differs by design, for this specific case.

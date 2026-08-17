@@ -1191,6 +1191,7 @@ export default function App() {
                 onUnlogRunThrough={handleUnlogRunThrough}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
+                onSetMemoryAnchor={handleSetMemoryAnchor}
               />
             )}
             {activeTab === "progress" && <ProgressTab piece={piece} chunks={chunks} timeline={timeline} currentDay={currentDay} />}

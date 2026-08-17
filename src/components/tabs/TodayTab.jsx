@@ -86,6 +86,7 @@ export function TodayTab({
   onUnlogRunThrough,
   onReschedule,
   onReassessRange,
+  onSetMemoryAnchor,
 }) {
   const [viewMode, setViewMode] = useState("day");
   const day = timeline.days[currentDay - 1];
@@ -176,7 +177,7 @@ export function TodayTab({
             onUnlogSession={onUnlogSession}
           />
         ) : (
-          <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
+          <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} onSetMemoryAnchor={onSetMemoryAnchor} />
         )
       ) : viewMode === "week" ? (
         <WeekView
@@ -192,7 +193,7 @@ export function TodayTab({
       ) : (
         <div className="view-all-list">
           {timeline.days.map((d) => (
-            <DayChecklist key={d.dayNumber} piece={piece} chunks={chunks} day={d} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
+            <DayChecklist key={d.dayNumber} piece={piece} chunks={chunks} day={d} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} onSetMemoryAnchor={onSetMemoryAnchor} />
           ))}
         </div>
       )}

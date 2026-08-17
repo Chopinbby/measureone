@@ -7,7 +7,9 @@ import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
 import { WeekView } from "./today/WeekView";
+import { InterleavePanel } from "./today/InterleavePanel";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
+import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival } from "../../lib/revival";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes } from "../../lib/utils";
 
@@ -17,7 +19,7 @@ import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes } from "..
 // day view becomes in that state: the live due list from
 // computeDueReviews, logged through exactly the same ChecklistItem the
 // bounded plan uses.
-function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession }) {
+function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, onConfirmProvisionalSession, onDiscardProvisionalSession }) {
   if (dueItems.length === 0) {
     // computeDueReviews returns [] both for "genuinely nothing due" and for
     // a suppressed piece (paused/archived/mid-revival), and those need
@@ -56,6 +58,8 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession }) 
             day={day}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
+            onConfirmProvisionalSession={onConfirmProvisionalSession}
+            onDiscardProvisionalSession={onDiscardProvisionalSession}
           />
         ))}
       </div>
@@ -82,6 +86,8 @@ export function TodayTab({
   onJumpToday,
   onLogSession,
   onUnlogSession,
+  onConfirmProvisionalSession,
+  onDiscardProvisionalSession,
   onLogRunThrough,
   onUnlogRunThrough,
   onReschedule,
@@ -127,6 +133,18 @@ export function TodayTab({
     setViewMode("day");
   };
 
+  // Interleaved mode (Pass 29) reuses this exact "today" list rather than
+  // building a separate chunk-selection mechanism — just narrowed to
+  // chunks that have actually left Stabilizing (isInterleaveEligible,
+  // lib/ladder.js). A chunk can appear twice in todaysIds (e.g. a review
+  // id also present some other way); de-duped the same way todaysRanges
+  // already does below.
+  const interleaveItems = [...new Set(todaysIds)]
+    .map((id) => chunkById[id])
+    .filter(Boolean)
+    .filter((c) => isInterleaveEligible(piece.progress[c.id]))
+    .map((c) => ({ id: c.id, chunk: c }));
+
   const todaysRanges = [...new Set(todaysIds)]
     .filter((id) => ((piece.progress[id] || {}).doneDays || []).includes(todaysDayNumber))
     .map((id) => chunkById[id])
@@ -151,6 +169,13 @@ export function TodayTab({
             <button className={viewMode === "day" ? "active" : ""} onClick={() => setViewMode("day")}>Day view</button>
             <button className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
             <button className={viewMode === "all" ? "active" : ""} onClick={() => setViewMode("all")}>View all</button>
+            <button
+              className={viewMode === "interleave" ? "active" : ""}
+              disabled={interleaveItems.length === 0}
+              onClick={() => setViewMode("interleave")}
+            >
+              Interleaved
+            </button>
           </div>
           {viewMode === "day" && (
             <>
@@ -164,6 +189,12 @@ export function TodayTab({
           )}
         </div>
       </div>
+      {interleaveItems.length === 0 && (
+        <p className="wizard-hint" style={{ marginTop: -8 }}>
+          Interleaved mode unlocks once at least one chunk graduates past Stabilizing — no chunks have graduated past
+          Stabilizing yet.
+        </p>
+      )}
 
       <FocusPanel piece={piece} chunks={chunks} currentDay={currentDay} />
 
@@ -175,10 +206,33 @@ export function TodayTab({
             day={elapsedDay}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
+            onConfirmProvisionalSession={onConfirmProvisionalSession}
+            onDiscardProvisionalSession={onDiscardProvisionalSession}
           />
         ) : (
-          <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} onSetMemoryAnchor={onSetMemoryAnchor} />
+          <DayChecklist
+            piece={piece}
+            chunks={chunks}
+            day={day}
+            onLogSession={onLogSession}
+            onUnlogSession={onUnlogSession}
+            onConfirmProvisionalSession={onConfirmProvisionalSession}
+            onDiscardProvisionalSession={onDiscardProvisionalSession}
+            onLogRunThrough={onLogRunThrough}
+            onUnlogRunThrough={onUnlogRunThrough}
+            onSetMemoryAnchor={onSetMemoryAnchor}
+          />
         )
+      ) : viewMode === "interleave" ? (
+        <InterleavePanel
+          piece={piece}
+          day={todaysDayNumber}
+          items={interleaveItems}
+          ladderConfig={piece.ladderConfig}
+          onLogSession={onLogSession}
+          onConfirmProvisionalSession={onConfirmProvisionalSession}
+          onDiscardProvisionalSession={onDiscardProvisionalSession}
+        />
       ) : viewMode === "week" ? (
         <WeekView
           piece={piece}
@@ -193,7 +247,19 @@ export function TodayTab({
       ) : (
         <div className="view-all-list">
           {timeline.days.map((d) => (
-            <DayChecklist key={d.dayNumber} piece={piece} chunks={chunks} day={d} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} onSetMemoryAnchor={onSetMemoryAnchor} />
+            <DayChecklist
+              key={d.dayNumber}
+              piece={piece}
+              chunks={chunks}
+              day={d}
+              onLogSession={onLogSession}
+              onUnlogSession={onUnlogSession}
+              onConfirmProvisionalSession={onConfirmProvisionalSession}
+              onDiscardProvisionalSession={onDiscardProvisionalSession}
+              onLogRunThrough={onLogRunThrough}
+              onUnlogRunThrough={onUnlogRunThrough}
+              onSetMemoryAnchor={onSetMemoryAnchor}
+            />
           ))}
         </div>
       )}

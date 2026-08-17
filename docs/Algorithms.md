@@ -333,7 +333,19 @@ below.
 ## Confidence
 
 `computeAutoConfidence(chunk, piece, currentDay)` is intentionally **not**
-"did you touch it" — it's reps-quality-weighted:
+"did you touch it" — it's reps-quality-weighted, and (Pass 29) it's also
+not "every record in `sessions`": it reads through `lib/utils.js`'s
+`loggedSessions(sessions)` (`!s.skipped`) rather than the raw array, so a
+skipped session — Interleaved mode's "skip, just save time" action,
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
+— contributes nothing here: no rep-quality term, and critically it can't
+become the "most recent session" the last-outcome multiplier below reads,
+which would otherwise mute that multiplier (a skip has no
+`outcome`/`effectiveness`, so `sessionOutcome` returns `null` for it) even
+though nothing about the chunk's actual mastery changed. The same helper
+gates `computeProgressTier`, `formatLadderStatus`'s history check, and the
+Progress tab's consistency/tempo-trend/outcome-breakdown stats — anywhere
+`sessions` is read as evidence of judged practice, not just here.
 
 - Each logged session contributes `repRatio * (0.5 + 0.5 * bpmRatio)` where
   `repRatio = cleanReps / requiredReps` (`REQUIRED_REPS = { easy: 3,
@@ -391,7 +403,17 @@ Data shapes: [Data-Model.md](Data-Model.md#the-piece-object) (`ChunkProgress.sta
 etc., `piece.ladderConfig`). Design: [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
 Replaces the old flat pass/fail and free-standing "how did it feel"
 self-report with an objective three-tier judgment, and advances a
-per-chunk spaced-repetition ladder on every logged session.
+per-chunk spaced-repetition ladder on every logged session — with one
+exception (Pass 29 follow-up): a soft-miss/fail classified during
+Interleaved mode is deferred, not applied on the spot. `classifySessionOutcome`
+itself is unchanged and still runs immediately (InterleavePanel needs the
+resulting outcome to decide whether to defer at all); what's deferred is
+only the write to `piece.progress[id]`'s ladder fields —
+`handleLogSession`'s `provisional: true` branch saves the classified
+outcome without calling `computeLadderAdvance`, and
+`handleConfirmProvisionalSession` calls it later, on demand. See
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
+for the full mechanism and why.
 
 `classifySessionOutcome({ cleanReps, bpm, requiredReps, practiceBPM,
 manualFail, previousOutcome, previousCleanReps })` (`lib/confidence.js`) —
@@ -752,6 +774,19 @@ Both call sites (`MasterAgendaTab`, `TodayTab`) use this one function
 rather than each running its own query — Master Agenda just renders less of
 the same result. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+### `isInterleaveEligible` — Interleaved mode's eligibility rule (Pass 29)
+
+`isInterleaveEligible(entry)` (`lib/ladder.js`) is the one-line predicate
+behind the Today tab's Interleaved mode
+([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)):
+`entry.stage === "settling" || entry.stage === "holding"`. It's a plain
+per-chunk lookup against the same `ChunkProgress.stage` the ladder already
+maintains, not new derived or persisted state. `TodayTab` applies it as a
+filter over whichever "today" item list is already in scope — the
+newChunkIds/specialChunkIds/reviewChunkIds triple mid-plan, or
+`computeDueReviews`'s `dueItems` past the plan — rather than computing a
+separate rotation set.
 
 ### `isInRevival` — one definition of "in revival"
 

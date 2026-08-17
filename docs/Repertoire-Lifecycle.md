@@ -936,6 +936,108 @@ back in Pass 1 precisely so this would be possible. The surfaces detect
 "past the plan" from elapsed calendar days instead — see the decision
 record for that and for the known duplication it left behind.
 
+### Interleaved practice mode (built, Pass 29)
+
+A toggleable mode on the Today tab (`viewMode === "interleave"`, alongside
+Day view/Week/View all) that rotates practice through several chunks in
+turn rather than working one checklist top-to-bottom — the retrieval-
+practice benefit interleaving is known for only applies to material that's
+actually somewhat consolidated, so this deliberately doesn't open up to
+everything on today's plan.
+
+- **Eligibility**: a chunk rotates in only once it's left Stabilizing —
+  `isInterleaveEligible` (`src/lib/ladder.js`) checks
+  `entry.stage === "settling" || entry.stage === "holding"`. A chunk still
+  building its first consecutive-pass streak, including one that hasn't
+  cleared Tier 1 at all (`stage` null/undefined), stays out of rotation.
+  Plain per-chunk lookup against existing ladder state — no new persisted
+  field.
+- **Item source**: reuses exactly the "today" list the rest of the tab
+  already computes — `[...day.newChunkIds, ...day.specialChunkIds,
+  ...day.reviewChunkIds]` mid-plan, or `computeDueReviews`'s `dueItems`
+  past the plan — filtered to eligible chunks only. No separate
+  chunk-selection mechanism; if a chunk isn't already part of today's
+  agenda, interleaving doesn't add it just because it's eligible.
+- **Rotation timer**: mode-level, not per-item — one `setInterval`/
+  `durationSeconds` counter (`InterleavePanel`,
+  `src/components/tabs/today/InterleavePanel.jsx`) mirroring the pattern
+  `ChecklistItem`'s own per-chunk timer already uses, advancing to the next
+  eligible chunk every 4 minutes (fixed for this pass; a configurable
+  interval is deferred).
+- **Logging**: a rotation prompts the same rep/BPM/`manualFail` inputs and
+  the same `onLogSession` call the regular checklist uses — a real logged
+  attempt mid-rotation advances the ladder identically to logging it from
+  Day view, no parallel path.
+- **Skip ("skip, just save time")**: opting out of reporting an outcome
+  for the current turn. A zero-rep session fed through the normal path
+  would classify as a real fail (`classifySessionOutcome` treats
+  `!cleanReps` as `"fail"`), which would be wrong for someone who simply
+  chose not to report anything. `handleLogSession` (`App.jsx`) has one new
+  `skipped: true` branch for this: it appends a session record (time,
+  `loggedDate`, and the piece's `lastLoggedAt`) and returns *before*
+  `computeLadderAdvance` runs, so `stage`/`practiceBPM`/`nextDueDate` are
+  left untouched. **It also deliberately does NOT add the day to
+  `doneDays`** — a skip is explicitly not "marked completed": the chunk
+  stays open on the regular checklist so it can be logged for real later,
+  during or outside Interleaved mode, same as if nothing had happened yet.
+  The skipped record still lands in `progress[id].sessions` (so the time
+  spent counts toward total time practiced, `sumPracticeSeconds`), but
+  every consumer that treats `sessions` as evidence of *judged* practice —
+  confidence scoring, the Progress tab's history/consistency/outcome
+  stats, ladder-status display — reads through `lib/utils.js`'s
+  `loggedSessions(sessions)` helper instead of the raw array, so a skip
+  can't silently masquerade as a pass/fail/soft-miss, or as "this chunk
+  was practiced today," anywhere that matters. `ChecklistItem` also has a
+  dedicated render branch for a skipped session (a plain "Skipped in
+  Interleaved practice — not marked done" line) rather than falling into
+  the normal "Logged: N reps at X BPM" line, which has no reps/BPM to show
+  for a skip.
+- **Empty state**: if nothing on today's list has graduated past
+  Stabilizing, the "Interleaved" toggle is disabled with an inline reason
+  ("No chunks have graduated past Stabilizing yet") rather than switching
+  into an empty rotation — same disabled-with-explanation pattern used
+  elsewhere in the app.
+- **Provisional logging for a rough interleaved attempt (follow-up, same
+  pass)**: interleaved retrieval practice often *looks* worse than the same
+  chunk would in focused, blocked practice, while still being the more
+  effective long-term practice — so an outcome InterleavePanel
+  auto-classifies as soft-miss or fail (via `classifySessionOutcome`, NOT a
+  manual "needs more work" override, which is already a deliberate fail
+  decision the learner made on purpose) doesn't commit to the ladder the
+  moment it's logged. `handleLogSession` (`App.jsx`) has a second new
+  branch for this, `provisional: true`: it saves the real
+  `cleanReps`/`bpm`/`outcome` (unlike a skip, which saves none), but — same
+  as skip — does not add the day to `doneDays` and does not run
+  `computeLadderAdvance`. Two new handlers resolve it later, from
+  `ChecklistItem` (so from Day view, Week, View all, the past-plan
+  due-review panel, or Revival — wherever that chunk is next viewed, not
+  only from Interleaved mode) or from InterleavePanel's own card if the
+  same chunk comes back around in rotation before it's resolved:
+  - `handleConfirmProvisionalSession(chunkId, day, { targetBPM,
+    suggestedStartingBPM })` finally runs the saved outcome through
+    `computeLadderAdvance`, marks the *original* attempt's day done, and
+    stamps a `ladderSnapshot` on the now-resolved session — so undoing it
+    later goes through the existing `handleUnlogSession` mechanism
+    unmodified; nothing new was needed there. The ladder math is dated to
+    the *confirm* date, not the original attempt date — a confirmed
+    soft-miss/fail schedules its next review from when the outcome was
+    actually accepted, not backdated to a tentative attempt that may have
+    sat unresolved for a while.
+  - `handleDiscardProvisionalSession(chunkId, day)` removes the record
+    outright, as if it never happened — no ladder snapshot to restore,
+    since a provisional session never touched the ladder to begin with.
+    This is also how a rough attempt gets "redone": discard, then log a
+    fresh one normally.
+  - A full pass never goes through this path — only soft-miss/fail do; a
+    clean pass has no "would this even count" question to defer.
+  - `loggedSessions` (`lib/utils.js`) excludes a pending provisional
+    session from confidence/progress-tab reads the same way it excludes a
+    skipped one — it hasn't been judged yet either.
+- **Deferred**: a configurable rotation interval; relaxing the ladder's
+  consecutive-clean-reps requirement in early stages (a separate,
+  unresolved design question); cross-piece interleaving (stays
+  single-piece like the rest of the Today tab).
+
 ### Explicitly not designed/built here
 
 - Revival's internal structure/pacing beyond the trigger conditions and

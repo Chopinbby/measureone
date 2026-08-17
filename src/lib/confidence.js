@@ -1,4 +1,4 @@
-import { clamp, rangesOverlap, daysBetweenInclusive } from "./utils";
+import { clamp, rangesOverlap, daysBetweenInclusive, loggedSessions } from "./utils";
 import { REQUIRED_REPS, STAGE_LABEL } from "./constants";
 import { STAGES } from "./ladder";
 
@@ -185,7 +185,13 @@ export function computeAutoConfidence(chunk, piece, currentDay) {
   // judges against, so a run-through that passes also scores as fully done.
   const requiredReps = resolveRequiredReps(chunk);
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
-  const sessions = entry.sessions || [];
+  // A skipped session (Interleaved mode, Pass 29) has no reps/BPM/outcome
+  // to score and was deliberately never "logged" in the judged sense — see
+  // lib/utils.js's loggedSessions. Without this, a skip as the most recent
+  // session would null out sessionOutcome() below (no outcome/effectiveness
+  // field), silently dropping the pass/fail multiplier a real last session
+  // would have applied.
+  const sessions = loggedSessions(entry.sessions);
 
   let repQuality = 0;
   sessions.forEach((s) => {
@@ -265,7 +271,7 @@ export function computeConfidenceAsOf(chunk, piece, asOfDay) {
   const filteredEntry = {
     ...entry,
     doneDays: (entry.doneDays || []).filter((d) => d <= asOfDay),
-    sessions: (entry.sessions || []).filter((s) => s.day <= asOfDay),
+    sessions: loggedSessions(entry.sessions).filter((s) => s.day <= asOfDay),
   };
   const asOfPiece = { ...piece, progress: { ...piece.progress, [chunk.id]: filteredEntry } };
   return computeConfidence(chunk, asOfPiece, asOfDay);
@@ -294,7 +300,7 @@ export const PROGRESS_TIER_META = {
 // stage, rather than "untouched" or jumping straight to "mastered."
 export function computeProgressTier(chunk, piece) {
   const entry = piece.progress[chunk.id] || {};
-  const sessions = entry.sessions || [];
+  const sessions = loggedSessions(entry.sessions);
   if (sessions.length === 0) return "untouched";
   if (entry.stage === "holding") return "mastered";
   if (entry.stage === "settling") return "comfortable";
@@ -349,7 +355,7 @@ export function computeProgressTier(chunk, piece) {
 // while flagged (any fail resets it), so showing it is accurate, not a leak.
 export function formatLadderStatus(entry, ladderConfig, asOfDate) {
   if (!entry) return null;
-  const hasHistory = (entry.sessions || []).length > 0;
+  const hasHistory = loggedSessions(entry.sessions).length > 0;
   if (!STAGES.includes(entry.stage) && !hasHistory) return null;
   const stage = STAGES.includes(entry.stage) ? entry.stage : "stabilizing";
   const consecutivePasses = entry.consecutivePasses || 0;

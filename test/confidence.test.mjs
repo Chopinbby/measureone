@@ -4,8 +4,10 @@ import {
   getSuggestedStartingBPM,
   computeConfidence,
   computeAutoConfidence,
+  computeProgressTier,
   classifySessionOutcome,
   resolveRequiredReps,
+  formatLadderStatus,
 } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
@@ -429,5 +431,64 @@ describe("computeAutoConfidence uses resolveRequiredReps too, not its own separa
     };
     const confidence = computeAutoConfidence(runThrough, piece, 1);
     assert.ok(confidence < 65, "1 of 2 required reps should score below the 'fully done' 65%");
+  });
+});
+
+describe("A skipped session (Interleaved mode, Pass 29) is excluded wherever sessions are treated as judged practice", () => {
+  const chunk = { id: "c1", kind: "section", difficultyLabel: "medium", start: 1, end: 4, recurring: false };
+
+  test("computeAutoConfidence: a skip as the most recent session does NOT null out the real last outcome's pass/fail multiplier", () => {
+    const withoutSkip = {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: {
+        c1: { doneDays: [1], currentBPM: 90, sessions: [{ day: 1, cleanReps: 4, bpm: 90, outcome: "pass" }] },
+      },
+    };
+    const withTrailingSkip = {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: {
+        c1: {
+          // Same day, same doneDays — a skip never adds to doneDays (this
+          // pass's fix), so isolating the skip's effect means holding
+          // `currentDay` and `doneDays` identical between the two cases and
+          // varying only whether a skip record trails the real pass in
+          // `sessions`. Evaluating at different currentDay values instead
+          // would also move the (unrelated) recency term and produce a
+          // false positive here.
+          doneDays: [1],
+          currentBPM: 90,
+          sessions: [
+            { day: 1, cleanReps: 4, bpm: 90, outcome: "pass" },
+            { day: 1, skipped: true, durationSeconds: 120 },
+          ],
+        },
+      },
+    };
+    const confBefore = computeAutoConfidence(chunk, withoutSkip, 1);
+    const confAfter = computeAutoConfidence(chunk, withTrailingSkip, 1);
+    assert.equal(
+      confAfter,
+      confBefore,
+      "a trailing skip must not change the score the real 'pass' session already earned — it should read straight through the skip to that pass"
+    );
+  });
+
+  test("computeProgressTier: a chunk with only a skipped session (no real session ever) reads as 'untouched', not touched", () => {
+    const piece = {
+      progress: { c1: { doneDays: [], stage: null, sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] } },
+    };
+    assert.equal(computeProgressTier(chunk, piece), "untouched");
+  });
+
+  test("formatLadderStatus: a chunk with only a skipped session and no recognized stage returns null (same as truly no history)", () => {
+    const ladderConfig = {
+      stabilizing: { intervalDays: 4, graduationPasses: 4 },
+      settling: { intervalDays: 7, graduationPasses: 4 },
+      holding: { startIntervalDays: 14, maxIntervalDays: 70 },
+    };
+    const entry = { stage: null, sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] };
+    assert.equal(formatLadderStatus(entry, ladderConfig, "2026-08-16"), null);
   });
 });

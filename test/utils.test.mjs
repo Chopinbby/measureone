@@ -11,7 +11,38 @@ process.env.TZ = "America/Denver";
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { daysBetweenInclusive, elapsedDay, getCurrentDay, todayISODate } from "../src/lib/utils.js";
+import { daysBetweenInclusive, elapsedDay, getCurrentDay, todayISODate, loggedSessions, sumPracticeSeconds } from "../src/lib/utils.js";
+
+describe("loggedSessions (Pass 29) — filters out skipped sessions, keeps real ones", () => {
+  test("drops sessions with skipped: true", () => {
+    const sessions = [
+      { day: 1, cleanReps: 4, bpm: 90, outcome: "pass" },
+      { day: 2, skipped: true, durationSeconds: 120 },
+      { day: 3, cleanReps: 2, bpm: 80, outcome: "soft-miss" },
+    ];
+    const result = loggedSessions(sessions);
+    assert.equal(result.length, 2);
+    assert.ok(result.every((s) => !s.skipped));
+  });
+
+  test("handles null/undefined/empty without throwing", () => {
+    assert.deepEqual(loggedSessions(undefined), []);
+    assert.deepEqual(loggedSessions(null), []);
+    assert.deepEqual(loggedSessions([]), []);
+  });
+});
+
+describe("sumPracticeSeconds still counts skipped sessions' time — saving the time was the point", () => {
+  test("a skipped session's durationSeconds counts toward total time practiced", () => {
+    const piece = {
+      progress: {
+        c1: { sessions: [{ day: 1, cleanReps: 4, bpm: 90, outcome: "pass", durationSeconds: 60 }] },
+        c2: { sessions: [{ day: 1, skipped: true, durationSeconds: 120 }] },
+      },
+    };
+    assert.equal(sumPracticeSeconds(piece), 180, "both the real session's and the skipped session's time count");
+  });
+});
 
 describe("[regression] day counting must not undercount across a DST boundary", () => {
   // Hand-counted from a calendar: 2026-02-01 through 2026-08-11 inclusive is

@@ -72,6 +72,26 @@ export function formatHoursMinutes(totalSeconds) {
   return formatMinutes(totalSeconds / 60);
 }
 
+// A skipped session (Interleaved mode's "skip, just save time" action,
+// Pass 29) records that time was spent but is deliberately not a completed
+// practice attempt — no reps/BPM/outcome, and (per handleLogSession,
+// App.jsx) never marked "done." A provisional session (Pass 29 follow-up —
+// an auto-classified soft-miss/fail logged mid-rotation) DOES carry real
+// reps/BPM/outcome, but is equally not yet a judged attempt: the user
+// hasn't confirmed or discarded it, and it hasn't touched the ladder
+// (handleConfirmProvisionalSession/handleDiscardProvisionalSession,
+// App.jsx, resolve it one way or the other). Every consumer that treats
+// `piece.progress[id].sessions` as evidence of real, judged practice
+// (confidence scoring, the Progress tab's stats, ladder-status history)
+// should read through this rather than the raw array, so neither kind can
+// silently masquerade as a pass/fail/soft-miss, or as "this chunk has been
+// practiced," anywhere that matters. `sumPracticeSeconds` below
+// deliberately does NOT use this — a skipped OR provisional session's time
+// still counts toward total time practiced; the time was spent either way.
+export function loggedSessions(sessions) {
+  return (sessions || []).filter((s) => !s.skipped && !s.provisional);
+}
+
 export function sumPracticeSeconds(piece) {
   return Object.values(piece.progress).reduce(
     (sum, entry) => sum + (entry.sessions || []).reduce((s, sess) => s + (sess.durationSeconds || 0), 0),

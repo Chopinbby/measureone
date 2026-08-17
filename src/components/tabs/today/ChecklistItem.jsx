@@ -15,7 +15,19 @@ import {
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
 
-export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSession, tempoLadder, memoryAnchor, onSetMemoryAnchor }) {
+export function ChecklistItem({
+  chunk,
+  role,
+  piece,
+  day,
+  onLogSession,
+  onUnlogSession,
+  onConfirmProvisionalSession,
+  onDiscardProvisionalSession,
+  tempoLadder,
+  memoryAnchor,
+  onSetMemoryAnchor,
+}) {
   const entry = piece.progress[chunk.id] || {};
   const checked = (entry.doneDays || []).includes(day);
   // Multiple sessions can now legitimately share a plan-day (a Tier 1
@@ -197,15 +209,56 @@ export function ChecklistItem({ chunk, role, piece, day, onLogSession, onUnlogSe
           <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
           <span className="conf-pill mono">{conf}%</span>
         </div>
-        {session && (
+        {session && session.skipped ? (
+          // Pass 29 — a session logged via Interleaved mode's "skip, just
+          // save time" action has no reps/BPM/outcome to report (that's the
+          // point of the button), so it gets its own line rather than
+          // falling into the "Logged: {cleanReps}...{bpm}..." line below,
+          // which would otherwise render literal "undefined"s.
+          <p className="tip-line">
+            Skipped in Interleaved practice
+            {session.durationSeconds ? ` — ${formatDuration(session.durationSeconds)} logged` : ""}. Not marked done —
+            log a real attempt whenever you're ready.
+          </p>
+        ) : session && session.provisional ? (
+          // Pass 29 follow-up — an auto-classified soft-miss/fail logged
+          // during Interleaved mode is saved with its real reps/BPM, but
+          // deliberately hasn't touched the ladder yet (see App.jsx's
+          // handleLogSession `provisional` branch): interleaved retrieval
+          // attempts often look rougher than the same chunk would in
+          // focused practice, so the learner gets a say before it counts.
+          // Confirm applies it now (computeLadderAdvance, dated today, not
+          // backdated to the original attempt); Discard drops it as if it
+          // never happened — this is also how a rough attempt gets "redone."
+          <div className="tip-line">
+            <div>
+              Provisional: {session.cleanReps} clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM —
+              would be a {outcomeMeta ? outcomeMeta.label.toLowerCase() : "non-pass"}. Not yet applied — confirm or
+              discard, or log a fresh attempt below.
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <button
+                type="button"
+                className="primary-btn sm"
+                onClick={() => onConfirmProvisionalSession(chunk.id, day, { targetBPM, suggestedStartingBPM })}
+              >
+                Confirm
+              </button>
+              <button type="button" className="ghost-btn sm" onClick={() => onDiscardProvisionalSession(chunk.id, day)}>
+                Discard
+              </button>
+            </div>
+          </div>
+        ) : session ? (
           <p className="tip-line">
             Logged: {session.cleanReps} consecutive clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM
             {session.durationSeconds ? ` in ${formatDuration(session.durationSeconds)}` : ""}
             {outcomeMeta ? ` — ${outcomeMeta.label}` : ""}
             {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
           </p>
+        ) : (
+          <p className="tip-line">Try: {tips.join(", ")}</p>
         )}
-        {!session && <p className="tip-line">Try: {tips.join(", ")}</p>}
         {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
         {canEditNote && (
           noteOpen ? (

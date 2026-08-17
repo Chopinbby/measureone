@@ -3,7 +3,7 @@
 // App.jsx's handleLogSession on every logged session.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeLadderAdvance, computeDemonstratedTempoBaseline } from "../src/lib/ladder.js";
+import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible } from "../src/lib/ladder.js";
 import { mergeLadderConfig } from "../src/lib/storage.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
@@ -555,5 +555,22 @@ describe("ladderConfig editing (Settings' LadderConfigEditor) actually changes l
     const r = computeLadderAdvance(baseState({ consecutivePasses: 0 }), { result: "pass", asOfDate: "2026-01-01" }, edited);
     assert.equal(r.stage, "stabilizing", "only 1 of 4 required passes — doesn't graduate");
     assert.equal(r.nextDueDate, "2026-01-11", "10 days out (the edited interval), not 4 (the default)");
+  });
+});
+
+describe("isInterleaveEligible (Pass 29's Interleaved-mode eligibility rule)", () => {
+  test("includes Settling and Holding", () => {
+    assert.equal(isInterleaveEligible({ stage: "settling" }), true);
+    assert.equal(isInterleaveEligible({ stage: "holding" }), true);
+  });
+
+  test("excludes Stabilizing", () => {
+    assert.equal(isInterleaveEligible({ stage: "stabilizing" }), false);
+  });
+
+  test("excludes a chunk with no ladder entry yet (stage null/undefined, hasn't cleared Tier 1)", () => {
+    assert.equal(isInterleaveEligible({ stage: null }), false);
+    assert.equal(isInterleaveEligible({}), false);
+    assert.equal(isInterleaveEligible(undefined), false);
   });
 });

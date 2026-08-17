@@ -161,11 +161,6 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
           </div>
         )}
       </div>
-
-      <label className="field" style={{ marginTop: 8 }}>
-        <span>Target tempo (BPM) — optional</span>
-        <NumberInput value={draft.targetBPM || ""} min={20} max={400} onCommit={(n) => set({ targetBPM: n })} />
-      </label>
     </>
   );
 }

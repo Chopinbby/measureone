@@ -17,7 +17,7 @@ export function BpmZonesEditor({ draft, set }) {
     <div>
       <p className="wizard-hint">
         Optionally set a different tempo target for specific measure ranges — this overrides the
-        whole-piece default (set under Schedule) for those measures.
+        whole-piece default (set under Piece) for those measures.
       </p>
       <div className="pairs-list">
         {(draft.bpmZones || []).map((z, i) => (

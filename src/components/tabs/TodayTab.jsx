@@ -6,6 +6,7 @@ import { SectionRunThroughPanel } from "./today/SectionRunThroughPanel";
 import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
+import { WeekView } from "./today/WeekView";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
 import { isInRevival } from "../../lib/revival";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes } from "../../lib/utils";
@@ -116,6 +117,15 @@ export function TodayTab({
     ? dueItems.map((i) => i.chunkId)
     : [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
 
+  // Clicking a day in the week view drops into that day's own view — the
+  // week is a way in, never a second place to work. Past the plan there's
+  // no plan day to switch to (day nav is disabled entirely in that mode),
+  // so the maintenance cell passes null and only the view mode changes.
+  const handleSelectWeekDay = (dayNumber) => {
+    if (dayNumber != null) onDayChange(dayNumber);
+    setViewMode("day");
+  };
+
   const todaysRanges = [...new Set(todaysIds)]
     .filter((id) => ((piece.progress[id] || {}).doneDays || []).includes(todaysDayNumber))
     .map((id) => chunkById[id])
@@ -138,6 +148,7 @@ export function TodayTab({
         <div className="day-nav-controls">
           <div className="segmented">
             <button className={viewMode === "day" ? "active" : ""} onClick={() => setViewMode("day")}>Day view</button>
+            <button className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
             <button className={viewMode === "all" ? "active" : ""} onClick={() => setViewMode("all")}>View all</button>
           </div>
           {viewMode === "day" && (
@@ -167,6 +178,17 @@ export function TodayTab({
         ) : (
           <DayChecklist piece={piece} chunks={chunks} day={day} onLogSession={onLogSession} onUnlogSession={onUnlogSession} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
         )
+      ) : viewMode === "week" ? (
+        <WeekView
+          piece={piece}
+          chunks={chunks}
+          timeline={timeline}
+          currentDay={currentDay}
+          isRealToday={isRealToday}
+          pastPlan={pastPlan}
+          dueItems={dueItems}
+          onSelectDay={handleSelectWeekDay}
+        />
       ) : (
         <div className="view-all-list">
           {timeline.days.map((d) => (

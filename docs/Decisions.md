@@ -1684,6 +1684,65 @@ working.**
 - **Consequence / precedent:** this is the standing answer to "component
   logic can't be tested." Move it to `lib/`. `npm test`: 256 → 278.
 
+**Decision (Pass 22): the week view is navigation-only — no logging happens
+from it, in either mode.**
+
+A third view mode ("Week", between "Day view" and "View all" in
+`TodayTab`) showing 7 days as cards, current day ringed, each card a link
+into that day's own view. `components/tabs/today/WeekView.jsx`.
+
+- **Why read-only, decided at the start of the pass rather than after
+  building it:** two reasons, and the second is the one that settles it.
+  A logging row needs clean reps, BPM, a timer and the suggested-tempo
+  line — more than a 7-across grid can hold without becoming the day view
+  again. More importantly, **a session logged from a cell that isn't today
+  would be keyed to the wrong day**, and the maintenance ladder reads those
+  day numbers to decide when a chunk next comes due. A grid invites
+  clicking any cell, so inline logging there is an invitation to write
+  ladder-corrupting data. The day view stays the single place work is
+  recorded.
+- **The window slides rather than paging fixed weeks:** it centres on the
+  current day (day 7 of 21 shows days 4–10) and clamps at both ends, so
+  the current day is always visible and the window is always a full 7 days
+  when the plan has them. A plan shorter than 7 days shows all of itself.
+  Deliberately different from `TimelineTab`, which pages *fixed* week
+  blocks (days 1–7, 8–14) because it's showing the whole plan, not
+  answering "what's around me now".
+- **The highlighted cell is labelled "Today" or "Viewing"**, matching the
+  tab header's existing `(viewing)` suffix — the current day can be a
+  browsed day, and the two must not look alike.
+- **Known duplication, accepted rather than fixed:** the card body — the
+  New/Focus/Review groups with merged ranges — is now written twice, here
+  and in `TimelineTab`. Not extracted to a shared card, because
+  `TimelineTab` was outside the pass's scope and the two cards have
+  genuinely different heads (plan-day + calendar date + highlight vs. plan
+  day alone). **Anything changing day-card presentation must now change
+  both files.** Extract if a third caller ever appears.
+- **No CSS was added** — `.week-grid` and `.day-card` already existed for
+  `TimelineTab`, so this reuses them; the current-day ring is an inline
+  style. If that highlight is wanted elsewhere it should become a real
+  class in `App.jsx`'s stylesheet rather than a third inline copy.
+
+**Decision (Pass 22): in maintenance mode the week shows only today, and
+says so — it does not leave the days ahead looking empty.**
+
+Past the end of a bounded plan there are no plan days left, so the week
+view falls back to 7 calendar days around today. Only today's cell can
+carry content (the live due list); the days ahead read "Not due yet" and
+the panel states plainly that maintenance reviews come due one day at a
+time.
+
+- **Why it can't do better:** `computeDueReviews` answers "what is due as
+  of this date" and nothing answers "what will be due on Thursday" — a
+  forward-looking window is explicitly scoped out (see
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance),
+  "Scoped out"). This is a design boundary, not an unfinished cell.
+- **Why not just leave them blank:** a blank cell reads as "nothing due
+  Thursday," which is a promise this data cannot make — the honest state is
+  "not known yet." Same principle as the rest of the app: don't imply
+  information the model doesn't have. See the open question below on
+  whether that boundary should move.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as
@@ -2149,6 +2208,31 @@ directory rather than keeping it as a separate, un-tracked file.**
 
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
+
+- **Should a piece in maintenance get a genuinely forward-looking week, and
+  therefore the due-in-N-days query that was scoped out?** Surfaced by
+  Pass 22's week view (see the two decisions in [UX](#ux) above). Inside a
+  bounded plan the week is fully populated, because `timeline.days[]`
+  already holds every future day. Past the plan it structurally cannot be:
+  `computeDueReviews` is strictly "due as of this date," so six of the
+  seven cells can only say "not due yet." A learner in maintenance —
+  which is the *long-term* state of every piece they finish — therefore
+  gets a much thinner week than one still learning, exactly inverting who
+  benefits from planning ahead.
+  - **What it would take:** the forward-looking window deliberately ruled
+    out when the maintenance query was built. That exclusion was not an
+    oversight; the stated concern is that showing "due Thursday" invites
+    practising it Wednesday, which is precisely the massed-practice
+    behaviour spacing exists to prevent, and the ladder's due dates move
+    as sessions are logged, so a week-ahead forecast is a projection that
+    will often be wrong by the time it arrives.
+  - **The narrower version worth considering first:** not a full forecast,
+    but a count — "3 reviews expected in the next 7 days" — which conveys
+    load without naming a day to practise early. Undecided whether even
+    that crosses the line.
+  - **Not started.** Recorded because the honest-but-thin maintenance week
+    is the visible symptom of this, and a future pass looking at it should
+    know the emptiness is a decision, not a bug.
 
 - **Nothing prunes orphaned `piece.progress` entries after a piece edit, and
   it's undecided whether anything should.** Surfaced in Pass 20 while fixing

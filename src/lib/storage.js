@@ -648,7 +648,7 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
 }
 
 const MERGE_FIELDS_HANDLED_SEPARATELY = [
-  "id", "createdAt", "workId", "progress", "sections", "recordings",
+  "id", "createdAt", "workId", "progress", "sections", "recordings", "documents",
   "bpmZones", "revival", "memoryAnchors", "measureDifficulty", "totalMeasures",
 ];
 
@@ -702,6 +702,7 @@ export function mergeImportedPiece(existing, imported, ladderChoice = "existing"
 
   merged.sections = mergeById(existing.sections, imported.sections);
   merged.recordings = mergeById(existing.recordings, imported.recordings);
+  merged.documents = mergeById(existing.documents, imported.documents);
   merged.bpmZones = mergeById(existing.bpmZones, imported.bpmZones);
   merged.memoryAnchors = { ...(existing.memoryAnchors || {}), ...(imported.memoryAnchors || {}) };
   merged.progress = mergeProgress(existing.progress, imported.progress, importIsStale, ladderChoice);

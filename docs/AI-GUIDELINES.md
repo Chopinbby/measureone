@@ -139,6 +139,27 @@ purely in-memory check would have called this done and shipped a real,
 silent data-loss bug. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the fix.
 
+**A second, distinct way to hit the same underlying trap: the write can
+genuinely reach `localStorage` correctly and still get silently clobbered
+afterward, by separate logic that recomputes the same field on every
+load.** The Pass 29 case above was a write that never landed; this one is
+a write that landed, then got overwritten by something else entirely.
+Worked example (reschedule "extend the plan" feature): extending a
+`scheduleMode: "minutes"` piece's `daysToLearn` via the reschedule dialog
+worked immediately — checked `localStorage` right after the click and the
+extended value was genuinely there. It was only reloading the page that
+revealed `reconcileMinutesPerDaySchedule` (`lib/scheduling.js`, called on
+every load to keep `daysToLearn` honest against `minutesPerDay`) had
+silently recomputed it right back down, because that function had no way
+to know the extension was deliberate rather than stale. No error at any
+point, and the "behind schedule" banner gave no symptom either, since it
+correctly waits for a day to actually lapse before flagging anything — a
+purely in-memory-plus-immediate-`localStorage` check would have called
+this done. The general lesson: when a field is *derived* on load (not just
+saved), verifying the save isn't enough — verify what the load-time
+derivation does to it too, which usually means an actual reload, same as
+the first case. See [Decisions.md](Decisions.md#scheduling) for the fix.
+
 ## A guard added for one navigation path needs auditing everywhere that path exists
 
 When you add a confirmation/guard before a state transition (leaving a
@@ -207,6 +228,29 @@ spend a moment checking whether the relevant doc still matches what you just
 read in the code. If it doesn't, fix it — small, in-passing corrections are
 exactly how this documentation set is meant to stay trustworthy rather than
 becoming another stale artifact like the one that prompted the last audit.
+
+## A dirty working tree may not be entirely yours to commit
+
+This project is sometimes worked on from more than one session at once (the
+user may have another chat open against the same clone). Before running
+`git add`/`git commit`, check whether `git status`/`git diff` shows changes
+you didn't make — compare against what the working tree looked like when
+your session started, not just against what you personally just edited.
+Don't assume unfamiliar diffs are stray artifacts to clean up or, worse,
+silently fold them into your own commit.
+
+Worked example (Pass 24/38): a two-line copy fix was ready to commit, but
+`git diff` showed six modified files, four of which were untouched by this
+session — another session's in-progress work sitting in the same working
+tree, including further edits to the very file being committed. Committing
+everything would have shipped unreviewed code under this session's name;
+committing nothing would have lost the approved fix in the noise. The fix:
+build a patch containing only the hunks actually authored this session and
+apply it with `git apply --cached` (stages just those hunks, working tree
+untouched), then commit — leaving the other session's changes exactly as
+they were, uncommitted, for it to handle. See
+[CLAUDE.md](../CLAUDE.md)'s Pass 38 note for what that other session's
+changes turned out to be.
 
 ## When you're not sure
 

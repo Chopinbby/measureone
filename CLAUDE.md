@@ -106,6 +106,15 @@ chunking, scheduling, and confidence are actually computed, see
   - "Behind schedule" must trigger only when a chunk's scheduled day has
     already passed with zero sessions logged — never a same-day cumulative
     planned-vs-actual comparison.
+  - For a `scheduleMode: "minutes"` piece, `reconcileMinutesPerDaySchedule`
+    (`lib/scheduling.js`) recomputes `daysToLearn` from scratch on every
+    load. A reschedule that deliberately extends `daysToLearn` past that
+    (App.jsx's `handleReschedule`, "doesn't fit" branch, minutes-mode path)
+    relies on that function's `rescheduleMarker`-gated floor to not get
+    silently reverted on the next reload — found as a real bug (extension
+    worked in-session, vanished on reload) before the floor existed. If you
+    touch this function, keep the floor or the reschedule-extend feature
+    silently breaks again.
 - **`Wizard` is create-only.** Editing an existing piece always goes through
   `SettingsTab`, never the wizard.
 - **Piece Map chunk detail is a modal, not inline** — this was a deliberate
@@ -163,7 +172,9 @@ learned" state yet — a definition is decided but not implemented, see
 See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently
 singled out as "next"; pick from the priority-ordered backlog there. The
 Analytics fold-in that used to occupy that slot **shipped in Pass 20**:
-Analytics is gone as a tab and its two panels live in Progress. The
+Analytics is gone as a tab and its "Confidence by difficulty" panel lives
+in Progress (the other folded-in panel, "Recurring material payoff", was
+removed outright in Pass 32b — see below). The
 biggest maintenance-ladder item is now **substantially built, not just
 designed**: a continuous Stabilizing/Settling/Holding cadence has replaced
 the old fixed `REVIEW_OFFSETS` review (`computeTimeline` now schedules
@@ -210,3 +221,52 @@ that same function rather than adding a new `setActiveTab`/
 surfaces a live-derived "tempo climbing" nudge (`hasClimbingTempo`,
 `lib/confidence.js`) — no new persisted state, same pattern as the
 existing flag/needsRelearning tile markers.
+
+**Since Pass 31**, `ChecklistItem` no longer shows a per-chunk
+method-suggestion tip line — `suggestMethods()` was removed in favor of
+static instructional copy (a fixed requirement line, "Spaced Repetition"
+in place of "Ladder," and a "Needs more work" checkbox that states what a
+manual fail actually does). Don't reintroduce a dynamic technique
+suggestion by resurrecting that function; it's gone. **Since Pass 38**,
+Overview's "Start/Continue revival" button is a `primary-btn` (was
+`ghost-btn`), and Revival-mode copy was reworked to read less clinically:
+the Revival tab's title-card subheading dropped the purpose/last-played
+recap in favor of a plain "Returning '{piece}' to its former glory," the
+Overview stat cards and first-week list relabel during an active revival
+("revived" instead of "learned," "Revive"/"reconsolidate" instead of
+"Learn new"/"review"), and Master Agenda's revival cards no longer show
+the purpose blurb. The revival-mode UI still does not display why this
+revival was started (`revival.purpose`) or when the piece was last played
+anywhere — flagged as a possible follow-up, not treated as settled.
+
+**Since Pass 32a**, every piece carries a persisted `sortOrder` (number) that
+the sidebar piece switcher and other piece-listing surfaces sort by instead
+of `createdAt`, reorderable via up/down controls on each switcher row.
+Reordering only ever moves a *whole* row — a standalone piece, or an entire
+multi-movement work as one block — never an individual movement within a
+work; movement order inside a work is still `createdAt`-driven
+(`groupPiecesByWork`/`partsOfWork`, `lib/works.js`), untouched by this
+field, and stays visually contiguous "for free" regardless. Existing pieces
+migrate to a `createdAt`-derived default so nothing reshuffles on first
+load. Re-importing a backup gets its own explicit "keep what's here" /
+"use the imported order" choice rather than the usual most-recently-updated
+rule — order is display arrangement, not data an `updatedAt` comparison
+should settle. See [`docs/Data-Model.md`](docs/Data-Model.md#the-piece-object).
+
+**Since Pass 32b**, Progress's "Recurring material payoff" panel (folded in
+from the old Analytics tab back in Pass 20) is gone — a pure removal, along
+with the four variables that only fed it. Recurring material's actual
+scheduling-effort discount (`lib/chunking.js`) and any related confidence
+handling are untouched; only the display panel went.
+
+**Also this session:** the reschedule confirmation dialog (`handleReschedule`,
+`App.jsx`) fixed its "day(s)" pluralization, and — when the remaining work
+doesn't fit the days left — now offers a concrete way out instead of just a
+warning. For a `scheduleMode: "days"` piece: change the target date to a
+suggested one (derived from the same `requiredDays` estimate already
+computed) or reschedule into the existing window. For `scheduleMode:
+"minutes"`: there's no target date to suggest changing (one was never set
+in that mode) and no "cram into what's left" alternative worth offering
+(no calendar deadline to protect there), so it's a single action — extend
+`daysToLearn` to fit, at the same `minutesPerDay`. See the regression note
+above for the reload-persistence fix this required.

@@ -10,6 +10,7 @@ import {
   Settings as SettingsIcon,
   Plus,
   ChevronDown,
+  ChevronUp,
   Pencil,
   RefreshCw,
   Upload,
@@ -111,6 +112,14 @@ export default function App() {
   // { pieceId, marker }, with the marker already fully built by whichever
   // handler opened the modal, so confirming is a plain write.
   const [rescheduleTargets, setRescheduleTargets] = useState([]);
+  // Only ever set by the single-piece reschedule flow (handleReschedule)
+  // when the remaining work doesn't fit the days left — null otherwise
+  // (including every "Reschedule all" call, which covers multiple pieces
+  // with different fits and has no single date to suggest). { targetDate,
+  // daysToLearn } to extend the plan to, both derived from the same
+  // requiredDays estimate handleReschedule already computes — see
+  // handleConfirmRescheduleWithExtension below for how it's applied.
+  const [rescheduleSuggestion, setRescheduleSuggestion] = useState(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -180,17 +189,21 @@ export default function App() {
     setExportReminderDue(isExportReminderDue(lastExportedAt, firstUseAt));
   }, [loaded]);
 
-  const updatePiece = (updater) => {
-    if (!activePieceId) return;
+  // targetId defaults to the active piece (the common case, and every call
+  // site before Pass 32a) but can be passed explicitly — sidebar reordering
+  // needs to write sortOrder onto pieces that aren't necessarily the one
+  // currently open.
+  const updatePiece = (updater, targetId = activePieceId) => {
+    if (!targetId) return;
     setPieces((prev) => {
-      const current = prev[activePieceId];
+      const current = prev[targetId];
       if (!current) return prev;
       const next = typeof updater === "function" ? updater(current) : updater;
       // Bumped on every mutation through this single funnel (CLAUDE.md: all
       // piece changes go through updatePiece) so mergeImportedPiece can tell
       // "this device has newer state than the file being re-imported" from
       // "the file actually is the newer copy" — see storage.js.
-      return { ...prev, [activePieceId]: { ...next, updatedAt: Date.now() } };
+      return { ...prev, [targetId]: { ...next, updatedAt: Date.now() } };
     });
   };
 
@@ -224,7 +237,10 @@ export default function App() {
   const handleComplete = (finished, options = {}) => {
     if (!guardLeavingInterleaved()) return;
     const id = `p_${Date.now()}`;
-    const withId = ensureWorkId({ ...finished, id, updatedAt: Date.now() });
+    // Appends to the end of the switcher without waiting for a reload to
+    // backfill it (validateAndMigratePiece isn't in the create path) —
+    // Date.now() sorts after every existing piece's sortOrder/createdAt.
+    const withId = ensureWorkId({ ...finished, id, updatedAt: Date.now(), sortOrder: finished.createdAt || Date.now() });
     setPieces((prev) => ({ ...prev, [id]: withId }));
     setActivePieceId(id);
     setWizardOpen(false);
@@ -307,7 +323,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleConfirmImport = (selectedIndices, ladderChoices = {}) => {
+  const handleConfirmImport = (selectedIndices, ladderChoices = {}, orderChoice = "existing") => {
     const next = { ...pieces };
     let firstNewId = null;
     let updatedCount = 0;
@@ -352,7 +368,7 @@ export default function App() {
         // merged with defaults rather than reaching computeLadderAdvance
         // incomplete and throwing on the next logged session. See storage.js.
         const merged = validateAndMigratePiece(ensureWorkId({
-          ...mergeImportedPiece(match, p, ladderChoice),
+          ...mergeImportedPiece(match, p, ladderChoice, orderChoice),
           rescheduleMarker: null,
         }));
         next[match.id] = merged;
@@ -1041,6 +1057,7 @@ export default function App() {
     setRescheduleMessage("");
     setRescheduleTitle("");
     setRescheduleTargets([]);
+    setRescheduleSuggestion(null);
   };
 
   // Writes every confirmed marker. Split deliberately in two: the active
@@ -1090,6 +1107,36 @@ export default function App() {
     }
   };
 
+  // The other half of the "doesn't fit" choice for "days" mode (extend to a
+  // suggested target date), and the *only* reschedule action offered at all
+  // for "minutes" mode (there's no fixed deadline to protect there, so
+  // extending the plan rather than cramming into what's left is the only
+  // sensible option — see handleReschedule). Extends the plan to
+  // rescheduleSuggestion's length first, then applies the same
+  // rescheduleMarker against that now-larger window, in one updatePiece call
+  // so the timeline recomputed off the new daysToLearn already has the
+  // extra days available. Only ever reachable from the single-piece flow
+  // (rescheduleSuggestion is null for "Reschedule all"), so there's exactly
+  // one target and no "other pieces" branch to mirror from
+  // handleConfirmReschedule. targetDate is only present (and only written)
+  // for "days" mode — see handleReschedule; a "minutes" mode piece never
+  // had one to begin with, so nothing here should invent one. Setting
+  // daysToLearn alone would otherwise be silently undone on the next
+  // reload for a "minutes" mode piece — see reconcileMinutesPerDaySchedule
+  // (lib/scheduling.js) for the other half of that fix.
+  const handleConfirmRescheduleWithExtension = () => {
+    if (!rescheduleSuggestion || !rescheduleTargets.length) return;
+    const activeTarget = rescheduleTargets.find((t) => t.pieceId === activePieceId);
+    if (!activeTarget) return;
+    updatePiece((p) => ({
+      ...p,
+      ...(rescheduleSuggestion.targetDate ? { targetDate: rescheduleSuggestion.targetDate } : {}),
+      daysToLearn: rescheduleSuggestion.daysToLearn,
+      rescheduleMarker: activeTarget.marker,
+    }));
+    closeRescheduleModal();
+  };
+
   const handleEndRevival = () => {
     if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
     updatePiece((p) => ({
@@ -1127,12 +1174,18 @@ export default function App() {
     setActiveTab("today");
   };
 
-  const openRescheduleModal = (targets, title, message) => {
+  const openRescheduleModal = (targets, title, message, suggestion = null) => {
     setRescheduleTargets(targets);
     setRescheduleTitle(title);
     setRescheduleMessage(message);
+    setRescheduleSuggestion(suggestion);
     setRescheduleModalOpen(true);
   };
+
+  // month/day only, no year — matches the estFinishDate display convention
+  // ScheduleFields already uses for the same "derived finish date" idea.
+  const formatDateReadable = (dateStr) =>
+    new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
   const handleReschedule = () => {
     const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
@@ -1146,15 +1199,40 @@ export default function App() {
       status.remainingChunkIds
     );
 
+    const dayWord = (n) => (n === 1 ? "day" : "days");
+    const remainWord = (n) => (n === 1 ? "remains" : "remain");
+
     let message = `This will rebalance the ${status.remainingChunkIds.length} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`;
+    let suggestion = null;
     if (!fits) {
-      message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
+      // Extends the plan just far enough that requiredDays worth of days are
+      // actually available from today — same requiredDays estimate above,
+      // no separate calculation. daysToLearn counts day 1 as the start date
+      // itself, hence the -1 on both ends (matches estFinishDate in
+      // ScheduleFields.jsx).
+      const newDaysToLearn = currentDay - 1 + requiredDays;
+      if (piece.scheduleMode === "minutes") {
+        // No target date to suggest changing — one was never set in this
+        // mode (minutesPerDay is the fixed input, daysToLearn the derived
+        // output; see ScheduleFields.jsx). There's also no "cram into the
+        // tighter window" alternative worth offering: minutes-mode has no
+        // calendar deadline to protect by staying tight, so extending the
+        // plan is the only sensible reschedule here — a single action, not
+        // a choice. targetDate stays null so the modal renders one button.
+        suggestion = { targetDate: null, daysToLearn: newDaysToLearn };
+        message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, but only ${availableDays} ${dayWord(availableDays)} ${remainWord(availableDays)} in this plan.\n\nRescheduling will extend your plan to ${newDaysToLearn} days total, at the same pace, so everything fits. Continue?`;
+      } else {
+        const suggestedTargetDate = addDaysISO(piece.startDate, newDaysToLearn - 1);
+        suggestion = { targetDate: suggestedTargetDate, daysToLearn: newDaysToLearn };
+        message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, but only ${availableDays} ${dayWord(availableDays)} ${remainWord(availableDays)} in this plan.\n\nWould you like to change the target date to ${formatDateReadable(suggestedTargetDate)}, or reschedule into the current remaining plan days?`;
+      }
     }
 
     openRescheduleModal(
       [{ pieceId: activePieceId, marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds } }],
       "Reschedule remaining chunks?",
-      message
+      message,
+      suggestion
     );
   };
 
@@ -1195,9 +1273,30 @@ export default function App() {
     );
   };
 
-  const pieceList = Object.values(pieces).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const pieceList = Object.values(pieces).sort(
+    (a, b) => (a.sortOrder ?? a.createdAt ?? 0) - (b.sortOrder ?? b.createdAt ?? 0)
+  );
   const pieceGroups = groupPiecesByWork(pieceList);
   const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
+
+  // Reorders whole switcher rows (a standalone piece, or an entire
+  // multi-movement work as one block) by swapping two adjacent groups and
+  // re-ranking every piece to its new flattened position. Movement order
+  // *within* a work is untouched — that's still governed by createdAt via
+  // groupPiecesByWork/partsOfWork (lib/works.js), deliberately left alone
+  // per Pass 32a's build order (works already stay contiguous in the
+  // switcher for free, without any special-case logic here).
+  const moveGroup = (groupIndex, direction) => {
+    const targetIndex = groupIndex + direction;
+    if (targetIndex < 0 || targetIndex >= pieceGroups.length) return;
+    const reordered = [...pieceGroups];
+    [reordered[groupIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[groupIndex]];
+    reordered
+      .flatMap((g) => g.pieces)
+      .forEach((p, i) => {
+        if (p.sortOrder !== i) updatePiece((current) => ({ ...current, sortOrder: i }), p.id);
+      });
+  };
 
   return (
     <div className="measureone-app">
@@ -1298,9 +1397,31 @@ export default function App() {
               </button>
               {switcherOpen && (
                 <div className="piece-switcher-list">
-                  {pieceGroups.map((g) => (
+                  {pieceGroups.map((g, gi) => (
                     <div key={g.workId || g.pieces[0].id} className={g.workId ? "piece-switcher-work" : ""}>
-                      {g.workId && <div className="piece-switcher-work-name">{g.workName}</div>}
+                      <div className="piece-switcher-group-head">
+                        {g.workId && <div className="piece-switcher-work-name">{g.workName}</div>}
+                        <div className="piece-switcher-reorder">
+                          <button
+                            type="button"
+                            className="piece-switcher-reorder-btn"
+                            aria-label={`Move ${g.workName || g.pieces[0].name || "piece"} up in the list`}
+                            disabled={gi === 0}
+                            onClick={(e) => { e.stopPropagation(); moveGroup(gi, -1); }}
+                          >
+                            <ChevronUp size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="piece-switcher-reorder-btn"
+                            aria-label={`Move ${g.workName || g.pieces[0].name || "piece"} down in the list`}
+                            disabled={gi === pieceGroups.length - 1}
+                            onClick={(e) => { e.stopPropagation(); moveGroup(gi, 1); }}
+                          >
+                            <ChevronDown size={12} />
+                          </button>
+                        </div>
+                      </div>
                       {g.pieces.map((p) => (
                         <button
                           key={p.id}
@@ -1490,9 +1611,24 @@ export default function App() {
               <button className="ghost-btn" onClick={closeRescheduleModal}>
                 Cancel
               </button>
-              <button className="primary-btn" onClick={handleConfirmReschedule}>
-                Reschedule
-              </button>
+              {rescheduleSuggestion && rescheduleSuggestion.targetDate ? (
+                <>
+                  <button className="ghost-btn" onClick={handleConfirmReschedule}>
+                    Reschedule into current plan days
+                  </button>
+                  <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                    Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
+                  </button>
+                </>
+              ) : rescheduleSuggestion ? (
+                <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                  Reschedule
+                </button>
+              ) : (
+                <button className="primary-btn" onClick={handleConfirmReschedule}>
+                  Reschedule
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1568,8 +1704,13 @@ const CSS = `
 .piece-switcher-add { display: flex; align-items: center; gap: 6px; text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--brass-deep); font-weight: 600; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
 .piece-switcher-add:hover { background: rgba(185,138,62,0.08); }
 .piece-switcher-work { display: flex; flex-direction: column; gap: 2px; }
-.piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 6px 0 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-switcher-work .piece-switcher-item { margin-left: 8px; }
+.piece-switcher-group-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 10px; }
+.piece-switcher-reorder { display: flex; gap: 2px; flex-shrink: 0; }
+.piece-switcher-reorder-btn { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--ink-faint); }
+.piece-switcher-reorder-btn:hover:not(:disabled) { background: rgba(185,138,62,0.12); color: var(--ink-soft); }
+.piece-switcher-reorder-btn:disabled { opacity: 0.3; cursor: default; }
 .part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }
@@ -1616,7 +1757,7 @@ const CSS = `
 .manuscript-strip.compact { height: 28px; }
 .manuscript-block { position: relative; border-right: 2px solid var(--paper); min-width: 3px; }
 .manuscript-block:first-child { border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
-.recurring-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.85); }
+.recurring-dot { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); font-size: 11px; line-height: 1; color: rgba(255,255,255,0.85); }
 .final-barline { width: 4px; background: var(--ink); border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
 .block-tooltip {
   position: absolute;

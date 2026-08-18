@@ -51,7 +51,7 @@ export function ManuscriptStrip({ chunks, compact }) {
           className="manuscript-block"
           style={{ flex: c.measureCount, background: DIFFICULTY_META[c.difficultyLabel].color }}
         >
-          {c.recurring && <span className="recurring-dot" />}
+          {c.recurring && <span className="recurring-dot" aria-hidden="true">&#8635;</span>}
           <span className="block-tooltip">
             {formatRange(c.start, c.end)} — {DIFFICULTY_META[c.difficultyLabel].label}
             {c.recurring ? " — recurring" : ""}

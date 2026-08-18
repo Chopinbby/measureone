@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { clamp, formatMinutes, formatRange } from "../../lib/utils";
-import { REVIVAL_PURPOSE_OPTIONS } from "../../lib/constants";
 import { isManualConfidence } from "../../lib/confidence";
 import { getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
 import { PieceMapTab } from "./PieceMapTab";
@@ -45,7 +44,6 @@ export function RevivalTab({
   const ratedCount = revivalItems.filter((c) => isManualConfidence(c, piece.progress)).length;
   const flagged = revivalItems.filter((c) => (piece.progress[c.id] || {}).flag);
   const firstUnratedId = (revivalItems.find((c) => !isManualConfidence(c, piece.progress)) || revivalItems[0] || {}).id || null;
-  const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
   // Combos whose underlying content (anchor chunk, or an overlapping
   // neighbor) has produced a real fail since this revival run started —
   // see computeComboEscalations for why this is computed live rather than
@@ -57,10 +55,7 @@ export function RevivalTab({
       <div className="tab-header day-nav">
         <div>
           <h1>Revival</h1>
-          <p className="hero-sub">
-            Bringing "{piece.name}" back{purposeLabel ? ` for ${purposeLabel.label.toLowerCase()}` : ""}
-            {piece.lastPlayedDate ? ` · last played ${piece.lastPlayedDate}` : ""}
-          </p>
+          <p className="hero-sub">Returning "{piece.name}" to its former glory</p>
         </div>
         <button className="ghost-btn" onClick={onEndRevival}>End revival</button>
       </div>
@@ -94,9 +89,9 @@ export function RevivalTab({
         <div className="panel">
           <h3>Reassess where things stand</h3>
           <p className="wizard-hint">
-            Go chunk by chunk (and seam by seam) and rate confidence from memory right now — this sets a
-            fresh baseline for scheduling without touching your original practice history. Flag anything
-            that felt shaky as rough or lost; the plan below will prioritize those first.
+            Rate your confidence on each chunk to set a fresh baseline for practice. Flag anything that
+            feels shaky as "rough", and anything you truly can't remember as "lost". The plan will
+            prioritize these first.
           </p>
           <p className="derived-stat" style={{ marginBottom: 14 }}>
             <strong className="mono">{ratedCount}</strong> of <strong className="mono">{revivalItems.length}</strong> rated
@@ -156,8 +151,8 @@ export function RevivalTab({
             <div className="panel focus-panel">
               <h3>Needs another look</h3>
               <p className="wizard-hint">
-                A focus block below had a real fail somewhere in its underlying content this run —
-                worth its own dedicated pass rather than assuming it'll resolve on its own.
+                One of the blocks below had a rough pass. Worth practicing on its own rather than
+                assuming it'll sort itself out.
               </p>
               <div className="checklist">
                 {comboEscalations.map((combo) => {

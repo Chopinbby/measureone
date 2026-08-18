@@ -84,7 +84,18 @@ piece = {
                          // stand-in for it (see Decisions.md#scheduling).
   targetDate,            // string ("YYYY-MM-DD") | null — deadline the user picked
                          // in 'days' scheduleMode; daysToLearn is derived from
-                         // this (startDate through targetDate, inclusive)
+                         // this (startDate through targetDate, inclusive).
+                         // NOT itself read by the scheduler (computeTimeline
+                         // only ever reads daysToLearn) — it's a UI-facing
+                         // input that ScheduleFields.jsx's own effect turns
+                         // into daysToLearn, only in 'days' mode. A feature
+                         // that writes targetDate expecting the schedule to
+                         // change on its own, without also writing
+                         // daysToLearn, will silently do nothing — found the
+                         // hard way while building the reschedule "extend
+                         // the plan" feature (Decisions.md#scheduling). In
+                         // 'minutes' mode this field is carried along inert;
+                         // nothing reads or derives from it.
   practiceDaysPerWeek,   // number, 3-7 — how many of the 7 days in a week are
                          // practice days; computeTimeline bakes (7 - this many)
                          // rest days evenly into the generated plan. Missing on
@@ -107,6 +118,39 @@ piece = {
                          // browser/instance. Sort-order bookkeeping only (piece
                          // switcher, work grouping) — NOT the scheduling anchor;
                          // see startDate above for that.
+  sortOrder,             // number — persisted display order for the piece switcher
+                         // and any other piece-listing surface (Pass 32a); these sort
+                         // by this instead of createdAt. User-reorderable via
+                         // up/down controls on each switcher row (App.jsx's
+                         // moveGroup), which re-rank every piece to a fresh 0..n-1
+                         // sequence on each move. A piece saved before this field
+                         // existed defaults to its own createdAt (validateAndMigratePiece,
+                         // lib/storage.js) so migration reproduces the existing
+                         // createdAt order rather than shuffling on first load.
+                         // Reordering only ever moves a *switcher row* — a
+                         // standalone piece, or an entire multi-movement work as one
+                         // block — not individual movements within a work: which
+                         // movement shows first inside a work is still governed by
+                         // createdAt via groupPiecesByWork/partsOfWork
+                         // (src/lib/works.js), untouched by this field. That's
+                         // deliberate, not an oversight — see the "Works" section
+                         // below for why contiguity already falls out of workId
+                         // grouping without sortOrder needing to know works exist.
+                         // On import (ImportPiecesModal/mergeImportedPiece,
+                         // lib/storage.js), sortOrder is deliberately NOT governed
+                         // by the usual updatedAt-recency rule every other scalar
+                         // field uses — display arrangement isn't "data" in that
+                         // sense, so an unstale re-import (e.g. syncing a backup
+                         // from a second device right after manually reordering
+                         // here) must never silently reshuffle the switcher just
+                         // because its timestamp happens to be newer. Instead it's
+                         // a single explicit user choice per import ("Keep what's
+                         // here" / "Use the imported order"), applied uniformly to
+                         // every matched piece — same spirit as ladderChoice, but
+                         // one choice for the whole import rather than per piece,
+                         // since order is a whole-list arrangement, not independent
+                         // per-piece data. Defaults to "existing" so an import
+                         // never moves anything unless the user asks it to.
   updatedAt,             // epoch ms — bumped on every local mutation (App.jsx's
                          // updatePiece, the single funnel every piece change goes
                          // through per CLAUDE.md). Exists to let mergeImportedPiece
@@ -501,6 +545,14 @@ confidence, revival and storage need no awareness that works exist.
 
 Helpers live in `src/lib/works.js`: `ensureWorkId`, `partsOfWork` (siblings in
 creation order), `groupPiecesByWork` (ordered groups for the switcher).
+
+`groupPiecesByWork` groups a work's movements together the moment it meets
+the first one in the (now `sortOrder`-sorted, Pass 32a) piece list — a group's
+position follows wherever its earliest-appearing movement sits, and every
+movement joins that same group regardless of its own `sortOrder`. So a work's
+movements stay visually contiguous in the switcher "for free," without
+`sortOrder` or its reorder UI needing any work-specific logic — see
+`sortOrder` above.
 
 ## Practice chunks vs. sections vs. transitions vs. combos vs. run-throughs
 

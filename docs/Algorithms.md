@@ -214,7 +214,8 @@ before this existed.
 piece-level fixup: for a `scheduleMode: "minutes"` piece, replace
 `daysToLearn` with what `computeDaysNeededForMinutesPerDay` says is needed
 (no-op for `scheduleMode: "days"`, and a no-op if the value already
-matches). `ScheduleFields` already performed this same derivation live, as
+matches — see the floor exception below). `ScheduleFields` already
+performed this same derivation live, as
 a `useEffect` reacting to `draft.minutesPerDay`/`draft.daysToLearn` — but
 that only ever ran while a human had the Schedule panel mounted (Wizard or
 Settings edit mode). A piece arriving any other way — loaded from
@@ -230,6 +231,22 @@ import merge in `App.jsx`'s `handleConfirmImport` (so a same-session import
 doesn't have to wait for a reload to get corrected). See
 [Decisions.md](Decisions.md#scheduling) for why this couldn't just stay a
 UI-only concern.
+
+**Floor exception (added for the reschedule "extend the plan" feature —
+see [Rescheduling](#rescheduling) below):** the recomputed value is never
+allowed to shrink `daysToLearn` below whatever it already is *while
+`piece.rescheduleMarker` is set*. Without this, a reschedule that
+deliberately extends `daysToLearn` past what a from-scratch recompute
+would give (to make up for days that already elapsed without practice,
+which the from-scratch formula has no way to know about) would get
+silently reverted the very next time the piece loads — this was a real
+bug, not a hypothetical, found on critical review: the extension worked
+immediately in-session and vanished on reload. The floor is a genuine
+no-op whenever there's no active marker, or the marker's present but
+`daysToLearn` was never actually pushed past the recomputed value (the
+ordinary, non-extending reschedule path) — it only ever matters for a
+piece mid-extension. It also stops mattering the moment the piece is next
+saved from Settings, since that already clears `rescheduleMarker`.
 
 ## Import merge
 
@@ -1066,6 +1083,34 @@ the 0.65 efficiency constant — see
 `App.jsx`'s `handleReschedule`, specifically so the multi-piece bulk
 reschedule below can reuse the exact same formula instead of a second copy
 drifting out of sync with it.
+
+**When `estimateRescheduleFit` says it doesn't fit, `handleReschedule`
+(single-piece dialog only — bulk "Reschedule all" below is unchanged)
+offers a concrete way past it, branching on `piece.scheduleMode`:**
+
+- **`"days"` mode:** two buttons. "Reschedule into the current plan days"
+  is the pre-existing single-button behavior unchanged. "Change target
+  date" computes `newDaysToLearn = currentDay - 1 + requiredDays` (extends
+  the plan exactly far enough that `requiredDays` worth of days become
+  available from today) and a matching `targetDate =
+  addDaysISO(piece.startDate, newDaysToLearn - 1)` — the same formula
+  `ScheduleFields.jsx`'s `estFinishDate` uses to go the other direction.
+  Confirming writes both fields plus `rescheduleMarker` in one
+  `updatePiece` call, so the timeline `getEffectiveTimeline` recomputes off
+  the new, larger `daysToLearn` already has the room the marker's
+  `remainingChunkOrder` needs.
+- **`"minutes"` mode:** a single button — no target date to suggest
+  changing (see [Data-Model.md](Data-Model.md#the-piece-object):
+  `targetDate` is a `"days"`-mode-only input, never itself read by
+  `computeTimeline`) and no "protect the tight deadline" alternative
+  worth offering, since this mode has no deadline. Writes the same
+  `newDaysToLearn` (`daysToLearn` only, `targetDate` left alone) plus
+  `rescheduleMarker`. This write only actually sticks because of the
+  `reconcileMinutesPerDaySchedule` floor described above — without it, the
+  very next load would silently recompute `daysToLearn` back down, since
+  that function has no way to know an extension was ever deliberate. See
+  [Decisions.md](Decisions.md#scheduling) for the bug this was found to
+  cause before the floor existed.
 
 **`planRescheduleForPieces(pieces)`** (Pass 21, `lib/scheduling.js`) is the
 multi-piece form of the flow above — Master Agenda's "Reschedule all". For

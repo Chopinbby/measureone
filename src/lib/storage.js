@@ -210,6 +210,15 @@ export function validateAndMigratePiece(piece) {
     // freshly touched is the safe direction, since the alternative (0) would
     // make it look infinitely stale and let any import silently overwrite it.
     updatedAt: piece.updatedAt || Date.now(),
+    // Persisted piece-switcher/list display order (Pass 32a) — sorted on
+    // instead of createdAt wherever pieces are listed. A piece saved before
+    // this field existed defaults to its own createdAt value rather than a
+    // freshly-computed cross-piece rank: since every other already-loaded
+    // piece gets the same treatment, sorting by sortOrder reproduces exactly
+    // the createdAt order those pieces already had, so nothing shuffles on
+    // first load — only an explicit reorder (App.jsx's moveGroup) ever
+    // moves a piece off its createdAt-derived slot after that.
+    sortOrder: typeof piece.sortOrder === "number" ? piece.sortOrder : piece.createdAt || 0,
     sections: piece.sections || [{ id: "s1", name: "", start: 1, end: piece.totalMeasures }],
     bpmZones: piece.bpmZones || [],
     recordings: piece.recordings || [],
@@ -280,7 +289,14 @@ export function loadPiecesFromStorage() {
             // memory and discarded on the next load. !p.updatedAt catches a
             // piece saved before that field existed, same one-time-backfill
             // reasoning as startDate.
-            if (!p.startDate || !p.ladderConfig || !p.ladderConfig.bpmSteps || !p.updatedAt || migrated.daysToLearn !== p.daysToLearn) {
+            if (
+              !p.startDate ||
+              !p.ladderConfig ||
+              !p.ladderConfig.bpmSteps ||
+              !p.updatedAt ||
+              typeof p.sortOrder !== "number" ||
+              migrated.daysToLearn !== p.daysToLearn
+            ) {
               savePieceToStorage(migrated.id, migrated);
             }
           }
@@ -650,6 +666,13 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
 const MERGE_FIELDS_HANDLED_SEPARATELY = [
   "id", "createdAt", "workId", "progress", "sections", "recordings", "documents",
   "bpmZones", "revival", "memoryAnchors", "measureDifficulty", "totalMeasures",
+  // sortOrder is display arrangement, not "data" in the sense preferByRecency
+  // was built for — an unstale re-import silently reshuffling the switcher
+  // (e.g. syncing a backup from a second device after manually reordering
+  // here) shouldn't win just because its updatedAt happens to be newer. Left
+  // to the same explicit existing/imported choice as ladder state, not
+  // recency — see orderChoice below.
+  "sortOrder",
 ];
 
 // Merges a freshly-imported piece into the existing piece it matched,
@@ -676,7 +699,19 @@ const MERGE_FIELDS_HANDLED_SEPARATELY = [
 // diffImportedPiece/mergeProgress above. Defaults to "existing" so a caller
 // that doesn't pass one at all (including every pre-Pass-13 call site and
 // test) gets exactly the behavior this function always had.
-export function mergeImportedPiece(existing, imported, ladderChoice = "existing") {
+//
+// orderChoice ("existing" or "imported", default "existing"): which side's
+// sortOrder (Pass 32a) wins for a matched piece. A single per-import choice,
+// not per-piece like ladderChoice — order is a whole-list arrangement, not
+// independent per-chunk data, so there's no meaningful "divergence" to
+// detect per row the way diffImportedPiece does for ladder state; the user
+// just picks once in ImportPiecesModal and it applies to every matched
+// piece in that import. Defaults to "existing" so an import never silently
+// reshuffles the switcher — an imported sortOrder only ever applies when the
+// user explicitly asks for it, and even then only if the import actually
+// carries one (a pre-Pass-32 backup has no sortOrder to apply, so this falls
+// back to existing regardless of the choice).
+export function mergeImportedPiece(existing, imported, ladderChoice = "existing", orderChoice = "existing") {
   const importedUpdatedAt = typeof imported.updatedAt === "number" ? imported.updatedAt : 0;
   const existingUpdatedAt = typeof existing.updatedAt === "number" ? existing.updatedAt : 0;
   const importIsStale = importedUpdatedAt < existingUpdatedAt;
@@ -692,6 +727,9 @@ export function mergeImportedPiece(existing, imported, ladderChoice = "existing"
   // preserved as-is) could make this piece look older than it actually is on
   // the very next comparison.
   merged.updatedAt = Math.max(importedUpdatedAt, existingUpdatedAt) || undefined;
+
+  merged.sortOrder =
+    orderChoice === "imported" && typeof imported.sortOrder === "number" ? imported.sortOrder : existing.sortOrder;
 
   // totalMeasures and measureDifficulty must move together — mixing sources
   // would leave measureDifficulty the wrong length for totalMeasures.

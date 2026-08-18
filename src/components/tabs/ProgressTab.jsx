@@ -1,7 +1,7 @@
 import { Sparkline } from "../Sparkline";
 import { computePracticeHistory } from "../../lib/history";
 import { formatRange, loggedSessions } from "../../lib/utils";
-import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
+import { SESSION_OUTCOME_META, DIFFICULTY_META } from "../../lib/constants";
 import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
 
 export function ProgressTab({ piece, chunks, timeline, currentDay }) {
@@ -110,11 +110,6 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
       : 0;
     return { level, count: list.length, avg };
   });
-
-  const recurringChunks = practiceChunks.filter((c) => c.recurring);
-  const fullEffort = practiceChunks.reduce((s, c) => s + c.measureCount * c.avgDifficulty, 0);
-  const actualEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
-  const minutesSaved = Math.round((fullEffort - actualEffort) * EFFORT_TO_MIN);
 
   // Recent practice history. The work of matching persisted progress keys
   // back to the freshly-derived chunk set lives in lib/history.js — see the
@@ -234,14 +229,6 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
             </div>
           ))}
         </div>
-      </div>
-
-      <div className="panel">
-        <h3>Recurring material payoff</h3>
-        <p className="wizard-hint" style={{ marginBottom: 0 }}>
-          {recurringChunks.length} chunk{recurringChunks.length === 1 ? "" : "s"} marked as recurring saved an
-          estimated <strong>{minutesSaved}</strong> minutes of practice time in this plan.
-        </p>
       </div>
 
       <div className="panel">

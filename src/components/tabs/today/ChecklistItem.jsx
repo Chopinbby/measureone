@@ -4,7 +4,6 @@ import { formatRange, formatDuration, todayISODate } from "../../../lib/utils";
 import { ROLE_LABEL, DIFFICULTY_META, SESSION_OUTCOME_META } from "../../../lib/constants";
 import {
   computeConfidence,
-  suggestMethods,
   classifySessionOutcome,
   sessionOutcome,
   getDefaultTargetBPM,
@@ -55,7 +54,6 @@ export function ChecklistItem({
     );
   const undoWillFullyReverse = isLatestSessionOverall && hasValidLadderSnapshot;
   const conf = computeConfidence(chunk, piece, day);
-  const tips = suggestMethods(chunk, conf);
   const [reps, setReps] = useState("");
   const [bpm, setBpm] = useState("");
   const [manualFail, setManualFail] = useState(false);
@@ -256,41 +254,10 @@ export function ChecklistItem({
             {outcomeMeta ? ` — ${outcomeMeta.label}` : ""}
             {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
           </p>
-        ) : (
-          <p className="tip-line">Try: {tips.join(", ")}</p>
-        )}
-        {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
-        {canEditNote && (
-          noteOpen ? (
-            <MemoryAnchorField
-              key={chunk.id}
-              value={noteText}
-              // Commit-on-blur closes the editor too: focus leaving the
-              // textarea is the same gesture as "I'm done with this note",
-              // and the committed text reappears as the read-only line
-              // above, so nothing looks lost. Skips the write entirely when
-              // the text is unchanged — opening and closing the editor
-              // without typing shouldn't bump the piece's updatedAt, which
-              // import-merge reads as "this device has newer state".
-              onCommit={(text) => {
-                if (text !== noteText) onSetMemoryAnchor(chunk.id, text);
-                setNoteOpen(false);
-              }}
-            />
-          ) : (
-            <button
-              type="button"
-              className="link-btn"
-              style={{ alignSelf: "flex-start" }}
-              onClick={() => setNoteOpen(true)}
-            >
-              {noteText ? "Edit note" : "+ Add a note"}
-            </button>
-          )
-        )}
+        ) : null}
         <p className="tip-line"><strong>{requirementText}</strong></p>
         <p className="tip-line">
-          Ladder:{" "}
+          Spaced Repetition:{" "}
           {ladderStatus
             ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
                 ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
@@ -352,9 +319,38 @@ export function ChecklistItem({
             comfortably, slower is fine.
           </p>
         )}
+        {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
+        {canEditNote && (
+          noteOpen ? (
+            <MemoryAnchorField
+              key={chunk.id}
+              value={noteText}
+              // Commit-on-blur closes the editor too: focus leaving the
+              // textarea is the same gesture as "I'm done with this note",
+              // and the committed text reappears as the read-only line
+              // above, so nothing looks lost. Skips the write entirely when
+              // the text is unchanged — opening and closing the editor
+              // without typing shouldn't bump the piece's updatedAt, which
+              // import-merge reads as "this device has newer state".
+              onCommit={(text) => {
+                if (text !== noteText) onSetMemoryAnchor(chunk.id, text);
+                setNoteOpen(false);
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              className="link-btn"
+              style={{ alignSelf: "flex-start" }}
+              onClick={() => setNoteOpen(true)}
+            >
+              {noteText ? "Edit note" : "+ Add a note"}
+            </button>
+          )
+        )}
         <label className="fail-override-row">
           <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />
-          <span>Needs more work (mark as a fail regardless of reps)</span>
+          <span>Needs more work (lowers practice tempo, increases chunk visibility)</span>
         </label>
         <button className="primary-btn sm" disabled={!canLog} style={{ marginTop: 8, alignSelf: "flex-start" }} onClick={submitLog}>
           {checked ? "Log another attempt" : "Log practice"}

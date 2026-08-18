@@ -21,6 +21,14 @@ export function ImportPiecesModal({ candidates, existingPieces, onCancel, onImpo
   // divergent row defaults to "existing" (the safer, pre-Pass-13 behavior)
   // until the user actually picks.
   const [ladderChoices, setLadderChoices] = useState({});
+  // Single choice for the whole import, not per-piece like ladderChoices —
+  // sortOrder is a list-wide arrangement, not independent per-piece data, so
+  // there's no per-row "divergence" to flag the way hasDivergence does for
+  // ladder state. Defaults to "existing" (keep the order already here); only
+  // shown at all when at least one candidate matches an existing piece,
+  // since a pure "all new pieces" import has no existing order to conflict
+  // with. See mergeImportedPiece's orderChoice param (lib/storage.js).
+  const [orderChoice, setOrderChoice] = useState("existing");
 
   const rows = useMemo(
     () =>
@@ -66,6 +74,30 @@ export function ImportPiecesModal({ candidates, existingPieces, onCancel, onImpo
             <button className="ghost-btn" onClick={() => setSelected(new Set(candidates.map((_, i) => i)))}>Select all</button>
             <button className="ghost-btn" onClick={() => setSelected(new Set())}>Select none</button>
           </div>
+          {updateCount > 0 && (
+            <div style={{ margin: "0 0 14px", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
+              <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
+                Piece order — this file may list your pieces in a different order than they're
+                arranged here. Which order should the switcher use for matched pieces?
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className={orderChoice === "existing" ? "primary-btn sm" : "ghost-btn"}
+                  onClick={() => setOrderChoice("existing")}
+                >
+                  Keep what's here
+                </button>
+                <button
+                  type="button"
+                  className={orderChoice === "imported" ? "primary-btn sm" : "ghost-btn"}
+                  onClick={() => setOrderChoice("imported")}
+                >
+                  Use the imported order
+                </button>
+              </div>
+            </div>
+          )}
           <div className="checklist">
             {rows.map(({ piece, index, isUpdate, hasDivergence }) => (
               <div key={index}>
@@ -105,7 +137,7 @@ export function ImportPiecesModal({ candidates, existingPieces, onCancel, onImpo
         </div>
         <div className="modal-foot">
           <button className="ghost-btn" onClick={onCancel}>Cancel</button>
-          <button className="primary-btn" disabled={selected.size === 0} onClick={() => onImport([...selected], ladderChoices)}>
+          <button className="primary-btn" disabled={selected.size === 0} onClick={() => onImport([...selected], ladderChoices, orderChoice)}>
             <Upload size={15} /> Import {selected.size} piece{selected.size === 1 ? "" : "s"}
           </button>
         </div>

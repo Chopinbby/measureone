@@ -23,12 +23,18 @@ view alongside Day view/View all, see
 chunk, editable inline during logging, not just from the Piece Map), Progress
 tab (rolling-window consistency, consistency heatmap, actual-vs-planned,
 projected finish, tempo trend, effectiveness calibration — plus, as of Pass
-20, confidence-by-difficulty and recurring-material payoff, folded in when
-the separate Analytics tab was removed; see [Decisions.md](Decisions.md#ux)),
-multi-piece support, rescheduling (**since Pass 21** also a multi-piece
-"Reschedule all" from Master Agenda, plus "Pick a random piece to practice"
-and a maintenance-due random-start panel — see
-[Decisions.md](Decisions.md#scheduling)), section run-throughs, reference
+20, confidence-by-difficulty, folded in when the separate Analytics tab was
+removed; see [Decisions.md](Decisions.md#ux). The other folded-in panel,
+recurring-material payoff, was removed again in Pass 32b — pure display
+removal, the underlying scheduling-effort discount is untouched), multi-piece
+support, rescheduling (**since Pass 21** also a multi-piece "Reschedule all"
+from Master Agenda, plus "Pick a random piece to practice" and a
+maintenance-due random-start panel — see
+[Decisions.md](Decisions.md#scheduling); a piece whose remaining work
+doesn't fit the days left now offers a concrete way out inline — extend the
+target date, or extend the plan directly in "minutes per day" mode — rather
+than just a warning, see [Decisions.md](Decisions.md#scheduling)), section
+run-throughs, reference
 recordings and (**since Pass 24**) reference documents (sheet music PDFs,
 fingerings — same shape and pattern as recordings; see
 [Data-Model.md](Data-Model.md#the-piece-object)), multi-movement works
@@ -75,6 +81,22 @@ nudge (a tile marker plus a modal suggestion, +15–30 BPM) when a chunk's
 recent sessions show a real upward BPM trend — no new persisted state,
 suggestion overlay only, doesn't touch scoring or the ladder. See
 [Algorithms.md](Algorithms.md#tempo-climbing-nudge-pass-30).
+
+**Since Pass 31**, the per-chunk dynamic method-suggestion tip
+(`suggestMethods()`) is gone, replaced with static instructional copy in
+`ChecklistItem` — see
+[Product-Principles.md](Product-Principles.md#recommend-the-highest-impact-next-action).
+**Since Pass 38**, the Overview "Start/Continue revival" button is
+promoted to a `primary-btn`, and revival-mode copy across Overview,
+Revival, and Master Agenda was reworked to read less clinically — see
+[Decisions.md](Decisions.md#revival) for what that dropped (the revival
+tab no longer surfaces why a revival was started or when the piece was
+last played, anywhere).
+
+**Since Pass 32a**, the sidebar piece switcher is user-reorderable
+(persisted `piece.sortOrder`, up/down controls per row, whole-work blocks
+move together) — see [Decisions.md](Decisions.md#ux) and
+[Data-Model.md](Data-Model.md#the-piece-object).
 
 ## Immediate next action
 

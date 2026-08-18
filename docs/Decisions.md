@@ -250,12 +250,18 @@ confirmation.**
   applied to state, and a failure is reported via `window.alert` (which
   the save effect can't overwrite) naming the piece that failed. Verified
   by stubbing `localStorage` to reject one non-active piece mid-bulk-save.
-- **Consequence for later work:** the app only ever auto-persists the
-  active piece. Any future feature that writes to more than one piece at a
-  time (bulk archive, bulk status change, repertoire rotation) needs to
-  persist the others by hand the same way, or it will silently lose data
-  on reload. Worth solving once at the save-effect level if multi-piece
-  writes become common, rather than re-solving it per feature.
+- **Consequence noted here at the time, since resolved (see below):** at
+  the time of this pass, the app only ever auto-persisted the active
+  piece, so this fix had to save non-active pieces by hand — any future
+  multi-piece-writing feature would have needed to do the same. **That's
+  no longer true.** A Pass 29 follow-up generalized the save effect itself
+  to persist every entry in `pieces` on any change, not just the active
+  one, closing this gap at the root rather than leaving each feature to
+  work around it locally — see the [UX](#ux) section below for that fix.
+  Pass 32a's sidebar-reorder feature (`moveGroup`, `App.jsx`) writes to
+  multiple non-active pieces and relies on that generalized effect
+  directly, with no hand-written `savePieceToStorage` calls of its own —
+  confirmed working via an actual reload, not just this note.
 
 **Decision (Pass 21): "Pick a random piece to practice" (Master Agenda)
 picks only from pieces with actual work today.**
@@ -279,6 +285,62 @@ single-piece props, which `RevivalTab` still passes unchanged. Sections
 stay in the pool only in the single-piece (revival) form — a section that
 isn't due isn't part of a due-review session, so including it there would
 misrepresent what's actually due.
+
+**Decision: the single-piece reschedule confirmation, when the remaining
+work doesn't fit the days left, offers a concrete way out instead of just a
+warning — different concrete actions depending on `scheduleMode`.**
+
+- **`scheduleMode: "days"`:** two buttons — change the target date to a
+  suggested one, or reschedule into the existing (tighter) window. The
+  suggested date is computed from the same `requiredDays` estimate
+  `estimateRescheduleFit` already returns (`newDaysToLearn = currentDay -
+  1 + requiredDays`, then that many days out from `piece.startDate`) — not
+  a second, independently-tuned calculation. "Reschedule into the existing
+  window" is the pre-existing single-button behavior, unchanged.
+- **`scheduleMode: "minutes"`:** a single button, not a choice. There is no
+  target date to offer changing — one was never set in this mode
+  (`minutesPerDay` is the fixed input, `daysToLearn` the derived output),
+  and there's no "protect the tight deadline" alternative worth offering
+  either, since minutes-mode has no calendar deadline to protect in the
+  first place. The only sensible action is to extend `daysToLearn` to fit,
+  at the same `minutesPerDay` — decided directly by the user (not inferred)
+  after the first version of this feature surfaced a real bug (below).
+- **The day/days pluralization in this dialog was also fixed** — plural
+  except for exactly 1 ("1 day remains" / "N days remain"), no parenthesized
+  "day(s)".
+- **A real bug, found on critical review of the first version (which only
+  built the "days" mode path, extended verbatim to "minutes" mode by
+  writing `daysToLearn` directly): the extension silently reverted on the
+  next reload for a `scheduleMode: "minutes"` piece.** `daysToLearn` in
+  that mode is unconditionally recomputed from total effort and pace by
+  `reconcileMinutesPerDaySchedule` (`lib/scheduling.js`) on every load,
+  with no notion of days already elapsed without practice — it doesn't
+  know a reschedule just extended the plan, so it silently overwrote the
+  extension back down. Verified concretely (not just reasoned about):
+  seeded a behind-schedule minutes-mode piece, extended it, confirmed
+  `daysToLearn` was correct immediately, reloaded, watched it revert. The
+  banner gave no sign anything was wrong either way — "behind schedule"
+  correctly waits for a day to actually lapse before flagging misses, so
+  the reverted extension wouldn't have shown a symptom until days later.
+- **The fix:** `reconcileMinutesPerDaySchedule` now floors its recomputed
+  value at the piece's existing `daysToLearn` *while a `rescheduleMarker`
+  is in effect* — never shrinks a deliberate extension back down, but
+  changes nothing when there's no marker (every pre-existing minutes-mode
+  piece) or when the marker is present but `daysToLearn` was never actually
+  extended (the ordinary "reschedule anyway" path, which never touches
+  `daysToLearn` at all — the floor is a true no-op there). The floor clears
+  itself the moment the piece is next saved from Settings, since that
+  already clears `rescheduleMarker` — so an intentional pace/measure edit
+  still recomputes from scratch as it always did. Verified with 5 new
+  `lib/scheduling.js` tests (CLAUDE.md: lib-level regression coverage,
+  the component layer has none), one of which was confirmed to actually
+  fail by reverting the floor and watching it go red.
+- **Consequence for later work:** `piece.targetDate` is a `scheduleMode:
+  "days"`-only *input* to the scheduler, never itself read by
+  `computeTimeline` — `daysToLearn` is the only field that actually drives
+  plan length, in both modes. A feature that writes `targetDate` expecting
+  it to change the schedule on its own, without also touching
+  `daysToLearn`, will silently do nothing.
 
 ## Spaced repetition & maintenance
 
@@ -1844,7 +1906,8 @@ above). Progress's full panel order is now:
 5. Tempo trend
 6. Outcome breakdown
 7. **Confidence by difficulty** ← folded in
-8. **Recurring material payoff** ← folded in
+8. ~~Recurring material payoff~~ ← folded in, **removed again in Pass 32b**
+   (see below) — item 9 now follows item 7 directly
 9. Recent practice history
 
 - **Why here:** "Confidence by difficulty" renders the same horizontal
@@ -1867,6 +1930,30 @@ above). Progress's full panel order is now:
   out of `NAV_BASE` (`src/App.jsx`). The `.analytics-*` CSS classes stay —
   they were always shared with Progress's outcome bars and are not
   Analytics-specific despite the name.
+
+**Decision (Pass 32b, supersedes part of Pass 20 above): the "Recurring
+material payoff" panel is removed from Progress outright, not just
+relocated again.**
+
+- **What went:** the panel itself, and the four variables that only fed it
+  (`recurringChunks`, `fullEffort`, `actualEffort`, `minutesSaved` in
+  `ProgressTab.jsx`), plus the now-unused `EFFORT_TO_MIN` import that only
+  those variables consumed.
+- **What stayed:** recurring material's actual effect on scheduling —
+  the reduced effort cost baked into `lib/chunking.js` — is completely
+  untouched. This was a display-only removal; recurring chunks still cost
+  less scheduling effort, the app just no longer shows a sentence saying
+  so on Progress. "Confidence by difficulty" (the other Pass 20 fold-in)
+  stays exactly where Pass 20 put it, now followed directly by "Recent
+  practice history."
+- **Why not addressed here:** no rationale was recorded for *why* the
+  panel was removed (the pass instructions specified the removal directly,
+  without discussion) — if that reasoning matters later, it isn't captured
+  in this doc.
+- **Consequence:** the numbered panel-order list above is stale as written
+  for item 8 — left in place with a strikethrough rather than renumbered,
+  since renumbering would make a past decision read as if it always
+  matched today's page, which it didn't.
 
 **Decision (Pass 20): an unresolvable id in "Recent practice history" is
 handled by *category*, not by a blanket null check — and section
@@ -2022,6 +2109,51 @@ rather than a new field — and the field's visible label changes from
   can carry over, showing stale unsaved text. Reps/BPM/timer inputs
   already had this; the note editor is one more piece of state riding the
   same pre-existing pattern, not a new one.
+
+**Decision (Pass 32a): the sidebar piece switcher sorts by a new persisted
+`piece.sortOrder`, not `createdAt`, and is user-reorderable.**
+
+- **Reorder UI moves whole switcher rows, not individual pieces within a
+  work.** A row is either a standalone piece or an entire multi-movement
+  work; up/down controls swap two adjacent rows and re-rank every piece to
+  a fresh `0..n-1` sequence. Movement order *within* a work is untouched —
+  still `createdAt`-driven via `groupPiecesByWork`/`partsOfWork`
+  (`lib/works.js`) — confirmed before building anything special-cased for
+  it that a work's movements already stay visually contiguous "for free":
+  `groupPiecesByWork` groups on the position of a work's first-encountered
+  movement in the sorted list, regardless of that movement's own
+  `sortOrder`, so no work-specific reorder logic was needed at all.
+- **Migration defaults `sortOrder` to the piece's own `createdAt`** rather
+  than a freshly-computed cross-piece rank — since every already-loaded
+  piece gets the same treatment, sorting by `sortOrder` reproduces exactly
+  the `createdAt` order those pieces already had, so nothing reshuffles on
+  first load after this shipped.
+- **Import gets its own explicit order choice, not the usual
+  most-recently-updated rule.** Every other scalar field on a matched
+  piece resolves import conflicts by comparing `updatedAt` (see
+  `mergeImportedPiece` above) — right for practice data, wrong for display
+  arrangement. An unstale re-import (e.g. syncing a backup from a second
+  device right after manually reordering here) must never silently
+  reshuffle the switcher just because its timestamp happens to be newer.
+  `sortOrder` was pulled out of that generic recency rule into its own
+  per-import "keep what's here" / "use the imported order" pick in
+  `ImportPiecesModal`, applied uniformly to every matched piece in that
+  import (a single choice, not per-piece — order is a whole-list
+  arrangement, no meaningful per-row "divergence" the way ladder state
+  has one). Defaults to "existing" so an import never moves anything
+  unless asked.
+- **Found and fixed on critical review, not during the original build:**
+  the reorder handler's `updatePiece` calls originally built the updated
+  piece from a variable captured at render time instead of from the
+  `current` value React hands the updater function — every other call
+  site in `App.jsx` uses the live value. Not reachable as a live bug given
+  this app's synchronous, single-tab architecture, but inconsistent with
+  the established pattern and a landmine if that ever changes; fixed to
+  match convention.
+- **Deliberately deferred, flagged rather than folded in:** cross-work
+  reordering semantics beyond what's obviously already free (this pass
+  confirmed contiguity is free; it did not investigate whether more
+  elaborate cross-work ordering rules are needed).
 
 ## Data model
 
@@ -2532,6 +2664,27 @@ definition, `isInRevival(piece)` in `lib/revival.js`, standardized on
   `computeDueReviews`"). It was flagged rather than folded into that pass,
   and done separately once confirmed — the pass boundary held.
 
+**Decision (Pass 38): the Revival tab's title-card subheading drops the
+purpose/last-played recap in favor of a plain "Returning '{piece}' to its
+former glory," as part of a broader pass making revival-mode copy read
+less clinical (user-directed — flagged as "too jargon-y/clinical" after a
+copy audit; see also Pass 24's rewrites to the reassessment and
+"needs another look" panel hints, same motivation).**
+
+- **Consequence, not explicitly decided:** `revival.purpose` (why this
+  revival was started — performance/lesson/enjoyment/checking) and
+  `piece.lastPlayedDate` are still collected at revival entry
+  (`RevivalEntryModal`) but are no longer displayed anywhere during an
+  active revival — the Revival tab header showed them before this pass;
+  `MasterAgendaTab`'s revival card also dropped its purpose blurb in the
+  same pass. `lastPlayedDate` is still shown on Piece Overview
+  independent of revival state (see
+  [Data-Model.md](Data-Model.md#the-piece-object)), so that field isn't
+  orphaned; `revival.purpose` now has no display surface at all. Whether
+  that's fine (the purpose mattered only at entry, to shape tone/tempo) or
+  a real information loss (a returning user forgets why they started this
+  revival) wasn't explicitly weighed — flagged here rather than decided.
+
 ## Lifecycle
 
 **Decision: pause/archive (`piece.status`) is a manual, user-set toggle with
@@ -2579,6 +2732,17 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **Should Revival's "performance tempo override" field move into Settings
+  (reusing the piece's existing target tempo) instead of living at the top
+  of the Revival tab, and should "tempo ladder starting point" move to
+  revival setup time (Wizard/`RevivalEntryModal`) instead of only being
+  editable from Revival settings after the fact?** Raised by the user
+  during Pass 24's copy audit, explicitly deferred as out of scope for that
+  pass (it touches `SettingsTab.jsx` and the wizard's revival-adjacent
+  flow, not just Revival-tab copy/layout — see
+  [CLAUDE.md](../CLAUDE.md) Pass 38 note and
+  [Algorithms.md](Algorithms.md#revival) for how both fields are currently
+  read). Not started; a candidate for a future pass, not decided against.
 - **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
   `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
   resolution, so two rows added in the same millisecond would share an id.**

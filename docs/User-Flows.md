@@ -118,11 +118,13 @@ see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are
   confidence-by-difficulty, recurring-material time savings, and recent
   practice history.
 
-**There was a third tab, Analytics — it is gone as of Pass 20.** Its two
-panels (confidence-by-difficulty, recurring-material payoff) now sit near
-the bottom of Progress, after the outcome breakdown and before the practice
-log; the metrics were relocated unchanged, not redesigned. See
-[Decisions.md](Decisions.md#ux) for the placement reasoning.
+**There was a third tab, Analytics — it is gone as of Pass 20.** Its
+confidence-by-difficulty panel sits near the bottom of Progress, after the
+outcome breakdown and before the practice log; the metric was relocated
+unchanged, not redesigned. See [Decisions.md](Decisions.md#ux) for the
+placement reasoning. (The other Pass 20 fold-in, recurring-material
+payoff, was removed outright in Pass 32b — see
+[Decisions.md](Decisions.md#ux).)
 
 ## 4. Falling behind and rescheduling
 
@@ -133,10 +135,15 @@ log; the metrics were relocated unchanged, not redesigned. See
 2. `ScheduleBanner` surfaces the count and a "Reschedule remaining days"
    action, shown on both Overview and Today.
 3. `handleReschedule` estimates whether the remaining material can
-   realistically fit in the remaining days at the current pace. If it can't,
-   the confirmation dialog escalates from a mild confirm to an explicit
-   warning naming the shortfall, and suggests extending the timeline in
-   Settings instead.
+   realistically fit in the remaining days at the current pace. If it
+   can't, the confirmation dialog names the shortfall and offers a way past
+   it right there rather than just a warning: for a fixed-target-date
+   piece, change the target date to a suggested one or reschedule into the
+   existing window (two buttons); for a minutes-per-day piece, there's no
+   target date to offer changing, so it's a single action — extend the
+   plan to fit at the same pace. See
+   [Decisions.md](Decisions.md#scheduling) for why these differ by
+   `scheduleMode`.
 4. Confirming sets `piece.rescheduleMarker`; `getEffectiveTimeline` then
    keeps every already-passed day exactly as it was and repacks only the
    untouched chunks into the days that remain.
@@ -189,6 +196,14 @@ Movements of the same work are grouped under the work title in that list
 strip on the Overview of any movement — same `switchToPiece` call, just a
 closer-to-hand entry point while working within one work.
 
+**Since Pass 32a**, that list is user-reorderable: up/down controls on each
+row move a standalone piece or an entire work as one block (never an
+individual movement within a work — those stay ordered by creation date,
+already grouped together regardless), writing a persisted `piece.sortOrder`
+that the switcher — and every other piece-listing surface, including the
+Export picker — sorts by instead of creation date. See
+[Decisions.md](Decisions.md#ux).
+
 ## 7. Backup and restore
 
 Settings exposes **Export all** (`handleExportAll`, downloads every piece as
@@ -197,3 +212,9 @@ a single JSON file) and **Import a backup** (`handleImportClick` →
 active piece). This is the only backup mechanism — there is no cloud sync
 (see [Roadmap.md](Roadmap.md)), so this JSON export is the only way data
 survives clearing browser storage or moving to a new browser/device.
+
+**Since Pass 32a**, importing a backup that matches existing pieces also
+offers a "keep what's here" / "use the imported order" choice for switcher
+order — one pick for the whole import, not per piece, shown only when at
+least one candidate actually matches something already here. See
+[Decisions.md](Decisions.md#ux).

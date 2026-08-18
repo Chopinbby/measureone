@@ -13,6 +13,7 @@ import {
   shouldShowScheduleBanner,
   planRescheduleForPieces,
   estimateRescheduleFit,
+  reconcileMinutesPerDaySchedule,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate } from "../src/lib/utils.js";
 
@@ -681,5 +682,69 @@ describe("estimateRescheduleFit — the 'will this actually fit' warning", () =>
 
     assert.equal(byId.roomy.fit.fits, true);
     assert.equal(byId.crammed.fit.fits, false);
+  });
+});
+
+describe("reconcileMinutesPerDaySchedule — rescheduleMarker floor", () => {
+  // A "minutes" mode piece's daysToLearn is normally a pure function of
+  // total effort and pace, recomputed from scratch on every load — no
+  // memory of days that already elapsed without practice. App.jsx's
+  // reschedule "doesn't fit" branch deliberately extends daysToLearn past
+  // that recomputed value to make up for exactly that lost time, at the
+  // same minutesPerDay. Without a floor, this function would silently
+  // erase that extension the very next time the piece loads — the bug this
+  // guards against (found in manual browser testing: daysToLearn extended
+  // to 181 in-session, reverted to 135 on reload).
+  test("no rescheduleMarker: recomputes normally, exactly like before this floor existed", () => {
+    const piece = basePiece({
+      scheduleMode: "minutes", minutesPerDay: 30, daysToLearn: 999, rescheduleMarker: null,
+    });
+    const reconciled = reconcileMinutesPerDaySchedule(piece);
+    const expected = computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 30, 7);
+    assert.equal(reconciled.daysToLearn, expected);
+  });
+
+  test("a rescheduleMarker present: an extended daysToLearn is never shrunk back down", () => {
+    const piece = basePiece({ scheduleMode: "minutes", minutesPerDay: 30 });
+    const needed = computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 30, 7);
+    const extended = { ...piece, daysToLearn: needed + 50, rescheduleMarker: { asOfDay: 5, remainingChunkOrder: [] } };
+    const reconciled = reconcileMinutesPerDaySchedule(extended);
+    assert.equal(reconciled.daysToLearn, needed + 50);
+  });
+
+  test("a rescheduleMarker present but daysToLearn was never actually extended: still just recomputes, no phantom floor", () => {
+    // Mirrors the ordinary (non-extending) "reschedule anyway" path, which
+    // sets rescheduleMarker without ever touching daysToLearn — the floor
+    // must be a true no-op here, not an accidental one-way ratchet.
+    const piece = basePiece({ scheduleMode: "minutes", minutesPerDay: 30 });
+    const needed = computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 30, 7);
+    const rescheduledOnly = { ...piece, daysToLearn: needed, rescheduleMarker: { asOfDay: 5, remainingChunkOrder: [] } };
+    const reconciled = reconcileMinutesPerDaySchedule(rescheduledOnly);
+    assert.equal(reconciled.daysToLearn, needed);
+  });
+
+  test("pace genuinely slows down further after an extension: still grows past the floor, never stuck below what's actually needed", () => {
+    // A large piece with small chunks so pace actually moves the day count
+    // across a wide range (a piece whose chunks are each already bigger
+    // than a day's budget saturates to "1 chunk = 1 day" regardless of
+    // pace, which would make `needed` pace-independent and defeat the
+    // point of this test).
+    const piece = basePiece({ totalMeasures: 400, measureDifficulty: Array(400).fill(1), customChunkSize: 2, scheduleMode: "minutes", minutesPerDay: 300 });
+    const needed = computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 300, 7);
+    const extendedThenSlower = {
+      ...piece, minutesPerDay: 30, daysToLearn: needed + 10, rescheduleMarker: { asOfDay: 5, remainingChunkOrder: [] },
+    };
+    const reconciled = reconcileMinutesPerDaySchedule(extendedThenSlower);
+    const neededAtSlowerPace = computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 30, 7);
+    assert.ok(neededAtSlowerPace > needed + 10, "test setup sanity check: the slower pace must genuinely need more days than the floor");
+    assert.equal(reconciled.daysToLearn, neededAtSlowerPace);
+  });
+
+  test("clearing rescheduleMarker (a Settings save, per App.jsx's handleSavePiece) drops the floor immediately", () => {
+    const piece = basePiece({ scheduleMode: "minutes", minutesPerDay: 30 });
+    const needed = computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 30, 7);
+    const extendedNoLongerMarked = { ...piece, daysToLearn: needed + 50, rescheduleMarker: null };
+    const reconciled = reconcileMinutesPerDaySchedule(extendedNoLongerMarked);
+    assert.equal(reconciled.daysToLearn, needed);
   });
 });

@@ -208,6 +208,29 @@ read in the code. If it doesn't, fix it — small, in-passing corrections are
 exactly how this documentation set is meant to stay trustworthy rather than
 becoming another stale artifact like the one that prompted the last audit.
 
+## A dirty working tree may not be entirely yours to commit
+
+This project is sometimes worked on from more than one session at once (the
+user may have another chat open against the same clone). Before running
+`git add`/`git commit`, check whether `git status`/`git diff` shows changes
+you didn't make — compare against what the working tree looked like when
+your session started, not just against what you personally just edited.
+Don't assume unfamiliar diffs are stray artifacts to clean up or, worse,
+silently fold them into your own commit.
+
+Worked example (Pass 24/38): a two-line copy fix was ready to commit, but
+`git diff` showed six modified files, four of which were untouched by this
+session — another session's in-progress work sitting in the same working
+tree, including further edits to the very file being committed. Committing
+everything would have shipped unreviewed code under this session's name;
+committing nothing would have lost the approved fix in the noise. The fix:
+build a patch containing only the hunks actually authored this session and
+apply it with `git apply --cached` (stages just those hunks, working tree
+untouched), then commit — leaving the other session's changes exactly as
+they were, uncommitted, for it to handle. See
+[CLAUDE.md](../CLAUDE.md)'s Pass 38 note for what that other session's
+changes turned out to be.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

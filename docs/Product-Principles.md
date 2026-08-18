@@ -74,11 +74,18 @@ See [Algorithms.md](Algorithms.md) for both mechanisms.
 ## Recommend the highest-impact next action
 
 Rather than asking the learner to figure out what to practice, the app
-ranks: `FocusPanel` sorts everything touched so far by confidence;
-`suggestMethods()` recommends a practice technique matched to the chunk's
-specific situation (hard and unconfident vs. recurring vs. a seam
-transition); the reschedule dialog tells the learner *before* it's too late
-whether their remaining pace can actually finish the plan.
+ranks: `FocusPanel` sorts everything touched so far by confidence; the
+reschedule dialog tells the learner *before* it's too late whether their
+remaining pace can actually finish the plan.
+
+**Since Pass 31, this no longer includes a per-chunk practice-technique
+recommendation.** `suggestMethods()` — which matched a technique to the
+chunk's situation (hard and unconfident vs. recurring vs. a seam transition)
+and rendered it as a `ChecklistItem` tip line — was removed in favor of
+static instructional copy, on the judgment that a fixed per-role
+requirement line was clearer than a rotating technique suggestion. If a
+"recommend a specific technique" feature is proposed again, it's a new
+build, not a revival of `suggestMethods()`, which no longer exists.
 
 ## Maximize long-term repertoire, not just today's session
 

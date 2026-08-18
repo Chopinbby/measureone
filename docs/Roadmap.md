@@ -76,6 +76,17 @@ recent sessions show a real upward BPM trend — no new persisted state,
 suggestion overlay only, doesn't touch scoring or the ladder. See
 [Algorithms.md](Algorithms.md#tempo-climbing-nudge-pass-30).
 
+**Since Pass 31**, the per-chunk dynamic method-suggestion tip
+(`suggestMethods()`) is gone, replaced with static instructional copy in
+`ChecklistItem` — see
+[Product-Principles.md](Product-Principles.md#recommend-the-highest-impact-next-action).
+**Since Pass 38**, the Overview "Start/Continue revival" button is
+promoted to a `primary-btn`, and revival-mode copy across Overview,
+Revival, and Master Agenda was reworked to read less clinically — see
+[Decisions.md](Decisions.md#revival) for what that dropped (the revival
+tab no longer surfaces why a revival was started or when the piece was
+last played, anywhere).
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold

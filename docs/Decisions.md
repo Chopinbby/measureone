@@ -2532,6 +2532,27 @@ definition, `isInRevival(piece)` in `lib/revival.js`, standardized on
   `computeDueReviews`"). It was flagged rather than folded into that pass,
   and done separately once confirmed — the pass boundary held.
 
+**Decision (Pass 38): the Revival tab's title-card subheading drops the
+purpose/last-played recap in favor of a plain "Returning '{piece}' to its
+former glory," as part of a broader pass making revival-mode copy read
+less clinical (user-directed — flagged as "too jargon-y/clinical" after a
+copy audit; see also Pass 24's rewrites to the reassessment and
+"needs another look" panel hints, same motivation).**
+
+- **Consequence, not explicitly decided:** `revival.purpose` (why this
+  revival was started — performance/lesson/enjoyment/checking) and
+  `piece.lastPlayedDate` are still collected at revival entry
+  (`RevivalEntryModal`) but are no longer displayed anywhere during an
+  active revival — the Revival tab header showed them before this pass;
+  `MasterAgendaTab`'s revival card also dropped its purpose blurb in the
+  same pass. `lastPlayedDate` is still shown on Piece Overview
+  independent of revival state (see
+  [Data-Model.md](Data-Model.md#the-piece-object)), so that field isn't
+  orphaned; `revival.purpose` now has no display surface at all. Whether
+  that's fine (the purpose mattered only at entry, to shape tone/tempo) or
+  a real information loss (a returning user forgets why they started this
+  revival) wasn't explicitly weighed — flagged here rather than decided.
+
 ## Lifecycle
 
 **Decision: pause/archive (`piece.status`) is a manual, user-set toggle with
@@ -2579,6 +2600,17 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **Should Revival's "performance tempo override" field move into Settings
+  (reusing the piece's existing target tempo) instead of living at the top
+  of the Revival tab, and should "tempo ladder starting point" move to
+  revival setup time (Wizard/`RevivalEntryModal`) instead of only being
+  editable from Revival settings after the fact?** Raised by the user
+  during Pass 24's copy audit, explicitly deferred as out of scope for that
+  pass (it touches `SettingsTab.jsx` and the wizard's revival-adjacent
+  flow, not just Revival-tab copy/layout — see
+  [CLAUDE.md](../CLAUDE.md) Pass 38 note and
+  [Algorithms.md](Algorithms.md#revival) for how both fields are currently
+  read). Not started; a candidate for a future pass, not decided against.
 - **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
   `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
   resolution, so two rows added in the same millisecond would share an id.**

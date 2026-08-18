@@ -210,3 +210,20 @@ that same function rather than adding a new `setActiveTab`/
 surfaces a live-derived "tempo climbing" nudge (`hasClimbingTempo`,
 `lib/confidence.js`) — no new persisted state, same pattern as the
 existing flag/needsRelearning tile markers.
+
+**Since Pass 31**, `ChecklistItem` no longer shows a per-chunk
+method-suggestion tip line — `suggestMethods()` was removed in favor of
+static instructional copy (a fixed requirement line, "Spaced Repetition"
+in place of "Ladder," and a "Needs more work" checkbox that states what a
+manual fail actually does). Don't reintroduce a dynamic technique
+suggestion by resurrecting that function; it's gone. **Since Pass 38**,
+Overview's "Start/Continue revival" button is a `primary-btn` (was
+`ghost-btn`), and Revival-mode copy was reworked to read less clinically:
+the Revival tab's title-card subheading dropped the purpose/last-played
+recap in favor of a plain "Returning '{piece}' to its former glory," the
+Overview stat cards and first-week list relabel during an active revival
+("revived" instead of "learned," "Revive"/"reconsolidate" instead of
+"Learn new"/"review"), and Master Agenda's revival cards no longer show
+the purpose blurb. The revival-mode UI still does not display why this
+revival was started (`revival.purpose`) or when the piece was last played
+anywhere — flagged as a possible follow-up, not treated as settled.

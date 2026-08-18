@@ -210,7 +210,7 @@ export function validateAndMigratePiece(piece) {
     // freshly touched is the safe direction, since the alternative (0) would
     // make it look infinitely stale and let any import silently overwrite it.
     updatedAt: piece.updatedAt || Date.now(),
-    // Persisted piece-switcher/list display order (Pass 32) — sorted on
+    // Persisted piece-switcher/list display order (Pass 32a) — sorted on
     // instead of createdAt wherever pieces are listed. A piece saved before
     // this field existed defaults to its own createdAt value rather than a
     // freshly-computed cross-piece rank: since every other already-loaded
@@ -701,7 +701,7 @@ const MERGE_FIELDS_HANDLED_SEPARATELY = [
 // test) gets exactly the behavior this function always had.
 //
 // orderChoice ("existing" or "imported", default "existing"): which side's
-// sortOrder (Pass 32) wins for a matched piece. A single per-import choice,
+// sortOrder (Pass 32a) wins for a matched piece. A single per-import choice,
 // not per-piece like ladderChoice — order is a whole-list arrangement, not
 // independent per-chunk data, so there's no meaningful "divergence" to
 // detect per row the way diffImportedPiece does for ladder state; the user

@@ -182,7 +182,7 @@ export default function App() {
   }, [loaded]);
 
   // targetId defaults to the active piece (the common case, and every call
-  // site before Pass 32) but can be passed explicitly — sidebar reordering
+  // site before Pass 32a) but can be passed explicitly — sidebar reordering
   // needs to write sortOrder onto pieces that aren't necessarily the one
   // currently open.
   const updatePiece = (updater, targetId = activePieceId) => {
@@ -1214,7 +1214,7 @@ export default function App() {
   // re-ranking every piece to its new flattened position. Movement order
   // *within* a work is untouched — that's still governed by createdAt via
   // groupPiecesByWork/partsOfWork (lib/works.js), deliberately left alone
-  // per Pass 32's build order (works already stay contiguous in the
+  // per Pass 32a's build order (works already stay contiguous in the
   // switcher for free, without any special-case logic here).
   const moveGroup = (groupIndex, direction) => {
     const targetIndex = groupIndex + direction;

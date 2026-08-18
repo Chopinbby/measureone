@@ -757,7 +757,7 @@ describe("mergeImportedPiece — Pass 13 ladderChoice wiring", () => {
   });
 });
 
-describe("mergeImportedPiece — Pass 32 follow-up: orderChoice wiring", () => {
+describe("mergeImportedPiece — Pass 32a follow-up: orderChoice wiring", () => {
   // existing.updatedAt < imported.updatedAt on purpose: the import is NOT
   // stale, so if sortOrder were still governed by the generic
   // preferByRecency loop (the pre-fix behavior), the imported value would
@@ -790,7 +790,7 @@ describe("mergeImportedPiece — Pass 32 follow-up: orderChoice wiring", () => {
     assert.equal(merged.sortOrder, 2);
   });
 
-  test("orderChoice 'imported' falls back to existing when the import predates Pass 32 and has no sortOrder at all", () => {
+  test("orderChoice 'imported' falls back to existing when the import predates Pass 32a and has no sortOrder at all", () => {
     const { sortOrder, ...importedWithoutOrder } = imported;
     const merged = mergeImportedPiece(existing, importedWithoutOrder, "existing", "imported");
     assert.equal(merged.sortOrder, 5);

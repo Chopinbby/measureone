@@ -108,7 +108,7 @@ piece = {
                          // switcher, work grouping) — NOT the scheduling anchor;
                          // see startDate above for that.
   sortOrder,             // number — persisted display order for the piece switcher
-                         // and any other piece-listing surface (Pass 32); these sort
+                         // and any other piece-listing surface (Pass 32a); these sort
                          // by this instead of createdAt. User-reorderable via
                          // up/down controls on each switcher row (App.jsx's
                          // moveGroup), which re-rank every piece to a fresh 0..n-1
@@ -536,7 +536,7 @@ Helpers live in `src/lib/works.js`: `ensureWorkId`, `partsOfWork` (siblings in
 creation order), `groupPiecesByWork` (ordered groups for the switcher).
 
 `groupPiecesByWork` groups a work's movements together the moment it meets
-the first one in the (now `sortOrder`-sorted, Pass 32) piece list — a group's
+the first one in the (now `sortOrder`-sorted, Pass 32a) piece list — a group's
 position follows wherever its earliest-appearing movement sits, and every
 movement joins that same group regardless of its own `sortOrder`. So a work's
 movements stay visually contiguous in the switcher "for free," without

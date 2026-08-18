@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X, ChevronLeft, RefreshCw } from "lucide-react";
 import { NumberInput } from "./NumberInput";
 import { REVIVAL_PURPOSE_OPTIONS } from "../lib/constants";
+import { clamp } from "../lib/utils";
 
 /* ------------------------------------------------------------------ */
 /*  Revival entry (collects context before the reassessment pass)     */
@@ -9,7 +10,7 @@ import { REVIVAL_PURPOSE_OPTIONS } from "../lib/constants";
 
 export function RevivalEntryModal({ piece, onCancel, onStart }) {
   const [purpose, setPurpose] = useState(null);
-  const [performanceTempo, setPerformanceTempo] = useState(piece.targetBPM || "");
+  const [tempoLadderStartFraction, setTempoLadderStartFraction] = useState(0.6);
   const [lastPlayedDate, setLastPlayedDate] = useState(piece.lastPlayedDate || new Date().toISOString().slice(0, 10));
 
   return (
@@ -36,13 +37,12 @@ export function RevivalEntryModal({ piece, onCancel, onStart }) {
             />
           </label>
           <label className="field">
-            <span>Performance tempo — optional, if different from your original target</span>
+            <span>Tempo ladder starting point (% of target)</span>
             <NumberInput
-              value={performanceTempo}
-              min={20}
-              max={400}
-              placeholder={piece.targetBPM ? String(piece.targetBPM) : "e.g. 96"}
-              onCommit={setPerformanceTempo}
+              value={Math.round(tempoLadderStartFraction * 100)}
+              min={10}
+              max={95}
+              onCommit={(n) => setTempoLadderStartFraction(clamp(n, 10, 95) / 100)}
             />
           </label>
           <div className="field">
@@ -66,7 +66,7 @@ export function RevivalEntryModal({ piece, onCancel, onStart }) {
             onClick={() =>
               onStart({
                 purpose,
-                performanceTempo: performanceTempo ? Number(performanceTempo) : null,
+                tempoLadderStartFraction,
                 lastPlayedDate,
               })
             }

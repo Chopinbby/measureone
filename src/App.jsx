@@ -1034,7 +1034,7 @@ export default function App() {
     else setRevivalModalOpen(true);
   };
 
-  const handleStartRevival = ({ purpose, performanceTempo, lastPlayedDate }) => {
+  const handleStartRevival = ({ purpose, tempoLadderStartFraction, lastPlayedDate }) => {
     updatePiece((p) => ({
       ...p,
       lastPlayedDate: lastPlayedDate || p.lastPlayedDate || null,
@@ -1042,8 +1042,7 @@ export default function App() {
         active: true,
         startedAt: Date.now(),
         purpose,
-        performanceTempo: performanceTempo || null,
-        tempoLadderStartFraction: 0.6,
+        tempoLadderStartFraction: tempoLadderStartFraction ?? 0.6,
         reassessmentComplete: false,
         plan: null,
       },
@@ -1145,7 +1144,6 @@ export default function App() {
         active: false,
         startedAt: null,
         purpose: null,
-        performanceTempo: null,
         tempoLadderStartFraction: 0.6,
         reassessmentComplete: false,
         plan: null,
@@ -1514,7 +1512,6 @@ export default function App() {
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
                 onGeneratePlan={handleGenerateRevivalPlan}
-                onSetPerformanceTempo={(n) => handleUpdateRevival({ performanceTempo: n || null })}
                 onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}

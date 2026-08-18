@@ -23,7 +23,6 @@ export function RevivalTab({
   onFinishReassessment,
   onReopenReassessment,
   onGeneratePlan,
-  onSetPerformanceTempo,
   onSetTempoLadderFraction,
   onLogSession,
   onUnlogSession,
@@ -62,27 +61,15 @@ export function RevivalTab({
 
       <div className="panel">
         <h3>Revival settings</h3>
-        <div className="field-row">
-          <label className="field">
-            <span>Performance tempo override — optional</span>
-            <NumberInput
-              value={revival.performanceTempo || ""}
-              min={20}
-              max={400}
-              placeholder={piece.targetBPM ? String(piece.targetBPM) : "—"}
-              onCommit={onSetPerformanceTempo}
-            />
-          </label>
-          <label className="field">
-            <span>Tempo ladder starting point (% of target)</span>
-            <NumberInput
-              value={Math.round((revival.tempoLadderStartFraction ?? 0.6) * 100)}
-              min={10}
-              max={95}
-              onCommit={(n) => onSetTempoLadderFraction(clamp(n, 10, 95) / 100)}
-            />
-          </label>
-        </div>
+        <label className="field">
+          <span>Tempo ladder starting point (% of target)</span>
+          <NumberInput
+            value={Math.round((revival.tempoLadderStartFraction ?? 0.6) * 100)}
+            min={10}
+            max={95}
+            onCommit={(n) => onSetTempoLadderFraction(clamp(n, 10, 95) / 100)}
+          />
+        </label>
       </div>
 
       {!revival.reassessmentComplete ? (

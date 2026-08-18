@@ -28,16 +28,15 @@ export function isInRevival(piece) {
   return !!(piece && piece.revival && piece.revival.active);
 }
 
-// During an active revival, a piece-wide performance tempo (collected at
-// revival entry) takes priority over whatever target was set while first
-// learning the piece — the point of revival is often to land at a real
-// performance tempo that differs from the original learning target, and that
-// intent should win even where a chunk already has its own explicit target.
+// Same target-resolution rule as the non-revival path (confidence.js's
+// getSuggestedStartingBPM): a chunk's own explicit target wins, falling
+// back to the piece-wide default. Revival used to let a piece-wide
+// `revival.performanceTempo`, collected at entry, override this — reverted
+// (Pass 35) because it silently beat an explicit per-chunk target with no
+// way to tell from the tempo ladder alone which source it came from. See
+// docs/Decisions.md#revival.
 export function getRevivalTargetBPM(piece, chunk) {
   const entry = piece.progress[chunk.id] || {};
-  if (isInRevival(piece) && piece.revival.performanceTempo) {
-    return piece.revival.performanceTempo;
-  }
   return entry.targetBPM || getDefaultTargetBPM(piece, chunk);
 }
 

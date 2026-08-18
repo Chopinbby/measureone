@@ -2538,15 +2538,45 @@ or parameterization of `computeTimeline`.**
   `piece.minutesPerDay`) and the same greedy day-packing pattern
   `ScheduleFields` already uses. See [Algorithms.md](Algorithms.md#revival).
 
-**Decision: during an active revival, `piece.revival.performanceTempo`
+**~~Decision: during an active revival, `piece.revival.performanceTempo`
 overrides even an explicit per-chunk `targetBPM`, not just the piece-wide
-default.**
+default.~~ — reverted, Pass 35.**
 
-- **Why:** A performance tempo collected at revival entry represents a
-  deliberate, current intent (e.g. "this needs to be 120 for the recital")
-  that should supersede tempos set while first learning the piece, even
-  where a chunk already has its own explicit target from that earlier
-  phase. See `getRevivalTargetBPM` in [Algorithms.md](Algorithms.md#revival).
+- **Original why:** A performance tempo collected at revival entry
+  represents a deliberate, current intent (e.g. "this needs to be 120 for
+  the recital") that should supersede tempos set while first learning the
+  piece, even where a chunk already has its own explicit target from that
+  earlier phase.
+- **Why reverted:** the override was silent and total — a chunk's own
+  explicit target vanished from the tempo ladder with no visible indication
+  of which source (`performanceTempo` vs. the chunk's own `targetBPM`) was
+  actually driving it, and there was no way to opt a single chunk out. On
+  reflection this created more confusion than the "deliberate intent" case
+  it was meant to serve. `getRevivalTargetBPM` (`lib/revival.js`) now
+  resolves exactly like the non-revival path: `entry.targetBPM ||
+  getDefaultTargetBPM(piece, chunk)`. See
+  [Algorithms.md](Algorithms.md#revival).
+- **What happened to the field:** `piece.revival.performanceTempo` is left
+  stored-but-unread on any piece saved before Pass 35, rather than actively
+  migrated away — non-destructive, and nothing reads it, so there's no
+  correctness reason to touch already-saved data. New pieces
+  (`defaultPiece()`, Wizard.jsx) and pieces getting a from-scratch
+  `revival` default (storage.js, for a piece with no `revival` object at
+  all) no longer include the field going forward. The UI that collected and
+  edited it — a "Performance tempo" input in both `RevivalEntryModal`
+  (entry) and `RevivalTab`'s "Revival settings" panel (mid-revival) — is
+  removed outright, not just disconnected, since keeping either would
+  imply the value still does something.
+- **`tempoLadderStartFraction` moved to revival entry:** previously
+  hardcoded to `0.6` at `handleStartRevival` (App.jsx) and only editable
+  from `RevivalTab`'s mid-revival settings panel. As of Pass 35 it's
+  collected in `RevivalEntryModal` at the same point `purpose` and
+  `lastPlayedDate` already were, and stays editable afterward from
+  `RevivalTab`'s "Revival settings" panel (now holding just this one
+  field). The Wizard's "reviving an old piece" toggle (Wizard.jsx step 0)
+  doesn't collect this itself — it only sets `startAsRevival`, which opens
+  `RevivalEntryModal` on completion (`App.jsx`'s `handleComplete`), so that
+  single modal is the actual entry point for both ways a revival can start.
 
 **Decision: allow starting a piece directly in revival mode from the Wizard,
 not just from an existing piece via the Piece Overview dashboard.**

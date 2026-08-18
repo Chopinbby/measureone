@@ -4,7 +4,7 @@
 // cases below are as important as the "happy path" ones.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeComboEscalations, findComboUnderlyingChunks, computeRevivalTriggers, isInRevival } from "../src/lib/revival.js";
+import { computeComboEscalations, findComboUnderlyingChunks, computeRevivalTriggers, isInRevival, getRevivalTargetBPM } from "../src/lib/revival.js";
 import { computeDueReviews } from "../src/lib/maintenance.js";
 import { addDaysISO, todayISODate } from "../src/lib/utils.js";
 
@@ -341,5 +341,57 @@ describe("isInRevival — one definition of 'in revival'", () => {
       1,
       "the same piece, not in revival, still surfaces its due review"
     );
+  });
+});
+
+// Pass 35: revival.performanceTempo no longer overrides the target — a
+// piece-wide "performance tempo" collected at revival entry used to beat
+// even an explicit per-chunk targetBPM (docs/Decisions.md#revival). That
+// override is gone; getRevivalTargetBPM must now behave exactly like the
+// non-revival path (confidence.js's getSuggestedStartingBPM): the chunk's
+// own targetBPM wins, falling back to getDefaultTargetBPM.
+describe("getRevivalTargetBPM", () => {
+  const chunk = { id: "c1", start: 1, end: 4 };
+
+  test("ignores a stale/leftover revival.performanceTempo even while active", () => {
+    const piece = {
+      revival: { active: true, performanceTempo: 200 },
+      progress: { c1: { targetBPM: 90 } },
+      targetBPM: 100,
+      bpmZones: [],
+    };
+    assert.equal(getRevivalTargetBPM(piece, chunk), 90, "chunk's own explicit target wins, not performanceTempo");
+  });
+
+  test("falls back to the piece-wide targetBPM when the chunk has no explicit target", () => {
+    const piece = {
+      revival: { active: true, performanceTempo: 200 },
+      progress: { c1: {} },
+      targetBPM: 100,
+      bpmZones: [],
+    };
+    assert.equal(getRevivalTargetBPM(piece, chunk), 100, "falls back to getDefaultTargetBPM, not performanceTempo");
+  });
+
+  test("a BPM zone covering the chunk still wins over the piece-wide default, same as non-revival", () => {
+    const piece = {
+      revival: { active: true, performanceTempo: 200 },
+      progress: { c1: {} },
+      targetBPM: 100,
+      bpmZones: [{ start: 1, end: 4, bpm: 72 }],
+    };
+    assert.equal(getRevivalTargetBPM(piece, chunk), 72);
+  });
+
+  test("returns null when nothing at all is set (no explicit target anywhere)", () => {
+    const piece = { revival: { active: true }, progress: { c1: {} }, targetBPM: null, bpmZones: [] };
+    assert.equal(getRevivalTargetBPM(piece, chunk), null);
+  });
+
+  test("identical result whether or not the piece is currently in revival", () => {
+    const base = { progress: { c1: {} }, targetBPM: 110, bpmZones: [] };
+    const inRevival = { ...base, revival: { active: true, performanceTempo: 200 } };
+    const notInRevival = { ...base, revival: { active: false } };
+    assert.equal(getRevivalTargetBPM(inRevival, chunk), getRevivalTargetBPM(notInRevival, chunk));
   });
 });

@@ -84,7 +84,18 @@ piece = {
                          // stand-in for it (see Decisions.md#scheduling).
   targetDate,            // string ("YYYY-MM-DD") | null — deadline the user picked
                          // in 'days' scheduleMode; daysToLearn is derived from
-                         // this (startDate through targetDate, inclusive)
+                         // this (startDate through targetDate, inclusive).
+                         // NOT itself read by the scheduler (computeTimeline
+                         // only ever reads daysToLearn) — it's a UI-facing
+                         // input that ScheduleFields.jsx's own effect turns
+                         // into daysToLearn, only in 'days' mode. A feature
+                         // that writes targetDate expecting the schedule to
+                         // change on its own, without also writing
+                         // daysToLearn, will silently do nothing — found the
+                         // hard way while building the reschedule "extend
+                         // the plan" feature (Decisions.md#scheduling). In
+                         // 'minutes' mode this field is carried along inert;
+                         // nothing reads or derives from it.
   practiceDaysPerWeek,   // number, 3-7 — how many of the 7 days in a week are
                          // practice days; computeTimeline bakes (7 - this many)
                          // rest days evenly into the generated plan. Missing on

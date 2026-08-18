@@ -139,6 +139,27 @@ purely in-memory check would have called this done and shipped a real,
 silent data-loss bug. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the fix.
 
+**A second, distinct way to hit the same underlying trap: the write can
+genuinely reach `localStorage` correctly and still get silently clobbered
+afterward, by separate logic that recomputes the same field on every
+load.** The Pass 29 case above was a write that never landed; this one is
+a write that landed, then got overwritten by something else entirely.
+Worked example (reschedule "extend the plan" feature): extending a
+`scheduleMode: "minutes"` piece's `daysToLearn` via the reschedule dialog
+worked immediately — checked `localStorage` right after the click and the
+extended value was genuinely there. It was only reloading the page that
+revealed `reconcileMinutesPerDaySchedule` (`lib/scheduling.js`, called on
+every load to keep `daysToLearn` honest against `minutesPerDay`) had
+silently recomputed it right back down, because that function had no way
+to know the extension was deliberate rather than stale. No error at any
+point, and the "behind schedule" banner gave no symptom either, since it
+correctly waits for a day to actually lapse before flagging anything — a
+purely in-memory-plus-immediate-`localStorage` check would have called
+this done. The general lesson: when a field is *derived* on load (not just
+saved), verifying the save isn't enough — verify what the load-time
+derivation does to it too, which usually means an actual reload, same as
+the first case. See [Decisions.md](Decisions.md#scheduling) for the fix.
+
 ## A guard added for one navigation path needs auditing everywhere that path exists
 
 When you add a confirmation/guard before a state transition (leaving a

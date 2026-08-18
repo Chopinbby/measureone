@@ -43,8 +43,8 @@ export function OverviewTab({
   return (
     <div className="tab-pane">
       <div className="overview-top-row">
-        <button className="ghost-btn" onClick={onStartRevival}>
-          <RefreshCw size={14} /> {revivalActive ? "Continue revival" : "Start revival"}
+        <button className="primary-btn" onClick={onStartRevival}>
+          <RefreshCw size={16} /> {revivalActive ? "Continue revival" : "Start revival"}
         </button>
         <button className="ghost-btn" onClick={onAddPiece}>
           <Plus size={14} /> Add new piece

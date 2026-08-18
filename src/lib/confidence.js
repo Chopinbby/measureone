@@ -440,16 +440,3 @@ export function isManualConfidence(chunk, progress) {
   const entry = progress[chunk.id] || {};
   return entry.manualConfidence !== undefined && entry.manualConfidence !== null;
 }
-
-export function suggestMethods(chunk, confidence) {
-  if (chunk.kind === "section-runthrough" || chunk.kind === "section-transition")
-    return ["Full run-through without stopping", "Note where it still catches, fix it separately after"];
-  if (chunk.kind === "transition") return ["Slow practice at the seam", "Backward chaining into it"];
-  if (chunk.kind === "combo") return ["Start cold at the top of the block", "Slow practice", "Tempo ladder"];
-  if (chunk.difficultyLabel === "hard" && confidence < 50)
-    return ["Backward chaining", "Hands-separate practice", "Slow practice"];
-  if (chunk.recurring) return ["Interleaving", "Retrieval practice"];
-  if (confidence >= 70) return ["Tempo ladder", "Full run-throughs"];
-  if (chunk.difficultyLabel === "hard") return ["Slow practice", "Deliberate repetitions"];
-  return ["Deliberate repetitions", "Spaced repetition"];
-}

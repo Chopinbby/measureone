@@ -5,7 +5,6 @@ import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
-import { REVIVAL_PURPOSE_OPTIONS } from "../../lib/constants";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
 
 // Which sub-view was last open. This component unmounts whenever you
@@ -457,7 +456,6 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
           <div className="master-agenda-cards">
             {revivalPieces.map(({ pieceId, piece, priorityRanges }) => {
               const revival = piece.revival || {};
-              const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
               const statusText = !revival.reassessmentComplete
                 ? "Reassessment in progress"
                 : revival.plan
@@ -471,10 +469,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
                       {piece.composer && <p style={{ fontSize: "12px", color: "var(--ink-faint)", margin: "4px 0 0" }}>{piece.composer}</p>}
                     </div>
                   </div>
-                  <p className="day-card-note">
-                    Bringing this piece back{purposeLabel ? ` for ${purposeLabel.label.toLowerCase()}` : ""}
-                  </p>
-                  <p className="day-card-note" style={{ marginTop: 4 }}>{statusText}</p>
+                  <p className="day-card-note">{statusText}</p>
 
                   {priorityRanges.length > 0 && (
                     <div className="day-card-group" style={{ marginTop: 10 }}>

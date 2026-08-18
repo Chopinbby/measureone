@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { clamp, formatMinutes, formatRange } from "../../lib/utils";
-import { REVIVAL_PURPOSE_OPTIONS } from "../../lib/constants";
 import { isManualConfidence } from "../../lib/confidence";
 import { getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
 import { PieceMapTab } from "./PieceMapTab";
@@ -45,7 +44,6 @@ export function RevivalTab({
   const ratedCount = revivalItems.filter((c) => isManualConfidence(c, piece.progress)).length;
   const flagged = revivalItems.filter((c) => (piece.progress[c.id] || {}).flag);
   const firstUnratedId = (revivalItems.find((c) => !isManualConfidence(c, piece.progress)) || revivalItems[0] || {}).id || null;
-  const purposeLabel = REVIVAL_PURPOSE_OPTIONS.find((o) => o.value === revival.purpose);
   // Combos whose underlying content (anchor chunk, or an overlapping
   // neighbor) has produced a real fail since this revival run started —
   // see computeComboEscalations for why this is computed live rather than
@@ -57,10 +55,7 @@ export function RevivalTab({
       <div className="tab-header day-nav">
         <div>
           <h1>Revival</h1>
-          <p className="hero-sub">
-            Bringing "{piece.name}" back{purposeLabel ? ` for ${purposeLabel.label.toLowerCase()}` : ""}
-            {piece.lastPlayedDate ? ` · last played ${piece.lastPlayedDate}` : ""}
-          </p>
+          <p className="hero-sub">Returning "{piece.name}" to its former glory</p>
         </div>
         <button className="ghost-btn" onClick={onEndRevival}>End revival</button>
       </div>

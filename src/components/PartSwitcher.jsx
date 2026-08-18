@@ -26,9 +26,6 @@ export function PartSwitcher({ parts, activeId, workName, onSelectPart, onAddPar
   return (
     <div className="panel part-switcher">
       <h3>{workName}</h3>
-      <p className="tip-line">
-        {parts.length} movement{parts.length === 1 ? "" : "s"} set up — each has its own plan and progress.
-      </p>
       <div className="part-list">
         {parts.map((p, i) => (
           <button

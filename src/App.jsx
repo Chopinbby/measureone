@@ -1616,7 +1616,7 @@ const CSS = `
 .manuscript-strip.compact { height: 28px; }
 .manuscript-block { position: relative; border-right: 2px solid var(--paper); min-width: 3px; }
 .manuscript-block:first-child { border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
-.recurring-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.85); }
+.recurring-dot { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); font-size: 11px; line-height: 1; color: rgba(255,255,255,0.85); }
 .final-barline { width: 4px; background: var(--ink); border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
 .block-tooltip {
   position: absolute;

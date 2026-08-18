@@ -83,6 +83,11 @@ export function OverviewTab({
             {piece.totalMeasures} measures, {piece.sections.length} sections, {piece.daysToLearn}-day plan
             {piece.lastPlayedDate ? ` · last played ${piece.lastPlayedDate}` : ""}
           </p>
+          {piece.workId && workParts && workParts.length > 0 && (
+            <p className="hero-sub">
+              {workParts.length} movement{workParts.length === 1 ? "" : "s"}, {workParts.length} plan{workParts.length === 1 ? "" : "s"}
+            </p>
+          )}
           <RecordingsList recordings={piece.recordings} />
           <DocumentsList documents={piece.documents} />
         </div>
@@ -111,10 +116,10 @@ export function OverviewTab({
       <ManuscriptStrip chunks={practiceChunks} />
 
       <div className="stat-grid">
-        <div className="stat-card"><span className="stat-num mono">{measuresLearned}/{piece.totalMeasures}</span><span className="stat-lbl">Measures learned</span></div>
-        <div className="stat-card"><span className="stat-num mono">{sectionsLearned}/{piece.sections.length}</span><span className="stat-lbl">Sections learned</span></div>
+        <div className="stat-card"><span className="stat-num mono">{measuresLearned}/{piece.totalMeasures}</span><span className="stat-lbl">Measures {revivalActive ? "revived" : "learned"}</span></div>
+        <div className="stat-card"><span className="stat-num mono">{sectionsLearned}/{piece.sections.length}</span><span className="stat-lbl">Sections {revivalActive ? "revived" : "learned"}</span></div>
         <div className="stat-card"><span className="stat-num mono">{formatHoursMinutes(totalPracticeSeconds)}</span><span className="stat-lbl">Time practiced</span></div>
-        <div className="stat-card"><span className="stat-num mono">{totalProgressPct}%</span><span className="stat-lbl">Total progress</span></div>
+        <div className="stat-card"><span className="stat-num mono">{totalProgressPct}%</span><span className="stat-lbl">Total {revivalActive ? "revival progress" : "progress"}</span></div>
       </div>
 
       <div className="panel">
@@ -148,8 +153,8 @@ export function OverviewTab({
                 0
               );
               const parts = [];
-              if (newMeasures > 0) parts.push(`Learn ${newMeasures} new measures`);
-              if (reviewMeasures > 0) parts.push(`review ${reviewMeasures} measures`);
+              if (newMeasures > 0) parts.push(revivalActive ? `Revive ${newMeasures} measures` : `Learn ${newMeasures} new measures`);
+              if (reviewMeasures > 0) parts.push(revivalActive ? `reconsolidate ${reviewMeasures} measures` : `review ${reviewMeasures} measures`);
               if (parts.length) {
                 desc = parts.join(", ");
                 desc = desc[0].toUpperCase() + desc.slice(1);

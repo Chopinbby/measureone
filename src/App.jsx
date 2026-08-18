@@ -112,6 +112,14 @@ export default function App() {
   // { pieceId, marker }, with the marker already fully built by whichever
   // handler opened the modal, so confirming is a plain write.
   const [rescheduleTargets, setRescheduleTargets] = useState([]);
+  // Only ever set by the single-piece reschedule flow (handleReschedule)
+  // when the remaining work doesn't fit the days left — null otherwise
+  // (including every "Reschedule all" call, which covers multiple pieces
+  // with different fits and has no single date to suggest). { targetDate,
+  // daysToLearn } to extend the plan to, both derived from the same
+  // requiredDays estimate handleReschedule already computes — see
+  // handleConfirmRescheduleWithExtension below for how it's applied.
+  const [rescheduleSuggestion, setRescheduleSuggestion] = useState(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -1049,6 +1057,7 @@ export default function App() {
     setRescheduleMessage("");
     setRescheduleTitle("");
     setRescheduleTargets([]);
+    setRescheduleSuggestion(null);
   };
 
   // Writes every confirmed marker. Split deliberately in two: the active
@@ -1098,6 +1107,36 @@ export default function App() {
     }
   };
 
+  // The other half of the "doesn't fit" choice for "days" mode (extend to a
+  // suggested target date), and the *only* reschedule action offered at all
+  // for "minutes" mode (there's no fixed deadline to protect there, so
+  // extending the plan rather than cramming into what's left is the only
+  // sensible option — see handleReschedule). Extends the plan to
+  // rescheduleSuggestion's length first, then applies the same
+  // rescheduleMarker against that now-larger window, in one updatePiece call
+  // so the timeline recomputed off the new daysToLearn already has the
+  // extra days available. Only ever reachable from the single-piece flow
+  // (rescheduleSuggestion is null for "Reschedule all"), so there's exactly
+  // one target and no "other pieces" branch to mirror from
+  // handleConfirmReschedule. targetDate is only present (and only written)
+  // for "days" mode — see handleReschedule; a "minutes" mode piece never
+  // had one to begin with, so nothing here should invent one. Setting
+  // daysToLearn alone would otherwise be silently undone on the next
+  // reload for a "minutes" mode piece — see reconcileMinutesPerDaySchedule
+  // (lib/scheduling.js) for the other half of that fix.
+  const handleConfirmRescheduleWithExtension = () => {
+    if (!rescheduleSuggestion || !rescheduleTargets.length) return;
+    const activeTarget = rescheduleTargets.find((t) => t.pieceId === activePieceId);
+    if (!activeTarget) return;
+    updatePiece((p) => ({
+      ...p,
+      ...(rescheduleSuggestion.targetDate ? { targetDate: rescheduleSuggestion.targetDate } : {}),
+      daysToLearn: rescheduleSuggestion.daysToLearn,
+      rescheduleMarker: activeTarget.marker,
+    }));
+    closeRescheduleModal();
+  };
+
   const handleEndRevival = () => {
     if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
     updatePiece((p) => ({
@@ -1135,12 +1174,18 @@ export default function App() {
     setActiveTab("today");
   };
 
-  const openRescheduleModal = (targets, title, message) => {
+  const openRescheduleModal = (targets, title, message, suggestion = null) => {
     setRescheduleTargets(targets);
     setRescheduleTitle(title);
     setRescheduleMessage(message);
+    setRescheduleSuggestion(suggestion);
     setRescheduleModalOpen(true);
   };
+
+  // month/day only, no year — matches the estFinishDate display convention
+  // ScheduleFields already uses for the same "derived finish date" idea.
+  const formatDateReadable = (dateStr) =>
+    new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
   const handleReschedule = () => {
     const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
@@ -1154,15 +1199,40 @@ export default function App() {
       status.remainingChunkIds
     );
 
+    const dayWord = (n) => (n === 1 ? "day" : "days");
+    const remainWord = (n) => (n === 1 ? "remains" : "remain");
+
     let message = `This will rebalance the ${status.remainingChunkIds.length} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`;
+    let suggestion = null;
     if (!fits) {
-      message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more day(s), but only ${availableDays} day(s) remain in this plan. Rescheduling will pack things in as tightly as possible, but you likely won't finish everything by your target date. You could extend the timeline in Settings instead.\n\nReschedule anyway?`;
+      // Extends the plan just far enough that requiredDays worth of days are
+      // actually available from today — same requiredDays estimate above,
+      // no separate calculation. daysToLearn counts day 1 as the start date
+      // itself, hence the -1 on both ends (matches estFinishDate in
+      // ScheduleFields.jsx).
+      const newDaysToLearn = currentDay - 1 + requiredDays;
+      if (piece.scheduleMode === "minutes") {
+        // No target date to suggest changing — one was never set in this
+        // mode (minutesPerDay is the fixed input, daysToLearn the derived
+        // output; see ScheduleFields.jsx). There's also no "cram into the
+        // tighter window" alternative worth offering: minutes-mode has no
+        // calendar deadline to protect by staying tight, so extending the
+        // plan is the only sensible reschedule here — a single action, not
+        // a choice. targetDate stays null so the modal renders one button.
+        suggestion = { targetDate: null, daysToLearn: newDaysToLearn };
+        message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, but only ${availableDays} ${dayWord(availableDays)} ${remainWord(availableDays)} in this plan.\n\nRescheduling will extend your plan to ${newDaysToLearn} days total, at the same pace, so everything fits. Continue?`;
+      } else {
+        const suggestedTargetDate = addDaysISO(piece.startDate, newDaysToLearn - 1);
+        suggestion = { targetDate: suggestedTargetDate, daysToLearn: newDaysToLearn };
+        message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, but only ${availableDays} ${dayWord(availableDays)} ${remainWord(availableDays)} in this plan.\n\nWould you like to change the target date to ${formatDateReadable(suggestedTargetDate)}, or reschedule into the current remaining plan days?`;
+      }
     }
 
     openRescheduleModal(
       [{ pieceId: activePieceId, marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds } }],
       "Reschedule remaining chunks?",
-      message
+      message,
+      suggestion
     );
   };
 
@@ -1541,9 +1611,24 @@ export default function App() {
               <button className="ghost-btn" onClick={closeRescheduleModal}>
                 Cancel
               </button>
-              <button className="primary-btn" onClick={handleConfirmReschedule}>
-                Reschedule
-              </button>
+              {rescheduleSuggestion && rescheduleSuggestion.targetDate ? (
+                <>
+                  <button className="ghost-btn" onClick={handleConfirmReschedule}>
+                    Reschedule into current plan days
+                  </button>
+                  <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                    Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
+                  </button>
+                </>
+              ) : rescheduleSuggestion ? (
+                <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                  Reschedule
+                </button>
+              ) : (
+                <button className="primary-btn" onClick={handleConfirmReschedule}>
+                  Reschedule
+                </button>
+              )}
             </div>
           </div>
         </div>

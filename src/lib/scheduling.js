@@ -95,7 +95,24 @@ export function reconcileMinutesPerDaySchedule(piece) {
   if (piece.scheduleMode !== "minutes") return piece;
   const chunkSet = generateAllChunks(piece);
   const needed = computeDaysNeededForMinutesPerDay(chunkSet, piece.minutesPerDay, piece.practiceDaysPerWeek);
-  return needed === piece.daysToLearn ? piece : { ...piece, daysToLearn: needed };
+  // `needed` is a pure function of total effort and pace, computed as if
+  // starting fresh today with zero progress — it has no notion of days
+  // that already elapsed without practice. That's fine for a piece that
+  // hasn't fallen behind, but a reschedule (App.jsx's handleReschedule,
+  // "doesn't fit" branch) can deliberately push daysToLearn past `needed`
+  // to make up for exactly that lost time, at the same minutesPerDay
+  // budget. Without this floor, this function — which every load runs
+  // unconditionally via validateAndMigratePiece — would silently snap that
+  // extension right back down to `needed` on the very next reload, since
+  // `needed` alone has no way to tell "deliberately extended" apart from
+  // "never reconciled since an edit." Only floors while a rescheduleMarker
+  // is actually in effect, so a piece that's never been rescheduled behaves
+  // exactly as before; the marker being cleared (any Settings save clears
+  // it — App.jsx's handleSavePiece) drops the floor with it, so an
+  // intentional pace/measure edit still recomputes from scratch as usual.
+  const floor = piece.rescheduleMarker ? piece.daysToLearn : 0;
+  const target = Math.max(needed, floor);
+  return target === piece.daysToLearn ? piece : { ...piece, daysToLearn: target };
 }
 
 /* ------------------------------------------------------------------ */

@@ -121,6 +121,20 @@ Automatic entry triggers (rather than manual-only, as it was before Pass
 7) are now built — see [Stage 4 → Revival auto-triggers](#revival-auto-triggers)
 below.
 
+**Since Pass 37**, the reassessment card (the embedded `PieceMapTab` modal,
+`sequentialMode`) looks different from ordinary Piece Map's chunk-detail
+card, not just narrower: stats (difficulty/confidence/sessions/stage) move
+into a collapsed "Chunk Info" section at the bottom instead of sitting at
+the top; Target BPM shows as a read-only "N BPM — set at piece setup" line
+with a "Change for this chunk" button, rather than an always-open input,
+since most chunks just inherit the piece's setup-time tempo; a note next to
+Current BPM clarifies it means the fastest tempo playable accurately right
+now, not the eventual target; and "Set manually"/the "Confidence override"
+heading are gone, since Quick rate is already the manual-entry path here.
+Ordinary (non-revival) Piece Map keeps the original card — see
+[Decisions.md](Decisions.md#ux) for why the redesign didn't land in both
+places.
+
 ## Pause / Archive (built)
 
 A piece can carry `piece.status: 'active' | 'paused' | 'archived'`, set only

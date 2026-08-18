@@ -1852,6 +1852,54 @@ the grid.**
   style preference.
 - See [UX-Principles.md](UX-Principles.md#detail-on-demand-uses-a-real-modal-not-inline-expansion).
 
+**Decision (Pass 37): the chunk-detail modal's card redesign (stats
+collapsed into a bottom "Chunk Info" section, Target BPM shown as a
+read-only setup value instead of an always-open input, "Set manually" and
+the "Confidence override" heading/auto-calculated note removed) is scoped
+to `sequentialMode` only — i.e. revival's reassessment pass. Ordinary
+(non-revival) Piece Map editing keeps the modal's original layout,
+unchanged.**
+
+- **The scoping question:** `PieceMapTab` (`components/tabs/PieceMapTab.jsx`)
+  is one shared component rendering this modal in two places — the
+  ordinary Piece Map tab, and embedded (with `sequentialMode`) inside
+  `RevivalTab`'s reassessment pass. Pass 37's brief asked for the redesign
+  without settling whether it should land in both call sites or just one.
+- **Why sequentialMode only, not both:** the brief justifies removing "Set
+  manually" as "redundant with the 5-tier quick-rate system directly above
+  it" — but Quick rate (`CONFIDENCE_PRESETS`, a `sequentialMode`-gated
+  block) has never rendered outside `sequentialMode`. Removing "Set
+  manually" everywhere would have deleted the *only* way to move a chunk
+  from auto-calculated confidence into a manual override in ordinary Piece
+  Map, with nothing there to replace it — a real functional loss, not a
+  redundant control. That alone settles the question: the redesign
+  (all of it, not just the confidence-override piece, since presenting the
+  two call sites inconsistently would be its own confusion) is gated to
+  `sequentialMode`.
+- **One shared dependency needed a narrow exception:** the "remove the word
+  'optional' next to the notes field" part of the brief lives in
+  `MemoryAnchorField.jsx`'s hardcoded label, a component also used by
+  `ChecklistItem`/`DayChecklist` (ordinary practice logging), which Pass 37
+  wasn't scoped to touch. Rather than duplicate the field just to vary one
+  word, `MemoryAnchorField` gained an `optional` prop (default `true`,
+  preserving "Notes — optional" everywhere it isn't passed); `PieceMapTab`
+  passes `optional={!sequentialMode}`. This is a one-line, backward-compatible
+  addition to a file outside Pass 37's stated Touches list — flagged here
+  rather than silently folded in.
+- **What's actually new, sequentialMode only:** the existing stats block
+  (difficulty/confidence/sessions/stage/etc.) moves from the top of the
+  card into a collapsed `<details className="chunk-info">Chunk Info`
+  section at the bottom; Target BPM defaults to a read-only line ("N BPM —
+  set at piece setup") with a "Change for this chunk" button that reveals
+  the input, rather than an always-open `NumberInput` (state resets on
+  every chunk switch, so Next/Previous doesn't leave the editor open on the
+  next chunk); a `tip-line` note next to Current BPM clarifies it means the
+  fastest tempo playable *accurately right now*, not the eventual goal;
+  "Set manually" and the "Confidence override" heading/auto-calculated-%
+  note are gone (the manual-value `NumberInput` + "Reset to automatic"
+  still render, unlabeled, whenever a chunk already has a manual value from
+  Quick rate). See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#revival-built-mvp).
+
 **Decision: the practice-log checkbox submits the log directly, not just a
 "done" toggle.**
 

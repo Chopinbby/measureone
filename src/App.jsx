@@ -10,6 +10,7 @@ import {
   Settings as SettingsIcon,
   Plus,
   ChevronDown,
+  ChevronUp,
   Pencil,
   RefreshCw,
   Upload,
@@ -180,17 +181,21 @@ export default function App() {
     setExportReminderDue(isExportReminderDue(lastExportedAt, firstUseAt));
   }, [loaded]);
 
-  const updatePiece = (updater) => {
-    if (!activePieceId) return;
+  // targetId defaults to the active piece (the common case, and every call
+  // site before Pass 32) but can be passed explicitly — sidebar reordering
+  // needs to write sortOrder onto pieces that aren't necessarily the one
+  // currently open.
+  const updatePiece = (updater, targetId = activePieceId) => {
+    if (!targetId) return;
     setPieces((prev) => {
-      const current = prev[activePieceId];
+      const current = prev[targetId];
       if (!current) return prev;
       const next = typeof updater === "function" ? updater(current) : updater;
       // Bumped on every mutation through this single funnel (CLAUDE.md: all
       // piece changes go through updatePiece) so mergeImportedPiece can tell
       // "this device has newer state than the file being re-imported" from
       // "the file actually is the newer copy" — see storage.js.
-      return { ...prev, [activePieceId]: { ...next, updatedAt: Date.now() } };
+      return { ...prev, [targetId]: { ...next, updatedAt: Date.now() } };
     });
   };
 
@@ -224,7 +229,10 @@ export default function App() {
   const handleComplete = (finished, options = {}) => {
     if (!guardLeavingInterleaved()) return;
     const id = `p_${Date.now()}`;
-    const withId = ensureWorkId({ ...finished, id, updatedAt: Date.now() });
+    // Appends to the end of the switcher without waiting for a reload to
+    // backfill it (validateAndMigratePiece isn't in the create path) —
+    // Date.now() sorts after every existing piece's sortOrder/createdAt.
+    const withId = ensureWorkId({ ...finished, id, updatedAt: Date.now(), sortOrder: finished.createdAt || Date.now() });
     setPieces((prev) => ({ ...prev, [id]: withId }));
     setActivePieceId(id);
     setWizardOpen(false);
@@ -307,7 +315,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleConfirmImport = (selectedIndices, ladderChoices = {}) => {
+  const handleConfirmImport = (selectedIndices, ladderChoices = {}, orderChoice = "existing") => {
     const next = { ...pieces };
     let firstNewId = null;
     let updatedCount = 0;
@@ -352,7 +360,7 @@ export default function App() {
         // merged with defaults rather than reaching computeLadderAdvance
         // incomplete and throwing on the next logged session. See storage.js.
         const merged = validateAndMigratePiece(ensureWorkId({
-          ...mergeImportedPiece(match, p, ladderChoice),
+          ...mergeImportedPiece(match, p, ladderChoice, orderChoice),
           rescheduleMarker: null,
         }));
         next[match.id] = merged;
@@ -1195,9 +1203,30 @@ export default function App() {
     );
   };
 
-  const pieceList = Object.values(pieces).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const pieceList = Object.values(pieces).sort(
+    (a, b) => (a.sortOrder ?? a.createdAt ?? 0) - (b.sortOrder ?? b.createdAt ?? 0)
+  );
   const pieceGroups = groupPiecesByWork(pieceList);
   const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
+
+  // Reorders whole switcher rows (a standalone piece, or an entire
+  // multi-movement work as one block) by swapping two adjacent groups and
+  // re-ranking every piece to its new flattened position. Movement order
+  // *within* a work is untouched — that's still governed by createdAt via
+  // groupPiecesByWork/partsOfWork (lib/works.js), deliberately left alone
+  // per Pass 32's build order (works already stay contiguous in the
+  // switcher for free, without any special-case logic here).
+  const moveGroup = (groupIndex, direction) => {
+    const targetIndex = groupIndex + direction;
+    if (targetIndex < 0 || targetIndex >= pieceGroups.length) return;
+    const reordered = [...pieceGroups];
+    [reordered[groupIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[groupIndex]];
+    reordered
+      .flatMap((g) => g.pieces)
+      .forEach((p, i) => {
+        if (p.sortOrder !== i) updatePiece((current) => ({ ...current, sortOrder: i }), p.id);
+      });
+  };
 
   return (
     <div className="measureone-app">
@@ -1298,9 +1327,31 @@ export default function App() {
               </button>
               {switcherOpen && (
                 <div className="piece-switcher-list">
-                  {pieceGroups.map((g) => (
+                  {pieceGroups.map((g, gi) => (
                     <div key={g.workId || g.pieces[0].id} className={g.workId ? "piece-switcher-work" : ""}>
-                      {g.workId && <div className="piece-switcher-work-name">{g.workName}</div>}
+                      <div className="piece-switcher-group-head">
+                        {g.workId && <div className="piece-switcher-work-name">{g.workName}</div>}
+                        <div className="piece-switcher-reorder">
+                          <button
+                            type="button"
+                            className="piece-switcher-reorder-btn"
+                            aria-label={`Move ${g.workName || g.pieces[0].name || "piece"} up in the list`}
+                            disabled={gi === 0}
+                            onClick={(e) => { e.stopPropagation(); moveGroup(gi, -1); }}
+                          >
+                            <ChevronUp size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="piece-switcher-reorder-btn"
+                            aria-label={`Move ${g.workName || g.pieces[0].name || "piece"} down in the list`}
+                            disabled={gi === pieceGroups.length - 1}
+                            onClick={(e) => { e.stopPropagation(); moveGroup(gi, 1); }}
+                          >
+                            <ChevronDown size={12} />
+                          </button>
+                        </div>
+                      </div>
                       {g.pieces.map((p) => (
                         <button
                           key={p.id}
@@ -1568,8 +1619,13 @@ const CSS = `
 .piece-switcher-add { display: flex; align-items: center; gap: 6px; text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--brass-deep); font-weight: 600; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
 .piece-switcher-add:hover { background: rgba(185,138,62,0.08); }
 .piece-switcher-work { display: flex; flex-direction: column; gap: 2px; }
-.piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 6px 0 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-switcher-work .piece-switcher-item { margin-left: 8px; }
+.piece-switcher-group-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 10px; }
+.piece-switcher-reorder { display: flex; gap: 2px; flex-shrink: 0; }
+.piece-switcher-reorder-btn { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--ink-faint); }
+.piece-switcher-reorder-btn:hover:not(:disabled) { background: rgba(185,138,62,0.12); color: var(--ink-soft); }
+.piece-switcher-reorder-btn:disabled { opacity: 0.3; cursor: default; }
 .part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }

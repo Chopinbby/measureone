@@ -756,3 +756,43 @@ describe("mergeImportedPiece — Pass 13 ladderChoice wiring", () => {
     assert.equal(merged.progress.c1.sessions.length, 2);
   });
 });
+
+describe("mergeImportedPiece — Pass 32 follow-up: orderChoice wiring", () => {
+  // existing.updatedAt < imported.updatedAt on purpose: the import is NOT
+  // stale, so if sortOrder were still governed by the generic
+  // preferByRecency loop (the pre-fix behavior), the imported value would
+  // win outright with no orderChoice needed at all. That's exactly the
+  // "re-importing an unstale backup silently reshuffles the switcher" bug
+  // this test guards against — sortOrder must stay on `existing` here
+  // regardless of which side is newer, unless the caller explicitly asks
+  // for "imported".
+  const existing = {
+    id: "p_order", name: "Nocturne", totalMeasures: 40, startDate: "2026-01-01",
+    updatedAt: 1000, sortOrder: 5,
+  };
+  const imported = {
+    id: "p_order", name: "Nocturne", totalMeasures: 40, startDate: "2026-01-01",
+    updatedAt: 2000, sortOrder: 2,
+  };
+
+  test("no orderChoice argument at all keeps the existing order, even though the import is newer", () => {
+    const merged = mergeImportedPiece(existing, imported);
+    assert.equal(merged.sortOrder, 5);
+  });
+
+  test("explicit orderChoice 'existing' behaves the same as omitting it", () => {
+    const merged = mergeImportedPiece(existing, imported, "existing", "existing");
+    assert.equal(merged.sortOrder, 5);
+  });
+
+  test("explicit orderChoice 'imported' switches to the imported side's sortOrder", () => {
+    const merged = mergeImportedPiece(existing, imported, "existing", "imported");
+    assert.equal(merged.sortOrder, 2);
+  });
+
+  test("orderChoice 'imported' falls back to existing when the import predates Pass 32 and has no sortOrder at all", () => {
+    const { sortOrder, ...importedWithoutOrder } = imported;
+    const merged = mergeImportedPiece(existing, importedWithoutOrder, "existing", "imported");
+    assert.equal(merged.sortOrder, 5);
+  });
+});

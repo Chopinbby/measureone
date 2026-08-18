@@ -94,9 +94,9 @@ export function RevivalTab({
         <div className="panel">
           <h3>Reassess where things stand</h3>
           <p className="wizard-hint">
-            Go chunk by chunk (and seam by seam) and rate confidence from memory right now — this sets a
-            fresh baseline for scheduling without touching your original practice history. Flag anything
-            that felt shaky as rough or lost; the plan below will prioritize those first.
+            Rate your confidence on each chunk to set a fresh baseline for practice. Flag anything that
+            feels shaky as "rough", and anything you truly can't remember as "lost". The plan will
+            prioritize these first.
           </p>
           <p className="derived-stat" style={{ marginBottom: 14 }}>
             <strong className="mono">{ratedCount}</strong> of <strong className="mono">{revivalItems.length}</strong> rated
@@ -156,8 +156,8 @@ export function RevivalTab({
             <div className="panel focus-panel">
               <h3>Needs another look</h3>
               <p className="wizard-hint">
-                A focus block below had a real fail somewhere in its underlying content this run —
-                worth its own dedicated pass rather than assuming it'll resolve on its own.
+                One of the blocks below had a rough pass. Worth practicing on its own rather than
+                assuming it'll sort itself out.
               </p>
               <div className="checklist">
                 {comboEscalations.map((combo) => {

@@ -1034,7 +1034,7 @@ export default function App() {
     else setRevivalModalOpen(true);
   };
 
-  const handleStartRevival = ({ purpose, performanceTempo, lastPlayedDate }) => {
+  const handleStartRevival = ({ purpose, tempoLadderStartFraction, lastPlayedDate }) => {
     updatePiece((p) => ({
       ...p,
       lastPlayedDate: lastPlayedDate || p.lastPlayedDate || null,
@@ -1042,8 +1042,7 @@ export default function App() {
         active: true,
         startedAt: Date.now(),
         purpose,
-        performanceTempo: performanceTempo || null,
-        tempoLadderStartFraction: 0.6,
+        tempoLadderStartFraction: tempoLadderStartFraction ?? 0.6,
         reassessmentComplete: false,
         plan: null,
       },
@@ -1145,7 +1144,6 @@ export default function App() {
         active: false,
         startedAt: null,
         purpose: null,
-        performanceTempo: null,
         tempoLadderStartFraction: 0.6,
         reassessmentComplete: false,
         plan: null,
@@ -1514,7 +1512,6 @@ export default function App() {
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
                 onGeneratePlan={handleGenerateRevivalPlan}
-                onSetPerformanceTempo={(n) => handleUpdateRevival({ performanceTempo: n || null })}
                 onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
@@ -1922,6 +1919,13 @@ const CSS = `
 .detail-stats > div { display: flex; justify-content: space-between; font-size: 13.5px; border-bottom: 1px solid var(--line); padding-bottom: 7px; }
 .detail-stats .lbl { color: var(--ink-soft); }
 .detail-stats .val { font-weight: 600; }
+.chunk-info { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.chunk-info summary { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); list-style: none; }
+.chunk-info summary::-webkit-details-marker { display: none; }
+.chunk-info summary svg { transition: transform 0.15s ease; }
+.chunk-info[open] summary svg { transform: rotate(90deg); }
+.chunk-info[open] summary { margin-bottom: 12px; }
+.chunk-info .detail-stats { margin-bottom: 0; }
 
 .checklist { display: flex; flex-direction: column; gap: 10px; }
 .checklist-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }

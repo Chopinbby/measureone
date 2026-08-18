@@ -15,12 +15,17 @@ import { useState } from "react";
 // The component/prop names still say memoryAnchor: renaming those would
 // touch every call site and the persisted key itself, which is a data
 // migration, not a copy change.
-export function MemoryAnchorField({ value, onCommit }) {
+// `optional` defaults to true (the label reads "Notes — optional",
+// unchanged everywhere except one call site) — Pass 37 dropped the word
+// only from PieceMapTab's sequentialMode (revival reassessment) rendering,
+// via `optional={false}`, without touching the label anywhere else this
+// component is used (ChecklistItem/DayChecklist). See docs/Decisions.md#ux.
+export function MemoryAnchorField({ value, onCommit, optional = true }) {
   const [text, setText] = useState(value || "");
 
   return (
     <label className="field">
-      <span>Notes — optional</span>
+      <span>Notes{optional ? " — optional" : ""}</span>
       <textarea
         // Leads with an associative/mnemonic example because that's the
         // kind of note people don't think to write down; the structural

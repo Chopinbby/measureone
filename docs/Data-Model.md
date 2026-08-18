@@ -696,10 +696,22 @@ revival = {
                               // decide which logged sessions belong to the current run.
                               // That is the only thing that should read it
   purpose,                   // 'performance' | 'lesson' | 'enjoyment' | 'checking' | null
-  performanceTempo,          // number | null — piece-wide tempo override collected at entry;
-                              // see getRevivalTargetBPM in Algorithms.md#revival for precedence
-  tempoLadderStartFraction,  // number, default 0.6 — adjustable starting point for
-                              // computeTempoLadder, as a fraction of target BPM
+  tempoLadderStartFraction,  // number, default 0.6 — starting point for computeTempoLadder,
+                              // as a fraction of target BPM. Collected at revival entry
+                              // (RevivalEntryModal) and editable afterward from RevivalTab's
+                              // "Revival settings" panel — see Algorithms.md#revival
+  reassessmentComplete,      // boolean — gates the RevivalTab UI between the reassessment
+                              // pass and the generated plan
+  plan,                      // null | { days: [{ dayNumber, itemIds, minutes }], totalItems,
+                              //          generatedAt } — see computeRevivalPlan, Algorithms.md#revival
+}
+```
+
+A piece saved before Pass 35 may still carry a `revival.performanceTempo` field from
+when a piece-wide tempo override existed — left stored-but-unread rather than
+migrated away (non-destructive; nothing reads it). New and freshly-defaulted
+`revival` objects (`defaultPiece()` in Wizard.jsx, and storage.js's
+fallback for a piece with no `revival` object at all) no longer include it.
   reassessmentComplete,      // boolean — gates the RevivalTab UI between the reassessment
                               // pass and the generated plan
   plan,                      // null | { days: [{ dayNumber, itemIds, minutes }], totalItems,

@@ -1852,6 +1852,54 @@ the grid.**
   style preference.
 - See [UX-Principles.md](UX-Principles.md#detail-on-demand-uses-a-real-modal-not-inline-expansion).
 
+**Decision (Pass 37): the chunk-detail modal's card redesign (stats
+collapsed into a bottom "Chunk Info" section, Target BPM shown as a
+read-only setup value instead of an always-open input, "Set manually" and
+the "Confidence override" heading/auto-calculated note removed) is scoped
+to `sequentialMode` only — i.e. revival's reassessment pass. Ordinary
+(non-revival) Piece Map editing keeps the modal's original layout,
+unchanged.**
+
+- **The scoping question:** `PieceMapTab` (`components/tabs/PieceMapTab.jsx`)
+  is one shared component rendering this modal in two places — the
+  ordinary Piece Map tab, and embedded (with `sequentialMode`) inside
+  `RevivalTab`'s reassessment pass. Pass 37's brief asked for the redesign
+  without settling whether it should land in both call sites or just one.
+- **Why sequentialMode only, not both:** the brief justifies removing "Set
+  manually" as "redundant with the 5-tier quick-rate system directly above
+  it" — but Quick rate (`CONFIDENCE_PRESETS`, a `sequentialMode`-gated
+  block) has never rendered outside `sequentialMode`. Removing "Set
+  manually" everywhere would have deleted the *only* way to move a chunk
+  from auto-calculated confidence into a manual override in ordinary Piece
+  Map, with nothing there to replace it — a real functional loss, not a
+  redundant control. That alone settles the question: the redesign
+  (all of it, not just the confidence-override piece, since presenting the
+  two call sites inconsistently would be its own confusion) is gated to
+  `sequentialMode`.
+- **One shared dependency needed a narrow exception:** the "remove the word
+  'optional' next to the notes field" part of the brief lives in
+  `MemoryAnchorField.jsx`'s hardcoded label, a component also used by
+  `ChecklistItem`/`DayChecklist` (ordinary practice logging), which Pass 37
+  wasn't scoped to touch. Rather than duplicate the field just to vary one
+  word, `MemoryAnchorField` gained an `optional` prop (default `true`,
+  preserving "Notes — optional" everywhere it isn't passed); `PieceMapTab`
+  passes `optional={!sequentialMode}`. This is a one-line, backward-compatible
+  addition to a file outside Pass 37's stated Touches list — flagged here
+  rather than silently folded in.
+- **What's actually new, sequentialMode only:** the existing stats block
+  (difficulty/confidence/sessions/stage/etc.) moves from the top of the
+  card into a collapsed `<details className="chunk-info">Chunk Info`
+  section at the bottom; Target BPM defaults to a read-only line ("N BPM —
+  set at piece setup") with a "Change for this chunk" button that reveals
+  the input, rather than an always-open `NumberInput` (state resets on
+  every chunk switch, so Next/Previous doesn't leave the editor open on the
+  next chunk); a `tip-line` note next to Current BPM clarifies it means the
+  fastest tempo playable *accurately right now*, not the eventual goal;
+  "Set manually" and the "Confidence override" heading/auto-calculated-%
+  note are gone (the manual-value `NumberInput` + "Reset to automatic"
+  still render, unlabeled, whenever a chunk already has a manual value from
+  Quick rate). See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#revival-built-mvp).
+
 **Decision: the practice-log checkbox submits the log directly, not just a
 "done" toggle.**
 
@@ -2538,15 +2586,45 @@ or parameterization of `computeTimeline`.**
   `piece.minutesPerDay`) and the same greedy day-packing pattern
   `ScheduleFields` already uses. See [Algorithms.md](Algorithms.md#revival).
 
-**Decision: during an active revival, `piece.revival.performanceTempo`
+**~~Decision: during an active revival, `piece.revival.performanceTempo`
 overrides even an explicit per-chunk `targetBPM`, not just the piece-wide
-default.**
+default.~~ — reverted, Pass 35.**
 
-- **Why:** A performance tempo collected at revival entry represents a
-  deliberate, current intent (e.g. "this needs to be 120 for the recital")
-  that should supersede tempos set while first learning the piece, even
-  where a chunk already has its own explicit target from that earlier
-  phase. See `getRevivalTargetBPM` in [Algorithms.md](Algorithms.md#revival).
+- **Original why:** A performance tempo collected at revival entry
+  represents a deliberate, current intent (e.g. "this needs to be 120 for
+  the recital") that should supersede tempos set while first learning the
+  piece, even where a chunk already has its own explicit target from that
+  earlier phase.
+- **Why reverted:** the override was silent and total — a chunk's own
+  explicit target vanished from the tempo ladder with no visible indication
+  of which source (`performanceTempo` vs. the chunk's own `targetBPM`) was
+  actually driving it, and there was no way to opt a single chunk out. On
+  reflection this created more confusion than the "deliberate intent" case
+  it was meant to serve. `getRevivalTargetBPM` (`lib/revival.js`) now
+  resolves exactly like the non-revival path: `entry.targetBPM ||
+  getDefaultTargetBPM(piece, chunk)`. See
+  [Algorithms.md](Algorithms.md#revival).
+- **What happened to the field:** `piece.revival.performanceTempo` is left
+  stored-but-unread on any piece saved before Pass 35, rather than actively
+  migrated away — non-destructive, and nothing reads it, so there's no
+  correctness reason to touch already-saved data. New pieces
+  (`defaultPiece()`, Wizard.jsx) and pieces getting a from-scratch
+  `revival` default (storage.js, for a piece with no `revival` object at
+  all) no longer include the field going forward. The UI that collected and
+  edited it — a "Performance tempo" input in both `RevivalEntryModal`
+  (entry) and `RevivalTab`'s "Revival settings" panel (mid-revival) — is
+  removed outright, not just disconnected, since keeping either would
+  imply the value still does something.
+- **`tempoLadderStartFraction` moved to revival entry:** previously
+  hardcoded to `0.6` at `handleStartRevival` (App.jsx) and only editable
+  from `RevivalTab`'s mid-revival settings panel. As of Pass 35 it's
+  collected in `RevivalEntryModal` at the same point `purpose` and
+  `lastPlayedDate` already were, and stays editable afterward from
+  `RevivalTab`'s "Revival settings" panel (now holding just this one
+  field). The Wizard's "reviving an old piece" toggle (Wizard.jsx step 0)
+  doesn't collect this itself — it only sets `startAsRevival`, which opens
+  `RevivalEntryModal` on completion (`App.jsx`'s `handleComplete`), so that
+  single modal is the actual entry point for both ways a revival can start.
 
 **Decision: allow starting a piece directly in revival mode from the Wizard,
 not just from an existing piece via the Piece Overview dashboard.**

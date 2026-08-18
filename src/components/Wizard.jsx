@@ -71,7 +71,6 @@ export function defaultPiece() {
       active: false,
       startedAt: null,
       purpose: null,
-      performanceTempo: null,
       tempoLadderStartFraction: 0.6,
       reassessmentComplete: false,
       plan: null,

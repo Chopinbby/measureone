@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
@@ -54,6 +54,43 @@ export function PieceMapTab({
   // Pass 30 — live-derived, same as the tile marker above; recomputed on
   // every render from session history, no persisted "seen" state.
   const selectedClimbing = selectedChunk ? hasClimbingTempo(selectedEntry) : false;
+  // Same fallback chain used in three places below (the field itself, and
+  // the bpm-track gate/width) — computed once so they can't drift.
+  const resolvedTargetBPM = selectedChunk ? selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk) || null : null;
+  // Pass 37 (sequentialMode/revival reassessment only — see
+  // docs/Decisions.md#ux): Target BPM defaults to a read-only display of
+  // resolvedTargetBPM rather than an always-open input, since most chunks
+  // just use the piece's setup-time tempo. Resets on every chunk switch so
+  // Next/Previous doesn't carry an open editor onto the next chunk.
+  const [bpmOverrideOpen, setBpmOverrideOpen] = useState(false);
+  useEffect(() => setBpmOverrideOpen(false), [selected]);
+
+  // Same content, rendered in a different spot depending on mode: inline
+  // near the top for ordinary Piece Map, collapsed under "Chunk Info" at
+  // the bottom for sequentialMode (Pass 37) — see docs/Decisions.md#ux.
+  const detailStats = selectedChunk && (
+    <div className="detail-stats">
+      <div><span className="lbl">Difficulty</span><span className="val">{DIFFICULTY_META[selectedChunk.difficultyLabel].label}</span></div>
+      <div>
+        <span className="lbl">Confidence</span>
+        <span className="val">
+          {computeConfidence(selectedChunk, piece, currentDay)}%
+          {selectedIsManual && <span className="badge dark">Manual</span>}
+        </span>
+      </div>
+      <div><span className="lbl">Sessions logged</span><span className="val mono">{(selectedEntry.doneDays || []).length}</span></div>
+      <div>
+        <span className="lbl">Stage</span>
+        <span className="val">
+          {ladderStatus ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}` : "Not started"}
+        </span>
+      </div>
+      {ladderStatus && ladderStatus.dueLabel && (
+        <div><span className="lbl">Next review</span><span className="val">{ladderStatus.dueLabel}</span></div>
+      )}
+      {selectedChunk.recurringNote && <div><span className="lbl">Repeats</span><span className="val">{selectedChunk.recurringNote}</span></div>}
+    </div>
+  );
 
   return (
     <div className="tab-pane">
@@ -122,27 +159,7 @@ export function PieceMapTab({
               </button>
             </div>
             <div className="modal-body">
-              <div className="detail-stats">
-                <div><span className="lbl">Difficulty</span><span className="val">{DIFFICULTY_META[selectedChunk.difficultyLabel].label}</span></div>
-                <div>
-                  <span className="lbl">Confidence</span>
-                  <span className="val">
-                    {computeConfidence(selectedChunk, piece, currentDay)}%
-                    {selectedIsManual && <span className="badge dark">Manual</span>}
-                  </span>
-                </div>
-                <div><span className="lbl">Sessions logged</span><span className="val mono">{(selectedEntry.doneDays || []).length}</span></div>
-                <div>
-                  <span className="lbl">Stage</span>
-                  <span className="val">
-                    {ladderStatus ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}` : "Not started"}
-                  </span>
-                </div>
-                {ladderStatus && ladderStatus.dueLabel && (
-                  <div><span className="lbl">Next review</span><span className="val">{ladderStatus.dueLabel}</span></div>
-                )}
-                {selectedChunk.recurringNote && <div><span className="lbl">Repeats</span><span className="val">{selectedChunk.recurringNote}</span></div>}
-              </div>
+              {!sequentialMode && detailStats}
 
               <div className="field">
                 <span>Run-through flag</span>
@@ -187,62 +204,107 @@ export function PieceMapTab({
                 </div>
               )}
 
-              <div className="field">
-                <span>Confidence override</span>
-                {selectedIsManual ? (
-                  <div className="manual-conf-row">
-                    <NumberInput
-                      value={selectedEntry.manualConfidence}
-                      min={0}
-                      max={100}
-                      onCommit={(n) => onSetManualConfidence(selectedChunk.id, n)}
-                    />
-                    <button className="ghost-btn" onClick={() => onSetManualConfidence(selectedChunk.id, null)}>
-                      Reset to automatic
-                    </button>
+              {sequentialMode ? (
+                selectedIsManual && (
+                  <div className="field">
+                    <div className="manual-conf-row">
+                      <NumberInput
+                        value={selectedEntry.manualConfidence}
+                        min={0}
+                        max={100}
+                        onCommit={(n) => onSetManualConfidence(selectedChunk.id, n)}
+                      />
+                      <button className="ghost-btn" onClick={() => onSetManualConfidence(selectedChunk.id, null)}>
+                        Reset to automatic
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <div className="manual-conf-row">
-                    <p className="wizard-hint" style={{ margin: 0, flex: 1 }}>
-                      Auto-calculated at {computeAutoConfidence(selectedChunk, piece, currentDay)}% right now.
-                    </p>
-                    <button
-                      className="ghost-btn"
-                      onClick={() => onSetManualConfidence(selectedChunk.id, computeAutoConfidence(selectedChunk, piece, currentDay))}
-                    >
-                      Set manually
-                    </button>
-                  </div>
-                )}
-              </div>
+                )
+              ) : (
+                <div className="field">
+                  <span>Confidence override</span>
+                  {selectedIsManual ? (
+                    <div className="manual-conf-row">
+                      <NumberInput
+                        value={selectedEntry.manualConfidence}
+                        min={0}
+                        max={100}
+                        onCommit={(n) => onSetManualConfidence(selectedChunk.id, n)}
+                      />
+                      <button className="ghost-btn" onClick={() => onSetManualConfidence(selectedChunk.id, null)}>
+                        Reset to automatic
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="manual-conf-row">
+                      <p className="wizard-hint" style={{ margin: 0, flex: 1 }}>
+                        Auto-calculated at {computeAutoConfidence(selectedChunk, piece, currentDay)}% right now.
+                      </p>
+                      <button
+                        className="ghost-btn"
+                        onClick={() => onSetManualConfidence(selectedChunk.id, computeAutoConfidence(selectedChunk, piece, currentDay))}
+                      >
+                        Set manually
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="field-row">
                 <label className="field">
                   <span>Current BPM</span>
                   <NumberInput value={selectedEntry.currentBPM || ""} min={20} max={400} onCommit={(n) => onUpdateBPM(selectedChunk.id, "currentBPM", n)} />
+                  {sequentialMode && (
+                    <p className="tip-line">The fastest you can currently play it accurately — not the tempo you're aiming for.</p>
+                  )}
                 </label>
-                <label className="field">
-                  <span>Target BPM</span>
-                  <NumberInput
-                    value={selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk) || ""}
-                    min={20}
-                    max={400}
-                    onCommit={(n) => onUpdateBPM(selectedChunk.id, "targetBPM", n)}
-                  />
-                </label>
+                {sequentialMode ? (
+                  <div className="field">
+                    <span>Target BPM</span>
+                    {bpmOverrideOpen ? (
+                      <NumberInput
+                        value={resolvedTargetBPM || ""}
+                        min={20}
+                        max={400}
+                        onCommit={(n) => {
+                          onUpdateBPM(selectedChunk.id, "targetBPM", n);
+                          setBpmOverrideOpen(false);
+                        }}
+                      />
+                    ) : (
+                      <div className="manual-conf-row">
+                        <p className="wizard-hint" style={{ margin: 0, flex: 1 }}>
+                          {resolvedTargetBPM
+                            ? selectedEntry.targetBPM
+                              ? `${resolvedTargetBPM} BPM — set for this chunk`
+                              : `${resolvedTargetBPM} BPM — set at piece setup`
+                            : "No target BPM set yet"}
+                        </p>
+                        <button type="button" className="ghost-btn" onClick={() => setBpmOverrideOpen(true)}>
+                          {resolvedTargetBPM ? "Change for this chunk" : "Set for this chunk"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <label className="field">
+                    <span>Target BPM</span>
+                    <NumberInput
+                      value={resolvedTargetBPM || ""}
+                      min={20}
+                      max={400}
+                      onCommit={(n) => onUpdateBPM(selectedChunk.id, "targetBPM", n)}
+                    />
+                  </label>
+                )}
               </div>
-              {(selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk)) > 0 && (
+              {resolvedTargetBPM > 0 && (
                 <div className="bpm-track">
                   <div
                     className="bpm-fill"
                     style={{
-                      width: `${Math.round(
-                        clamp(
-                          (selectedEntry.currentBPM || 0) / (selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk)),
-                          0,
-                          1
-                        ) * 100
-                      )}%`,
+                      width: `${Math.round(clamp((selectedEntry.currentBPM || 0) / resolvedTargetBPM, 0, 1) * 100)}%`,
                     }}
                   />
                 </div>
@@ -271,7 +333,18 @@ export function PieceMapTab({
                 key={selectedChunk.id}
                 value={piece.memoryAnchors && piece.memoryAnchors[selectedChunk.id]}
                 onCommit={(text) => onSetMemoryAnchor(selectedChunk.id, text)}
+                optional={!sequentialMode}
               />
+
+              {sequentialMode && (
+                <details className="chunk-info">
+                  <summary>
+                    <ChevronRight size={14} className="chunk-info-chevron" />
+                    Chunk Info
+                  </summary>
+                  {detailStats}
+                </details>
+              )}
             </div>
 
             {sequentialMode && (

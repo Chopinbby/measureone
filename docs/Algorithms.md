@@ -1137,20 +1137,23 @@ was learned once but has gone stale — see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md).
 
 `getRevivalTargetBPM(piece, chunk)` resolves the effective tempo target
-during an active revival: `piece.revival.performanceTempo` (if the revival
-is active and a performance tempo was set) wins over everything, including a
-chunk's own explicit `targetBPM` — the point of collecting a performance
-tempo at revival entry is that it should override tempos set while first
-learning the piece, even at the per-chunk level. Falls back to
-`entry.targetBPM || getDefaultTargetBPM(piece, chunk)` otherwise, same as
-normal practice.
+during an active revival: `entry.targetBPM || getDefaultTargetBPM(piece,
+chunk)` — exactly the same target-resolution rule as normal (non-revival)
+practice, with no revival-specific override. (Through Pass 34,
+`piece.revival.performanceTempo` — a piece-wide tempo collected at revival
+entry — won over even a chunk's own explicit `targetBPM`; reverted in Pass
+35, see [Decisions.md](Decisions.md#revival). A piece saved before Pass 35
+may still carry that field, but nothing reads it.)
 
 `computeTempoLadder(targetBPM, startFraction, steps)` returns a small
 (default 5-step) array of BPM values from `targetBPM * startFraction`
 (default 0.6, adjustable via `piece.revival.tempoLadderStartFraction`) up to
 `targetBPM` itself, inclusive. Rounding can collapse steps together when
 `startFraction` is close to 1; the result is deduplicated rather than
-showing a misleading run of repeated values.
+showing a misleading run of repeated values. `tempoLadderStartFraction` is
+collected once at revival entry (`RevivalEntryModal`) and stays editable
+afterward from a "Revival settings" panel in `RevivalTab` — see
+[Decisions.md](Decisions.md#revival).
 
 `computeRevivalPlan(piece, chunkSet, currentDay)` builds the ordered
 day-by-day revival plan: practice chunks and transitions (**not** combos —

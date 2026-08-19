@@ -60,6 +60,40 @@ describe("getSuggestedStartingBPM — calibration grid", () => {
   });
 });
 
+// The calibration curve was hand-fit at targets >= 100 BPM only, and below
+// a difficulty-dependent threshold (~70 BPM for easy, ~50 for medium) its
+// unclamped output rises above target itself — e.g. easy @ 65 BPM target
+// raw-computes to ~66.8, rounding to 67, a nonsensical "start faster than
+// your goal tempo" recommendation. This floor guarantees the suggestion
+// always stays at least MIN_STARTING_TEMPO_BUFFER (15) below target.
+describe("getSuggestedStartingBPM — stays below target at low target BPMs", () => {
+  test("easy chunk at 65 BPM target (the reported case) suggests 50, not 67", () => {
+    const piece = makePiece({ targetBPM: 65 });
+    const chunk = makeChunk({ difficultyLabel: "easy" });
+    assert.equal(getSuggestedStartingBPM(piece, chunk), 50);
+  });
+
+  test("medium chunk at 65 BPM target also respects the 15 BPM floor", () => {
+    const piece = makePiece({ targetBPM: 65 });
+    const chunk = makeChunk({ difficultyLabel: "medium" });
+    assert.equal(getSuggestedStartingBPM(piece, chunk), 50);
+  });
+
+  test("suggestion never meets or exceeds target across a range of low targets and difficulties", () => {
+    for (const difficulty of ["easy", "medium", "hard"]) {
+      for (const target of [20, 30, 40, 50, 60, 65, 70, 80, 90]) {
+        const piece = makePiece({ targetBPM: target });
+        const chunk = makeChunk({ difficultyLabel: difficulty });
+        const suggested = getSuggestedStartingBPM(piece, chunk);
+        assert.ok(
+          suggested <= target - 15,
+          `expected ${difficulty} @ ${target} suggestion (${suggested}) to be <= ${target - 15}`
+        );
+      }
+    }
+  });
+});
+
 describe("getSuggestedStartingBPM — target resolution", () => {
   test("prefers a chunk-specific progress.targetBPM over the piece-wide default", () => {
     const piece = makePiece({ targetBPM: 200, progress: { c1: { targetBPM: 100 } } });

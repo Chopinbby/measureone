@@ -2203,6 +2203,48 @@ rather than a new field — and the field's visible label changes from
   confirmed contiguity is free; it did not investigate whether more
   elaborate cross-work ordering rules are needed).
 
+**Decision (user-directed): a chunk's first-encounter card states no BPM at
+all — not the piece's target tempo, not a suggested starting tempo — next
+to its reps requirement. Only reps are stated as a requirement there.**
+
+- **Trigger:** two issues surfaced back-to-back in the same conversation.
+  First, `getSuggestedStartingBPM`'s diminishing-returns curve (see
+  [Algorithms.md](Algorithms.md#starting-suggested-and-demonstrated-tempo))
+  was only calibrated at targets >= 100 BPM and could recommend a tempo
+  *above* a low target (65 BPM target → 67 BPM "suggestion") — fixed with
+  `MIN_STARTING_TEMPO_BUFFER` (15 BPM, `lib/confidence.js`), clamping the
+  suggestion to `min(raw curve, target - 15)`. Second, once that was fixed,
+  the user pointed out the deeper issue: `ChecklistItem` was showing
+  "Target tempo: 65 BPM" and "Suggested starting tempo: 50 BPM" as prose
+  lines sitting right next to "Need 3 clean reps to progress this chunk" —
+  reading as a tempo requirement on the very first attempt, even though
+  `requirementText` already correctly states a reps-only requirement then
+  (`practiceBPM == null`), and `classifySessionOutcome` treats a null
+  `practiceBPM` as already-cleared, so no tempo is actually enforced yet.
+  The suggestion undermines its own disclaimer ("slower is fine") by being
+  stated as a specific number in the same breath as a stated requirement.
+- **Fix, scoped precisely to first encounter.** Both lines in
+  `ChecklistItem` (`src/components/tabs/today/ChecklistItem.jsx`) are now
+  gated on `!isFirstEncounter` — the same flag (`practiceBPM == null &&
+  entry.sessions.length === 0`) already used elsewhere in this component,
+  not a new concept. Once a real session is logged (or, for the Target
+  tempo line, even after just a skipped/provisional Interleaved-mode
+  entry — `isFirstEncounter` is `false` the moment `sessions.length > 0`,
+  stricter than the old `practiceBPM == null` check that line alone used),
+  both lines can show again exactly as before.
+- **The "BPM achieved" input's placeholder deliberately keeps showing
+  `suggestedStartingBPM`.** Ghost text in an empty input is a different UX
+  register from an assertive sentence — it doesn't read as a stated rule,
+  and removing it entirely would leave a first-time learner with zero
+  starting-point guidance. Only the prose lines were removed.
+- **`getSuggestedStartingBPM`'s return value is untouched and still fully
+  wired through** — `handleLogSession`'s persisted `suggestedStartingBPM`,
+  `needsRelearning`'s rule 4, and the placeholder above all still consume
+  it; only its *first-encounter visible sentence* is gone. `InterleavePanel`
+  needed no change: by construction (chunks there have already graduated
+  past Stabilizing) `isFirstEncounter` is never true in that surface, and
+  it never rendered either line to begin with.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as

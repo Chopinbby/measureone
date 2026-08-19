@@ -59,6 +59,14 @@ const SUGGESTED_STARTING_TEMPO_CURVE = {
   hard: { base: 45, k: 0.12 },
 };
 
+// The curve above was calibrated at targets >= 100 BPM (see table above)
+// and isn't guaranteed to stay below target as target drops — below a
+// difficulty-dependent threshold (~70 BPM for easy, ~50 for medium) `base`
+// dominates and the raw curve output can equal or exceed target itself.
+// This floor guarantees a suggestion is always at least this far under
+// target, regardless of difficulty or how low target is.
+const MIN_STARTING_TEMPO_BUFFER = 15;
+
 // Concept 1 (see block comment above): a system-recommended starting tempo
 // from target BPM + difficulty only. Guidance only — see getDefaultTargetBPM
 // for the target-resolution rule this reuses. Without a target BPM there's
@@ -69,7 +77,8 @@ export function getSuggestedStartingBPM(piece, chunk) {
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   if (!targetBPM) return null;
   const curve = SUGGESTED_STARTING_TEMPO_CURVE[chunk.difficultyLabel] || SUGGESTED_STARTING_TEMPO_CURVE.medium;
-  return Math.round(curve.base * Math.pow(targetBPM / 100, curve.k));
+  const raw = curve.base * Math.pow(targetBPM / 100, curve.k);
+  return Math.round(Math.min(raw, targetBPM - MIN_STARTING_TEMPO_BUFFER));
 }
 
 // Chunk kinds representing a continuity run-through — a whole section, or

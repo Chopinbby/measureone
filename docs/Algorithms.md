@@ -698,17 +698,39 @@ to avoid:
      | 140 | ~80–85 | ~60–70 | ~45–50 |
      | 180 | ~85–90 | ~65–70 | ~45–50 |
      | 240 | ~90–100 | ~65–75 | ~45–55 |
+
+     This calibration only covers targets >= 100 BPM. Below a
+     difficulty-dependent threshold (~70 BPM for easy, ~50 for medium —
+     hard never crosses in practice since its `base` of 45 is already
+     low), the curve's fixed `base` dominates `k`'s sub-linear falloff and
+     the raw formula can equal or exceed target itself — found as a real
+     bug (a 65 BPM easy-chunk target suggesting 67, i.e. "start faster
+     than your goal tempo") once a piece with a target under 100 BPM was
+     actually tried. `MIN_STARTING_TEMPO_BUFFER` (15) clamps the return
+     value to `min(raw, target - 15)`, guaranteeing the suggestion always
+     lands meaningfully under target regardless of how low target is. It
+     only ever lowers the raw curve's output, never raises it, so the
+     >=100 BPM calibration table above is unaffected (every value there
+     already clears a 15 BPM gap on its own).
    - Modeled on, but distinct from, Revival's `tempoLadderStartFraction`
      idea (`computeTempoLadder`, `lib/revival.js`): that fraction paces a
      *return* to an already-learned piece; this one paces *first-time*
      ladder entry.
-   - Surfaced in `ChecklistItem` two ways, both gated on **first
-     encounter only** (no session ever logged for the chunk, i.e.
-     `practiceBPM == null` and `entry.sessions` is empty) — every later
-     session shows neither: as the "BPM achieved" field's placeholder,
-     and as a one-line note ("Suggested starting tempo: N BPM — choose
-     whatever tempo lets you play accurately and comfortably, slower is
-     fine") that disappears the moment a real session exists.
+   - Surfaced in `ChecklistItem` as the "BPM achieved" field's placeholder
+     only, gated on **first encounter** (no session ever logged for the
+     chunk, i.e. `practiceBPM == null` and `entry.sessions` is empty) —
+     every later session falls through to `practiceBPM` as the placeholder
+     instead. A dedicated one-line note ("Suggested starting tempo: N
+     BPM…") and the piece's own "Target tempo: N BPM" line used to sit
+     next to the reps requirement on first encounter too, but both were
+     removed: stated as prose right beside "Need N clean reps," they read
+     as a tempo requirement on the very first attempt, when the actual
+     requirement (`requirementText`, same first-encounter check) is
+     explicitly reps-only — `classifySessionOutcome` treats a null
+     `practiceBPM` as already-cleared, so no tempo is enforced yet either.
+     The placeholder alone (ghost text in an empty input, not an assertion
+     in prose) still nudges toward a sane starting point without reading
+     as a rule.
    - As of Pass 11, `ChecklistItem` also resolves this value **unconditionally**
      (every render, not just first encounter) and threads it through
      `sessionInput.suggestedStartingBPM` on every `onLogSession` call — a

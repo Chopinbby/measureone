@@ -264,7 +264,7 @@ export function ChecklistItem({
               }`
             : "not started yet"}
         </p>
-        {practiceBPM == null && targetBPM ? (
+        {!isFirstEncounter && practiceBPM == null && targetBPM ? (
           <p className="tip-line">Target tempo: {targetBPM} BPM</p>
         ) : null}
         {tempoLadder && tempoLadder.length > 0 && (
@@ -313,12 +313,6 @@ export function ChecklistItem({
             />
           </label>
         </div>
-        {isFirstEncounter && suggestedStartingBPM != null && (
-          <p className="tip-line">
-            Suggested starting tempo: {suggestedStartingBPM} BPM — choose whatever tempo lets you play accurately and
-            comfortably, slower is fine.
-          </p>
-        )}
         {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
         {canEditNote && (
           noteOpen ? (

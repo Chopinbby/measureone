@@ -198,19 +198,41 @@ export function computeTimeline(piece, chunkSet) {
   // on the same handful of later days too. Spreading introduction itself
   // out is what actually prevents that pile-up; it's still fully
   // introduced by halfPoint.
+  //
+  // Cumulative-boundary assignment, not a per-day-reset accumulator: each
+  // front day owns an equal proportional slice of totalNewEffort
+  // (boundary[i] = totalNewEffort * (i+1) / numFrontDays), and a chunk goes
+  // to whichever slice it falls into by where it starts (its running total
+  // *before* being added), walked forward with a running total that's
+  // never reset. A reset-per-day accumulator capped at the last front day
+  // (the previous version of this loop) has no way to correct for its own
+  // drift — any chunk that doesn't evenly divide into a day's target just
+  // keeps accumulating, and once dayIdx hits the final front day it can't
+  // advance further, so all of that drift piles onto whatever's left.
+  // Anchoring each day's boundary to the whole remaining total instead of
+  // to however much the previous day happened to absorb is what actually
+  // prevents that pile-up. Using the chunk's *start* rather than its
+  // midpoint for the comparison matters too: the running total is 0 before
+  // the very first chunk, which is always less than a positive boundary,
+  // so day one always gets at least the first chunk regardless of how
+  // large a single chunk's effort is relative to the per-day slice — a
+  // midpoint comparison can push even the first chunk past day one's
+  // boundary and leave it empty, found while testing this fix (a 3-chunk
+  // piece spread across 7 front days left day one with nothing introduced
+  // at all). Order (measure order) is preserved — this only changes which
+  // day a chunk lands on, never the sequence.
   const totalNewEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
-  const perDayNewTarget = totalNewEffort / frontDays.length;
+  const numFrontDays = frontDays.length;
   let dayIdx = 0;
-  let acc = 0;
+  let runningEffort = 0;
   practiceChunks.forEach((chunk) => {
-    if (acc + chunk.effort > perDayNewTarget && acc > 0 && dayIdx < frontDays.length - 1) {
+    while (dayIdx < numFrontDays - 1 && runningEffort >= (totalNewEffort * (dayIdx + 1)) / numFrontDays) {
       dayIdx++;
-      acc = 0;
     }
     const day = frontDays[dayIdx];
     days[day - 1].newChunkIds.push(chunk.id);
     introducedDay[chunk.id] = day;
-    acc += chunk.effort;
+    runningEffort += chunk.effort;
   });
   const sectionsEndDay = halfPoint;
 

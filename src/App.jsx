@@ -1862,6 +1862,13 @@ const CSS = `
 .schedule-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
 .schedule-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; max-width: 480px; }
 
+/* Non-blocking heads-up, not an alarm — amber rather than schedule-banner's
+   brick red, since this never requires action (proceeding as-is is always
+   fine, see ScheduleFields.jsx). */
+.plan-fit-banner { background: rgba(185,138,62,0.1); border: 1px solid rgba(185,138,62,0.35); border-radius: 14px; padding: 14px 18px; margin: 4px 0 18px; }
+.plan-fit-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14.5px; margin: 0 0 4px; color: var(--brass-deep); }
+.plan-fit-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; line-height: 1.5; }
+
 .storage-error-banner { display: flex; align-items: center; gap: 14px; background: rgba(181,71,58,0.1); border-bottom: 1px solid rgba(181,71,58,0.35); color: var(--brick); padding: 12px 24px; }
 .storage-error-banner svg { flex-shrink: 0; }
 .storage-error-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brick); }

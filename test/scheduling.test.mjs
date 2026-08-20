@@ -34,6 +34,51 @@ function basePiece(overrides) {
   };
 }
 
+describe("[regression] new-chunk introduction spreads overflow evenly, not onto the last front day", () => {
+  // Reproduces the bug directly: 10 equal-effort chunks (40 measures / 4)
+  // across 8 front days doesn't divide evenly (10/8 = 1.25 per day). The
+  // old reset-per-day accumulator, capped at the last front day once
+  // dayIdx got there, dumped every bit of that drift onto day 8 alone (7
+  // days with 1 chunk, day 8 with 3) — confirmed by temporarily reverting
+  // the fix and re-running this test to see it fail (day 8 got 3, this
+  // assertion's bound is 2). The cumulative-boundary fix instead lets any
+  // front day absorb one extra chunk, never concentrating all the drift on
+  // one day.
+  test("no single front day absorbs more than one extra chunk over the even share", () => {
+    const piece = basePiece({
+      totalMeasures: 40,
+      measureDifficulty: Array(40).fill(1),
+      customChunkSize: 4,
+      daysToLearn: 16,
+    });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.equal(chunkSet.practiceChunks.length, 10);
+    assert.equal(timeline.halfPoint, 8, "test setup sanity check: 8 front days for 10 chunks");
+
+    const counts = timeline.days.slice(0, 8).map((d) => d.newChunkIds.length);
+    const evenShare = Math.ceil(10 / 8); // 2
+    counts.forEach((count, i) => {
+      assert.ok(count <= evenShare, `day ${i + 1} got ${count} new chunks, more than the even share of ${evenShare} — overflow piled up instead of spreading`);
+    });
+    assert.equal(counts.reduce((s, c) => s + c, 0), 10, "every chunk is still introduced exactly once");
+  });
+
+  test("the very first front day still gets at least one chunk, even when a single chunk's effort is large relative to the per-day slice", () => {
+    // 3 chunks spread across 7 front days (12 measures / 4, 14-day plan) —
+    // few chunks, many days. A midpoint-based version of the boundary fix
+    // (an earlier draft of it) could push even the first chunk past day
+    // one's boundary and leave day one with nothing introduced at all;
+    // comparing each chunk's *starting* cumulative effort instead
+    // guarantees day one always gets the first chunk. Confirmed by
+    // temporarily reverting to the midpoint comparison to see this fail.
+    const piece = basePiece({ daysToLearn: 14 });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.ok(timeline.days[0].newChunkIds.length > 0, "day one has no new chunks introduced despite material and days being available");
+  });
+});
+
 describe("Tier 1 — near-mandatory first-touch review", () => {
   test("under a heavy-introduction collision, every chunk still gets a Tier 1 review placed somewhere, and introduction is untouched", () => {
     // 10 practice chunks + 9 transitions (19 total) crammed into a 5-day
@@ -331,15 +376,27 @@ describe("getEffectiveTimeline — Tier 2 date math must re-anchor to the resche
     assert.equal(effective.days.length, 30);
 
     // asOfDay(15)'s calendar date is 2026-01-15 (day 15 of a plan starting
-    // 2026-01-01); nextDueDate 2026-01-20 is 6 days after that, so it
-    // should land on original-plan day 20 (asOfDay + (6 - 1)) — never
-    // dropped, and never resolved against the ORIGINAL day-1 anchor
-    // (which would try to place it at day 20 relative to Jan 1, an
-    // entirely different, coincidentally-plausible-looking day number this
-    // assertion would not by itself catch — the real guard against that is
-    // the second half of this test).
-    const day20 = effective.days[19];
-    assert.ok(day20.reviewChunkIds.includes("c1"), "c1's Tier 2 review lands on the day 2026-01-20 actually maps to post-reschedule");
+    // 2026-01-01); nextDueDate 2026-01-20 is 6 days after that, so its raw
+    // due day (before any smoothing) is original-plan day 20 (asOfDay +
+    // (6 - 1)) — never dropped, and never resolved against the ORIGINAL
+    // day-1 anchor (which would try to place it at day 20 relative to
+    // Jan 1, an entirely different, coincidentally-plausible-looking day
+    // number this assertion would not by itself catch — the real guard
+    // against that is the second half of this test).
+    //
+    // Asserting "found, on or after day 20" rather than exactly day 20:
+    // the review-load smoothing pass (rule 5, forward-only — never
+    // earlier than due) can legitimately nudge it a little later still to
+    // relieve an overloaded day, and which days end up overloaded depends
+    // on the introduction-day distribution, not on this date-anchoring fix
+    // — an exact-day assertion would incidentally couple this test to that
+    // distribution instead of the thing it's actually guarding.
+    let foundDay = null;
+    effective.days.forEach((d, i) => {
+      if (d.type !== "consolidation" && d.reviewChunkIds.includes("c1")) foundDay = i + 1;
+    });
+    assert.ok(foundDay !== null, "c1's Tier 2 review must land somewhere in the rescheduled window");
+    assert.ok(foundDay >= 20, `c1 landed on day ${foundDay}, before its raw due day 20 relative to the reschedule anchor — smoothing must never drift a review earlier than due`);
 
     // Prove the fix is load-bearing, not coincidental: recompute the same
     // remaining-chunk sub-timeline the OLD (unfixed) code would have,

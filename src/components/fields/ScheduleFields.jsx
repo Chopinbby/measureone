@@ -8,6 +8,7 @@ import {
   MIN_PRACTICE_DAYS_PER_WEEK,
   MAX_PRACTICE_DAYS_PER_WEEK,
   MAX_RECOMMENDED_MINUTES_PER_DAY,
+  LONG_PLAN_DAYS_MINUTES_MODE,
 } from "../../lib/constants";
 import { todayISODate, addDaysISO, daysBetweenInclusive, clamp, formatMinutes } from "../../lib/utils";
 
@@ -54,8 +55,23 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.scheduleMode, startDate, draft.targetDate, draft.daysToLearn, draft.minutesPerDay, practiceDaysPerWeek, totalMinutesNeeded, chunkSet.all.length]);
 
+  // Same underlying condition in both modes — this piece has more material
+  // than fits comfortably — surfaced differently per mode since "fits
+  // comfortably" means something different depending on which quantity the
+  // user actually fixed. "days" mode: minutesPerDay is derived to exactly
+  // fit the fixed date, so overshooting a reasonable pace is the signal
+  // (reuses the same threshold the inline pace warning below already
+  // used — not a separate check). "minutes" mode: minutesPerDay is the
+  // user's own fixed input, daysToLearn is what stretches to fit it, so
+  // there's no pace to overshoot — an unusually long resulting plan is the
+  // analogous signal instead.
   const overloaded = draft.scheduleMode === "days" && draft.minutesPerDay > MAX_RECOMMENDED_MINUTES_PER_DAY;
+  const longPlan = draft.scheduleMode === "minutes" && (draft.daysToLearn || 0) > LONG_PLAN_DAYS_MINUTES_MODE;
   const estFinishDate = addDaysISO(startDate, Math.max(0, (draft.daysToLearn || 1) - 1));
+  const estFinishLabel = new Date(`${estFinishDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const targetDateLabel = draft.targetDate
+    ? new Date(`${draft.targetDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : null;
 
   return (
     <>
@@ -84,6 +100,33 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
         </div>
       </div>
 
+      {(overloaded || longPlan) && (
+        <div className="plan-fit-banner">
+          {draft.scheduleMode === "days" ? (
+            <>
+              <p className="plan-fit-banner-title">This plan will require spending over 2 hours/day on this piece</p>
+              <p className="plan-fit-banner-sub">
+                At this pace, you will need to practice this piece approximately{" "}
+                <strong className="mono">{formatMinutes(draft.minutesPerDay)}</strong>/day to learn it by{" "}
+                {targetDateLabel || "your target date"}. To lighten the daily load, set the date farther out
+                {practiceDaysPerWeek < 7 ? " or practice more days per week" : ""}. Otherwise… get ready to lock
+                in 🕶️
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="plan-fit-banner-title">This plan will take over 3 months to complete</p>
+              <p className="plan-fit-banner-sub">
+                At <strong className="mono">{formatMinutes(draft.minutesPerDay)}</strong>/day, this piece will
+                take about <strong className="mono">{draft.daysToLearn}</strong> days to learn — projected to
+                cover the whole piece around <strong className="mono">{estFinishLabel}</strong>. If you want to
+                have it down sooner, increase your daily practice estimate.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       {draft.scheduleMode === "days" ? (
         <>
           <label className="field">
@@ -98,13 +141,6 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
           <p className="derived-stat">
             At least <strong className="mono">{formatMinutes(draft.minutesPerDay)}</strong>/day needed at this pace
           </p>
-          {overloaded && (
-            <p className="wizard-hint" style={{ color: "var(--brick)" }}>
-              You'll need to spend at least 2 hours per day on this piece at your current pace. Set
-              the date farther out or practice more days per week to lighten your daily practice
-              load.
-            </p>
-          )}
         </>
       ) : (
         <>
@@ -114,7 +150,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
           </label>
           <p className="derived-stat">
             At least <strong className="mono">{draft.daysToLearn}</strong> days needed at this pace —
-            around <strong className="mono">{new Date(`${estFinishDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</strong>
+            around <strong className="mono">{estFinishLabel}</strong>
           </p>
         </>
       )}

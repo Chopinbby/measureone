@@ -10,7 +10,7 @@ import {
   Settings as SettingsIcon,
   Plus,
   ChevronDown,
-  ChevronUp,
+  GripVertical,
   Pencil,
   RefreshCw,
   Upload,
@@ -88,6 +88,15 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // Native HTML5 drag-and-drop state for reordering the piece switcher —
+  // indices into pieceGroups (below), not piece ids, since a drag always
+  // targets a whole row's position. draggedGroupIndex is set from the drag
+  // handle's onDragStart; dragOverGroupIndex tracks whichever row is
+  // currently the drop target, purely for the hover indicator, and is
+  // read-but-not-required by the actual reorder (the drop handler gets its
+  // own index from the row it fired on).
+  const [draggedGroupIndex, setDraggedGroupIndex] = useState(null);
+  const [dragOverGroupIndex, setDragOverGroupIndex] = useState(null);
   const [settingsEditing, setSettingsEditing] = useState(false);
   const [editDraft, setEditDraftState] = useState(null);
   const [dayOverride, setDayOverride] = useState(null);
@@ -1278,17 +1287,18 @@ export default function App() {
   const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
 
   // Reorders whole switcher rows (a standalone piece, or an entire
-  // multi-movement work as one block) by swapping two adjacent groups and
-  // re-ranking every piece to its new flattened position. Movement order
-  // *within* a work is untouched — that's still governed by createdAt via
-  // groupPiecesByWork/partsOfWork (lib/works.js), deliberately left alone
-  // per Pass 32a's build order (works already stay contiguous in the
-  // switcher for free, without any special-case logic here).
-  const moveGroup = (groupIndex, direction) => {
-    const targetIndex = groupIndex + direction;
-    if (targetIndex < 0 || targetIndex >= pieceGroups.length) return;
+  // multi-movement work as one block) by moving the dragged row to the
+  // dropped-on row's position and re-ranking every piece to the new
+  // flattened order. Movement order *within* a work is untouched — that's
+  // still governed by createdAt via groupPiecesByWork/partsOfWork
+  // (lib/works.js), deliberately left alone per Pass 32a's build order
+  // (works already stay contiguous in the switcher for free, without any
+  // special-case logic here).
+  const moveGroupTo = (fromIndex, toIndex) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= pieceGroups.length || toIndex >= pieceGroups.length) return;
     const reordered = [...pieceGroups];
-    [reordered[groupIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[groupIndex]];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
     reordered
       .flatMap((g) => g.pieces)
       .forEach((p, i) => {
@@ -1396,37 +1406,61 @@ export default function App() {
               {switcherOpen && (
                 <div className="piece-switcher-list">
                   {pieceGroups.map((g, gi) => (
-                    <div key={g.workId || g.pieces[0].id} className={g.workId ? "piece-switcher-work" : ""}>
+                    <div
+                      key={g.workId || g.pieces[0].id}
+                      className={[
+                        g.workId ? "piece-switcher-work" : "",
+                        draggedGroupIndex === gi ? "piece-switcher-dragging" : "",
+                        dragOverGroupIndex === gi && draggedGroupIndex !== null && draggedGroupIndex !== gi ? "piece-switcher-drag-over" : "",
+                      ].filter(Boolean).join(" ")}
+                      onDragOver={(e) => {
+                        if (draggedGroupIndex === null) return;
+                        e.preventDefault();
+                        if (dragOverGroupIndex !== gi) setDragOverGroupIndex(gi);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (draggedGroupIndex !== null) moveGroupTo(draggedGroupIndex, gi);
+                        setDraggedGroupIndex(null);
+                        setDragOverGroupIndex(null);
+                      }}
+                    >
                       <div className="piece-switcher-group-head">
-                        {g.workId && <div className="piece-switcher-work-name">{g.workName}</div>}
-                        <div className="piece-switcher-reorder">
+                        <span
+                          className="piece-switcher-drag-handle"
+                          draggable
+                          onDragStart={(e) => {
+                            setDraggedGroupIndex(gi);
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("text/plain", String(gi));
+                          }}
+                          onDragEnd={() => {
+                            setDraggedGroupIndex(null);
+                            setDragOverGroupIndex(null);
+                          }}
+                          aria-label={`Drag to reorder ${g.workName || g.pieces[0].name || "piece"}`}
+                        >
+                          <GripVertical size={14} />
+                        </span>
+                        {g.workId ? (
+                          <div className="piece-switcher-work-name">{g.workName}</div>
+                        ) : (
                           <button
-                            type="button"
-                            className="piece-switcher-reorder-btn"
-                            aria-label={`Move ${g.workName || g.pieces[0].name || "piece"} up in the list`}
-                            disabled={gi === 0}
-                            onClick={(e) => { e.stopPropagation(); moveGroup(gi, -1); }}
+                            className={`piece-switcher-item ${g.pieces[0].id === activePieceId ? "active" : ""}`}
+                            onClick={() => switchToPiece(g.pieces[0].id)}
                           >
-                            <ChevronUp size={12} />
+                            {g.pieces[0].name || "Untitled piece"}
+                            <PieceStatusBadge status={g.pieces[0].status} />
                           </button>
-                          <button
-                            type="button"
-                            className="piece-switcher-reorder-btn"
-                            aria-label={`Move ${g.workName || g.pieces[0].name || "piece"} down in the list`}
-                            disabled={gi === pieceGroups.length - 1}
-                            onClick={(e) => { e.stopPropagation(); moveGroup(gi, 1); }}
-                          >
-                            <ChevronDown size={12} />
-                          </button>
-                        </div>
+                        )}
                       </div>
-                      {g.pieces.map((p) => (
+                      {g.workId && g.pieces.map((p) => (
                         <button
                           key={p.id}
                           className={`piece-switcher-item ${p.id === activePieceId ? "active" : ""}`}
                           onClick={() => switchToPiece(p.id)}
                         >
-                          {p.name || (g.workId ? "Untitled movement" : "Untitled piece")}
+                          {p.name || "Untitled movement"}
                           <PieceStatusBadge status={p.status} />
                         </button>
                       ))}
@@ -1701,13 +1735,15 @@ const CSS = `
 .piece-switcher-add { display: flex; align-items: center; gap: 6px; text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--brass-deep); font-weight: 600; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
 .piece-switcher-add:hover { background: rgba(185,138,62,0.08); }
 .piece-switcher-work { display: flex; flex-direction: column; gap: 2px; }
-.piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 6px 0 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 6px 0 1px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-switcher-work .piece-switcher-item { margin-left: 8px; }
-.piece-switcher-group-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 10px; }
-.piece-switcher-reorder { display: flex; gap: 2px; flex-shrink: 0; }
-.piece-switcher-reorder-btn { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--ink-faint); }
-.piece-switcher-reorder-btn:hover:not(:disabled) { background: rgba(185,138,62,0.12); color: var(--ink-soft); }
-.piece-switcher-reorder-btn:disabled { opacity: 0.3; cursor: default; }
+.piece-switcher-group-head { display: flex; align-items: center; gap: 2px; }
+.piece-switcher-group-head .piece-switcher-item { flex: 1; min-width: 0; }
+.piece-switcher-drag-handle { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; margin-left: 2px; color: var(--ink-faint); cursor: grab; border-radius: 4px; }
+.piece-switcher-drag-handle:hover { background: rgba(185,138,62,0.12); color: var(--ink-soft); }
+.piece-switcher-drag-handle:active { cursor: grabbing; }
+.piece-switcher-dragging { opacity: 0.4; }
+.piece-switcher-drag-over { box-shadow: inset 0 2px 0 var(--brass); }
 .part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }

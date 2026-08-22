@@ -85,13 +85,43 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
 
 1. **The entire piece is introduced within the first half of the learning
    days** (`halfPoint`). New-chunk introduction is spread **evenly by total
-   effort** across that first-half window (`totalNewEffort / halfPoint` per
-   day), not greedily packed to `minutesPerDay` and moved on. Greedy
-   packing tends to finish early and cram most of the piece into just the
-   first few days, which then piles up all of *those* chunks' transitions
-   and spaced reviews onto the same handful of later days too — spreading
-   the introduction itself is what actually prevents that pile-up, while
-   still guaranteeing full coverage by `halfPoint`.
+   effort** across that first-half window, not greedily packed to
+   `minutesPerDay` and moved on. Greedy packing tends to finish early and
+   cram most of the piece into just the first few days, which then piles up
+   all of *those* chunks' transitions and spaced reviews onto the same
+   handful of later days too — spreading the introduction itself is what
+   actually prevents that pile-up, while still guaranteeing full coverage
+   by `halfPoint`.
+   - **Cumulative-boundary assignment, not a per-day-reset accumulator.**
+     Each front day owns an equal proportional slice of the piece's total
+     new-chunk effort (`totalNewEffort * (dayIndex + 1) / numFrontDays`),
+     and a chunk is assigned to whichever slice it falls into by where it
+     *starts* — its running total *before* being added, walked forward with
+     a running total that's never reset per day. The chunk's start (not its
+     midpoint) is what's compared against each boundary: the running total
+     is 0 before the very first chunk, which is always less than a positive
+     boundary, so day one always gets at least the first chunk regardless
+     of how large a single chunk's effort is relative to the per-day slice.
+   - **Past bug, fixed:** an earlier version reset an accumulator to 0 at
+     each day advance and capped `dayIdx` at the last front day once it got
+     there. That gave it no way to correct for its own drift — any chunk
+     that didn't evenly divide into a day's target just kept accumulating,
+     and once the last front day was reached it couldn't advance further,
+     so *all* remaining drift piled onto that one day alone (observed
+     concretely: 10 equal-effort chunks across 8 front days landed 7 days
+     with 1 chunk each and the 8th with 3). Anchoring each day's boundary to
+     the whole remaining total, rather than to however much the previous
+     day happened to absorb, is what actually prevents that pile-up. A
+     midpoint-based first draft of this fix traded that bug for a different
+     one — a single large chunk's midpoint could exceed day one's boundary
+     and leave day one with nothing introduced at all — which is why the
+     comparison uses each chunk's start, not its midpoint. **If overflow
+     starts piling onto the last front day again, or day one goes empty
+     despite there being material and days available, one of these two
+     regressions is back.** Regression tests for both:
+     `test/scheduling.test.mjs`, describe block "new-chunk introduction
+     spreads overflow evenly, not onto the last front day". See
+     [Decisions.md](Decisions.md#scheduling).
 2. **Transitions are scheduled as soon as both flanking chunks have been
    introduced** — not batched into the back half. This was a bug fixed
    during development: an early version delayed transitions unnecessarily

@@ -342,6 +342,47 @@ warning — different concrete actions depending on `scheduleMode`.**
   it to change the schedule on its own, without also touching
   `daysToLearn`, will silently do nothing.
 
+**Decision: fix `computeTimeline`'s new-chunk introduction spread from a
+per-day-reset accumulator to a cumulative-boundary assignment.**
+
+- **Why:** User-reported: when a piece's material doesn't divide evenly
+  across the front-half window, the overflow was piling onto the last
+  day(s) instead of spreading out. Root cause: the accumulator reset to 0
+  at every day advance and was capped at the last front day, so once
+  `dayIdx` reached it there was nowhere else for the remainder to go — every
+  chunk from that point on landed on that one day. Confirmed concretely, not
+  just reasoned about: 10 equal-effort chunks across 8 front days landed 7
+  days with 1 chunk each and the 8th with 3.
+- **Approach chosen:** each front day now owns an equal proportional slice
+  of `totalNewEffort`, and a chunk is assigned to whichever slice it falls
+  into by comparing its running total *before* being added against those
+  slice boundaries — walked forward with a running total that's never reset
+  per day, so drift corrects against the whole remaining total instead of
+  compounding onto whatever day happens to be last.
+- **A first draft of this fix traded one bug for another:** comparing each
+  chunk's *midpoint* against the boundaries (rather than its start) fixed
+  the last-day pile-up but could push even the very first chunk past day
+  one's boundary, leaving day one with nothing introduced at all — found
+  while testing the fix, not assumed. Comparing each chunk's *start*
+  instead guarantees day one always gets at least the first chunk: the
+  running total is 0 before it, and 0 is always less than a positive
+  boundary.
+- **Consequence:** a placement-only change inside `computeTimeline`, a pure
+  derivation off `piece` — nothing persisted changed. Any existing piece
+  with chunks not yet introduced will get different (more even)
+  introduction-day placements the next time its schedule recomputes — the
+  same category of consequence as the `autoChunkSize` flattening decision
+  above: a real change to derived schedule structure for already-in-progress
+  pieces, not just new-piece behavior. Not verified against a real piece
+  with partial practice history reloaded under the new placement — only
+  reasoned through (progress/sessions are untouched by this change) and
+  covered indirectly by the full existing scheduling test suite.
+- **Verified:** two new `lib/scheduling.js` tests (CLAUDE.md: lib-level
+  regression coverage only, no component-layer harness) — one reproducing
+  the last-day pile-up directly, one guarding the start-vs-midpoint
+  distinction — both confirmed to actually fail against the pre-fix code.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,

@@ -16,6 +16,16 @@ export const MIN_PRACTICE_DAYS_PER_WEEK = 3;
 export const MAX_PRACTICE_DAYS_PER_WEEK = 7;
 export const MAX_RECOMMENDED_MINUTES_PER_DAY = 120; // warn in the wizard past this pace
 
+// "minutes" scheduleMode has no fixed date to warn about overshooting — the
+// plan just stretches to fit (see reconcileMinutesPerDaySchedule,
+// lib/scheduling.js). This is the threshold past which the wizard's
+// plan-fit banner tells the user their plan grew unusually long, purely
+// informational (never blocking) rather than a "too much" warning the way
+// MAX_RECOMMENDED_MINUTES_PER_DAY is for "days" mode. Product call, not
+// derived from any formula — see docs/Research.md's inventory of hand-
+// picked constants.
+export const LONG_PLAN_DAYS_MINUTES_MODE = 90;
+
 export const DIFFICULTY_META = {
   easy: { label: "Easy", color: "var(--teal)" },
   medium: { label: "Medium", color: "var(--brass)" },

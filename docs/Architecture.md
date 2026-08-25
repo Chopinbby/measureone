@@ -267,6 +267,16 @@ never stored in `piece` itself. Schedule-related state that must persist
 (like the reschedule marker) goes on `piece` as input data, and the
 derivation recomputes from it on every render where `piece` changed.
 
+- **Pass 39**: one more `useEffect`, scoped to the active piece only —
+  watches `[loaded, piece, chunkSet, timeline, settingsEditing]` and, for a
+  `scheduleMode: "minutes"` piece past its own day count but not yet
+  learned, calls `updatePiece` with `computeMinutesModeAutoExtend`'s patch
+  (`lib/scheduling.js`). Self-limiting by construction: applying the patch
+  always grows `daysToLearn` past the piece's real elapsed day, so the next
+  run of the same effect finds nothing left to do. Skipped while
+  `settingsEditing` is true, so it can't write underneath an in-progress
+  Settings edit. See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
+
 ## Design tokens
 
 CSS custom properties on `.measureone-app`: `--paper`, `--paper-card`,

@@ -120,6 +120,70 @@ harness for rendering components. If logic that needs protecting is sitting
 in a component, the answer is to move it into `lib/`, not to skip the test.
 `lib/history.js` exists for exactly that reason.
 
+**A test's own hand-computed expected value needs the same rigor as the
+code it's testing — prefer deriving it from the same primitives, not a
+second hand-typed formula.** Worked example (Pass 39 follow-up): a new
+`planRescheduleForPieces` test asserted `plan.extend.daysToLearn` against
+`20 - 1 + requiredDays`, hand-computing the piece's elapsed-day count from
+the test's own `startedDaysAgo(20)` setup call. The real value was
+`elapsedDay(piece) - 1 + requiredDays` — off by one, because
+`daysBetweenInclusive` counts the start date itself as day 1, which the
+hand-typed `20` silently didn't account for. Caught immediately by running
+the suite (`22 !== 21`), not by inspection — fixed by importing `elapsedDay`
+and computing the expected value the same way the code under test does,
+removing the second, drift-prone calculation entirely rather than just
+correcting its arithmetic once.
+
+## Manually testing a stateful fix against data your own earlier testing already mutated can hide whether it works
+
+When verifying a fix that depends on a piece of data's *history* (not just
+its current values — a reschedule marker, a ladder stage, anything written
+by an earlier action rather than freshly computed), don't reuse test data
+you already exercised with different — especially pre-fix — code earlier in
+the same session. The data can be left in a state that produces a
+misleading result for the new test, and it will look identical to a real
+bug in the new code until you trace it back.
+
+Worked example (Pass 39 follow-up, bulk-reschedule-extend fix): verifying
+the new fix against three pieces that real manual testing, earlier in the
+very same session, had already run "Reschedule all" against — using the
+*pre-fix* code — produced an empty result with zero explanation from the
+console. The new fix looked broken. It wasn't: those three pieces had been
+left, by that earlier click, in a state where `computeScheduleStatus`'s
+"is this missed" check could never read true again (see
+[Decisions.md](Decisions.md#open-questions) for the mechanism — a real,
+independent bug this testing surfaced, not one the new fix caused).
+Re-running the exact same fix against a freshly seeded piece — never
+touched by any earlier action — confirmed it worked correctly on the first
+try. The lesson isn't "that bug exists" (that's a product finding, logged
+separately); it's the testing discipline: when a fix's behavior depends on
+what a piece has already been through, verify against data with a *known*,
+clean history, not whatever happens to already be sitting in the
+environment from earlier in the session.
+
+## A markdown anchor you compute from a heading is a guess, not a fact — verify it
+
+GitHub-flavored anchors are generated from heading text by a specific,
+easy-to-get-wrong set of rules (lowercase, spaces to hyphens, most
+punctuation stripped). When linking to a heading elsewhere in `docs/`,
+don't hand-derive the anchor from the heading text and trust it — grep the
+target file (or other existing links to the same heading) for the anchor
+string that's actually already in use, and reuse that exact string. The
+failure mode is silent: a wrong anchor doesn't error, the link just resolves
+to nowhere in particular, and nothing in the normal edit-and-move-on flow
+surfaces that.
+
+Worked example (Pass 39): a new cross-reference to Repertoire-Lifecycle.md's
+Stage 3 heading — "Stage 3 — 'Learned' (defined; not yet implemented)" —
+was written as `#stage-3--learned`, a plausible-looking shortened guess.
+The real anchor, already in use by several pre-existing links elsewhere in
+the same docs set, was the full
+`#stage-3--learned-defined-not-yet-implemented` (the heading was
+deliberately left unrenamed specifically *because* changing it would break
+every one of those). Caught by grepping the whole `docs/` tree for the
+literal anchor string before trusting it, which surfaced the mismatch
+against the pre-existing links immediately.
+
 ## An immediate post-action check is not the same as verifying persistence
 
 When manually testing anything that writes to `localStorage`, check it

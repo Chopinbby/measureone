@@ -988,8 +988,7 @@ ago still reports day 10.
 `elapsedDay(piece)` (`lib/utils.js`) is the unclamped form: the same
 day-1-is-`startDate` arithmetic, floored at 1 (so a future `startDate`
 reads as "day 1, not started" rather than a negative day) but with no
-upper bound. Both surfaces call it and compare against
-`timeline.days.length`. **`getCurrentDay` is now derived from it**
+upper bound. **`getCurrentDay` is now derived from it**
 (`clamp(elapsedDay(piece), 1, totalDays)`) rather than repeating the date
 arithmetic, so the clamped and unclamped forms cannot drift apart.
 
@@ -997,6 +996,82 @@ This clamp is also why Master Agenda's pre-Pass-8 `dayNumber >
 timeline.days.length` guard **never fired for today**: a piece past its
 plan silently re-rendered its last scheduled day, every day, indefinitely.
 Fixing the detection fixed that too.
+
+**`elapsedDay(piece) > timeline.days.length` alone is no longer "the plan
+is over" (Pass 39).** Through Pass 38, both surfaces compared `elapsedDay`
+against `timeline.days.length` directly and switched straight to the due
+list the moment it tipped over — purely a calendar question, with no
+regard for whether the plan's actual content had been touched. That
+conflated two different things: a piece whose target date passed with real
+work still outstanding isn't *done*, it's *behind* — and the old check
+couldn't tell the two apart. See
+[Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
+for the definition this now implements, and
+[Decisions.md](Decisions.md#scheduling) for the days-vs-minutes asymmetry
+below.
+
+`isPlanActuallyComplete(piece, chunkSet, timeline)` (`lib/scheduling.js`)
+is the replacement — the one function both `TodayTab`'s `pastPlan` and
+`MasterAgendaTab`'s per-piece day-lookup now call, so the definition can't
+drift between the two surfaces the way two independent inline checks
+eventually would have. Gated on `elapsedDay(piece) > timeline.days.length`
+first (still necessary — the calendar has to have actually elapsed before
+"is it finished" is even a meaningful question), then splits by
+`scheduleMode`:
+
+- **`"days"`** — the deadline was a deliberate choice, so running past it
+  doesn't excuse unfinished work. Every item `computeTimeline` actually
+  scheduled — `chunkSet.all`: practice chunks, transitions, and combos —
+  must have at least one logged session (`doneDays.length > 0`). Section
+  run-throughs and the synthetic `"__consolidation__"` entry are **not**
+  included — `generateAllChunks` never puts either one in `all` to begin
+  with (see [Chunking](#chunking) and
+  [Section run-throughs](#section-run-throughs) above), so this reads as
+  "not part of what a plan-completeness check evaluates" by the same
+  structural fact that already excludes them from Tier 1/Tier 2 review
+  placement. **Flagged, not fully resolved:** whether a piece should also
+  require the final "Full run-through" consolidation day to be logged
+  before counting as complete was left an open product question rather
+  than guessed at — see [Decisions.md](Decisions.md#scheduling).
+- **`"minutes"`** — there was never a deadline to run past in the first
+  place, so "finished" is Stage 3's real definition instead:
+  `isPieceLearned(piece, chunkSet)` (`lib/ladder.js`) — every practice
+  chunk's ladder card at Holding. `isPieceLearned` reads only
+  `chunkSet.practiceChunks`, matching Stage 3's definition as stated in
+  Repertoire-Lifecycle.md (transitions/combos ride the same ladder
+  mechanics but were never part of what "learned" means).
+
+**`computeMinutesModeAutoExtend(piece, chunkSet, timeline)`
+(`lib/scheduling.js`)** is what keeps a `"minutes"`-mode piece from ever
+needing the days-mode reschedule prompt in the first place: once
+`elapsedDay(piece) > timeline.days.length` and `isPieceLearned` is still
+false, it returns a `{ daysToLearn, rescheduleMarker }` patch that grows
+the plan by `elapsedDay(piece) + 14` days (14 is arbitrary runway, matching
+Holding's own default `startIntervalDays` rather than being a bare
+number — sized off `elapsedDay`, not the old `daysToLearn`, so a piece left
+unopened far longer than one step still catches up in a single extension).
+`App.jsx` applies this from a `useEffect` scoped to the active piece,
+mirroring `handleReschedule`'s own minutes-mode branch but self-triggered
+instead of button-triggered — see [Decisions.md](Decisions.md#scheduling).
+
+This reuses `reconcileMinutesPerDaySchedule`'s existing
+`rescheduleMarker`-gated floor (above) to make the extension stick across
+reload, with one deliberate difference from how `handleReschedule` itself
+builds a marker: **the marker's `asOfDay` is pinned to the *new* final day,
+not the current one.** By the time this auto-extend fires at all,
+`computeTimeline`'s own halfPoint rule has normally long since finished
+introducing every chunk, so `remainingChunkIds` (chunks with zero sessions)
+is typically empty — and `getEffectiveTimeline` gives a chunk no presence
+at all in a re-packed sub-plan unless it's named in `remainingChunkOrder`.
+Anchoring `asOfDay` at the *old* final day with an empty
+`remainingChunkOrder` would blank Tier 1/2 review placement for the entire
+newly-extended region; anchoring it at the *new* final day instead means
+only that single trailing day goes unplaced, and everything else keeps the
+full, real placement `computeTimeline` produces against the larger
+`daysToLearn`. Verified live in the browser, not just reasoned about: a
+seeded minutes-mode piece with every chunk touched but still in
+Settling/Stabilizing correctly kept showing real, due Tier 2 reviews deep
+into the auto-extended region rather than an empty day.
 
 **All day counting goes through `daysBetweenInclusive`** — `elapsedDay`
 calls it rather than doing its own arithmetic. This is load-bearing, not
@@ -1137,32 +1212,54 @@ reschedule below can reuse the exact same formula instead of a second copy
 drifting out of sync with it.
 
 **When `estimateRescheduleFit` says it doesn't fit, `handleReschedule`
-(single-piece dialog only — bulk "Reschedule all" below is unchanged)
-offers a concrete way past it, branching on `piece.scheduleMode`:**
+offers a concrete way past it, branching on `piece.scheduleMode` and, as of
+Pass 39, on whether the piece's own plan has already fully elapsed:**
 
-- **`"days"` mode:** two buttons. "Reschedule into the current plan days"
-  is the pre-existing single-button behavior unchanged. "Change target
-  date" computes `newDaysToLearn = currentDay - 1 + requiredDays` (extends
-  the plan exactly far enough that `requiredDays` worth of days become
-  available from today) and a matching `targetDate =
-  addDaysISO(piece.startDate, newDaysToLearn - 1)` — the same formula
-  `ScheduleFields.jsx`'s `estFinishDate` uses to go the other direction.
-  Confirming writes both fields plus `rescheduleMarker` in one
-  `updatePiece` call, so the timeline `getEffectiveTimeline` recomputes off
-  the new, larger `daysToLearn` already has the room the marker's
-  `remainingChunkOrder` needs.
-- **`"minutes"` mode:** a single button — no target date to suggest
-  changing (see [Data-Model.md](Data-Model.md#the-piece-object):
-  `targetDate` is a `"days"`-mode-only input, never itself read by
-  `computeTimeline`) and no "protect the tight deadline" alternative
-  worth offering, since this mode has no deadline. Writes the same
-  `newDaysToLearn` (`daysToLearn` only, `targetDate` left alone) plus
-  `rescheduleMarker`. This write only actually sticks because of the
+- **`"days"` mode, still inside its own plan (just tight):** two buttons,
+  unchanged since Pass 36. "Reschedule into the current plan days" packs
+  the remaining chunks into whatever's left. "Change target date" extends
+  the plan via `computeReschedulePastPlanExtension` (below) and writes both
+  `daysToLearn`/`targetDate` plus `rescheduleMarker` in one `updatePiece`
+  call, so `getEffectiveTimeline`'s recompute already has the room the
+  marker's `remainingChunkOrder` needs.
+- **`"days"` mode, but the piece's target date has *already fully
+  passed*
+  (`elapsedDay(piece) > timeline.days.length`; Pass 39 follow-up):** only
+  one button — "Change target date." "Reschedule into the current plan
+  days" is not offered here: `estimateRescheduleFit`'s `availableDays`
+  floors at 1 in this state, so that option would pack every remaining
+  chunk onto what's effectively a single already-past day. Confirmed as a
+  real, not hypothetical, consequence during manual verification: doing
+  exactly that once is what lets a piece stop being recognized as behind
+  schedule *at all*, ever again (see
+  [Decisions.md](Decisions.md#scheduling) for the mechanism and why it's
+  logged as an open issue rather than also fixed this session). Signaled to
+  the modal via `suggestion.singleChoice = true`, alongside the same
+  `daysToLearn`/`targetDate` the two-button case computes.
+- **`"minutes"` mode:** unchanged since Pass 36 — a single button
+  regardless of how far past the plan the piece is, since this mode never
+  had a target date or a "protect the tight deadline" alternative to begin
+  with. Writes the same computed `daysToLearn` (`targetDate` left alone)
+  plus `rescheduleMarker`. This write only actually sticks because of the
   `reconcileMinutesPerDaySchedule` floor described above — without it, the
   very next load would silently recompute `daysToLearn` back down, since
   that function has no way to know an extension was ever deliberate. See
   [Decisions.md](Decisions.md#scheduling) for the bug this was found to
   cause before the floor existed.
+
+`computeReschedulePastPlanExtension(piece, anchorDay, requiredDays)` (Pass
+39, `lib/scheduling.js`) is the shared formula behind every "push the
+deadline out" button above and the bulk case below: `daysToLearn = anchorDay
+- 1 + requiredDays`, `targetDate = addDaysISO(piece.startDate, daysToLearn -
+1)` for anything other than `"minutes"` mode. Callers pass
+`elapsedDay(piece)` as `anchorDay`, never the clamped `currentDay`/`asOfDay`
+— sizing off the clamped value could leave the freshly-extended plan still
+short of *today* for a piece genuinely far past its plan, needing several
+more reschedule actions to actually converge (confirmed in manual testing:
+a piece 10 days past a 5-day plan took three successive clicks to converge
+before this fix). Extracted into one function specifically so the
+single-piece and bulk paths can't drift apart the way `currentDay` vs.
+`elapsedDay` already had before this fix existed.
 
 **`planRescheduleForPieces(pieces)`** (Pass 21, `lib/scheduling.js`) is the
 multi-piece form of the flow above — Master Agenda's "Reschedule all". For
@@ -1171,12 +1268,33 @@ every piece it builds the same `{ asOfDay, remainingChunkOrder }` marker
 single shared day number, since pieces in a bulk reschedule usually started
 on different dates), and calls `estimateRescheduleFit` per piece so the
 confirmation can name which ones probably won't fit. A piece is included
-only if it's active, not mid-revival, not past the end of its own plan
-(`elapsedDay(piece) <= timeline.days.length`), and actually has both a miss
-and remaining chunks; results are ordered furthest-behind first. One
-malformed piece is skipped (logged, not thrown) rather than failing the
-whole bulk action. `App.jsx`'s `handleConfirmReschedule` applies the
-resulting markers by writing the active piece through the normal
+only if it's active, not mid-revival, its plan isn't *actually* finished yet
+(`isPlanActuallyComplete` — see
+[Detecting that a piece has run past its plan](#detecting-that-a-piece-has-run-past-its-plan);
+**was the raw `elapsedDay(piece) <= timeline.days.length` check through
+Pass 38**, the same calendar-only bug fixed everywhere else this pass), and
+actually has both a miss and remaining chunks; results are ordered
+furthest-behind first. One malformed piece is skipped (logged, not thrown)
+rather than failing the whole bulk action.
+
+**Since Pass 39**, each plan entry also carries an `extend` field —
+`computeReschedulePastPlanExtension(piece, elapsedDay(piece),
+fit.requiredDays)` when the piece is a `"days"`-mode piece whose own plan
+has *already fully elapsed* (`elapsedDay(piece) > timeline.days.length`),
+`null` otherwise. Deliberately excludes `"minutes"`-mode pieces even when
+they'd otherwise qualify — such a piece already has its own separate,
+automatic fix (`computeMinutesModeAutoExtend`, applied the moment it's next
+opened, no button involved), and computing a *second*, differently-sized
+extension for it here would just reintroduce two formulas answering the
+same question. `App.jsx`'s `handleRescheduleAll` uses the presence of
+`extend` to build the confirmation message — pieces getting their target
+date pushed out are named separately from pieces that are merely tight
+(the pre-existing "probably won't fit" warning, now only shown for the
+latter group) — and `handleConfirmReschedule` applies `extend`'s
+`daysToLearn`/`targetDate` alongside the marker, the same way the
+single-piece "Change target date" button always has. `App.jsx`'s
+`handleConfirmReschedule` applies the resulting markers (and, since Pass
+39, extensions) by writing the active piece through the normal
 `updatePiece` path and every other piece directly to `localStorage` (the
 save effect only ever persists the active piece) — see
 [Decisions.md](Decisions.md#scheduling) for why that ordering (save first,

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { FocusPanel } from "./today/FocusPanel";
 import { SectionRunThroughPanel } from "./today/SectionRunThroughPanel";
@@ -11,6 +11,7 @@ import { InterleavePanel } from "./today/InterleavePanel";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival } from "../../lib/revival";
+import { isPlanActuallyComplete, computeScheduleStatus } from "../../lib/scheduling";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, hasPendingProvisionalSession } from "../../lib/utils";
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
@@ -100,6 +101,11 @@ export function TodayTab({
   const day = timeline.days[currentDay - 1];
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const practiceChunks = chunks.filter((c) => c.kind === "section");
+  // TodayTab already receives exactly chunkSet.all (as `chunks`) and
+  // derives practiceChunks locally above — this is the same shape a real
+  // chunkSet carries, built here rather than threading a new prop through
+  // App.jsx for it.
+  const chunkSet = { all: chunks, practiceChunks };
 
   // getCurrentDay (lib/utils) clamps into the plan, so `currentDay` can
   // never report a day past the end — the unclamped elapsed day is what
@@ -108,7 +114,38 @@ export function TodayTab({
   // Only when actually parked on real "today". A day explicitly picked
   // from the Timeline tab still renders that day's plan grid, past-plan or
   // not — otherwise a past-plan piece's plan would become unreachable.
-  const pastPlan = isRealToday && elapsedDay > timeline.days.length;
+  // Pass 39: the calendar running out is no longer sufficient on its own —
+  // see isPlanActuallyComplete (lib/scheduling.js) for what "actually
+  // complete" now means per scheduleMode.
+  const pastPlan = isRealToday && isPlanActuallyComplete(piece, chunkSet, timeline);
+  // The calendar-elapsed-but-not-actually-complete case, scheduleMode:
+  // "days" only. A minutes-mode piece in the equivalent state doesn't get
+  // this prompt — there was never a deadline to protect, so App.jsx's
+  // auto-extend effect (computeMinutesModeAutoExtend) grows the plan
+  // automatically instead of asking. See docs/Decisions.md#scheduling for
+  // the asymmetry. Paused/archived pieces are excluded the same way every
+  // other schedule-pressure surface already excludes them (ScheduleBanner
+  // above self-suppresses via computeScheduleStatus's missedCount, which
+  // this banner doesn't route through, so it needs its own check).
+  const needsRescheduleNudge =
+    isRealToday &&
+    elapsedDay > timeline.days.length &&
+    !pastPlan &&
+    (piece.status || "active") === "active" &&
+    piece.scheduleMode !== "minutes";
+  // isPlanActuallyComplete's "days"-mode bar covers chunkSet.all (practice
+  // chunks, transitions, combos), but the reschedule mechanism itself
+  // (handleReschedule/rescheduleMarker/getEffectiveTimeline) only ever
+  // knows how to re-place *practice chunks* — a transition/combo rides
+  // along with its neighboring chunk's touched status, not its own. So
+  // needsRescheduleNudge can be true with nothing a reschedule can actually
+  // act on, if every practice chunk is touched and the only thing left is a
+  // transition/focus block. Distinguished here so the banner can say
+  // something true in that case instead of offering a button that would
+  // silently no-op — see docs/Decisions.md#scheduling.
+  const hasReschedulableWork =
+    needsRescheduleNudge &&
+    computeScheduleStatus(piece, practiceChunks, timeline, currentDay).remainingChunkIds.length > 0;
 
   // computeDueReviews only reads chunkSet.all; TodayTab already receives
   // exactly that list as `chunks`, so it's wrapped rather than threading a
@@ -215,7 +252,39 @@ export function TodayTab({
 
   return (
     <div className="tab-pane">
-      <ScheduleBanner piece={piece} practiceChunks={practiceChunks} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
+      <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
+      {needsRescheduleNudge && (
+        <div className="schedule-banner">
+          {hasReschedulableWork ? (
+            <>
+              <div>
+                <p className="schedule-banner-title">Past your target date</p>
+                <p className="schedule-banner-sub">
+                  There's still real work left in this plan. Reschedule to pick a new target date,
+                  or fit what's left into the time you have.
+                </p>
+              </div>
+              <button className="primary-btn" onClick={onReschedule}>
+                <RotateCcw size={15} /> Reschedule
+              </button>
+            </>
+          ) : (
+            <>
+              <div>
+                <p className="schedule-banner-title">Past your target date</p>
+                <p className="schedule-banner-sub">
+                  Every chunk has been introduced — what's left is a transition or focus block
+                  still waiting to be logged. Nothing to reschedule; check "View all" below to find
+                  it.
+                </p>
+              </div>
+              <button className="primary-btn" onClick={() => leaveInterleaved("all")}>
+                View all
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="tab-header day-nav">
         <div>

@@ -133,20 +133,58 @@ payoff, was removed outright in Pass 32b — see
    [Algorithms.md](Algorithms.md#behind-schedule-detection) — this is a
    deliberately narrow trigger, not a same-day comparison).
 2. `ScheduleBanner` surfaces the count and a "Reschedule remaining days"
-   action, shown on both Overview and Today.
+   action, shown on both Overview and Today — but only while the plan
+   itself isn't *actually* finished yet (`isPlanActuallyComplete`, Pass
+   39). This is no longer just "has the calendar run out": a piece whose
+   target date has already passed with real work still outstanding keeps
+   showing this banner instead of going quiet.
 3. `handleReschedule` estimates whether the remaining material can
    realistically fit in the remaining days at the current pace. If it
    can't, the confirmation dialog names the shortfall and offers a way past
-   it right there rather than just a warning: for a fixed-target-date
-   piece, change the target date to a suggested one or reschedule into the
-   existing window (two buttons); for a minutes-per-day piece, there's no
-   target date to offer changing, so it's a single action — extend the
-   plan to fit at the same pace. See
-   [Decisions.md](Decisions.md#scheduling) for why these differ by
+   it, branching by `scheduleMode` **and, as of Pass 39, by whether the
+   piece's own plan has already fully elapsed**:
+   - `"days"` mode, still inside its own plan (just tight): two buttons —
+     change the target date to a suggested one, or reschedule into the
+     existing window.
+   - `"days"` mode, target date already fully passed: **one button
+     only** — "Change target date." Cramming everything into what's
+     effectively a single already-past day isn't offered here; it doesn't
+     help and can leave the piece permanently unrecognized as behind
+     schedule afterward (see [Decisions.md](Decisions.md#open-questions)).
+   - `"minutes"` mode: always a single action — extend the plan to fit at
+     the same pace, since this mode never had a target date to offer
+     protecting.
+
+   See [Decisions.md](Decisions.md#scheduling) for why these differ by
    `scheduleMode`.
-4. Confirming sets `piece.rescheduleMarker`; `getEffectiveTimeline` then
+4. Confirming sets `piece.rescheduleMarker` (and, when the dialog offered an
+   extension, `daysToLearn`/`targetDate` too); `getEffectiveTimeline` then
    keeps every already-passed day exactly as it was and repacks only the
    untouched chunks into the days that remain.
+
+**Since Pass 39, Today's Practice can also show a second, separate banner**
+below the "N chunks behind schedule" one: a `"days"`-mode piece whose
+calendar has run out with real work still left, but where every *practice
+chunk* specifically has already been touched (only a transition or focus
+block is what's actually outstanding). In that narrower case there's
+nothing the reschedule mechanism can act on — no day-placement problem
+left to solve — so the banner says so plainly ("Nothing to reschedule —
+check 'View all' to find it") with a button that switches to the "View
+all" list instead of offering a Reschedule button that would do nothing.
+A `"minutes"`-mode piece never gets either banner in this state — it
+self-heals silently instead (below).
+
+**Since Pass 39, Master Agenda mirrors the same distinction.** A
+`"days"`-mode piece past its target date with real work remaining gets a
+matching "Past its target date" card (previously it was simply omitted). A
+`"minutes"`-mode piece in the equivalent state — including one sitting
+inactive in the background, not the piece currently open — instead shows
+its real, current scheduled content, computed live for display only
+(nothing written to storage from Master Agenda itself); the actual,
+persisted extension happens once that piece is opened directly. **Also
+since Pass 39**, "Log practice" and "Pick a random piece to practice" on
+Master Agenda land directly on Today's Practice for that piece rather than
+Piece Overview — see flow 6 below.
 
 **Since Pass 21, this also has a multi-piece form.** Master Agenda's
 Learning-phase tab shows a "Reschedule all" panel whenever one or more
@@ -154,10 +192,15 @@ active pieces are behind, naming the count. Confirming it applies the same
 `rescheduleMarker` write to every eligible piece at once — each anchored to
 its *own* current day, not a shared one — behind a single confirmation that
 names which pieces (if any) probably won't fit at the current pace, same
-underlying `estimateRescheduleFit` check the single-piece dialog uses. See
-[Decisions.md](Decisions.md#scheduling) for the eligibility rules (paused/
-archived/mid-revival/past-plan pieces are left out) and the storage-safety
-fix behind it.
+underlying `estimateRescheduleFit` check the single-piece dialog uses.
+**Since Pass 39**, a `"days"`-mode piece whose plan has already fully
+elapsed is no longer excluded from this list (it used to be, on the same
+calendar-only check fixed everywhere else this pass) — and the bulk action
+now also pushes its target date out automatically as part of the same
+confirmation, named in its own sentence separately from pieces that are
+merely tight. See [Decisions.md](Decisions.md#scheduling) for the
+eligibility rules (paused/archived/mid-revival/actually-finished pieces are
+still left out) and the storage-safety fix behind it.
 
 **Also on Master Agenda, since Pass 21:** "Pick a random piece to practice"
 switches the active piece to a random one that has real work today
@@ -182,6 +225,16 @@ The sidebar's piece-switcher trigger opens a list of every piece in
 `pieces`; selecting one calls `switchToPiece`, which updates `activePieceId`
 (and the persisted `measureone-active_piece_id` key). "Add new piece" is
 reachable from the switcher, the Overview top row, and Settings.
+
+`switchToPiece` normally lands on Piece Overview — the default second
+argument. **Since Pass 39**, Master Agenda's "Log practice" (on any
+learning-phase, maintenance-due, or "needs reschedule" card) and "Pick a
+random piece to practice" pass `"today"` instead, landing directly on
+Today's Practice for that piece rather than the dashboard — you clicked
+something that means "go practice," so you land where you'd actually log
+it. Revival's "Open piece →" button deliberately still lands on Overview,
+unchanged — a revival-mode piece has its own separate tab, and Today's
+Practice isn't a meaningful destination for it mid-revival.
 
 **Since Pass 29 follow-up**, switching pieces (or navigating to a different
 sidebar tab, or clicking "Edit piece") while the piece you're leaving has

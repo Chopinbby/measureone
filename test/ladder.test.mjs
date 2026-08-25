@@ -3,7 +3,7 @@
 // App.jsx's handleLogSession on every logged session.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible } from "../src/lib/ladder.js";
+import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible, isPieceLearned } from "../src/lib/ladder.js";
 import { mergeLadderConfig } from "../src/lib/storage.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
@@ -572,5 +572,56 @@ describe("isInterleaveEligible (Pass 29's Interleaved-mode eligibility rule)", (
     assert.equal(isInterleaveEligible({ stage: null }), false);
     assert.equal(isInterleaveEligible({}), false);
     assert.equal(isInterleaveEligible(undefined), false);
+  });
+});
+
+describe("isPieceLearned (Pass 39's Stage 3 rollup — every practice chunk at Holding)", () => {
+  const chunkSet = { practiceChunks: [{ id: "c1" }, { id: "c5" }, { id: "c9" }] };
+
+  test("false when no chunk has been touched at all", () => {
+    assert.equal(isPieceLearned({ progress: {} }, chunkSet), false);
+  });
+
+  test("false when some chunks are at Holding but at least one isn't", () => {
+    const piece = {
+      progress: {
+        c1: { stage: "holding" },
+        c5: { stage: "settling" },
+        c9: { stage: "holding" },
+      },
+    };
+    assert.equal(isPieceLearned(piece, chunkSet), false);
+  });
+
+  test("true only once every practice chunk has reached Holding", () => {
+    const piece = {
+      progress: {
+        c1: { stage: "holding" },
+        c5: { stage: "holding" },
+        c9: { stage: "holding" },
+      },
+    };
+    assert.equal(isPieceLearned(piece, chunkSet), true);
+  });
+
+  test("transitions/combos are irrelevant — only chunkSet.practiceChunks is read", () => {
+    const withExtras = {
+      practiceChunks: chunkSet.practiceChunks,
+      transitions: [{ id: "t1" }],
+      combos: [{ id: "x1" }],
+    };
+    const piece = {
+      progress: {
+        c1: { stage: "holding" },
+        c5: { stage: "holding" },
+        c9: { stage: "holding" },
+        // t1/x1 deliberately left untouched — must not affect the result.
+      },
+    };
+    assert.equal(isPieceLearned(piece, withExtras), true);
+  });
+
+  test("an empty piece (no practice chunks) is defensively not 'learned'", () => {
+    assert.equal(isPieceLearned({ progress: {} }, { practiceChunks: [] }), false);
   });
 });

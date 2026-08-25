@@ -2,10 +2,11 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus } from "../../lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
+import { isPieceLearned } from "../../lib/ladder";
 
 // Which sub-view was last open. This component unmounts whenever you
 // navigate to another main tab, so plain useState would reset the choice
@@ -15,7 +16,7 @@ import { isInRevival, computeRevivalPlan } from "../../lib/revival";
 // fresh page load starting back at Learning phase is the right default.
 let lastSubTab = "learning";
 
-export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onRescheduleAll }) {
+export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onSelectDay, onRescheduleAll }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
   const [subTab, setSubTabState] = useState(lastSubTab);
 
@@ -59,7 +60,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
           if (isInRevival(piece)) return;
 
           const chunkSet = generateAllChunks(piece);
-          const timeline = getEffectiveTimeline(piece, chunkSet);
+          let timeline = getEffectiveTimeline(piece, chunkSet);
           const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
 
           if (!timeline || !timeline.days || !timeline.days.length) return;
@@ -69,9 +70,38 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
           // scheduled day forever and re-show already-finished work. The
           // unclamped elapsed day is what lets us tell "past the plan" from
           // "on the last day of the plan".
-          const dayNumber = computeElapsedDay(piece) + daysFromToday;
+          let dayNumber = computeElapsedDay(piece) + daysFromToday;
 
           if (dayNumber < 1) return;
+
+          // scheduleMode: "minutes" past its own (possibly stale)
+          // daysToLearn that isn't learned yet would auto-extend itself
+          // the instant it's opened (App.jsx's effect,
+          // computeMinutesModeAutoExtend) — there's no deadline to prompt
+          // about here, per docs/Decisions.md#scheduling's days-vs-minutes
+          // asymmetry. Rather than let such a piece go invisible on this
+          // agenda until someone happens to open it directly (the gap this
+          // replaces), compute the same extension *for display only* —
+          // nothing persisted, a pure rendering-time patch — so the card
+          // shows exactly the real, current content it would show once
+          // actually opened. `piece`/`timeline`/`dayNumber` are reassigned
+          // in place so every read below (missedCount, the day itself,
+          // what's pushed into `items`) automatically reflects it. Only
+          // for real "today" — browsing the date picker elsewhere has
+          // nothing to do with whether *today's* plan needs to grow.
+          if (
+            dayNumber > timeline.days.length &&
+            selectedDate === todayISODate() &&
+            piece.scheduleMode === "minutes" &&
+            !isPieceLearned(piece, chunkSet)
+          ) {
+            const extension = computeMinutesModeAutoExtend(piece, chunkSet, timeline);
+            if (extension) {
+              piece = { ...piece, ...extension };
+              timeline = getEffectiveTimeline(piece, chunkSet);
+              dayNumber = computeElapsedDay(piece) + daysFromToday;
+            }
+          }
 
           // Past the end of the bounded plan there is no timeline day to
           // render — the live maintenance ladder takes over (see
@@ -79,6 +109,34 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
           // strictly "as of today", and asking the picker about a future
           // date must not become an upcoming-due window.
           if (dayNumber > timeline.days.length) {
+            // Pass 39: the calendar running out is no longer sufficient to
+            // call the plan done — see isPlanActuallyComplete
+            // (lib/scheduling.js) and docs/Decisions.md#scheduling. A
+            // days-mode piece past its target date with real work still
+            // outstanding isn't finished, and falling through to the
+            // maintenance-due branch below would misrepresent it:
+            // computeDueReviews only ever returns *ladder* reviews for
+            // chunks already touched at least once, so a piece with
+            // never-touched material left could show an incomplete (or
+            // empty) due list and read as "nothing left" when it isn't.
+            if (!isPlanActuallyComplete(piece, chunkSet, timeline)) {
+              // Reaching here with scheduleMode "minutes" means the
+              // extension attempt above either found nothing to extend
+              // (already learned — heading into the due-list branch below
+              // instead) or was skipped because this isn't real "today" —
+              // either way there's nothing to prompt about for this mode,
+              // mirroring TodayTab's own days-mode-only nudge.
+              if (piece.scheduleMode === "minutes") return;
+              if (selectedDate !== todayISODate()) return;
+              const { missedCount } = computeScheduleStatus(
+                piece,
+                chunkSet.practiceChunks,
+                timeline,
+                timeline.days.length + 1
+              );
+              items.push({ pieceId, piece, needsReschedule: true, missedCount, totalTime: 0 });
+              return;
+            }
             if (selectedDate !== todayISODate()) return;
             const dueItems = computeDueReviews(piece, chunkSet, selectedDate);
             if (!dueItems.length) return;
@@ -254,7 +312,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
 
   const pickRandomPiece = () => {
     if (!practiceablePieceIds.length) return;
-    onSelectPiece(practiceablePieceIds[Math.floor(Math.random() * practiceablePieceIds.length)]);
+    onSelectPieceToday(practiceablePieceIds[Math.floor(Math.random() * practiceablePieceIds.length)]);
   };
 
   // The maintenance random-start pool: every individual due spot across
@@ -266,7 +324,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
     )
   );
 
-  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount, isDueList, dueRanges, dueCount, dueOverdueCount }) => (
+  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
     <div key={pieceId} className="piece-card">
       <div className="piece-card-head">
         <div>
@@ -279,7 +337,9 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
         </div>
       </div>
 
-      {isDueList ? (
+      {needsReschedule ? (
+        <p className="day-card-note">Past its target date with real work still left in the plan.</p>
+      ) : isDueList ? (
         <div className="day-card-group">
           <span className="day-card-tag review">Due</span>
           {dueRanges.map((r) => (
@@ -324,14 +384,16 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectDay, onReschedu
         {/* A review arriving late is schedule slack, never a
             failure — the due card states the count plainly and is
             never styled as "behind". */}
-        <span style={{ fontSize: "12px", color: isDueList ? "var(--ink-soft)" : missedCount > 0 ? "var(--brick)" : "var(--ink-soft)" }}>
-          {isDueList
-            ? `Maintenance — ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
-            : missedCount > 0
-              ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule`
-              : "On schedule"}
+        <span style={{ fontSize: "12px", color: needsReschedule || (!isDueList && missedCount > 0) ? "var(--brick)" : "var(--ink-soft)" }}>
+          {needsReschedule
+            ? `Past target date${missedCount > 0 ? ` — ${missedCount} chunk${missedCount === 1 ? "" : "s"} behind` : ""}`
+            : isDueList
+              ? `Maintenance — ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
+              : missedCount > 0
+                ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule`
+                : "On schedule"}
         </span>
-        <button className="link-btn" onClick={() => onSelectPiece(pieceId)}>
+        <button className="link-btn" onClick={() => onSelectPieceToday(pieceId)}>
           Log practice →
         </button>
       </div>

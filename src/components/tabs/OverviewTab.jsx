@@ -50,7 +50,7 @@ export function OverviewTab({
           <Plus size={14} /> Add new piece
         </button>
       </div>
-      <ScheduleBanner piece={piece} practiceChunks={practiceChunks} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
+      <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
       {revivalTriggers.triggered && (
         <div className="revival-banner">
           <div>

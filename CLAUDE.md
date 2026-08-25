@@ -115,6 +115,18 @@ chunking, scheduling, and confidence are actually computed, see
     worked in-session, vanished on reload) before the floor existed. If you
     touch this function, keep the floor or the reschedule-extend feature
     silently breaks again.
+  - **"The calendar ran out" is not the same question as "the plan is
+    actually finished" (Pass 39).** Every surface that decides whether a
+    piece has run past its plan — `TodayTab`'s `pastPlan`, `MasterAgendaTab`'s
+    per-piece day lookup, `ScheduleBanner`'s suppression, `planRescheduleForPieces`'
+    eligibility — must go through `isPlanActuallyComplete(piece, chunkSet,
+    timeline)` (`lib/scheduling.js`), never a raw `elapsedDay(piece) >
+    timeline.days.length` comparison. A `scheduleMode: "days"` piece whose
+    target date passed with real work still outstanding is *behind*, not
+    *done* — the raw calendar comparison used to conflate the two, which is
+    exactly the bug this function exists to fix; if a new call site reaches
+    for the raw comparison instead, that's this regression coming back. See
+    [`docs/Algorithms.md`](docs/Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
 - **`Wizard` is create-only.** Editing an existing piece always goes through
   `SettingsTab`, never the wizard.
 - **Piece Map chunk detail is a modal, not inline** — this was a deliberate
@@ -163,9 +175,14 @@ Several constants driving scheduling and confidence (`EFFORT_TO_MIN`,
 are hand-picked, not derived from any study — see
 [`docs/Research.md`](docs/Research.md) for the full inventory and what
 would need to be true to replace them. There's also no undo history for BPM
-zones or difficulty reassessment, and no first-class "this piece is
-learned" state yet — a definition is decided but not implemented, see
-[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md).
+zones or difficulty reassessment. **"This piece is learned" is now
+implemented, as of Pass 39** — `isPieceLearned(piece, chunkSet)`
+(`src/lib/ladder.js`) is a live derivation (every practice chunk's ladder
+`stage` at Holding), not a persisted field on `piece`, so there is still no
+first-class piece-level "learned" *state* to gate other features on (e.g.
+the still-unbuilt "gate revival entry behind maintenance" item — see
+[`docs/Decisions.md`](docs/Decisions.md#open-questions)). See
+[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
 
 ## Roadmap
 
@@ -179,8 +196,14 @@ biggest maintenance-ladder item is now **substantially built, not just
 designed**: a continuous Stabilizing/Settling/Holding cadence has replaced
 the old fixed `REVIEW_OFFSETS` review (`computeTimeline` now schedules
 reviews straight off each chunk's live ladder due-date), and "learned" is
-defined as every chunk reaching Holding, though nothing yet queries that
-roll-up. The live "what's due" query that works beyond the current plan's
+defined as every chunk reaching Holding — **and as of Pass 39, something
+finally queries that roll-up**: `isPieceLearned(piece, chunkSet)`
+(`src/lib/ladder.js`). It's load-bearing, not just a future display label —
+`isPlanActuallyComplete` (`src/lib/scheduling.js`) reads it to decide, for a
+`scheduleMode: "minutes"` piece, whether the plan should keep auto-extending
+itself or finally read as complete; see
+[`docs/Algorithms.md`](docs/Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
+The live "what's due" query that works beyond the current plan's
 bounded length is built as of Pass 8 (`computeDueReviews` in
 `src/lib/maintenance.js`, surfaced in Master Agenda and the Today tab), as
 is post-run-through logging (stop count / rough-lost flag, Pass 6). The
@@ -192,9 +215,12 @@ exits on 4 consecutive passes or a manual override, reuses the `lost`
 demote-and-pin mechanism under the label "Needs reinforcement," and resets
 `practiceBPM` to `getSuggestedStartingBPM`. A Settings editor for
 `ladderConfig` is built too (Pass 17 — `LadderConfigEditor`, under
-SettingsTab's "Maintenance ladder" panel). Still not built: the
-piece-level "learned" rollup (nothing queries "every chunk at Holding"
-yet), a second Tier 1 rung, and Stage 5 repertoire rotation.
+SettingsTab's "Maintenance ladder" panel). Still not built: a
+first-class *persisted* "learned" piece state to gate other features on
+(the roll-up above is a live derivation, not a stored field — see
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
+"gate revival entry behind maintenance" item this still blocks), a second
+Tier 1 rung, and Stage 5 repertoire rotation.
 If you're about to touch scheduling, confidence,
 or the practice-logging UI, check
 [`docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
@@ -259,7 +285,7 @@ with the four variables that only fed it. Recurring material's actual
 scheduling-effort discount (`lib/chunking.js`) and any related confidence
 handling are untouched; only the display panel went.
 
-**Also this session:** the reschedule confirmation dialog (`handleReschedule`,
+**Since Pass 36**, the reschedule confirmation dialog (`handleReschedule`,
 `App.jsx`) fixed its "day(s)" pluralization, and — when the remaining work
 doesn't fit the days left — now offers a concrete way out instead of just a
 warning. For a `scheduleMode: "days"` piece: change the target date to a
@@ -270,3 +296,41 @@ in that mode) and no "cram into what's left" alternative worth offering
 (no calendar deadline to protect there), so it's a single action — extend
 `daysToLearn` to fit, at the same `minutesPerDay`. See the regression note
 above for the reload-persistence fix this required.
+
+**Since Pass 39**, "the calendar ran out" and "the plan is actually
+finished" are no longer the same question anywhere in the app — see the
+new regression note above (`isPlanActuallyComplete`) for the mechanics.
+Built alongside it: `isPieceLearned` (Stage 3's rollup, see the Roadmap
+paragraph above), a `scheduleMode: "minutes"` piece now auto-extends its
+own plan (no dialog, no button — `computeMinutesModeAutoExtend`, applied by
+an effect in `App.jsx` scoped to the active piece) once it's past its own
+day count but not yet learned, and a `scheduleMode: "days"` piece in the
+equivalent state gets a new "Past your target date" prompt on Today's
+Practice instead of silently reading as complete. Master Agenda's per-piece
+day lookup uses the same `isPlanActuallyComplete` check, shows a matching
+card for an affected `"days"`-mode piece instead of quietly dropping it,
+and computes a *display-only* version of the minutes-mode auto-extension so
+a `"minutes"`-mode piece in the background (not the currently-open one)
+still shows real, current content rather than going invisible — nothing is
+written to storage from that computation; the real write only happens via
+the `App.jsx` effect once that piece is actually opened. Master Agenda's
+"Log practice" and "Pick a random piece" buttons now land on Today's
+Practice, not Overview (`switchToPiece` takes an optional target tab).
+
+**Also since Pass 39** (a follow-up round, same session): the single-piece
+reschedule dialog no longer offers "reschedule into current plan days" once
+a piece's target date has *already fully passed* — only "push the target
+date out," since there's no real "current plan days" left to pack into once
+the deadline's already gone (`suggestion.singleChoice`, `App.jsx`). The
+bulk "Reschedule all" button now does the equivalent for its whole batch:
+a `scheduleMode: "days"` piece already past its own plan gets its target
+date pushed out automatically as part of the bulk action, not just repacked
+within a plan length that was never going to fit it
+(`computeReschedulePastPlanExtension`, shared by both the single-piece and
+bulk paths — `lib/scheduling.js`). **A real, pre-existing bug was found
+(not fixed) while verifying this**: a piece that's *already* been
+rescheduled once via "cram into what's left" while fully past its own plan
+can permanently stop being recognized as behind schedule at all, which
+silently drops it from "Reschedule all" forever after — see
+[`docs/Decisions.md`](docs/Decisions.md#scheduling) for the mechanism and
+why only half of the two-part fix shipped this session.

@@ -83,13 +83,13 @@ export function OverviewTab({
             {piece.totalMeasures} measures, {piece.sections.length} sections, {piece.daysToLearn}-day plan
             {piece.lastPlayedDate ? ` · last played ${piece.lastPlayedDate}` : ""}
           </p>
+          <RecordingsList recordings={piece.recordings} />
+          <DocumentsList documents={piece.documents} />
           {piece.workId && workParts && workParts.length > 0 && (
             <p className="hero-sub">
               {workParts.length} movement{workParts.length === 1 ? "" : "s"}, {workParts.length} plan{workParts.length === 1 ? "" : "s"}
             </p>
           )}
-          <RecordingsList recordings={piece.recordings} />
-          <DocumentsList documents={piece.documents} />
         </div>
       </div>
 
@@ -107,7 +107,6 @@ export function OverviewTab({
         <PartSwitcher
           parts={workParts}
           activeId={piece.id}
-          workName={piece.workName || "Untitled work"}
           onSelectPart={onSelectPart}
           onAddPart={onAddPart}
         />

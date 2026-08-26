@@ -1849,7 +1849,7 @@ const CSS = `
 .piece-switcher-drag-handle:active { cursor: grabbing; }
 .piece-switcher-dragging { opacity: 0.4; }
 .piece-switcher-drag-over { box-shadow: inset 0 2px 0 var(--brass); }
-.part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }
 .part-chip.active { background: var(--brass); border-color: var(--brass); color: var(--white); }

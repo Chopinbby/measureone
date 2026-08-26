@@ -9,7 +9,11 @@ import { PIECE_STATUS_LABEL } from "../lib/constants";
 // here is that part's own measures-touched figure — deliberately not rolled up
 // into a single "work progress" number, which would flatten movements of very
 // different lengths into one misleading bar.
-export function PartSwitcher({ parts, activeId, workName, onSelectPart, onAddPart }) {
+//
+// No work-title heading here (removed this pass): the hero card's eyebrow
+// directly above already names the work, so a second heading in this panel
+// was the same title twice on the same screen.
+export function PartSwitcher({ parts, activeId, onSelectPart, onAddPart }) {
   const touchedPct = useMemo(() => {
     const out = {};
     parts.forEach((p) => {
@@ -25,7 +29,6 @@ export function PartSwitcher({ parts, activeId, workName, onSelectPart, onAddPar
 
   return (
     <div className="panel part-switcher">
-      <h3>{workName}</h3>
       <div className="part-list">
         {parts.map((p, i) => (
           <button

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 import { formatRange, formatDuration, todayISODate } from "../../../lib/utils";
 import { ROLE_LABEL, DIFFICULTY_META, SESSION_OUTCOME_META } from "../../../lib/constants";
@@ -80,10 +80,22 @@ export function ChecklistItem({
   // stays read-only, exactly as before.
   const canEditNote = typeof onSetMemoryAnchor === "function";
 
+  // The interval's own tick only updates durationSeconds once per second, so
+  // relying on that state at click time can under-report the true elapsed
+  // time by up to ~999ms (or more, if a window.confirm() blocks the thread
+  // mid-click). timerStartRef records the wall-clock moment this running
+  // segment began, plus the accumulated seconds it started from (so
+  // pause/resume and manual minutes-entry still carry over correctly) —
+  // submitLog re-derives the actual elapsed time from Date.now() at the
+  // moment of the click instead of trusting the last tick's state.
+  const timerStartRef = useRef(null);
+
   useEffect(() => {
     if (!timerRunning) return;
+    timerStartRef.current = { startedAt: Date.now(), baseSeconds: durationSeconds };
     const id = setInterval(() => setDurationSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);
 
   const canLog = reps !== "" && bpm !== "";
@@ -131,6 +143,16 @@ export function ChecklistItem({
     if (!canLog) return;
     const cleanReps = Number(reps);
     const bpmAttempted = Number(bpm);
+    // Captured immediately on click (pure read, no state write yet) so a
+    // window.confirm() below can't stall this number and so a cancelled
+    // confirm leaves the running timer untouched.
+    const finalDurationSeconds =
+      timerRunning && timerStartRef.current
+        ? Math.max(
+            0,
+            timerStartRef.current.baseSeconds + Math.floor((Date.now() - timerStartRef.current.startedAt) / 1000)
+          )
+        : durationSeconds;
     // Pass 26 — a clarity checkpoint, not a hard block: an attempt that
     // falls short (on reps, or on tempo alone with reps otherwise met —
     // widened post-Pass-26 per the user: a tempo-only shortfall still
@@ -166,7 +188,14 @@ export function ChecklistItem({
       previousOutcome,
       previousCleanReps: previousSession ? previousSession.cleanReps : null,
     });
-    onLogSession(chunk.id, day, { cleanReps, bpm: bpmAttempted, outcome, durationSeconds, targetBPM, suggestedStartingBPM });
+    onLogSession(chunk.id, day, {
+      cleanReps,
+      bpm: bpmAttempted,
+      outcome,
+      durationSeconds: finalDurationSeconds,
+      targetBPM,
+      suggestedStartingBPM,
+    });
     setReps("");
     setBpm("");
     setManualFail(false);
@@ -187,7 +216,7 @@ export function ChecklistItem({
               : "Removes this log entry, but can't reverse tempo or schedule changes it already caused — a later session has been logged since, or this entry predates undo support."
           }
         >
-          <Check size={13} />
+          <Check size={16} />
         </button>
       ) : (
         <button

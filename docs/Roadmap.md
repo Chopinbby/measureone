@@ -98,6 +98,19 @@ last played, anywhere).
 move together) — see [Decisions.md](Decisions.md#ux) and
 [Data-Model.md](Data-Model.md#the-piece-object).
 
+**Since Pass 42**, there's a first, deliberately bounded cross-piece
+summary: `AllPiecesTab`, one row per piece (progress %, confidence %, days
+since last touched, time practiced) plus a total-time-practiced stat,
+reached via a "View all pieces" button on Progress rather than a new
+`NAV_BASE` entry. See [Architecture.md](Architecture.md) for the component
+and exactly which existing per-piece functions it calls. This is *not* the
+"cross-piece repertoire health dashboards" item mentioned above under
+Maintenance mode — no lifecycle-state detection, no health scoring, just a
+summary table — and it's not a consistency/streak view either (which days
+across pieces were touched); both were explicitly scoped out of this first
+version, not forgotten. Either is a reasonable next step if this view turns
+out to earn its place.
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold

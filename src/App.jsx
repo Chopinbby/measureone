@@ -59,6 +59,7 @@ import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
 import { RevivalTab } from "./components/tabs/RevivalTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
+import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
 
 /* ------------------------------------------------------------------ */
 /*  App shell                                                          */
@@ -1671,7 +1672,19 @@ export default function App() {
                 onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
               />
             )}
-            {activeTab === "progress" && <ProgressTab piece={piece} chunks={chunks} timeline={timeline} currentDay={currentDay} />}
+            {activeTab === "progress" && (
+              <ProgressTab
+                piece={piece}
+                chunks={chunks}
+                timeline={timeline}
+                currentDay={currentDay}
+                onViewAllPieces={() => setActiveTab("all-pieces")}
+              />
+            )}
+            {/* Not in NAV_BASE — reached only via the button on Progress,
+                same "button-only tab" pattern as "revival" below (not part
+                of the persistent sidebar). See docs/Architecture.md. */}
+            {activeTab === "all-pieces" && <AllPiecesTab pieces={pieceList} onSelectPiece={switchToPiece} />}
             {activeTab === "settings" && (
               <SettingsTab
                 piece={piece}
@@ -1951,6 +1964,8 @@ const CSS = `
 .day-num { width: 56px; color: var(--brass-deep); flex-shrink: 0; }
 .day-desc { flex: 1; color: var(--ink-soft); }
 .day-min { color: var(--ink-faint); flex-shrink: 0; }
+.all-pieces-col { width: 90px; flex-shrink: 0; color: var(--ink-faint); }
+.all-pieces-head { color: var(--ink-faint); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
 
 .def-list { display: flex; flex-direction: column; gap: 10px; margin: 0 0 18px; }
 .def-list > div { display: flex; justify-content: space-between; font-size: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); gap: 12px; }

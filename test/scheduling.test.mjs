@@ -14,8 +14,11 @@ import {
   planRescheduleForPieces,
   estimateRescheduleFit,
   reconcileMinutesPerDaySchedule,
+  isPlanActuallyComplete,
+  computeMinutesModeAutoExtend,
+  computeReschedulePastPlanExtension,
 } from "../src/lib/scheduling.js";
-import { addDaysISO, todayISODate } from "../src/lib/utils.js";
+import { addDaysISO, todayISODate, elapsedDay } from "../src/lib/utils.js";
 
 function basePiece(overrides) {
   return {
@@ -276,28 +279,191 @@ describe("Tier 2 — flexes under budget contention, rolls forward, never drops 
   });
 });
 
-describe("Pass 16 — shouldShowScheduleBanner suppresses the banner once a piece has run past its plan", () => {
-  const timeline = { days: Array(10) }; // a 10-day plan; only .days.length is read
+describe("Pass 16 — shouldShowScheduleBanner, redefined in Pass 39 around isPlanActuallyComplete", () => {
+  // timeline.days.length is the only field isPlanActuallyComplete reads off
+  // timeline itself — a 10-entry array stands in for a 10-day plan.
+  const timeline = { days: Array(10) };
+  const startedDaysAgo = (n) => addDaysISO(todayISODate(), -n);
 
-  test("elapsedDay past the plan length hides the banner even with a real missedCount", () => {
-    assert.equal(shouldShowScheduleBanner(11, timeline, 3), false, "one day past the plan, 3 chunks missed — still hidden");
-    assert.equal(shouldShowScheduleBanner(40, timeline, 1), false, "long past the plan, 1 chunk missed — still hidden");
+  test("[fix — the exact symptom this pass exists for] past the plan but real work remains: keeps warning instead of going silent", () => {
+    // Pre-Pass-39, this suppressed purely on elapsedDay > days.length,
+    // regardless of whether anything was actually missed — a piece behind
+    // schedule with its calendar days elapsed went silent instead of
+    // continuing to warn. Nothing logged at all, 11 days elapsed on a
+    // 10-day plan: isPlanActuallyComplete must read false here.
+    const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10) });
+    const chunkSet = generateAllChunks(piece);
+    assert.equal(shouldShowScheduleBanner(piece, chunkSet, timeline, 3), true, "one day past the plan, 3 chunks missed — must not go silent");
+    assert.equal(shouldShowScheduleBanner(piece, chunkSet, timeline, 1), true, "long past the plan, 1 chunk missed — must not go silent");
   });
 
-  test("elapsedDay past the plan length with nothing missed stays hidden (unaffected either way)", () => {
-    assert.equal(shouldShowScheduleBanner(11, timeline, 0), false);
+  test("past the plan and genuinely complete (every scheduled item logged): hidden, regardless of what missedCount claims", () => {
+    const piece0 = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10) });
+    const chunkSet = generateAllChunks(piece0);
+    const progress = Object.fromEntries(chunkSet.all.map((c) => [c.id, { doneDays: [1] }]));
+    const piece = { ...piece0, progress };
+    // isPlanActuallyComplete short-circuits shouldShowScheduleBanner before
+    // missedCount is ever consulted — a nonzero value here couldn't happen
+    // in real use (computeScheduleStatus derives missedCount from the same
+    // doneDays data), but proves the completeness check really does take
+    // precedence rather than happening to agree with missedCount by luck.
+    assert.equal(shouldShowScheduleBanner(piece, chunkSet, timeline, 3), false);
   });
 
   test("still within the plan, a real missedCount shows the banner (unchanged behavior)", () => {
-    assert.equal(shouldShowScheduleBanner(5, timeline, 2), true);
+    const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(4) }); // day 5 of 10
+    const chunkSet = generateAllChunks(piece);
+    assert.equal(shouldShowScheduleBanner(piece, chunkSet, timeline, 2), true);
   });
 
   test("still within the plan, nothing missed hides the banner (unchanged behavior)", () => {
-    assert.equal(shouldShowScheduleBanner(5, timeline, 0), false);
+    const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(4) });
+    const chunkSet = generateAllChunks(piece);
+    assert.equal(shouldShowScheduleBanner(piece, chunkSet, timeline, 0), false);
   });
 
   test("boundary: elapsedDay exactly at the plan's last day is not yet 'past' it — missedCount still governs", () => {
-    assert.equal(shouldShowScheduleBanner(10, timeline, 2), true, "day 10 of a 10-day plan is still in the plan, not past it");
+    const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(9) }); // day 10 of 10
+    const chunkSet = generateAllChunks(piece);
+    assert.equal(shouldShowScheduleBanner(piece, chunkSet, timeline, 2), true, "day 10 of a 10-day plan is still in the plan, not past it");
+  });
+});
+
+describe("isPlanActuallyComplete — Pass 39: what 'the plan is actually finished' means per scheduleMode", () => {
+  const startedDaysAgo = (n) => addDaysISO(todayISODate(), -n);
+
+  describe("scheduleMode: 'days'", () => {
+    test("still within the plan: never complete, regardless of progress", () => {
+      const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(4) }); // day 5 of 10
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false);
+    });
+
+    test("past the target date with incomplete chunks: not complete", () => {
+      const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10) }); // day 11 of 10, nothing logged
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false);
+    });
+
+    test("past the target date with every scheduled item (practice chunks, transitions, combos) logged: complete", () => {
+      const piece0 = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10) });
+      const chunkSet = generateAllChunks(piece0);
+      const progress = Object.fromEntries(chunkSet.all.map((c) => [c.id, { doneDays: [1] }]));
+      const piece = { ...piece0, progress };
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), true);
+    });
+
+    test("past the target date but a single item (e.g. a transition) still untouched: not complete", () => {
+      const piece0 = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10) });
+      const chunkSet = generateAllChunks(piece0);
+      assert.ok(chunkSet.all.length > 1, "test setup sanity check — needs at least one item to leave untouched");
+      const progress = Object.fromEntries(chunkSet.all.slice(1).map((c) => [c.id, { doneDays: [1] }]));
+      const piece = { ...piece0, progress };
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false);
+    });
+  });
+
+  describe("scheduleMode: 'minutes'", () => {
+    test("past the original day count with a chunk not yet at Holding: not complete, even though every chunk has been logged", () => {
+      const piece0 = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(10) });
+      const chunkSet = generateAllChunks(piece0);
+      const progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1], stage: "settling" }]));
+      const piece = { ...piece0, progress };
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false);
+    });
+
+    test("past the original day count with every practice chunk at Holding: complete", () => {
+      const piece0 = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(10) });
+      const chunkSet = generateAllChunks(piece0);
+      const progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1], stage: "holding" }]));
+      const piece = { ...piece0, progress };
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), true);
+    });
+
+    test("still within the plan: not complete even with every chunk already at Holding — the calendar gate comes first", () => {
+      const piece0 = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(4) });
+      const chunkSet = generateAllChunks(piece0);
+      const progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1], stage: "holding" }]));
+      const piece = { ...piece0, progress };
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false);
+    });
+  });
+});
+
+describe("computeMinutesModeAutoExtend — Pass 39: keeps a minutes-mode plan producing real tasks until the piece is actually learned", () => {
+  const startedDaysAgo = (n) => addDaysISO(todayISODate(), -n);
+
+  test("wrong scheduleMode: no-op", () => {
+    const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10) }); // "days" mode (default)
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeMinutesModeAutoExtend(piece, chunkSet, timeline), null);
+  });
+
+  test("still within the plan: no-op regardless of ladder state", () => {
+    const piece = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(4) });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeMinutesModeAutoExtend(piece, chunkSet, timeline), null);
+  });
+
+  test("past the original day count with every chunk already at Holding: no-op, the piece is actually done", () => {
+    const piece0 = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(10) });
+    const chunkSet = generateAllChunks(piece0);
+    const progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1], stage: "holding" }]));
+    const piece = { ...piece0, progress };
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeMinutesModeAutoExtend(piece, chunkSet, timeline), null);
+  });
+
+  test("past the original day count with a chunk not yet at Holding: extends daysToLearn, anchors the marker at the new final day", () => {
+    const piece0 = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(10) }); // elapsedDay 11
+    const chunkSet = generateAllChunks(piece0);
+    // Every practice chunk already touched (so remainingChunkIds comes out
+    // empty, below) but not yet graduated — the realistic trigger case,
+    // since computeTimeline guarantees full introduction well within the
+    // *original* plan.
+    const progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1], stage: "settling" }]));
+    const piece = { ...piece0, progress };
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+
+    const result = computeMinutesModeAutoExtend(piece, chunkSet, timeline);
+    assert.ok(result, "an extension patch is returned");
+    assert.ok(result.daysToLearn > piece.daysToLearn, "daysToLearn actually grows");
+    assert.ok(result.daysToLearn >= 11, "grows at least far enough to cover today (elapsedDay 11)");
+    assert.deepEqual(result.rescheduleMarker.remainingChunkOrder, [], "nothing is actually untouched here");
+    assert.equal(
+      result.rescheduleMarker.asOfDay,
+      result.daysToLearn,
+      "anchored at the *new* final day (not the old one) so an empty remainingChunkOrder can't blank the whole extended region — see the comment on this function"
+    );
+  });
+
+  test("applying the extension makes the plan catch up to today in one step, even after a long absence", () => {
+    const piece0 = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(30) }); // elapsedDay 31
+    const chunkSet = generateAllChunks(piece0);
+    const progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1], stage: "settling" }]));
+    const piece = { ...piece0, progress };
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+
+    const result = computeMinutesModeAutoExtend(piece, chunkSet, timeline);
+    const extended = { ...piece, ...result };
+    const extendedChunkSet = generateAllChunks(extended);
+    const extendedTimeline = getEffectiveTimeline(extended, extendedChunkSet);
+
+    assert.ok(extendedTimeline.days.length >= 31, "the plan itself now covers today, in one shot rather than several reactive re-fires");
+    assert.equal(
+      isPlanActuallyComplete(extended, extendedChunkSet, extendedTimeline),
+      false,
+      "still not learned, so still correctly not 'complete' — only the calendar gate moved"
+    );
   });
 });
 
@@ -630,18 +796,84 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
     assert.deepEqual(planRescheduleForPieces({ reviving }), []);
   });
 
-  test("a piece past the end of its own plan is left alone", () => {
-    // The same boundary shouldShowScheduleBanner uses. Without it, every
-    // long-finished piece would be swept in forever: getCurrentDay clamps to
-    // the plan's last day, so computeScheduleStatus keeps reporting the same
-    // stale misses no matter how much later it's asked.
+  test("[fix, Pass 39] a piece past the end of its own plan with real work remaining is no longer swept aside — it needs the bulk reschedule most", () => {
+    // Through Pass 38 this gated on elapsedDay(piece) > timeline.days.length
+    // alone — the same calendar-only bug shouldShowScheduleBanner had, just
+    // in this sibling function. A days-mode piece whose target date passed
+    // with nothing ever logged is exactly the piece "Reschedule all" should
+    // catch, not exclude.
     const finishedLongAgo = basePiece({ name: "Old", daysToLearn: 10, startDate: startedDaysAgo(100) });
     const chunkSet = generateAllChunks(finishedLongAgo);
     const timeline = getEffectiveTimeline(finishedLongAgo, chunkSet);
     const { missedCount } = computeScheduleStatus(finishedLongAgo, chunkSet.practiceChunks, timeline, 10);
-    assert.ok(missedCount > 0, "computeScheduleStatus alone still calls this piece behind…");
+    assert.ok(missedCount > 0, "test setup sanity check — real work is genuinely outstanding");
 
-    assert.deepEqual(planRescheduleForPieces({ finishedLongAgo }), [], "…but a bulk reschedule must not touch it");
+    const plans = planRescheduleForPieces({ finishedLongAgo });
+    assert.equal(plans.length, 1, "no longer excluded — real work outstanding means it belongs in the bulk reschedule");
+    assert.equal(plans[0].pieceId, "finishedLongAgo");
+  });
+
+  test("[fix] a days-mode piece already past its own target date gets an `extend` patch, not just a repack", () => {
+    // Being included (the fix above) isn't enough on its own: applying only
+    // the marker leaves daysToLearn untouched, so the piece stays past its
+    // own plan even after a "successful" bulk reschedule — the piece's
+    // Master Agenda card would never actually clear. `extend` is what
+    // closes that: same formula (elapsedDay - 1 + requiredDays) the
+    // single-piece "Change target date" button uses, via
+    // computeReschedulePastPlanExtension.
+    const piece = basePiece({ name: "Old", daysToLearn: 10, startDate: startedDaysAgo(20) });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, 10);
+    const { requiredDays } = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, 10, remainingChunkIds);
+
+    const [plan] = planRescheduleForPieces({ piece });
+    assert.ok(plan.extend, "an extend patch is present");
+    assert.equal(
+      plan.extend.daysToLearn,
+      elapsedDay(piece) - 1 + requiredDays,
+      "anchored to the real elapsedDay, not the clamped asOfDay (10) — the two differ here since the piece is 20 days past a 10-day plan"
+    );
+    assert.ok(plan.extend.daysToLearn > piece.daysToLearn, "the plan actually grows");
+    assert.equal(plan.extend.targetDate, addDaysISO(piece.startDate, plan.extend.daysToLearn - 1));
+  });
+
+  test("a piece that's merely tight but still inside its own plan gets no `extend` — unchanged pack-into-what's-left behavior", () => {
+    const piece = behindPieceOnDay6({ name: "Tight", totalMeasures: 200, measureDifficulty: Array(200).fill(1) });
+
+    const [plan] = planRescheduleForPieces({ piece });
+    assert.equal(plan.extend, null, "still within its own plan — nothing to extend, whether or not it happens to fit");
+  });
+
+  test("a minutes-mode piece past its own day count gets no `extend` from the bulk path — it has its own separate, automatic fix", () => {
+    // computeMinutesModeAutoExtend (App.jsx's effect) already handles this
+    // the moment the piece is opened, with its own formula
+    // (elapsedDay + 14). Giving it a second, differently-sized fix here
+    // would just reintroduce two answers to the same question.
+    const piece0 = basePiece({ name: "MinutesOld", scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(20) });
+    const chunkSet = generateAllChunks(piece0);
+    // Leave one practice chunk genuinely untouched so this piece clears the
+    // remainingChunkIds.length === 0 guard and actually reaches the extend
+    // computation, rather than being excluded earlier for an unrelated
+    // reason.
+    const progress = Object.fromEntries(chunkSet.practiceChunks.slice(1).map((c) => [c.id, { doneDays: [1], stage: "settling" }]));
+    const piece = { ...piece0, progress };
+
+    const [plan] = planRescheduleForPieces({ piece });
+    assert.ok(plan, "test setup sanity check — the piece is included");
+    assert.equal(plan.extend, null);
+  });
+
+  test("a piece whose plan is actually finished (every item logged) is still left alone", () => {
+    // The behavior the old elapsedDay-only check was *trying* to protect —
+    // preserved, just gated on real completeness (isPlanActuallyComplete)
+    // instead of the calendar alone.
+    const piece0 = basePiece({ name: "Old", daysToLearn: 10, startDate: startedDaysAgo(100) });
+    const chunkSet = generateAllChunks(piece0);
+    const progress = Object.fromEntries(chunkSet.all.map((c) => [c.id, { doneDays: [1] }]));
+    const finishedLongAgo = { ...piece0, progress };
+
+    assert.deepEqual(planRescheduleForPieces({ finishedLongAgo }), [], "genuinely done — a bulk reschedule must not touch it");
   });
 
   test("a piece with every chunk already practiced has nothing to reschedule", () => {
@@ -739,6 +971,22 @@ describe("estimateRescheduleFit — the 'will this actually fit' warning", () =>
 
     assert.equal(byId.roomy.fit.fits, true);
     assert.equal(byId.crammed.fit.fits, false);
+  });
+});
+
+describe("computeReschedulePastPlanExtension — shared by handleReschedule (App.jsx) and planRescheduleForPieces' bulk extend", () => {
+  test("days-mode: daysToLearn is anchorDay - 1 + requiredDays, targetDate follows from it", () => {
+    const piece = basePiece({ startDate: "2026-01-01" });
+    const result = computeReschedulePastPlanExtension(piece, 21, 5);
+    assert.equal(result.daysToLearn, 25);
+    assert.equal(result.targetDate, addDaysISO("2026-01-01", 24));
+  });
+
+  test("minutes-mode: targetDate is null — never set in this mode", () => {
+    const piece = basePiece({ scheduleMode: "minutes", startDate: "2026-01-01" });
+    const result = computeReschedulePastPlanExtension(piece, 21, 5);
+    assert.equal(result.daysToLearn, 25);
+    assert.equal(result.targetDate, null);
   });
 });
 

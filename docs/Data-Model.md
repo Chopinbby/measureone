@@ -774,13 +774,18 @@ than a new 0-100 (or 0-4) field. See
   `computeConfidenceAsOf` (used for "most improved this week") can't
   correctly exclude a manual override that was set *after* the historical
   cutoff being reconstructed — see [Algorithms.md](Algorithms.md#confidence).
-- There is no first-class "piece is learned" state yet. The definition is
-  decided (every chunk's ladder card reaching Holding), and the mechanism
-  that advances `stage` is live (`computeLadderAdvance` called from
-  `handleLogSession` on every logged session) — but nothing yet queries
-  "is every chunk at Holding" to actually compute the piece-level "learned"
-  flag itself. See
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
+- **Resolved as of Pass 39, not a simplification anymore in the sense this
+  list means:** "is every chunk at Holding" is now a real, queried rollup —
+  `isPieceLearned(piece, chunkSet)` (`src/lib/ladder.js`), computed fresh
+  off `chunkSet.practiceChunks`/`progress[id].stage`. The remaining gap is
+  narrower than before: this is a *live derivation*, not a first-class
+  *persisted* piece-level "learned" state — nothing writes a `piece.stage`
+  or similar field, so a feature that needs to gate on "learned" as stored
+  data (e.g. the still-unbuilt "gate revival entry behind maintenance" item)
+  still has nothing to read for that specific purpose. See
+  [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan),
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented),
+  and [Decisions.md](Decisions.md#open-questions).
 - `piece.progress[id].doneDays.length` (surfaced in PieceMapTab as
   "Sessions logged") counts distinct days touched, not sessions logged —
   pre-existing behavior that was a distinction without a difference before

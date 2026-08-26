@@ -3,6 +3,7 @@ import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WE
 import { generateAllChunks } from "./chunking";
 import { sessionOutcome } from "./confidence";
 import { isInRevival } from "./revival";
+import { isPieceLearned } from "./ladder";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -509,6 +510,23 @@ export function estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay, 
   return { availableDays, requiredDays, fits: requiredDays <= availableDays };
 }
 
+// Shared by handleReschedule's single-piece "doesn't fit" extension
+// (App.jsx) and planRescheduleForPieces' bulk "already past its plan"
+// extension below — same formula in one place, so a future change to how
+// this is sized can't fix one call site and silently leave the other
+// stale, which is exactly how Pass 39's clamped-vs-real-elapsedDay bug
+// happened in the first place (see docs/Decisions.md#scheduling).
+// `anchorDay` is the caller's chosen "day 1 of the extension" — always the
+// real elapsedDay(piece), never the clamped currentDay/asOfDay, so the
+// result actually covers today in one step. `targetDate` is null for
+// scheduleMode: "minutes" (never set in that mode — see
+// Data-Model.md#the-piece-object).
+export function computeReschedulePastPlanExtension(piece, anchorDay, requiredDays) {
+  const daysToLearn = anchorDay - 1 + requiredDays;
+  const targetDate = piece.scheduleMode === "minutes" ? null : addDaysISO(piece.startDate, daysToLearn - 1);
+  return { daysToLearn, targetDate };
+}
+
 // "Reschedule all" (Pass 21) — the multi-piece form of what the per-piece
 // Reschedule button has always done. Answers, for a whole pieces map:
 // which pieces are behind schedule *right now*, and what rescheduleMarker
@@ -526,12 +544,18 @@ export function estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay, 
 //     and computeDueReviews already apply.
 //   * it isn't mid-revival — revival replaces the original plan's pacing
 //     entirely, so rebalancing that plan underneath it is meaningless.
-//   * it's still inside its own plan (elapsedDay <= days.length) — the same
-//     boundary shouldShowScheduleBanner uses. Past that point the piece has
-//     moved to maintenance and "behind schedule" is no longer a meaningful
-//     question; without this, every long-finished piece would be swept into
-//     a bulk reschedule forever (getCurrentDay clamps, so computeScheduleStatus
-//     keeps reporting stale misses — see shouldShowScheduleBanner below).
+//   * its plan isn't *actually* finished yet (isPlanActuallyComplete, Pass
+//     39 — see that function) — genuinely done means "behind schedule" is
+//     no longer a meaningful question; without this, every finished piece
+//     would be swept into a bulk reschedule forever (getCurrentDay clamps,
+//     so computeScheduleStatus keeps reporting stale misses — see
+//     shouldShowScheduleBanner below). **Was `elapsedDay(piece) >
+//     timeline.days.length` through Pass 38** — the same calendar-only
+//     check shouldShowScheduleBanner used to make, and the same bug: a
+//     days-mode piece whose target date passed with real work still
+//     outstanding got silently excluded from "Reschedule all" right when it
+//     needed it most. Fixed alongside the rest of Pass 39 rather than left
+//     as a sibling gap — see docs/Decisions.md#scheduling.
 //   * it actually has misses (missedCount > 0) and something left to move.
 //
 // asOfDay comes from getCurrentDay, i.e. the piece's *real* current day —
@@ -553,7 +577,7 @@ export function planRescheduleForPieces(pieces) {
       const chunkSet = generateAllChunks(piece);
       const timeline = getEffectiveTimeline(piece, chunkSet);
       if (!timeline || !timeline.days || !timeline.days.length) return;
-      if (elapsedDay(piece) > timeline.days.length) return;
+      if (isPlanActuallyComplete(piece, chunkSet, timeline)) return;
 
       const asOfDay = getCurrentDay(piece, timeline.days.length);
       const { missedCount, remainingChunkIds } = computeScheduleStatus(
@@ -564,6 +588,26 @@ export function planRescheduleForPieces(pieces) {
       );
       if (missedCount === 0 || remainingChunkIds.length === 0) return;
 
+      const fit = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds);
+
+      // A piece whose target date has already passed (not just "tight
+      // within what's left") has no meaningful "pack into what's left"
+      // option left — asOfDay is already clamped to the plan's last day, so
+      // there's no calendar room to pack into. Bulk reschedule used to just
+      // leave such a piece exactly as behind as it found it (see the fix
+      // this addresses, below); now it pushes the target date out to fit,
+      // the same way the single-piece "Change target date" button would.
+      // Days-mode only — a minutes-mode piece in this state already has its
+      // own separate, automatic fix (App.jsx's effect,
+      // computeMinutesModeAutoExtend) that runs the moment it's opened, no
+      // button needed; giving it a second, differently-sized fix here would
+      // just reintroduce two formulas answering the same question. See
+      // docs/Decisions.md#scheduling.
+      const extend =
+        piece.scheduleMode !== "minutes" && elapsedDay(piece) > timeline.days.length
+          ? computeReschedulePastPlanExtension(piece, elapsedDay(piece), fit.requiredDays)
+          : null;
+
       plans.push({
         pieceId,
         piece,
@@ -572,8 +616,9 @@ export function planRescheduleForPieces(pieces) {
         // remaining work realistically won't fit — the per-piece button
         // gives that warning in full, and the bulk path shouldn't be the
         // less-informative way to do the same thing.
-        fit: estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds),
+        fit,
         marker: { asOfDay, remainingChunkOrder: remainingChunkIds },
+        extend,
       });
     } catch (e) {
       console.error(`Error planning reschedule for piece ${pieceId}:`, e);
@@ -585,22 +630,109 @@ export function planRescheduleForPieces(pieces) {
   return plans;
 }
 
+// Is this piece's plan actually finished, or just past its calendar
+// length? Those used to be treated as the same question (`elapsedDay >
+// timeline.days.length`, everywhere a surface needed to know "is this
+// piece past its plan") — but a piece whose target date passed with real
+// work still outstanding isn't done, it's behind, and Pass 39 exists
+// specifically to stop conflating the two. What counts as "actually
+// finished" splits by scheduleMode, per
+// docs/Decisions.md#scheduling's days-vs-minutes asymmetry:
+//
+//   * "days" — the deadline was a deliberate choice, so running past it
+//     doesn't excuse unfinished work. Every item computeTimeline actually
+//     scheduled — chunkSet.all: practice chunks, transitions, and combos
+//     (generateAllChunks never puts section run-throughs or the synthetic
+//     "__consolidation__" entry in `all` — see chunking.js — so neither
+//     one is required here; flagged in Decisions.md rather than assumed,
+//     since a piece-level "everything, including the final run-through,
+//     was played" bar was never specified) — must have at least one
+//     logged session (`doneDays.length > 0`).
+//   * "minutes" — there was never a deadline to run past in the first
+//     place, so "finished" is just Stage 3's real definition: every
+//     practice chunk's ladder card at Holding (`isPieceLearned`,
+//     lib/ladder.js). See `computeMinutesModeAutoExtend` below for what
+//     keeps the plan itself growing to fit until that's true, instead of
+//     this ever reporting "finished" purely because the calendar ran out.
+export function isPlanActuallyComplete(piece, chunkSet, timeline) {
+  if (elapsedDay(piece) <= timeline.days.length) return false;
+  if (piece.scheduleMode === "minutes") return isPieceLearned(piece, chunkSet);
+  return (chunkSet.all || []).every((c) => (((piece.progress[c.id] || {}).doneDays) || []).length > 0);
+}
+
+// How many days computeMinutesModeAutoExtend (below) grows a minutes-mode
+// plan by each time it fires. Not derived from anything — just enough
+// runway that a piece still consolidating doesn't need to re-trigger this
+// every single day. Matches Holding's own default startIntervalDays
+// (docs/Repertoire-Lifecycle.md's ladder table) rather than being a bare
+// arbitrary number.
+const MINUTES_AUTO_EXTEND_STEP_DAYS = 14;
+
+// scheduleMode: "minutes" mirror of the days-mode "past the plan with real
+// work left" case above (isPlanActuallyComplete) — see
+// docs/Decisions.md#scheduling for the asymmetry this generalizes. A
+// minutes-mode piece never had a deadline to protect, so instead of a
+// reschedule prompt, the plan just grows automatically to keep producing
+// real content until the piece is actually learned (isPieceLearned).
+// Reuses reconcileMinutesPerDaySchedule's rescheduleMarker-gated floor
+// (below) to make the extension stick across reload — CLAUDE.md: don't
+// touch that floor without keeping it, or this silently reverts.
+//
+// Returns null when no extension is warranted (wrong scheduleMode, still
+// inside the current plan, or already learned). Otherwise a
+// { daysToLearn, rescheduleMarker } patch, applied by the caller the same
+// way handleReschedule's own minutes-mode branch already applies its
+// (manually-triggered) result.
+export function computeMinutesModeAutoExtend(piece, chunkSet, timeline) {
+  if (piece.scheduleMode !== "minutes") return null;
+  if (elapsedDay(piece) <= timeline.days.length) return null;
+  if (isPieceLearned(piece, chunkSet)) return null;
+
+  // Sized off the real elapsed day, not timeline.days.length, so a piece
+  // that's sat unopened for far longer than one step still catches up in
+  // a single extension rather than needing several reactive re-fires to
+  // converge.
+  const target = elapsedDay(piece) + MINUTES_AUTO_EXTEND_STEP_DAYS;
+  if (target <= piece.daysToLearn) return null;
+
+  const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, timeline.days.length);
+  return {
+    daysToLearn: target,
+    // asOfDay is pinned to the *new* final day — not `timeline.days.length`,
+    // the anchor handleReschedule's own marker uses — so getEffectiveTimeline's
+    // splice only ever re-packs that one trailing day. By the time this
+    // auto-extend fires at all, introduction is normally long complete
+    // (computeTimeline's own halfPoint rule guarantees it within the
+    // *original* plan), so remainingChunkIds is typically empty here —
+    // and an empty remainingChunkOrder anchored at the *old* last day
+    // would blank Tier 1/2 placement for the *entire* newly-extended
+    // region (getEffectiveTimeline gives a chunk no presence at all in
+    // the re-packed sub-plan unless it's in remainingChunkOrder).
+    // Anchoring at the new last day instead means only that single
+    // trailing day goes unplaced; everything else keeps the full, real
+    // placement computeTimeline produces against the larger daysToLearn.
+    rescheduleMarker: { asOfDay: target, remainingChunkOrder: remainingChunkIds },
+  };
+}
+
 // Whether the schedule-behind-schedule banner (ScheduleBanner.jsx) should
-// render at all — Pass 16. `currentDay` (App.jsx's realCurrentDay, fed into
-// computeScheduleStatus above) is clamped to timeline.days.length via
-// getCurrentDay (lib/utils.js), so once a piece runs past its own plan it
-// stays pinned at the last day forever — and computeScheduleStatus keeps
-// finding chunks introduced before that pinned day with zero sessions,
-// reporting a nonzero missedCount indefinitely. "Behind schedule" stops
-// being a meaningful question once the plan itself is over: the piece has
-// moved into ongoing maintenance (computeDueReviews, lib/maintenance.js),
-// the same condition TodayTab.jsx already uses (its own `pastPlan`) to
-// switch into that mode. Takes `elapsedDay` as an already-computed number
-// (lib/utils.js's elapsedDay(piece), read once by the caller) rather than
-// `piece` itself, so this stays a pure function of its inputs like every
-// other export here (computeScheduleStatus above takes `currentDay` the
-// same way) instead of reaching for the real clock internally.
-export function shouldShowScheduleBanner(elapsedDay, timeline, missedCount) {
-  if (elapsedDay > timeline.days.length) return false;
+// render at all — Pass 16, redefined in Pass 39. `currentDay` (App.jsx's
+// realCurrentDay, fed into computeScheduleStatus above) is clamped to
+// timeline.days.length via getCurrentDay (lib/utils.js), so once a piece
+// runs past its own plan it stays pinned at the last day forever — and
+// computeScheduleStatus keeps finding chunks introduced before that pinned
+// day with zero sessions, reporting a nonzero missedCount indefinitely.
+// "Behind schedule" stops being a meaningful question once the plan is
+// *actually* over (isPlanActuallyComplete — no longer just "the calendar
+// ran out," see that function for why the two aren't the same question):
+// the piece has moved into ongoing maintenance (computeDueReviews,
+// lib/maintenance.js), the same condition TodayTab.jsx's `pastPlan` uses to
+// switch into that mode. Takes `piece`/`chunkSet` (rather than a
+// precomputed `elapsedDay` number, Pass 16's original signature) because
+// isPlanActuallyComplete needs both the real piece and its full chunk set,
+// not just one derived number — still a pure function of its inputs, same
+// as every other export here.
+export function shouldShowScheduleBanner(piece, chunkSet, timeline, missedCount) {
+  if (isPlanActuallyComplete(piece, chunkSet, timeline)) return false;
   return missedCount > 0;
 }

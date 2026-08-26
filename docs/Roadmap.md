@@ -98,6 +98,19 @@ last played, anywhere).
 move together) — see [Decisions.md](Decisions.md#ux) and
 [Data-Model.md](Data-Model.md#the-piece-object).
 
+**Since Pass 42**, there's a first, deliberately bounded cross-piece
+summary: `AllPiecesTab`, one row per piece (progress %, confidence %, days
+since last touched, time practiced) plus a total-time-practiced stat,
+reached via a "View all pieces" button on Progress rather than a new
+`NAV_BASE` entry. See [Architecture.md](Architecture.md) for the component
+and exactly which existing per-piece functions it calls. This is *not* the
+"cross-piece repertoire health dashboards" item mentioned above under
+Maintenance mode — no lifecycle-state detection, no health scoring, just a
+summary table — and it's not a consistency/streak view either (which days
+across pieces were touched); both were explicitly scoped out of this first
+version, not forgotten. Either is a reasonable next step if this view turns
+out to earn its place.
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold
@@ -142,18 +155,27 @@ assuming this section is stale.
    themselves (combo escalation *within* an already-triggered revival was
    already built separately — see
    [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)
-   for both). **Still not implemented**: a live "what's due" query that
-   works *beyond* the current plan's bounded length, so maintenance
-   reviews can actually surface to the learner once a piece runs past its
-   original plan. **Now scoped, ahead of building it (Pass 8)**: it
-   surfaces in both Master Agenda and the per-piece Today tab via one
-   shared function (`computeDueReviews`), suppressed for paused/archived
-   pieces and pieces mid-revival. This is also what resolves "what does
-   learned mean" (Stage 3), once
-   something queries "is every chunk's stage at Holding" — see
+   for both). The live "what's due" query that works *beyond* the current
+   plan's bounded length (Pass 8, `computeDueReviews`) surfaces in both
+   Master Agenda and the per-piece Today tab, suppressed for
+   paused/archived pieces and pieces mid-revival. **"What does learned
+   mean" (Stage 3) is now resolved *and* implemented, not just resolved
+   (Pass 39)**: `isPieceLearned(piece, chunkSet)` (`src/lib/ladder.js`)
+   finally queries "is every chunk's stage at Holding" — it's a live
+   derivation, not a persisted piece-level state, and it's already
+   load-bearing: `isPlanActuallyComplete` (`src/lib/scheduling.js`) reads
+   it to decide whether a `scheduleMode: "minutes"` piece should keep
+   auto-extending its own plan or finally read as complete, and the same
+   function replaced the old calendar-only "has this piece run past its
+   plan" check everywhere that question is asked (Today's Practice, Master
+   Agenda, the schedule-behind banner, bulk "Reschedule all" eligibility).
+   See
    [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
-   for the full design and [Decisions.md](Decisions.md#spaced-repetition--maintenance)
-   for the decision records. Repertoire rotation (multiple pieces
+   and [Decisions.md](Decisions.md#scheduling) for the mechanics, and
+   [Decisions.md](Decisions.md#open-questions) for what's still queued
+   behind it — a first-class *persisted* "learned" state (gating revival
+   entry behind maintenance needs one; the live derivation alone isn't
+   that). Repertoire rotation (multiple pieces
    competing for daily practice time while in maintenance) remains
    genuinely undesigned — see
    [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-5--repertoire-rotation-not-built).

@@ -58,6 +58,25 @@ export function isInterleaveEligible(entry) {
   return stage === "settling" || stage === "holding";
 }
 
+// Stage 3's "learned" rollup
+// (Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented) —
+// decided long before this existed as a real function: a piece is
+// "learned" once every practice chunk's ladder card has reached Holding.
+// Pass 39 implements it as this one function rather than leaving every
+// caller to write its own inline check, since it's now load-bearing for
+// scheduling behavior (isPlanActuallyComplete, lib/scheduling.js), not
+// just a future display label.
+//
+// Deliberately chunkSet.practiceChunks only, not chunkSet.all — Stage 3's
+// definition has always been stated in terms of the piece's practice
+// chunks specifically; transitions/combos ride the same ladder mechanics
+// but were never part of what "learned" means here.
+export function isPieceLearned(piece, chunkSet) {
+  const practiceChunks = (chunkSet && chunkSet.practiceChunks) || [];
+  if (!practiceChunks.length) return false;
+  return practiceChunks.every((c) => (((piece && piece.progress) || {})[c.id] || {}).stage === "holding");
+}
+
 // Duplicated from adaptiveReviewOffsets (scheduling.js:94-100) rather than
 // imported — factoring it into a shared helper would mean editing
 // scheduling.js, which isn't in this pass's Touches list (new-file-only).

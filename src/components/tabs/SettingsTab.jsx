@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore } from "lucide-react";
 import { BasicsFields } from "../fields/BasicsFields";
 import { SectionsEditor } from "../fields/SectionsEditor";
@@ -14,6 +15,19 @@ import { autoChunkSize } from "../../lib/chunking";
 import { formatMinutes } from "../../lib/utils";
 
 export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus }) {
+  // Mirrors BasicsFields' own local "multiple movements" toggle state, the
+  // same way Wizard.jsx does — needed here too so Save can be blocked when
+  // the toggle is on but the work title is blank (same rule as the Wizard,
+  // see CLAUDE.md). Unlike Wizard, SettingsTab itself never unmounts between
+  // edit sessions (editDraft/editing live in App.jsx precisely so switching
+  // tabs mid-edit doesn't lose the draft), so this can't just be a useState
+  // initializer the way BasicsFields' own copy is — it has to be reset
+  // explicitly whenever a new edit session starts.
+  const [multiPart, setMultiPart] = useState(false);
+  useEffect(() => {
+    if (editing) setMultiPart(!!(editDraft?.workId || editDraft?.workName));
+  }, [editing]);
+
   if (!editing || !editDraft) {
     const status = piece.status || "active";
     return (
@@ -129,7 +143,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
   return (
     <div className="tab-pane">
       <div className="tab-header"><h1>Edit piece</h1></div>
-      <div className="panel"><h3>Piece</h3><BasicsFields draft={editDraft} set={setEditDraft} /></div>
+      <div className="panel"><h3>Piece</h3><BasicsFields draft={editDraft} set={setEditDraft} onMultiPartChange={setMultiPart} /></div>
       <div className="panel"><h3>Sections</h3><SectionsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Difficulty</h3><DifficultyEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Recurring material</h3><RecurringEditor draft={editDraft} set={setEditDraft} /></div>
@@ -140,7 +154,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
       <div className="panel"><h3>Documents</h3><DocumentsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="edit-actions">
         <button className="ghost-btn" onClick={onDiscard}>Discard changes</button>
-        <button className="primary-btn" onClick={() => onSave(editDraft)}>
+        <button className="primary-btn" disabled={multiPart && !editDraft.workName.trim()} onClick={() => onSave(editDraft)}>
           <Check size={15} /> Save changes
         </button>
       </div>

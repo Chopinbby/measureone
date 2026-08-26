@@ -102,6 +102,11 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
       : defaultPiece()
   );
   const [startAsRevival, setStartAsRevival] = useState(false);
+  // Mirrors BasicsFields' own local toggle state (via onMultiPartChange)
+  // purely so canAdvance() can see it — BasicsFields still owns the toggle
+  // itself, this is read-only from here. Initial value matches BasicsFields'
+  // own init logic for the joinWork ("Add a movement") case.
+  const [multiPart, setMultiPart] = useState(!!joinWork);
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
   const chunkSet = useMemo(() => generateAllChunks(draft), [draft]);
@@ -110,7 +115,11 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
   const avgMinPerDay = Math.round(totalMinutes / draft.daysToLearn / 5) * 5;
 
   const canAdvance = () => {
-    if (step === 0) return draft.name.trim().length > 0 && draft.totalMeasures > 0;
+    if (step === 0) {
+      if (!(draft.name.trim().length > 0 && draft.totalMeasures > 0)) return false;
+      if (multiPart && !draft.workName.trim()) return false;
+      return true;
+    }
     if (step === 4) {
       if (draft.scheduleMode === "days" && !draft.targetDate) return false;
       return draft.daysToLearn > 0 && draft.minutesPerDay > 0;
@@ -154,6 +163,7 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
                 draft={draft}
                 set={set}
                 lockWork={!!joinWork}
+                onMultiPartChange={setMultiPart}
                 afterWorkMode={
                   <div className="field" style={{ marginTop: 20 }}>
                     <span>Are you learning it for the first time?</span>

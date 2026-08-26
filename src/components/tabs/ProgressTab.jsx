@@ -4,7 +4,7 @@ import { formatRange, loggedSessions } from "../../lib/utils";
 import { SESSION_OUTCOME_META, DIFFICULTY_META } from "../../lib/constants";
 import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
 
-export function ProgressTab({ piece, chunks, timeline, currentDay }) {
+export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPieces }) {
   const practiceChunks = chunks.filter((c) => c.kind === "section");
 
   // #1 Rolling-window consistency — not a streak: a plain fraction of the
@@ -119,8 +119,9 @@ export function ProgressTab({ piece, chunks, timeline, currentDay }) {
 
   return (
     <div className="tab-pane">
-      <div className="tab-header">
+      <div className="tab-header day-nav">
         <h1>Progress</h1>
+        <button className="ghost-btn" onClick={onViewAllPieces}>View all pieces</button>
       </div>
 
       <div className="stat-grid-2">

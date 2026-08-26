@@ -36,6 +36,13 @@ learning" — see the gap noted below.
 
 ## Stage 3 — "Learned" (defined; not yet implemented)
 
+> **Heading kept as-is deliberately** — it's linked from a number of other
+> places in `docs/` and from code comments by its exact anchor
+> (`#stage-3--learned-defined-not-yet-implemented`), and renaming it would
+> break every one of those without a coordinated fix across files this
+> pass didn't touch. Read the body below, not the heading, for the current
+> state: **the rollup is now built.**
+
 **Decided** (see [Decisions.md](Decisions.md#spaced-repetition--maintenance)):
 a piece is "learned" once every practice chunk's ladder card has reached
 Holding — the resting stage of the spaced-repetition ladder described in
@@ -45,26 +52,40 @@ one: a piece that consolidates fast graduates fast, one that doesn't,
 doesn't, regardless of what `daysToLearn` originally guessed. **Per-chunk
 ladder state now exists and advances live** — `computeLadderAdvance`
 (`src/lib/ladder.js`) is called from `handleLogSession` (`App.jsx`) on
-every logged session (Pass 2/3 of the maintenance-ladder build). **What's
-still not implemented** is the piece-level rollup itself: nothing yet
-queries "is every chunk's `stage` at `holding`" to actually compute a
-piece's "learned" flag — see
-[Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
+every logged session (Pass 2/3 of the maintenance-ladder build).
 
-**Queued behind this work:** gating revival entry so a revival can only be
-started once a piece is in maintenance (i.e. learned), with a manual
-Settings transition for pieces finished away from the app. Agreed in
-principle but explicitly blocked on the rollup above — there is no mode to
-gate on until it exists. It also has to reconcile with the Wizard's
-start-directly-in-revival path and with the staleness auto-trigger, which
-fires for pieces *abandoned* mid-learning. Design it together with this
-state rather than bolting it on afterwards; full detail in
-[Decisions.md](Decisions.md#open-questions).
+**The piece-level rollup itself is now built too (Pass 39):**
+`isPieceLearned(piece, chunkSet)` (`src/lib/ladder.js`) is the real
+function that queries "is every practice chunk's `stage` at `holding`" —
+no longer just prose. It's genuinely load-bearing, not a future display
+label: `isPlanActuallyComplete` (`src/lib/scheduling.js`) calls it to
+decide, for a `scheduleMode: "minutes"` piece, whether the plan should keep
+extending itself or finally read as complete — see
+[Stage 4 → this pass's build](#stage-4--maintenance-mostly-built) below
+and [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
+for the mechanics, [Decisions.md](Decisions.md#scheduling) for why. It is
+**not yet surfaced anywhere as a user-visible "this piece is learned"
+label or state** — only its scheduling *consequences* are visible so far,
+the same way ladder `stage` itself has always been felt through its
+downstream effects (`practiceBPM`, which day a review lands on) rather
+than shown as a raw value.
+
+**Still queued behind this work, now unblocked but not built:** gating
+revival entry so a revival can only be started once a piece is in
+maintenance (i.e. learned), with a manual Settings transition for pieces
+finished away from the app. Agreed in principle, and no longer blocked on
+"there's no mode to gate on" — `isPieceLearned` is exactly that mode now —
+but this pass's Builds list didn't include wiring it into Revival entry,
+so that gate still doesn't exist. It also has to reconcile with the
+Wizard's start-directly-in-revival path and with the staleness
+auto-trigger, which fires for pieces *abandoned* mid-learning. Design it
+together with this state rather than bolting it on afterwards; full detail
+in [Decisions.md](Decisions.md#open-questions).
 
 `computeProgressTier` (buckets a chunk into untouched/learned/comfortable/
 mastered) and `computeConfidence` (continuous 0–100 score) both continue
-to answer their own separate questions from this piece-level "learned"
-rollup, which nothing computes yet — see
+to answer their own separate, chunk-level questions from this piece-level
+"learned" rollup (`isPieceLearned`, now built — see above) — see
 [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
 **As of Pass 6, `computeProgressTier` buckets directly off the chunk's
 ladder `stage`** rather than its most-recent session's clean-rep count

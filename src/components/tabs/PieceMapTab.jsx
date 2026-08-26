@@ -333,7 +333,6 @@ export function PieceMapTab({
                 key={selectedChunk.id}
                 value={piece.memoryAnchors && piece.memoryAnchors[selectedChunk.id]}
                 onCommit={(text) => onSetMemoryAnchor(selectedChunk.id, text)}
-                optional={!sequentialMode}
               />
 
               {sequentialMode && (

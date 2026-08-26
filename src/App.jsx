@@ -19,9 +19,9 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
-import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes } from "./lib/utils";
+import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
@@ -59,6 +59,7 @@ import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
 import { RevivalTab } from "./components/tabs/RevivalTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
+import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
 
 /* ------------------------------------------------------------------ */
 /*  App shell                                                          */
@@ -226,6 +227,27 @@ export default function App() {
   );
   const currentDay = dayOverride || realCurrentDay;
 
+  // scheduleMode: "minutes" mirror of TodayTab's days-mode reschedule nudge
+  // (Pass 39): once elapsedDay runs past this piece's daysToLearn with the
+  // piece not yet actually learned (isPieceLearned — Stage 3's real
+  // definition, not just "logged once"), there's no deadline here to
+  // protect by stopping and asking, so the plan just grows automatically
+  // instead of falling into the due-reviews-only maintenance view. See
+  // computeMinutesModeAutoExtend (lib/scheduling.js) and
+  // docs/Decisions.md#scheduling for the days-vs-minutes asymmetry this
+  // generalizes. Scoped to the active piece only, same as chunkSet/timeline
+  // themselves — a background piece not currently open picks this up the
+  // next time it's opened, not live. Skipped while the piece is being
+  // hand-edited in Settings so this can't race a save landing on top of it.
+  // Self-limiting: applying the patch grows daysToLearn past elapsedDay, so
+  // the next recompute finds nothing left to do and the effect is a no-op.
+  useEffect(() => {
+    if (!loaded || !piece || !chunkSet || !timeline || settingsEditing) return;
+    const extension = computeMinutesModeAutoExtend(piece, chunkSet, timeline);
+    if (extension) updatePiece((p) => ({ ...p, ...extension }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, piece, chunkSet, timeline, settingsEditing]);
+
   const navItems = useMemo(() => {
     if (!isInRevival(piece)) return NAV_BASE;
     const items = [...NAV_BASE];
@@ -233,11 +255,15 @@ export default function App() {
     return items;
   }, [isInRevival(piece)]);
 
-  const switchToPiece = (id) => {
+  // `tab` defaults to "overview" (every call site before Master Agenda's
+  // "Log practice"/"Pick a random piece" below), which land on Today's
+  // Practice instead — you clicked "practice", so you should land where
+  // you actually log it, not on the dashboard.
+  const switchToPiece = (id, tab = "overview") => {
     if (!guardLeavingInterleaved()) return;
     setActivePieceId(id);
     setSwitcherOpen(false);
-    setActiveTab("overview");
+    setActiveTab(tab);
     setDayOverride(null);
     setSettingsEditing(false);
     setEditDraftState(null);
@@ -1086,20 +1112,32 @@ export default function App() {
   // the *active* piece's result, so a failure belonging to a different piece
   // would be cleared again within the same tick. (The banner still covers
   // the active piece, via that effect, exactly as before.)
+  // A target's `extend` (single-piece flow never sets it; bulk sets it only
+  // for a piece planRescheduleForPieces found already past its own target
+  // date — lib/scheduling.js) carries { daysToLearn, targetDate }, with
+  // targetDate omitted rather than written as null for a scheduleMode:
+  // "minutes" piece — same "only include it when it's real" pattern
+  // handleConfirmRescheduleWithExtension below already uses for the
+  // single-piece case.
+  const extendPatch = (extend) =>
+    extend ? { daysToLearn: extend.daysToLearn, ...(extend.targetDate ? { targetDate: extend.targetDate } : {}) } : {};
+
   const handleConfirmReschedule = () => {
     if (!rescheduleTargets.length) return;
 
     const activeTarget = rescheduleTargets.find((t) => t.pieceId === activePieceId);
-    if (activeTarget) updatePiece((p) => ({ ...p, rescheduleMarker: activeTarget.marker }));
+    if (activeTarget) {
+      updatePiece((p) => ({ ...p, rescheduleMarker: activeTarget.marker, ...extendPatch(activeTarget.extend) }));
+    }
 
     const saved = {};
     const failedNames = [];
     rescheduleTargets
       .filter((t) => t.pieceId !== activePieceId)
-      .forEach(({ pieceId, marker }) => {
+      .forEach(({ pieceId, marker, extend }) => {
         const current = pieces[pieceId];
         if (!current) return;
-        const next = { ...current, rescheduleMarker: marker, updatedAt: Date.now() };
+        const next = { ...current, rescheduleMarker: marker, ...extendPatch(extend), updatedAt: Date.now() };
         if (savePieceToStorage(pieceId, next).ok) saved[pieceId] = next;
         else failedNames.push(current.name || "Untitled piece");
       });
@@ -1196,7 +1234,26 @@ export default function App() {
 
   const handleReschedule = () => {
     const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
-    if (status.remainingChunkIds.length === 0) return;
+    if (status.remainingChunkIds.length === 0) {
+      // Nothing untouched among *practice chunks* — the only unit this
+      // reschedule mechanism (and rescheduleMarker/getEffectiveTimeline
+      // underneath it) actually knows how to re-place. Usually that really
+      // does mean "nothing to do." But isPlanActuallyComplete's "days"-mode
+      // bar also covers transitions/combos (chunkSet.all) — so a piece can
+      // still correctly show the reschedule nudge (real work left) while
+      // having zero untouched *practice* chunks, if the one thing left is a
+      // transition or focus block riding on already-touched neighbors. A
+      // reschedule genuinely can't help there (there's no day-placement
+      // problem to solve, just something still waiting to be logged), so
+      // say that plainly instead of a click that silently does nothing —
+      // see docs/Decisions.md#scheduling.
+      if (!isPlanActuallyComplete(piece, chunkSet, timeline)) {
+        window.alert(
+          "Every practice chunk has already been introduced — there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"View all\" on Today's Practice to find it."
+        );
+      }
+      return;
+    }
 
     const { availableDays, requiredDays, fits } = estimateRescheduleFit(
       piece,
@@ -1213,11 +1270,23 @@ export default function App() {
     let suggestion = null;
     if (!fits) {
       // Extends the plan just far enough that requiredDays worth of days are
-      // actually available from today — same requiredDays estimate above,
-      // no separate calculation. daysToLearn counts day 1 as the start date
-      // itself, hence the -1 on both ends (matches estFinishDate in
-      // ScheduleFields.jsx).
-      const newDaysToLearn = currentDay - 1 + requiredDays;
+      // actually available *from today* — same requiredDays estimate above,
+      // no separate calculation. Shared with planRescheduleForPieces' bulk
+      // "already past its plan" extension (lib/scheduling.js) rather than a
+      // second copy of this formula — anchored to the real, unclamped
+      // elapsedDay rather than `currentDay` (which is clamped to the plan's
+      // length once you're past it, via getCurrentDay): for a piece only
+      // slightly behind the two are identical, but for one genuinely far
+      // past its plan, sizing off the clamped value could still leave the
+      // freshly-extended plan short of *today*, needing several more
+      // reschedule clicks to actually catch up (confirmed in manual
+      // testing: a piece 10 days past a 5-day plan took three successive
+      // clicks to converge).
+      const { daysToLearn: newDaysToLearn, targetDate: suggestedTargetDate } = computeReschedulePastPlanExtension(
+        piece,
+        elapsedDay(piece),
+        requiredDays
+      );
       if (piece.scheduleMode === "minutes") {
         // No target date to suggest changing — one was never set in this
         // mode (minutesPerDay is the fixed input, daysToLearn the derived
@@ -1228,8 +1297,20 @@ export default function App() {
         // a choice. targetDate stays null so the modal renders one button.
         suggestion = { targetDate: null, daysToLearn: newDaysToLearn };
         message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, but only ${availableDays} ${dayWord(availableDays)} ${remainWord(availableDays)} in this plan.\n\nRescheduling will extend your plan to ${newDaysToLearn} days total, at the same pace, so everything fits. Continue?`;
+      } else if (elapsedDay(piece) > timeline.days.length) {
+        // The piece's target date has already fully passed — not just a
+        // tight window, an actually-expired one. "Reschedule into current
+        // plan days" packs everything onto what's effectively a single
+        // already-past day (availableDays floors at 1 here); doing that
+        // once is exactly what let a piece go permanently invisible to
+        // "Reschedule all" later (found during Pass 39 follow-up
+        // verification — see docs/Decisions.md#scheduling). There's no
+        // real "current plan days" left to offer as an alternative, so
+        // only the extend choice is offered — singleChoice tells the modal
+        // to render one button instead of two.
+        suggestion = { targetDate: suggestedTargetDate, daysToLearn: newDaysToLearn, singleChoice: true };
+        message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)} — and this piece's target date has already passed.\n\nRescheduling will move the target date to ${formatDateReadable(suggestedTargetDate)} to fit, at the same pace. Continue?`;
       } else {
-        const suggestedTargetDate = addDaysISO(piece.startDate, newDaysToLearn - 1);
         suggestion = { targetDate: suggestedTargetDate, daysToLearn: newDaysToLearn };
         message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, but only ${availableDays} ${dayWord(availableDays)} ${remainWord(availableDays)} in this plan.\n\nWould you like to change the target date to ${formatDateReadable(suggestedTargetDate)}, or reschedule into the current remaining plan days?`;
       }
@@ -1262,7 +1343,17 @@ export default function App() {
     const nameOf = (p) => p.piece.name || "Untitled piece";
     const names = plans.map(nameOf).join(", ");
     const totalChunks = plans.reduce((s, p) => s + p.marker.remainingChunkOrder.length, 0);
-    const tight = plans.filter((p) => !p.fit.fits);
+    // A piece already past its own target date gets an `extend` patch from
+    // planRescheduleForPieces (Pass 39 follow-up) — its target date moves
+    // as part of this action, so it no longer belongs in the "probably
+    // won't fit" warning below, which is specifically about a piece that's
+    // still inside its plan but running tight.
+    const extending = plans.filter((p) => p.extend);
+    const tight = plans.filter((p) => !p.fit.fits && !p.extend);
+
+    const extendingNote = extending.length
+      ? `\n\n${extending.length === 1 ? "" : `${extending.length} of these — `}${extending.map(nameOf).join(", ")}${extending.length === 1 ? " is" : " are"} past ${extending.length === 1 ? "its" : "their"} target date entirely. Rescheduling will also push ${extending.length === 1 ? "its" : "their"} target date${extending.length === 1 ? "" : "s"} out to fit, at the same pace.`
+      : "";
 
     const warning = tight.length
       ? `\n\nHeads up: at your current pace, ${tight.length === 1 ? "" : `${tight.length} of these — `}${tight.map(nameOf).join(", ")}${tight.length === 1 ? " probably won't" : " — probably won't"} fit in the days ${tight.length === 1 ? "its plan has" : "their plans have"} left. Rescheduling packs things in as tightly as possible either way; open ${tight.length === 1 ? "it" : "them"} individually for the details, or extend the timeline in Settings.`
@@ -1270,11 +1361,15 @@ export default function App() {
 
     const message =
       `${plans.length} piece${plans.length === 1 ? " is" : "s are"} behind schedule: ${names}.\n\n` +
-      `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are, and each piece keeps its own target date.` +
-      `${warning}\n\nContinue?`;
+      // "...and each piece keeps its own target date" only when that's
+      // actually true for every piece here — dropped rather than stated
+      // falsely whenever extendingNote is about to say otherwise for some
+      // of them.
+      `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are${extending.length ? "" : ", and each piece keeps its own target date"}.` +
+      `${extendingNote}${warning}\n\nContinue?`;
 
     openRescheduleModal(
-      plans.map(({ pieceId, marker }) => ({ pieceId, marker })),
+      plans.map(({ pieceId, marker, extend }) => ({ pieceId, marker, extend })),
       `Reschedule ${plans.length} piece${plans.length === 1 ? "" : "s"}?`,
       message
     );
@@ -1517,6 +1612,7 @@ export default function App() {
               <MasterAgendaTab
                 pieces={pieces}
                 onSelectPiece={switchToPiece}
+                onSelectPieceToday={(id) => switchToPiece(id, "today")}
                 onSelectDay={handleSelectDay}
                 onRescheduleAll={handleRescheduleAll}
               />
@@ -1576,7 +1672,19 @@ export default function App() {
                 onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
               />
             )}
-            {activeTab === "progress" && <ProgressTab piece={piece} chunks={chunks} timeline={timeline} currentDay={currentDay} />}
+            {activeTab === "progress" && (
+              <ProgressTab
+                piece={piece}
+                chunks={chunks}
+                timeline={timeline}
+                currentDay={currentDay}
+                onViewAllPieces={() => setActiveTab("all-pieces")}
+              />
+            )}
+            {/* Not in NAV_BASE — reached only via the button on Progress,
+                same "button-only tab" pattern as "revival" below (not part
+                of the persistent sidebar). See docs/Architecture.md. */}
+            {activeTab === "all-pieces" && <AllPiecesTab pieces={pieceList} onSelectPiece={switchToPiece} />}
             {activeTab === "settings" && (
               <SettingsTab
                 piece={piece}
@@ -1642,7 +1750,25 @@ export default function App() {
               <button className="ghost-btn" onClick={closeRescheduleModal}>
                 Cancel
               </button>
-              {rescheduleSuggestion && rescheduleSuggestion.targetDate ? (
+              {!rescheduleSuggestion ? (
+                <button className="primary-btn" onClick={handleConfirmReschedule}>
+                  Reschedule
+                </button>
+              ) : !rescheduleSuggestion.targetDate ? (
+                // scheduleMode: "minutes" — no target date to reference at
+                // all, extending is the only action either way.
+                <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                  Reschedule
+                </button>
+              ) : rescheduleSuggestion.singleChoice ? (
+                // scheduleMode: "days", but the target date has already
+                // fully passed — "reschedule into current plan days" isn't
+                // a real alternative here (see the comment where this is
+                // set), so only the extend button shows.
+                <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                  Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
+                </button>
+              ) : (
                 <>
                   <button className="ghost-btn" onClick={handleConfirmReschedule}>
                     Reschedule into current plan days
@@ -1651,14 +1777,6 @@ export default function App() {
                     Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
                   </button>
                 </>
-              ) : rescheduleSuggestion ? (
-                <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
-                  Reschedule
-                </button>
-              ) : (
-                <button className="primary-btn" onClick={handleConfirmReschedule}>
-                  Reschedule
-                </button>
               )}
             </div>
           </div>
@@ -1744,7 +1862,7 @@ const CSS = `
 .piece-switcher-drag-handle:active { cursor: grabbing; }
 .piece-switcher-dragging { opacity: 0.4; }
 .piece-switcher-drag-over { box-shadow: inset 0 2px 0 var(--brass); }
-.part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }
 .part-chip.active { background: var(--brass); border-color: var(--brass); color: var(--white); }
@@ -1846,6 +1964,8 @@ const CSS = `
 .day-num { width: 56px; color: var(--brass-deep); flex-shrink: 0; }
 .day-desc { flex: 1; color: var(--ink-soft); }
 .day-min { color: var(--ink-faint); flex-shrink: 0; }
+.all-pieces-col { width: 90px; flex-shrink: 0; color: var(--ink-faint); }
+.all-pieces-head { color: var(--ink-faint); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
 
 .def-list { display: flex; flex-direction: column; gap: 10px; margin: 0 0 18px; }
 .def-list > div { display: flex; justify-content: space-between; font-size: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); gap: 12px; }

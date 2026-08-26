@@ -383,6 +383,356 @@ per-day-reset accumulator to a cumulative-boundary assignment.**
   distinction — both confirmed to actually fail against the pre-fix code.
 - See [Algorithms.md](Algorithms.md#timeline--scheduler).
 
+**Decision (Pass 39): "the calendar ran out" and "the plan is actually
+finished" are not the same question — and what counts as "finished" itself
+splits by `scheduleMode`, generalizing the same days-vs-minutes asymmetry
+the reschedule-confirmation decision above already established for the
+"doesn't fit" case.**
+
+- **Why:** the motivating symptom, reported directly: a piece behind
+  schedule whose calendar days had elapsed went *silent* instead of
+  continuing to warn — `shouldShowScheduleBanner` suppressed the "N chunks
+  behind schedule" banner the moment `elapsedDay(piece) >
+  timeline.days.length`, with no regard for whether anything was actually
+  missed, and both `TodayTab`'s `pastPlan` and `MasterAgendaTab`'s
+  per-piece day lookup made the identical calendar-only judgment to switch
+  into the maintenance/due-list view. All three were really asking "has
+  the clock run out," when the question that actually matters is "is there
+  still real work left."
+- **Stage 3 was decided but never built as a real rollup** (see
+  [Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)):
+  "a piece is learned once every practice chunk's ladder card has reached
+  Holding" existed only as prose. This pass implements it as
+  `isPieceLearned(piece, chunkSet)` (`lib/ladder.js`) and builds the
+  piece-level "is the plan actually finished" rollup,
+  `isPlanActuallyComplete(piece, chunkSet, timeline)` (`lib/scheduling.js`),
+  on top of it — see [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
+  for the mechanics. `shouldShowScheduleBanner`, `TodayTab`'s `pastPlan`,
+  and `MasterAgendaTab`'s per-piece day lookup all now call this one
+  function rather than each repeating (and eventually drifting from) the
+  same calendar-only comparison — the same "one function, every surface
+  calls it" pattern `computeDueReviews` already established
+  ([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#how-maintenance-surfaces-in-the-ui-built)).
+- **The asymmetry, generalized rather than reinvented:** the existing
+  reschedule-confirmation decision above already splits `"doesn't fit"`
+  by `scheduleMode` — `"days"` offers the learner a choice (change the
+  target date, or cram into what's left) because the deadline was a
+  deliberate one worth protecting or deliberately abandoning; `"minutes"`
+  just extends automatically, since there was never a deadline to protect
+  in the first place. This pass applies that identical reasoning to the
+  calendar-*elapsed* case instead of the plan-doesn't-*fit* case:
+  - **`"days"`** — running past a deliberately-chosen deadline doesn't
+    excuse unfinished work, so it doesn't quietly graduate to "complete."
+    `isPlanActuallyComplete` additionally requires every item
+    `computeTimeline` actually scheduled (`chunkSet.all`) to have at least
+    one logged session. When that's not yet true, `TodayTab` surfaces a
+    new banner ("Past your target date… Reschedule to pick a new target
+    date, or fit what's left into the time you have") that calls the
+    *existing* `onReschedule` prop — already wired to `handleReschedule`,
+    already opening the Pass 36 reschedule-confirmation modal with exactly
+    the days-mode choice this needs. **No new modal or flow was built**,
+    per the pass's own explicit scope — see "Deliberately deferred," below.
+  - **`"minutes"`** — there was never a deadline to protect, so instead of
+    a prompt, the plan just keeps growing automatically
+    (`computeMinutesModeAutoExtend`, reusing
+    `reconcileMinutesPerDaySchedule`'s existing `rescheduleMarker`-gated
+    floor — CLAUDE.md's explicit warning not to break that floor is why
+    this pass touches `lib/scheduling.js` rather than adding a second,
+    parallel extension mechanism) until `isPieceLearned` is true, at which
+    point — and only then — the piece reads as actually complete and
+    switches to maintenance.
+- **Scope, deliberately narrow (per the pass's own instruction):**
+  - Building a brand-new reschedule-prompt UI for the days-mode case was
+    explicitly out — Pass 36 already shipped the enhanced confirmation
+    modal (pluralization fix, target-date suggestion); this pass triggers
+    it, rather than duplicating it.
+  - `computeLadderAdvance` (how a chunk's `stage` itself advances) is
+    untouched — this pass only *reads* the existing `stage` field via
+    `isPieceLearned`.
+  - Whether section run-throughs or the synthetic `"__consolidation__"`
+    entry should count toward a `"days"`-mode piece's completeness was
+    flagged rather than guessed at (see
+    [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)) —
+    `generateAllChunks` structurally excludes both from `chunkSet.all`
+    already, so `isPlanActuallyComplete` doesn't require either one, but
+    whether it *should* — e.g. whether a piece is really "done" without
+    ever logging the final full run-through — is an open product question,
+    not a technical one this pass had grounds to resolve on its own.
+- **Two real gaps found during implementation, deliberately left
+  unfixed and flagged here rather than folded in as drive-by scope:**
+  1. `handleReschedule`'s own "anything left to reschedule?" guard
+     (`status.remainingChunkIds.length === 0` → no-op) is
+     *practice-chunks-only*, matching `computeScheduleStatus` — but the
+     new days-mode completeness bar this pass adds is *`chunkSet.all`*
+     (practice chunks, transitions, **and** combos). In the narrow case
+     where every practice chunk is touched but a transition or combo
+     isn't, `isPlanActuallyComplete` correctly still shows the new
+     reschedule nudge, but clicking its button would currently no-op
+     silently, since `handleReschedule` sees nothing to reschedule.
+     Widening `handleReschedule`'s own definition of "remaining work" — and
+     by extension what `rescheduleMarker.remainingChunkOrder` and
+     `getEffectiveTimeline`'s tail-splice mean — was judged too large a
+     change to make as a side effect of this pass, since it's an existing,
+     working mechanism with its own established (practice-chunk-scoped)
+     semantics used well beyond just this new banner.
+  2. `planRescheduleForPieces` (Master Agenda's bulk "Reschedule all")
+     still excludes any piece with `elapsedDay(piece) > timeline.days.length`
+     outright — the exact same calendar-only judgment this whole pass
+     exists to correct, just in a sibling code path this pass's Touches
+     didn't name. Left as-is rather than folded in: `MasterAgendaTab`'s own
+     per-piece card, once past its plan with real work remaining, is now
+     simply omitted from the agenda that day (see the next bullet) rather
+     than contributing a `missedCount`, so it never actually reaches
+     `behindItems`/the bulk button in the first place — the two gaps don't
+     currently compound into a visibly broken promise, but they're the
+     same bug and worth fixing together in a follow-up pass rather than
+     independently.
+- **`MasterAgendaTab`'s per-piece card, for a `"days"`-mode piece past its
+  target date with real work remaining, is an omission, not a new prompt.**
+  Before this pass, once `dayNumber > timeline.days.length`, the function
+  either showed a (possibly misleadingly partial or empty) maintenance-due
+  card or silently dropped the piece — `computeDueReviews` only ever
+  returns *ladder* reviews for chunks already logged at least once, so a
+  piece with real never-touched material left could show 0 due items and
+  vanish, or show a due list that looks like "everything left" when it
+  isn't. This pass's fix — gate that whole branch on
+  `isPlanActuallyComplete` instead of the raw day comparison — stops the
+  misrepresentation, but doesn't replace it with a new "needs reschedule"
+  card: building one would have meant a second, novel UI surface for a
+  case the pass's own "deliberately deferred" list explicitly ruled out
+  building fresh prompt UI for. The piece is simply left off the agenda
+  for that day, the same way every other "nothing to show" guard already
+  in that function behaves. A learner in this state still gets the new
+  `TodayTab` prompt once they open the piece directly (or, for a
+  minutes-mode piece, the plan just keeps extending on its own) — Master
+  Agenda not also surfacing it is a real, narrower gap than the
+  reschedule-not-fully-fitting case above, flagged for a deliberate human
+  decision on a follow-up pass rather than resolved unilaterally here.
+- **A real, pre-existing interaction surfaced (not caused) by manual
+  browser verification:** `handleReschedule`'s extension size
+  (`estimateRescheduleFit`) sizes relative to the *clamped* current day
+  (`getCurrentDay`), not the real unclamped `elapsedDay`. For a piece only
+  slightly behind, one click is enough. For a piece far enough past its
+  plan that this pass's new banner fires, a single click may only close
+  part of the gap — `elapsedDay` can still exceed the freshly-extended
+  `timeline.days.length`, leaving both the "N chunks behind schedule"
+  banner and the new "Past your target date" banner still showing, needing
+  another click. Confirmed concretely: a piece seeded 10 real days past a
+  5-day plan took three successive "Change target date" clicks (5→7→9→11
+  days) before `elapsedDay` finally cleared `timeline.days.length`. This is
+  existing `handleReschedule`/`estimateRescheduleFit` sizing behavior, not
+  something this pass changed — every click *does* make real, correct
+  progress (the remaining chunks re-pack into genuinely new days each
+  time) — but it's a mildly surprising UX property now that this pass's
+  own banner makes "still not caught up" visible in a way it wasn't
+  before. Not fixed here (`estimateRescheduleFit`'s sizing formula isn't
+  in this pass's Touches); flagged for whoever next touches that formula.
+- **Verified:** new `lib/scheduling.js` tests for `isPlanActuallyComplete`
+  (both `scheduleMode`s, including the "calendar gate comes first" case —
+  every chunk already at Holding but still within the plan reads as *not*
+  complete) and `computeMinutesModeAutoExtend` (no-op cases, the real
+  extension case, and that applying its own output actually clears the
+  "past plan" condition in one step even after a long absence); new
+  `lib/ladder.js` tests for `isPieceLearned`; the Pass 16
+  `shouldShowScheduleBanner` suite rewritten around the new
+  `(piece, chunkSet, timeline, missedCount)` signature, including the
+  specific case that used to be the bug ("past the plan but real work
+  remains" now asserts the banner **shows**, where it used to assert the
+  opposite). **Also verified live in the browser**, not just via unit
+  tests, for both `scheduleMode`s: a seeded `"days"`-mode piece push past
+  its target date with nothing logged showed the new reschedule nudge
+  (not "plan complete"), and clicking through it into the existing modal
+  and confirming an extension worked exactly as the per-piece Reschedule
+  button always has; the same piece with every `chunkSet.all` item logged
+  correctly read as complete and switched to the maintenance/due-list view
+  with both banners gone; a seeded `"minutes"`-mode piece well past its
+  original day count with chunks still in Settling/Stabilizing had
+  `daysToLearn` auto-extend on load (confirmed via `localStorage`, not
+  just the rendered UI) and kept showing real, currently-due Tier 2
+  reviews inside the newly-extended region; marking every chunk Holding
+  and reloading stopped the auto-extend (`daysToLearn` unchanged on a
+  further reload) and switched the same piece to "Plan complete —
+  maintenance" with a live due-reviews list. `npm test`: 388/388.
+- See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
+  and
+  [Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
+
+**Decision (Pass 39 follow-up): a critical review of the Pass 39 build,
+requested by the user before committing, found three real gaps — all three
+fixed the same session rather than logged and left.**
+
+- **Why a review at all:** the user asked for a skeptical second-engineer
+  pass over just the session's changed files before committing, explicitly
+  not the implementer re-confirming their own summary. The review found no
+  P1s (nothing broken or silently wrong), but did surface concrete P2s,
+  three of which were worth fixing immediately rather than deferring:
+  1. **`handleReschedule` could silently no-op.** `isPlanActuallyComplete`'s
+     `"days"`-mode bar covers `chunkSet.all` (practice chunks, transitions,
+     combos), but the reschedule mechanism itself only ever knows how to
+     re-place *practice chunks* — a transition/combo rides along with its
+     neighboring chunk's touched status, not its own. So the new "past your
+     target date" nudge (`TodayTab`) could correctly say real work remains
+     while every practice chunk was actually touched (only a transition or
+     combo left) — in which case clicking its Reschedule button did
+     nothing, silently, since `handleReschedule`'s own guard
+     (`remainingChunkIds.length === 0`) saw nothing to act on. **Fixed**:
+     `TodayTab` now distinguishes the two cases (`hasReschedulableWork`) and
+     shows different copy — "Nothing to reschedule, check View all" with a
+     button that switches view mode, instead of a Reschedule button, when
+     only a transition/combo is left. `handleReschedule` also got a plain
+     `window.alert` backstop for the same state, in case it's ever reached
+     some other way. Widening the reschedule mechanism itself to also
+     independently re-place transitions/combos (rather than working around
+     the gap in the UI) was considered and rejected as too large a change
+     to make as a side effect of this fix — see
+     [Algorithms.md](Algorithms.md#rescheduling) for why `getEffectiveTimeline`'s
+     splice logic makes that non-trivial.
+  2. **Master Agenda didn't mirror Today's Practice.** A `"days"`-mode piece
+     past its target date with real work remaining got a card on Today's
+     Practice (Pass 39's build) but was simply omitted from Master Agenda —
+     not wrong, but a real gap the user asked to close. **Fixed**: Master
+     Agenda now shows a matching "needs reschedule" card for the same
+     state. Fixing this correctly also required swapping
+     `planRescheduleForPieces`' own stale `elapsedDay(piece) >
+     timeline.days.length` exclusion for `isPlanActuallyComplete` (the same
+     fix applied everywhere else this pass) — otherwise the new card would
+     drive the "N pieces are behind schedule" bulk banner into naming a
+     piece that "Reschedule all" would then silently skip.
+  3. **A `"minutes"`-mode piece sitting inactive in the background could go
+     invisible on Master Agenda.** The auto-extend effect
+     (`computeMinutesModeAutoExtend`) only ever runs for the *active*
+     piece — a background piece past its own (stale) day count and not yet
+     learned would hit the same `isPlanActuallyComplete === false` path the
+     fix above uses for `"days"`-mode pieces, but showing it a "needs
+     reschedule" card would be wrong: `"minutes"`-mode never shows a
+     reschedule prompt anywhere else, it just self-heals. **Fixed**: Master
+     Agenda now computes the same extension *for display only* (a pure,
+     in-memory patch to the piece object used just for that render, nothing
+     written to storage) so the piece shows real, current scheduled content
+     — exactly what it would show once actually opened — rather than a
+     prompt or an omission. The real, persisted extension still only
+     happens via the existing `App.jsx` effect once the piece is opened.
+  - **A related, explicitly requested change bundled into the same fix:**
+    "Log practice" and "Pick a random piece to practice" on Master Agenda
+    now always land on Today's Practice for that piece, not Piece
+    Overview — landing on the dashboard when you clicked something that
+    says "practice" was an unnecessary extra step. `switchToPiece` (App.jsx)
+    took an optional target-tab parameter rather than adding a parallel
+    function; Revival's "Open piece →" button deliberately keeps routing to
+    Overview, unchanged — Revival has its own separate entry surface, and
+    Today's Practice isn't a meaningful landing spot for a piece mid-revival
+    (it can show a stale bounded-plan view, or the maintenance-suppressed
+    state, neither of which is what a revival-mode piece needs).
+- **A fourth, independently reported gap, same review round: the reschedule
+  sizing quirk.** `handleReschedule`'s "doesn't fit" extension sized off
+  `currentDay` (clamped to the plan's length via `getCurrentDay` once
+  you're past it), not the real unclamped `elapsedDay`. For a piece only
+  slightly behind, the two are identical; for a piece genuinely far past
+  its plan, sizing off the clamped value could leave the
+  freshly-extended plan still short of *today*, needing several more
+  clicks to actually converge. **Confirmed concretely, not just reasoned
+  about**: a piece seeded 10 real days past a 5-day plan took three
+  successive "Change target date" clicks (5→7→9→11 days) before `elapsedDay`
+  finally cleared `timeline.days.length`. **Fixed**: the formula now
+  anchors to `elapsedDay(piece)`. Re-verified live with a more extreme case
+  (16 days past a 5-day plan) — one click now fully converges.
+- **Verified:** `npm test`: 394/394 (17 new tests across the four fixes,
+  covering `isPlanActuallyComplete`'s minutes-vs-days split, the new
+  `hasReschedulableWork` logic is component-level and untestable per
+  CLAUDE.md's lib-only test policy, so verified live in-browser instead).
+  Manually verified in-browser, for each of the four fixes independently:
+  the transition-only banner correctly shows "Nothing to reschedule" with a
+  working "View all" button and no dead Reschedule button; a days-mode
+  piece past its target date got the new Master Agenda card, and clicking
+  "Log practice" on it landed directly on Today's Practice, showing both
+  the existing "N chunks behind schedule" banner and the new nudge
+  together; a seeded background (inactive) minutes-mode piece past its
+  stale day count showed real, current Day-N content on Master Agenda
+  rather than a prompt or nothing; the sizing fix confirmed via the
+  10-days-past-a-5-day-plan case above. Revival's "Open piece →" button
+  confirmed still routing to Overview, unchanged.
+- See [Algorithms.md](Algorithms.md#rescheduling).
+
+**Decision (Pass 39 follow-up, second round): bulk "Reschedule all" now
+pushes a piece's target date out when its plan has already fully elapsed,
+rather than only ever repacking within days that no longer exist.**
+
+- **Why:** found during the same critical-review pass above, but judged
+  worth a separate round rather than folding in: applying only a
+  `rescheduleMarker` (what "Reschedule all" always did) leaves `daysToLearn`
+  untouched, so a `"days"`-mode piece whose target date has already fully
+  passed stays past its own plan even after a "successful" bulk
+  reschedule — its Master Agenda "needs reschedule" card (the fix above)
+  would never actually clear. The single-piece "Change target date" button
+  already solves exactly this for one piece at a time; the bulk button had
+  no equivalent.
+- **Fix:** `planRescheduleForPieces` now computes an `extend` patch
+  (`computeReschedulePastPlanExtension`, the same formula the single-piece
+  sizing fix above uses — extracted into one shared function specifically
+  so the two paths can't drift apart the way `currentDay` vs. `elapsedDay`
+  already had) for any `"days"`-mode piece whose own plan has fully
+  elapsed; `null` for everything else, including a `"minutes"`-mode piece
+  in the equivalent state (which already has its own separate, automatic
+  fix and doesn't need a second one from this path — see
+  [Algorithms.md](Algorithms.md#rescheduling)). `handleConfirmReschedule`
+  applies `extend`'s `daysToLearn`/`targetDate` alongside the marker, for
+  both the active piece and every other piece in the batch.
+- **The confirmation wording was drafted and shown to the user before
+  writing any code**, per their explicit ask. Final wording: pieces getting
+  an automatic extension are named in their own sentence ("N of these — X,
+  Y — are past their target date entirely. Rescheduling will also push
+  their target dates out to fit, at the same pace."), separately from the
+  pre-existing "probably won't fit" warning, which now only applies to
+  pieces that are merely tight but still inside their own plan — the base
+  sentence's blanket "and each piece keeps its own target date" is dropped
+  whenever any piece in the batch is actually having its date moved, so it
+  never states something false.
+- **A real, pre-existing bug was found while verifying this — not fixed,
+  logged as an open issue below.** See [Open questions](#open-questions).
+- **Verified:** new `lib/scheduling.js` tests for `planRescheduleForPieces`'s
+  `extend` field (a genuinely past-plan `"days"`-mode piece gets one sized
+  correctly; a merely-tight-but-within-plan piece gets `null`; a
+  `"minutes"`-mode piece past its own plan gets `null` even with real
+  untouched work, confirming the deliberate exclusion) and a standalone
+  `computeReschedulePastPlanExtension` describe block. Manually verified in
+  the browser: the exact proposed wording rendered correctly (singular
+  case, "Pass39c Bulk Test is past its target date entirely..."); clicking
+  through extended `daysToLearn`/`targetDate` correctly and the piece
+  immediately showed real, current tasks instead of the reschedule card.
+  `npm test`: 394/394.
+
+**Decision (Pass 39 follow-up, third round): the single-piece reschedule
+dialog no longer offers "reschedule into current plan days" once a piece's
+target date has already fully passed.**
+
+- **Why:** the open issue found while verifying the bulk-extend fix above
+  (full mechanism in [Open questions](#open-questions)) traces back to a
+  single root cause — a piece whose plan has *already fully elapsed* still
+  had "reschedule into current plan days" offered as if it were a real
+  alternative to extending. Choosing it packs every remaining chunk onto
+  what's effectively a single already-past day (`estimateRescheduleFit`'s
+  `availableDays` floors at 1 there), which is exactly the state that later
+  makes the piece permanently unrecognizable as behind schedule. Asked to
+  restate the bug in plain language and propose a fix; two options were
+  offered — (1) stop offering the trap-creating choice in the first place,
+  and (2) make "Reschedule all" resilient to a piece already stuck this
+  way, so it stays discoverable even after the fact. **The user chose (1)
+  only** — the safer, narrower fix; (2) remains open (see below).
+- **Fix:** when `handleReschedule` detects the piece is a `"days"`-mode
+  piece whose own plan has already fully elapsed (`elapsedDay(piece) >
+  timeline.days.length`, not just "doesn't fit"), the suggestion carries
+  `singleChoice: true`. The confirmation modal renders one button —
+  "Change target date to X" — instead of two, and the message states
+  plainly that the target date has already passed rather than framing it
+  as a choice. A piece that's merely tight but still inside its own plan is
+  completely unaffected — both buttons still show, exactly as before.
+- **Verified:** manually in the browser, both cases side by side — a piece
+  seeded 15 days past its own 10-day plan showed exactly one button
+  ("Change target date to Sep 19"); a piece merely tight but still on day 5
+  of a 20-day plan showed both buttons, unchanged. `npm test`: 394/394,
+  build clean.
+- See [Algorithms.md](Algorithms.md#rescheduling).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -2893,6 +3243,52 @@ directory rather than keeping it as a separate, un-tracked file.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **A piece that's already been rescheduled once via "cram it into what's
+  left" while its own plan was already fully elapsed can permanently stop
+  being recognized as behind schedule — and "Reschedule all" then silently
+  drops it forever, even though nothing about it ever got fixed.** Found
+  (not caused) while verifying the Pass 39 follow-up bulk-extend fix above,
+  by testing against pieces that had genuinely been through the *old*
+  "reschedule into current plan days" button while already past their own
+  plan. Root cause: that button packs every remaining chunk onto what's
+  effectively a single day (`asOfDay`, clamped to the plan's last day, since
+  `availableDays` floors at 1 once you're past the plan). From then on,
+  `computeScheduleStatus`'s "is this missed" test —
+  `timeline.introducedDay[id] < currentDay` — compares that same clamped
+  day to itself: `currentDay` (`getCurrentDay`, also clamped to the plan's
+  length) can never exceed it, so the comparison is never strictly true,
+  ever again, no matter how many more real days pass. `missedCount` reads
+  `0` permanently. `planRescheduleForPieces` requires `missedCount > 0` to
+  include a piece, so the piece silently stops qualifying for "Reschedule
+  all" from that point on — invisible to the bulk button, though still
+  fixable by opening the piece directly and clicking its own Reschedule
+  button (that path checks `remainingChunkIds.length`, built from
+  `doneDays`, not the broken `introducedDay`/`currentDay` comparison, so
+  it's unaffected).
+  - **Two-part fix proposed to the user; only the first part was asked
+    for.** (1) Stop the trap from being created going forward — the
+    single-piece dialog no longer offers "reschedule into current plan
+    days" once a piece's target date has already fully passed (**built,
+    see the decision above**), so no *new* piece can fall into this state
+    via that path again. (2) Make "Reschedule all" itself resilient to a
+    piece already stuck this way — for a piece whose plan has already
+    fully elapsed, trust the simpler, unbreakable "real work is still
+    untouched" signal (`remainingChunkIds.length > 0`, from `doneDays`)
+    instead of the day-by-day comparison that can get permanently stuck at
+    zero, rather than requiring `missedCount > 0` too. **The user chose
+    part (1) only** ("just 1") — part (2) is unbuilt and this issue stays
+    open until it (or some other repair) lands.
+  - **Still reachable today** by any piece that went through the old
+    "reschedule into current plan days" button while already past its own
+    plan, before this session's part-(1) fix existed — including, found
+    during this same testing, real pieces already sitting in this
+    session's own local test data. Not urgent (the single-piece escape
+    hatch still works), but a piece stuck this way will silently never
+    reappear in a bulk reschedule until a human notices and opens it
+    directly.
+  - See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
+    for `computeScheduleStatus`, and the three decisions immediately above
+    this section for the fixes that did ship this session.
 - **Should Revival's "performance tempo override" field move into Settings
   (reusing the piece's existing target tempo) instead of living at the top
   of the Revival tab, and should "tempo ladder starting point" move to
@@ -2972,12 +3368,22 @@ oversight to silently fix; surface it instead.
     branch. So two surfaces disagree about whether that piece has daily
     work. Confirmed by manual verification (see the `isInRevival` decision
     above).
-  - **What blocks it:** there is no learning-vs-maintenance mode to gate
-    on. "Learned" *is* defined — every chunk reaching Holding (see
-    [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md)) — but nothing
-    queries that roll-up, and there is no first-class piece state for it.
-    Both the state and a Settings control to set it manually would have to
-    exist first. This is queued **behind** that work, not alongside it.
+  - **What blocked it, and what changed (Pass 39):** "learned" *is* now
+    both defined and queried — `isPieceLearned(piece, chunkSet)`
+    (`src/lib/ladder.js`) computes "is every chunk at Holding" for real, no
+    longer just prose (see
+    [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)).
+    That resolves the *technical* blocker named here. What's still
+    missing, and still blocks this specific item: `isPieceLearned` is a
+    live derivation, not a first-class *persisted* piece state — nothing
+    writes a `piece.stage`/`piece.mode` field a Settings control could set
+    manually, which the "a piece finished away from the app would be moved
+    into maintenance manually in Settings" half of this design explicitly
+    needs. Wiring the gate itself, and that manual Settings control, were
+    not in scope for Pass 39 (which built the rollup for a different
+    reason — see [Scheduling](#scheduling) — not for this item) and remain
+    unbuilt. This is queued **behind** that remaining piece, not alongside
+    it.
   - **Three existing behaviours it must reconcile, none of which are
     oversights:**
     1. The Wizard deliberately allows starting a piece *directly* in

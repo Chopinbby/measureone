@@ -439,7 +439,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
         </div>
       )}
 
-      <div className="segmented" style={{ marginBottom: 16 }}>
+      <div className="segmented" style={{ marginBottom: 16, alignSelf: "flex-start" }}>
         <button type="button" className={subTab === "learning" ? "active" : ""} onClick={() => setSubTab("learning")}>
           Learning phase ({learningItems.length})
         </button>

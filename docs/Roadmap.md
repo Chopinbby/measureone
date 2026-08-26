@@ -103,7 +103,10 @@ summary: `AllPiecesTab`, one row per piece (progress %, confidence %, days
 since last touched, time practiced) plus a total-time-practiced stat,
 reached via a "View all pieces" button on Progress rather than a new
 `NAV_BASE` entry. See [Architecture.md](Architecture.md) for the component
-and exactly which existing per-piece functions it calls. This is *not* the
+and exactly which existing per-piece functions it calls, and
+[Decisions.md](Decisions.md#cross-piece-views) for the scope/placement
+reasoning and why confidence here can drift slightly from other screens for
+an overdue piece. This is *not* the
 "cross-piece repertoire health dashboards" item mentioned above under
 Maintenance mode — no lifecycle-state detection, no health scoring, just a
 summary table — and it's not a consistency/streak view either (which days

@@ -33,7 +33,14 @@ Step 1 is also where the user says whether this is a single piece or one
 movement of a larger work, and whether they're learning it fresh or reviving
 it. Both toggles are on the same step as the basics; the multi-movement one
 lives inside `BasicsFields` so Settings gets it too (a standalone piece can be
-promoted into a work later by typing a work title there).
+promoted into a work later by typing a work title there). Choosing "Multiple
+movements" makes the work title itself required to advance — `canAdvance()`
+blocks "Next" if it's blank, the same way a blank piece name or zero measures
+already did. Settings' "Save changes" enforces the identical rule when
+editing an existing piece. See
+[Decisions.md](Decisions.md#multi-movement-works) for why (clearing an
+existing multi-movement piece's title in Settings used to silently detach it
+from its work).
 
 **Since Pass 24, step 1 also carries four optional extras that don't gate
 advancing past it:** target tempo (BPM) is now a `BasicsFields` field, so it
@@ -43,9 +50,11 @@ and Documents (`DocumentsEditor`) — the same components Settings uses,
 rendered directly in `Wizard.jsx` rather than folded into `BasicsFields`
 itself, specifically so they don't *also* duplicate into Settings' "Piece"
 panel (Settings keeps its own separate "Tempo zones"/"Recordings"/"Documents"
-panels, unchanged, for editing after setup). None of the four are required —
-`canAdvance()` for step 1 only checks name and total measures, same as
-before. The Timeline step no longer has a target-tempo field; it only sets
+panels, unchanged, for editing after setup). None of the four gate advancing
+past step 1 — `canAdvance()` there checks name and total measures always,
+plus the work title specifically when "Multiple movements" is selected (see
+above); target tempo, tempo zones, recordings, and documents stay fully
+optional. The Timeline step no longer has a target-tempo field; it only sets
 the schedule itself (start date, deadline vs. minutes/day, practice days per
 week, chunk size).
 
@@ -125,6 +134,17 @@ unchanged, not redesigned. See [Decisions.md](Decisions.md#ux) for the
 placement reasoning. (The other Pass 20 fold-in, recurring-material
 payoff, was removed outright in Pass 32b — see
 [Decisions.md](Decisions.md#ux).)
+
+**Since Pass 42, both of the above answer "how is *this* piece doing" —
+a third, narrower question ("how is everything doing, at a glance") has a
+first answer too: a "View all pieces" button on Progress opens
+`AllPiecesTab`, one row per piece (progress %, confidence %, days since
+last touched, time practiced) plus a total-time-practiced stat. Not a
+sidebar tab — reached only from that button, same pattern the Revival tab
+uses. Clicking a row calls `switchToPiece`, landing on that piece's
+Overview. See [Decisions.md](Decisions.md#cross-piece-views) for what this
+deliberately doesn't do yet (no consistency/streak view, no lifecycle
+health scoring).
 
 ## 4. Falling behind and rescheduling
 

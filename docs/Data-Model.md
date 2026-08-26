@@ -192,6 +192,9 @@ piece = {
                          // startDate). Read by Revival's 60+-days-untouched auto-trigger
                          // condition (computeRevivalTriggers, lib/revival.js, Pass 7) — a piece
                          // whose only activity is run-throughs must not look falsely stale here.
+                         // Also read by AllPiecesTab's "days since last touched" column
+                         // (Pass 42) — the always-fresh-on-load guarantee is exactly why that
+                         // reads correctly for pieces saved long before this field existed.
                          // See Repertoire-Lifecycle.md#revival-auto-triggers and
                          // Decisions.md#spaced-repetition--maintenance.
   ladderConfig,          // { stabilizing, settling, holding, bpmSteps } — piece-level tunable

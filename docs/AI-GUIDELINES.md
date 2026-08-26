@@ -120,6 +120,22 @@ harness for rendering components. If logic that needs protecting is sitting
 in a component, the answer is to move it into `lib/`, not to skip the test.
 `lib/history.js` exists for exactly that reason.
 
+**When the logic genuinely can't move to `lib/` — a per-piece `try`/`catch`
+loop in a component is inherently about the render loop, not a pure
+function — verify it by actually reproducing the failure, not by reading
+the code and reasoning it should work.** Worked example (Pass 42): a review
+flagged that `AllPiecesTab` had no error isolation between pieces, unlike
+`MasterAgendaTab`'s established pattern for the same "loop over every piece"
+shape. Adding the `try`/`catch` and confirming it *read* correctly wasn't
+treated as done — instead, a piece with `measureDifficulty: null` (a
+realistic corruption `validateAndMigratePiece` doesn't guard against) was
+injected directly into `localStorage`, the page reloaded, and the console
+checked for the actual error message. Only that — watching the malformed
+piece get skipped with a logged error while the good piece still rendered —
+counted as verification. The browser-testing equivalent of "verify a
+regression test can actually fail" above, for the one category of defensive
+code the lib-only suite can't reach.
+
 **A test's own hand-computed expected value needs the same rigor as the
 code it's testing — prefer deriving it from the same primitives, not a
 second hand-typed formula.** Worked example (Pass 39 follow-up): a new
@@ -272,10 +288,25 @@ both worth the few minutes it took to check:
   eventual fix was scoped (relocate what's genuinely shared into the shared
   component; render what would otherwise duplicate directly in the wizard
   instead — see [Decisions.md](Decisions.md#data-model)).
+- **Confirmed wrong, but that wasn't the end of it (Pass 42):** a pass's own
+  instructions claimed a specific line on Overview ("N movements, N plans")
+  showed a piece's work title twice. Checking it against the actual Pass 38
+  commit and live rendering showed that line has never contained title text
+  at all — the claim, as literally stated, was false. The easy stopping
+  point would have been "nothing to fix here." Instead, the underlying
+  complaint the claim was gesturing at — the work title genuinely does show
+  twice on that screen — turned out to be real, just one card down
+  (`PartSwitcher`'s own heading, not the line named). Disproving the literal
+  claim isn't the same as confirming there's nothing to the complaint behind
+  it; when a claim about *where* something is wrong turns out false, check
+  whether the *what* is still true somewhere else before reporting back that
+  there's nothing there.
 
 Trusting the first claim without checking would have been fine by luck.
 Trusting the second would have meant asserting something false to the user
-and potentially building on a wrong premise. Check both kinds the same way.
+and potentially building on a wrong premise. The third would have meant
+telling the user their actual complaint was imaginary. Check all three kinds
+the same way.
 
 ## Avoid duplicate documentation
 

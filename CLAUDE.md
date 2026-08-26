@@ -334,3 +334,46 @@ can permanently stop being recognized as behind schedule at all, which
 silently drops it from "Reschedule all" forever after — see
 [`docs/Decisions.md`](docs/Decisions.md#scheduling) for the mechanism and
 why only half of the two-part fix shipped this session.
+
+**In the same session as Pass 42 (below), several smaller fixes also
+shipped, none individually pass-numbered:** `ChecklistItem`'s practice
+timer now computes elapsed time from a wall-clock timestamp captured at
+the moment "Log practice" is clicked, instead of trusting whatever the
+last per-second tick had left `durationSeconds` at — the old approach
+could undercount by up to a second, more if a `window.confirm` shortfall
+dialog delayed the actual save. The multi-movement summary line
+("N movements, N plans") now sits at the actual bottom edge of the title
+card's content, after Recordings/Documents, correcting where Pass 38 had
+actually left it (under the measure-count line — not the bottom edge;
+those two are not the same spot). `PartSwitcher` no longer renders its own
+`<h3>{workName}</h3>` heading — the hero card's eyebrow already names the
+work, so a multi-movement piece's Overview was showing the same title
+twice, in two different cards. Master Agenda's Learning/Maintenance/Revival
+subtab buttons no longer stretch to the page's full width. Every
+notes-style field's label dropped the "— optional" suffix, everywhere
+`MemoryAnchorField` renders. **Work title is now required, in both the
+Wizard and Settings, whenever "Multiple movements" is selected** — blank
+titles used to silently produce a confusing dead-end (Wizard: piece never
+actually joined the work; Settings: clearing an existing multi-movement
+piece's title silently demoted it out of its work, `ensureWorkId`,
+detaching it from its siblings with no warning). See
+[`docs/Decisions.md`](docs/Decisions.md#multi-movement-works) for the full
+reasoning behind both title-related fixes.
+
+**Since Pass 42**, there's a first, deliberately bounded cross-piece
+summary: `AllPiecesTab` — one row per piece (progress %, confidence %, days
+since last touched, time practiced) plus a total-time-practiced stat,
+reached via a "View all pieces" button on Progress rather than a new
+sidebar entry (same button-triggered-tab pattern `revival` already uses,
+not in `NAV_BASE`). Every number comes from an existing per-piece function
+called once per piece — no new aggregation logic. Confidence deliberately
+uses `elapsedDay` (real, unclamped calendar days) rather than the
+timeline-clamped `getCurrentDay` other screens use for the *active* piece,
+so a neglected piece keeps reading as more stale over time instead of
+freezing once it falls off its own plan — a considered choice, not an
+oversight; see [`docs/Decisions.md`](docs/Decisions.md#cross-piece-views)
+for why, and what switching to `getCurrentDay` would actually cost. Not the
+full "cross-piece repertoire health dashboard" mentioned earlier in this
+file — no lifecycle-state detection, no consistency/streak view — both
+explicitly scoped out of this first version; see
+[`docs/Roadmap.md`](docs/Roadmap.md).

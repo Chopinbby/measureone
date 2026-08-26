@@ -2983,6 +2983,62 @@ nested structure inside one piece.**
   standalone piece in Settings groups it, clearing the title ungroups it, with
   no separate "convert to work" action to build or explain.
 
+**Decision: the work title is shown exactly once on a movement's Overview —
+in the hero card's eyebrow — not also as `PartSwitcher`'s own heading.**
+
+- **Why:** `PartSwitcher` used to render `<h3>{workName}</h3>` at the top of
+  its own panel, directly below the hero card, whose eyebrow already names
+  the work (`piece.workId && piece.workName ? piece.workName : "Now
+  practicing"`). A multi-movement piece's Overview was showing the same
+  title twice, in two visually separate cards, one screen height apart.
+  `PartSwitcher` dropped the heading; the `workName` prop it used to take is
+  gone from both `PartSwitcher` and its one call site (`OverviewTab`). A
+  `margin-top` on `.part-switcher .part-list` that existed only to space
+  content below the removed heading was trimmed too, so the panel's top
+  padding matches every other panel's instead of reading as extra-generous.
+- **Found via:** a code-review pass explicitly asked to be skeptical of a
+  prior pass's own claim that a *different* line (the "N movements, N
+  plans" summary under the measure-count line) contained the duplicate
+  title. It didn't — checked against the actual Pass 38 commit and live
+  rendering, that line has never had title text in it. The real duplication
+  was one card down, not in the line the original instructions named. Don't
+  stop at disproving a specific claim if the underlying complaint it was
+  gesturing at ("I see the title twice") is still real — keep looking for
+  where it actually lives.
+
+**Decision: once "Multiple movements" is selected, a blank work title now
+blocks proceeding — in both the Wizard ("Next") and Settings ("Save
+changes").**
+
+- **Why:** the Wizard case is a straightforward confusing-dead-end
+  prevention — nothing catastrophic happens (the piece would just silently
+  never join a work despite the toggle showing "Multiple movements"), but
+  it's confusing and easy to not notice. The Settings case is more serious:
+  `ensureWorkId` (`lib/works.js`) demotes a piece with a blank work title
+  back to standalone — `workId: null` — even if it already had siblings.
+  Clearing an existing multi-movement piece's title in Settings (by
+  accident, or by not realizing the field was blank) silently detaches it
+  from its work, with no warning, while its sibling movements keep pointing
+  at the same `workId` and simply lose that one piece from their
+  `PartSwitcher` list. The single-piece "switch back to 'A single piece'"
+  path is unaffected — that's a deliberate, explicit demotion action (it
+  clears `workName` itself as part of the toggle), not an accidental blank.
+- **Mechanism:** `BasicsFields` owns the single/multi toggle as local
+  `useState`, invisible to either `Wizard`'s or `SettingsTab`'s own
+  `canAdvance()`/save-gating logic. Both gained an optional
+  `onMultiPartChange` callback prop on `BasicsFields` to mirror that state
+  up. `Wizard` mirrors it into a plain `useState` (correct on first mount,
+  since Wizard itself remounts fresh every time it opens). `SettingsTab`
+  can't rely on that same trick — `editDraft`/`editing` deliberately live in
+  `App.jsx`, not `SettingsTab`, specifically so switching tabs mid-edit
+  doesn't lose the draft — so `SettingsTab` never unmounts between edit
+  sessions and needs an explicit `useEffect` keyed on `editing` to reset the
+  mirrored value each time a new edit session starts.
+- **Known parallel gap, not fixed:** Settings' "Save changes" still isn't
+  gated on piece name or total measures being non-blank/non-zero, the way
+  the Wizard already was before this session. See
+  [Open questions](#open-questions).
+
 ## Revival
 
 **Decision: revival reassessment reuses `manualConfidence` (via a fast
@@ -3225,6 +3281,80 @@ no automatic transitions — not a computed "this piece is learned" state.**
   mechanism was built. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built) and
   [Algorithms.md](Algorithms.md#behind-schedule-detection).
+
+## Cross-piece views
+
+**Decision (Pass 42): the first cross-piece summary (`AllPiecesTab`) is
+deliberately bounded — a per-piece row (progress %, confidence %, days
+since last touched, time practiced) plus a total-time stat, nothing more.**
+
+- **Scope explicitly settled with the user before building**, rather than
+  guessed at: candidates on the table were this summary table, a
+  consistency/streak view (which calendar days across pieces were touched
+  by *any* piece), or both. The consistency view was scoped out entirely —
+  no existing `lib/` function computes it, so building it would mean new
+  aggregation logic from scratch, which the pass was explicitly asked to
+  avoid. This is *not* the "cross-piece repertoire health dashboards" item
+  already listed under Maintenance mode in [Roadmap.md](Roadmap.md) — no
+  lifecycle-state detection, no health scoring, just a summary table.
+- **Placement:** reached via a "View all pieces" button on `ProgressTab`,
+  using a button-triggered `activeTab` value ("all-pieces") never added to
+  `NAV_BASE` — the same shape `revival` already uses. Chosen over a new
+  sidebar entry because it's a smaller IA commitment and matches the user's
+  own request; can be promoted to a real nav item later if the view earns
+  its place.
+
+**Decision: `AllPiecesTab`'s per-piece confidence uses `elapsedDay(piece)`
+(real, unclamped calendar days since `startDate`), not the timeline-clamped
+`getCurrentDay(piece, timeline.days.length)` other screens use for whichever
+piece is currently active.**
+
+- **Why not just match the other screens:** `getCurrentDay` clamps to the
+  plan's last day and *stays pinned there forever* once a piece runs past
+  its own plan — it doesn't just read differently, it freezes. Two pieces
+  neglected for very different lengths of time (two weeks overdue vs. six
+  months overdue, neither reopened since) would show the exact same
+  confidence number under `getCurrentDay`, because both clamp to the same
+  day. For a view whose purpose includes surfacing which pieces have gone
+  stale, that's a real cost, not a cosmetic difference — `elapsedDay`'s
+  "keep decaying with real time" behavior is the more informative default
+  here, even though it's the one that doesn't match `OverviewTab`.
+- **What matching the other screens would actually require:** not a one-line
+  swap. `getCurrentDay` needs `timeline.days.length` as its clamp bound,
+  which means computing a real timeline per piece
+  (`getEffectiveTimeline`/`computeTimeline`), not just `generateAllChunks` —
+  `MasterAgendaTab` already pays this cost for every piece, so it's not
+  prohibitive, just more than what's here now. Doing it *correctly*, matching
+  what `MasterAgendaTab` actually shows for a "background" piece (one that
+  isn't the currently-open one), would also mean replicating
+  `computeMinutesModeAutoExtend`'s display-only extension — otherwise an
+  overdue `scheduleMode: "minutes"` piece would show a stale, frozen number
+  here instead of the "keeps growing" one Master Agenda deliberately built
+  for exactly that case (see the Pass 39 notes in [CLAUDE.md](../CLAUDE.md)).
+  Switching to `getCurrentDay` without that second piece would trade one
+  small inconsistency (drifts from Overview for an overdue piece) for a
+  different, arguably worse one (freezes exactly where that mechanism was
+  built to stop freezing).
+- **Explicitly confirmed with the user, not a unilateral call**: raised as a
+  flagged trade-off after a code review; the user chose to keep `elapsedDay`
+  rather than have the fuller `getCurrentDay`-plus-auto-extend version built.
+  Revisit if this view's purpose shifts toward "match every other screen
+  exactly" rather than "surface staleness honestly."
+- Practical effect for most pieces, most of the time: no difference at all —
+  the two functions agree for any piece still inside its own plan window,
+  which is the common case. They diverge only for a piece that's fallen
+  behind its own schedule and hasn't been reopened since.
+
+**Includes per-piece error isolation** (a `try`/`catch` around each piece's
+row computation, plus an outer one around the whole loop) — the same
+two-layer shape `MasterAgendaTab`'s `agendaData` computation already uses
+for the same "loop over every piece at once" risk: one malformed piece
+shouldn't be able to take down a view whose entire point is showing every
+piece. Added after a code review flagged its absence (found by comparison
+against `MasterAgendaTab`'s existing pattern, then verified by actually
+injecting a piece with `measureDifficulty: null` into `localStorage` and
+confirming it was skipped with a logged error rather than crashing the
+page).
 
 ## Documentation
 
@@ -3524,3 +3654,17 @@ oversight to silently fix; surface it instead.
   session history. Not a correctness question, a performance one — worth
   measuring if it's ever revisited, but not urgent enough to have gated
   landing the correctness fix itself.
+- **Settings' "Save changes" isn't gated on piece name or total measures
+  being present/non-zero, the way the Wizard's "Next" already was before
+  this session and still is.** Surfaced while adding the work-title
+  requirement to both surfaces (see
+  [Multi-movement works](#multi-movement-works)) — that fix only closed the
+  one gap it was asked to close (a blank work title while "Multiple
+  movements" is selected); it didn't touch, and this session wasn't asked
+  to touch, whether Settings should also require the fields the Wizard
+  already treats as mandatory. Not urgent (clearing a piece's name or
+  measures in Settings isn't a normal editing action, and nothing currently
+  demonstrates a user actually hitting this), but a real, asymmetric gap
+  between the two surfaces that
+  [UX-Principles.md](UX-Principles.md#editors-are-shared-so-the-ui-cant-drift-from-itself)
+  says to treat as a bug, not a stylistic choice. Not started.

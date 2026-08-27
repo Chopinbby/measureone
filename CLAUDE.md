@@ -119,7 +119,9 @@ chunking, scheduling, and confidence are actually computed, see
     actually finished" (Pass 39).** Every surface that decides whether a
     piece has run past its plan — `TodayTab`'s `pastPlan`, `MasterAgendaTab`'s
     per-piece day lookup, `ScheduleBanner`'s suppression, `planRescheduleForPieces`'
-    eligibility — must go through `isPlanActuallyComplete(piece, chunkSet,
+    eligibility, `SettingsTab`'s Archive-button gate, and `OverviewTab`'s
+    "Continue learning"/"Continue maintenance" relabel — must go through
+    `isPlanActuallyComplete(piece, chunkSet,
     timeline)` (`lib/scheduling.js`), never a raw `elapsedDay(piece) >
     timeline.days.length` comparison. A `scheduleMode: "days"` piece whose
     target date passed with real work still outstanding is *behind*, not
@@ -377,3 +379,46 @@ full "cross-piece repertoire health dashboard" mentioned earlier in this
 file — no lifecycle-state detection, no consistency/streak view — both
 explicitly scoped out of this first version; see
 [`docs/Roadmap.md`](docs/Roadmap.md).
+
+**In the same session as Pass 43/45 below**, Settings' "Archive piece"
+control (Practice status panel) stopped being unconditional: it's now
+disabled — grayed, with an inline reason and a hover title — until
+`isPlanActuallyComplete(piece, chunkSet, timeline)` says the piece's plan
+is actually finished. Pause is untouched, still available any time, no
+condition attached. A real, deliberately unresolved gap this opened: a
+piece the learner has genuinely abandoned mid-plan (not finished, never
+going to be) has no clean way to archive under this rule — see
+[`docs/Decisions.md`](docs/Decisions.md#lifecycle) for the reasoning and
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the gap.
+`SettingsTab` now receives `chunkSet`/`timeline` as props from `App.jsx`,
+the same way every other tab already does, instead of recomputing them
+locally — an early version of this fix recomputed them locally, before
+being corrected to reuse the existing values.
+
+**Since Pass 43**, Overview has a "Continue learning" shortcut under the
+title card that jumps straight to Today's Practice (`onSelectDay(null)`,
+the same reset-to-real-time path `onJumpToday` already uses) — hidden
+during an active revival (`"Start/Continue revival"` already covers that
+slot in the same area), and relabeled "Continue maintenance" once
+`isPlanActuallyComplete` says the plan is done.
+
+**Since Pass 45**, a new shared `classifyDayCompletion(day, piece,
+currentDay)` (`lib/scheduling.js`) reports `"future" | "done" | "behind" |
+"empty"` for a single timeline day, written once so a future Timeline-tab
+pass can reuse it instead of duplicating the logic. Overview's "first
+week" list uses it: a past day is grayed regardless of which of the three
+non-`"future"` states it's in, but struck through only when genuinely
+`"done"` — an empty/rest day is `"empty"`, not `"done"`, specifically so
+it grays without reading as crossed-off work that never happened (it
+shipped the other way first and was corrected once the struck-through
+"Nothing scheduled" row was pointed out — see
+[`docs/Decisions.md`](docs/Decisions.md#ux)). Today's row also gets a
+"(behind N chunks)" note, reusing `computeScheduleStatus`'s existing
+`missedCount` rather than a new count. Two gaps flagged, not fixed: a
+consolidation day's logged run-through doesn't satisfy the per-chunk
+`doneDays` check `classifyDayCompletion` does (so a logged consolidation
+day still reads `"behind"`), and neither this note nor the graying is
+revival-aware — a piece mid-revival can show "(behind N chunks)" against
+its *original*, pre-revival plan, not the revival plan actually being
+followed. See [`docs/Decisions.md`](docs/Decisions.md#open-questions) for
+both.

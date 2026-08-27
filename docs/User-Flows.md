@@ -72,8 +72,11 @@ because that's what it is. See
 
 ## 2. The daily practice loop
 
-Entry point: the Today tab, or clicking a day card in Timeline
-(`handleSelectDay`, which sets `dayOverride` and jumps to Today).
+Entry point: the Today tab, clicking a day card in Timeline
+(`handleSelectDay`, which sets `dayOverride` and jumps to Today), or —
+since the same session as Pass 43/45 — Overview's "Continue learning" /
+"Continue maintenance" button, which resets to real-time tracking rather
+than jumping to a specific day.
 
 1. `ScheduleBanner` shows if any chunks are behind schedule
    (`computeScheduleStatus`) and offers rescheduling — see flow 4.
@@ -120,7 +123,12 @@ see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are
 
 - **Overview**: "where do things stand right now" — measures/sections
   learned, total time practiced, overall progress %, and a practice-progress
-  bar broken down by `computeProgressTier`.
+  bar broken down by `computeProgressTier`. Since the same session as Pass
+  43/45: a "Continue learning" / "Continue maintenance" button under the
+  title card jumps straight into practice (see flow 2 above); and the
+  "first week" list grays out past days and strikes through only the ones
+  actually completed, with today's row noting "(behind N chunks)" when
+  applicable — see [Decisions.md](Decisions.md#ux).
 - **Progress**: "how is it actually going" — rolling-window consistency,
   consistency heatmap, most-improved-this-week, actual-vs-planned chart,
   projected finish date, tempo trend sparklines, outcome breakdown,

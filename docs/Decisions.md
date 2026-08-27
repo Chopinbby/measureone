@@ -2636,6 +2636,65 @@ to its reps requirement. Only reps are stated as a requirement there.**
   past Stabilizing) `isFirstEncounter` is never true in that surface, and
   it never rendered either line to begin with.
 
+**Decision (Pass 43): Overview gets a one-click "Continue learning"
+shortcut into Today's Practice, under the title card — hidden during an
+active revival, relabeled "Continue maintenance" once the plan is actually
+finished.**
+
+- **Why:** Overview previously had no way to jump into practice itself,
+  only into Revival (via "Start/Continue revival") or via the sidebar's
+  own "Today's Practice" nav item.
+- **Destination, not a new navigation concept:** the button calls the
+  existing `onSelectDay(null)` — the same "reset to real-time" sentinel
+  `onJumpToday` already uses — instead of a new handler, so it lands
+  exactly where the sidebar's own nav item would, including resetting any
+  stale day the app happened to be showing.
+- **Hidden, not relabeled, during revival:** "Start/Continue revival" is
+  already the primary action for that state in the same area; showing
+  both would be two competing primary buttons at once.
+- **Relabel, not hide, once the plan is actually finished
+  (`isPlanActuallyComplete`, Pass 39):** the destination (Today's Practice)
+  is still meaningful in maintenance — `computeDueReviews` still surfaces
+  content there — so hiding the shortcut would remove something still
+  useful. "Continue maintenance" reuses Master Agenda's existing
+  Learning/Maintenance/Revival vocabulary rather than inventing new terms.
+
+**Decision (Pass 45): Overview's "first week" list now shows which past
+days were actually completed, via a new shared
+`classifyDayCompletion(day, piece, currentDay)` (`lib/scheduling.js`) —
+written standalone so the Timeline tab can reuse it instead of duplicating
+the logic.**
+
+- **What it returns:** `"future"` (day ≥ currentDay), `"done"` (every chunk
+  the day scheduled has that exact day in its own `doneDays`), `"behind"`
+  (something scheduled, not all done), or `"empty"` (nothing scheduled at
+  all — a rest day, or any other empty day). A past day is grayed whether
+  `"done"`, `"behind"`, or `"empty"`; only `"done"` gets struck through.
+- **`"empty"` is deliberately its own state, not folded into `"done"`.**
+  Grayed-but-not-struck reads as "nothing to do here"; struck-through
+  "Nothing scheduled" read as claiming work was completed that never
+  existed. It was actually built the first way (empty collapsed into
+  `"done"`) and corrected to a separate `"empty"` state once the
+  struck-through "Nothing scheduled" row was pointed out — not designed
+  right from the start.
+- **Today's row gets a "(behind N chunks)" note** when
+  `computeScheduleStatus`'s existing `missedCount` is nonzero — reused
+  directly, not recomputed, per
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems).
+- **Known gap, not fixed:** a consolidation day's `reviewChunkIds` lists
+  every practice chunk, but logging that day's run-through
+  (`handleLogRunThrough`, `App.jsx`) only ever writes the synthetic
+  `"__consolidation__"` progress entry, never each individual chunk's own
+  `doneDays` — so a logged consolidation day still reads `"behind"` here.
+  See [Algorithms.md](Algorithms.md#behind-schedule-detection).
+- **Known gap, not fixed: not revival-aware.** A piece that's both
+  mid-revival and behind on its *original* (pre-revival) schedule still
+  shows the "(behind N chunks)" note and first-week graying against that
+  original plan, not the revival plan the learner is actually following.
+  Not a new inconsistency on its own — `ScheduleBanner` already shows "N
+  chunks behind schedule" during revival today — but it's a second surface
+  carrying the same one. See [Open questions](#open-questions).
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as
@@ -3254,8 +3313,9 @@ copy audit; see also Pass 24's rewrites to the reassessment and
 
 ## Lifecycle
 
-**Decision: pause/archive (`piece.status`) is a manual, user-set toggle with
-no automatic transitions — not a computed "this piece is learned" state.**
+**Decision — superseded for Archive specifically (see below): pause/archive
+(`piece.status`) is a manual, user-set toggle with no automatic
+transitions — not a computed "this piece is learned" state.**
 
 - **Why:** at the time, [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
   flagged "what formally defines learned" as unresolved (since resolved in
@@ -3281,6 +3341,34 @@ no automatic transitions — not a computed "this piece is learned" state.**
   mechanism was built. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built) and
   [Algorithms.md](Algorithms.md#behind-schedule-detection).
+
+**Superseding decision: "Archive piece" (Settings' "Practice status" panel)
+is now disabled — grayed, with an inline reason and a hover title — until
+`isPlanActuallyComplete(piece, chunkSet, timeline)` (Pass 39) says the
+piece's plan is actually finished. Pause is untouched.**
+
+- **Why:** requested directly — archiving was previously possible at any
+  point in a piece's plan, with no signal that the plan itself wasn't done.
+  Reuses `isPlanActuallyComplete` directly rather than a new check, per
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems).
+- **Only Archive changed.** Pause keeps behaving exactly as the decision
+  above describes — no computed condition, available any time. The two
+  buttons sit side by side in the same panel and now deliberately behave
+  differently.
+- **Tension flagged, not resolved:** a piece the learner has genuinely
+  abandoned mid-plan — not finished, never going to be — can't be archived
+  under this rule until it either finishes, or (for a `scheduleMode:
+  "days"` piece) runs past its calendar with every scheduled item logged.
+  Pause is the only escape hatch for that case today, and it isn't a
+  semantic match ("set this aside for now" vs. "I'm done with this,
+  permanently"). Not decided which way to resolve — see
+  [Open questions](#open-questions).
+- **Consequence:** `chunkSet`/`timeline` are now passed into `SettingsTab`
+  as props from `App.jsx`, the same way every other tab already receives
+  them, rather than recomputed locally inside `SettingsTab` — an early
+  version of this fix recomputed them locally (to stay within a
+  narrowly-scoped file-touch instruction) before being corrected to reuse
+  the existing values instead. See [Architecture.md](Architecture.md).
 
 ## Cross-piece views
 
@@ -3668,3 +3756,34 @@ oversight to silently fix; surface it instead.
   between the two surfaces that
   [UX-Principles.md](UX-Principles.md#editors-are-shared-so-the-ui-cant-drift-from-itself)
   says to treat as a bug, not a stylistic choice. Not started.
+- **Should Archive have its own path for a piece the learner has genuinely
+  abandoned mid-plan, distinct from "the plan is done"?** Raised directly
+  by the user while gating Archive behind `isPlanActuallyComplete` (see
+  [Lifecycle](#lifecycle)) — that gate has no way to distinguish "not done
+  yet, still working on it" from "not done, and never going to be." Pause
+  is the only thing available today for the second case, and its own
+  copy ("set aside for now") doesn't match that intent. Two directions
+  raised, neither decided: give Archive its own "abandon this" path
+  distinct from plan-completion, or lean on Pause as the real answer and
+  fix its copy/semantics to say so explicitly. Not started.
+- **The "(behind N chunks)" note and graying on Overview's first-week list
+  (Pass 45, `classifyDayCompletion`) aren't revival-aware.** A piece that's
+  both mid-revival and behind on its *original* (pre-revival) schedule
+  still shows this note and graying against that original plan — not the
+  revival plan actually being followed. See [UX](#ux) for the mechanism.
+  Not a new problem on its own (`ScheduleBanner` already surfaces original-
+  plan "behind schedule" messaging during revival today), but this adds a
+  second surface carrying it. Worth deciding whether either surface should
+  suppress itself during revival, or whether both referencing the original
+  plan is actually fine since revival doesn't replace that history. Not
+  started.
+- **A consolidation day's logged run-through doesn't satisfy
+  `classifyDayCompletion`'s (Pass 45) per-chunk check.** The consolidation
+  day's `reviewChunkIds` lists every practice chunk, but
+  `handleLogRunThrough` only writes the synthetic `"__consolidation__"`
+  progress entry, never each chunk's own `doneDays` — so a logged
+  consolidation day still classifies as "behind" on Overview's first-week
+  list. See [Algorithms.md](Algorithms.md#behind-schedule-detection) and
+  [UX](#ux). Fixing it means deciding whether `classifyDayCompletion`
+  should also accept `"__consolidation__"`'s `doneDays` as satisfying a
+  consolidation day's practice-chunk ids — not decided. Not started.

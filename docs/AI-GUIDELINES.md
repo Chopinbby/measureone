@@ -240,6 +240,34 @@ saved), verifying the save isn't enough — verify what the load-time
 derivation does to it too, which usually means an actual reload, same as
 the first case. See [Decisions.md](Decisions.md#scheduling) for the fix.
 
+## A visual "disabled" treatment can silently break in ways only a real hover reveals
+
+Pairing a disabled control's grayed styling with `pointer-events: none`
+(often reached for to also suppress a hover-color CSS rule that isn't
+itself gated on `:disabled`) removes the element from hit-testing
+entirely — including for the native `title` tooltip, which depends on the
+browser detecting a real hover. Reading `element.title` (or the JSX)
+confirms the attribute is present; it does not confirm the browser will
+ever actually show it.
+
+Worked example (same session as Pass 43/45): a disabled "Archive piece"
+button was styled `{ opacity: 0.45, cursor: "not-allowed", pointerEvents:
+"none" }` with a `title` explaining why it was locked. A first
+verification pass read `button.title` via script and called the tooltip
+"present" — true of the attribute, not of what a user would ever see. A
+later, more skeptical review actually dispatched a real hover and checked
+`button.matches(':hover')` — false, meaning the tooltip could never
+trigger. Fixed by dropping `pointerEvents: "none"`: the native `disabled`
+attribute already blocks clicks and keyboard activation on its own, so
+pointer-events was never load-bearing for that half of the requirement,
+only for the cosmetic hover-color suppression. Re-verified the same way —
+hover then registered `:hover` correctly. The general lesson: for any
+disabled-with-tooltip or disabled-with-hover-dependent UI, verify by
+actually hovering and checking the resulting state (`:hover` match,
+whether a listener fires), not by reading an attribute off the element and
+assuming the browser will honor it the way the element's other properties
+suggest.
+
 ## A guard added for one navigation path needs auditing everywhere that path exists
 
 When you add a confirmation/guard before a state transition (leaving a

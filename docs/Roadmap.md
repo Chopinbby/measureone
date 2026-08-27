@@ -60,10 +60,15 @@ Pause/Archive (`piece.status`, set from Settings — pulls a piece off the
 Master Agenda and suppresses "behind schedule," with no change to how
 confidence decays; see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built)) —
-this is **not** Maintenance mode above, just a manual visibility toggle. The
-"what does learned mean" question it used to be blocked on is now resolved
-in design (see item 2 below) — Pause/Archive still doesn't need it answered,
-though, since it's scoped to "take this off my daily agenda" regardless.
+this is **not** Maintenance mode above, just a manual visibility toggle.
+Pause is unconditional, still scoped to "take this off my daily agenda"
+regardless of plan state. **Archive is not, as of the same session as Pass
+43/45**: it's now disabled until `isPlanActuallyComplete` says the piece's
+plan is actually finished (see
+[Decisions.md](Decisions.md#lifecycle)) — a real, deliberately unresolved
+gap this opened is that a piece genuinely abandoned mid-plan (not finished,
+never going to be) can't be archived under this rule; see
+[Decisions.md](Decisions.md#open-questions).
 
 **Since Pass 29**, Today's Practice has a fourth view mode, **Interleaved
 practice** — rotates chunks that have graduated past Stabilizing

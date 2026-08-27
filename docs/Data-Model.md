@@ -47,8 +47,12 @@ piece = {
                          // circuits missedCount to 0 for either). Confidence is
                          // unaffected either way — computeAutoConfidence's existing
                          // recency decay already makes an untouched piece's confidence
-                         // fade on its own; status doesn't add a second decay path. See
-                         // Repertoire-Lifecycle.md and Decisions.md#lifecycle.
+                         // fade on its own; status doesn't add a second decay path.
+                         // Setting the value itself is still always the user's own
+                         // click, but as of the same session as Pass 43/45, the control
+                         // for setting it to 'archived' specifically (not 'paused') is
+                         // conditionally disabled — see Repertoire-Lifecycle.md and
+                         // Decisions.md#lifecycle.
   totalMeasures,         // number
   measureDifficulty,     // number[totalMeasures], each 1|2|3 (easy/medium/hard)
   diffMode,              // 'grid' | 'simple' — legacy; 'simple' (the quick-count

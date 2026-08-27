@@ -1617,7 +1617,17 @@ export default function App() {
                 onRescheduleAll={handleRescheduleAll}
               />
             )}
-            {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
+            {activeTab === "timeline" && (
+              <TimelineTab
+                chunks={chunks}
+                chunkSet={chunkSet}
+                timeline={timeline}
+                piece={piece}
+                currentDay={currentDay}
+                onSelectDay={handleSelectDay}
+                onReschedule={handleReschedule}
+              />
+            )}
             {activeTab === "map" && (
               <PieceMapTab
                 piece={piece}
@@ -1993,7 +2003,10 @@ const CSS = `
 .day-card.consolidation { background: rgba(185,138,62,0.08); }
 .day-card.rest { background: var(--paper); }
 .day-card.rest .day-card-min { color: var(--ink-faint); }
+.day-card.day-past { opacity: 0.55; }
 .day-card-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft); margin-bottom: 8px; }
+.day-card-day { display: inline-flex; align-items: center; gap: 4px; }
+.day-card-check { color: var(--ink-faint); opacity: 0.7; }
 .day-card-min { color: var(--brass-deep); }
 .day-card-note { font-size: 12.5px; color: var(--ink-soft); margin: 0; }
 .day-card-group { margin-bottom: 6px; }

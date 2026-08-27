@@ -33,7 +33,14 @@ Step 1 is also where the user says whether this is a single piece or one
 movement of a larger work, and whether they're learning it fresh or reviving
 it. Both toggles are on the same step as the basics; the multi-movement one
 lives inside `BasicsFields` so Settings gets it too (a standalone piece can be
-promoted into a work later by typing a work title there).
+promoted into a work later by typing a work title there). Choosing "Multiple
+movements" makes the work title itself required to advance — `canAdvance()`
+blocks "Next" if it's blank, the same way a blank piece name or zero measures
+already did. Settings' "Save changes" enforces the identical rule when
+editing an existing piece. See
+[Decisions.md](Decisions.md#multi-movement-works) for why (clearing an
+existing multi-movement piece's title in Settings used to silently detach it
+from its work).
 
 **Since Pass 24, step 1 also carries four optional extras that don't gate
 advancing past it:** target tempo (BPM) is now a `BasicsFields` field, so it
@@ -43,9 +50,11 @@ and Documents (`DocumentsEditor`) — the same components Settings uses,
 rendered directly in `Wizard.jsx` rather than folded into `BasicsFields`
 itself, specifically so they don't *also* duplicate into Settings' "Piece"
 panel (Settings keeps its own separate "Tempo zones"/"Recordings"/"Documents"
-panels, unchanged, for editing after setup). None of the four are required —
-`canAdvance()` for step 1 only checks name and total measures, same as
-before. The Timeline step no longer has a target-tempo field; it only sets
+panels, unchanged, for editing after setup). None of the four gate advancing
+past step 1 — `canAdvance()` there checks name and total measures always,
+plus the work title specifically when "Multiple movements" is selected (see
+above); target tempo, tempo zones, recordings, and documents stay fully
+optional. The Timeline step no longer has a target-tempo field; it only sets
 the schedule itself (start date, deadline vs. minutes/day, practice days per
 week, chunk size).
 
@@ -63,8 +72,11 @@ because that's what it is. See
 
 ## 2. The daily practice loop
 
-Entry point: the Today tab, or clicking a day card in Timeline
-(`handleSelectDay`, which sets `dayOverride` and jumps to Today).
+Entry point: the Today tab, clicking a day card in Timeline
+(`handleSelectDay`, which sets `dayOverride` and jumps to Today), or —
+since the same session as Pass 43/45 — Overview's "Continue learning" /
+"Continue maintenance" button, which resets to real-time tracking rather
+than jumping to a specific day.
 
 1. `ScheduleBanner` shows if any chunks are behind schedule
    (`computeScheduleStatus`) and offers rescheduling — see flow 4.
@@ -111,7 +123,12 @@ see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are
 
 - **Overview**: "where do things stand right now" — measures/sections
   learned, total time practiced, overall progress %, and a practice-progress
-  bar broken down by `computeProgressTier`.
+  bar broken down by `computeProgressTier`. Since the same session as Pass
+  43/45: a "Continue learning" / "Continue maintenance" button under the
+  title card jumps straight into practice (see flow 2 above); and the
+  "first week" list grays out past days and strikes through only the ones
+  actually completed, with today's row noting "(behind N chunks)" when
+  applicable — see [Decisions.md](Decisions.md#ux).
 - **Progress**: "how is it actually going" — rolling-window consistency,
   consistency heatmap, most-improved-this-week, actual-vs-planned chart,
   projected finish date, tempo trend sparklines, outcome breakdown,
@@ -125,6 +142,20 @@ unchanged, not redesigned. See [Decisions.md](Decisions.md#ux) for the
 placement reasoning. (The other Pass 20 fold-in, recurring-material
 payoff, was removed outright in Pass 32b — see
 [Decisions.md](Decisions.md#ux).)
+
+**Since Pass 42, both of the above answer "how is *this* piece doing" —
+a third, narrower question ("how is everything doing, at a glance") has a
+first answer too: a "View all pieces" button on Progress opens
+`AllPiecesTab`** — one row per piece (progress %, confidence %, days since
+last touched, time practiced *this week*), a this-week-total stat, and a
+14-day cross-piece consistency heatmap (any piece touched counts that
+day). Not a sidebar tab — reached only from that button, same pattern the
+Revival tab uses; a "Back to {current piece}" button in its own header
+returns the way you'd expect. Clicking a row calls `switchToPiece`,
+landing on that piece's Overview. See
+[Decisions.md](Decisions.md#cross-piece-views) for what this still
+doesn't do (no lifecycle health scoring) and the reasoning behind the
+week-vs-all-time and heatmap-window choices.
 
 ## 4. Falling behind and rescheduling
 

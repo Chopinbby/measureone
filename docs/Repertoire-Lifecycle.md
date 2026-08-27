@@ -179,16 +179,28 @@ reachable via the piece switcher, just no longer part of the daily rotation.
   (off the agenda, no schedule warning); the "whole piece slowly degrades"
   behavior described in product conversations about this feature is just
   that same recency decay compounding over a longer untouched stretch, not
-  a distinct decay curve.
+  a distinct decay curve. **Since the same session as Pass 43/45**, setting
+  a piece to archived is no longer unconditional — the control is disabled
+  until `isPlanActuallyComplete(piece, chunkSet, timeline)` (Pass 39) says
+  the plan is actually finished, with an inline reason shown while it's
+  locked. Pause is unaffected — still available any time, no condition.
+  See [Decisions.md](Decisions.md#lifecycle) for why, and
+  [Decisions.md](Decisions.md#open-questions) for the resulting gap (a
+  piece genuinely abandoned mid-plan, not finished and never going to be,
+  has no clean path to archive).
 
-**Deliberately not this feature**: an automatic "learned" detector, or any
-scheduled maintenance-review mechanic. Pause/archive is a manual visibility
-toggle only — it answers "keep this off my daily plate," not "tell me when
-to revisit it." That's Stage 4 below — now mostly built (the ladder,
-Tier 1/2 scheduling, post-run-through logging, and Revival's auto-triggers
-are all live); what's still missing is a live "what's due" query that
-surfaces maintenance in the UI beyond the current plan's bounded length —
-see "Explicitly not designed/built here" below.
+**Deliberately not this feature, still**: any scheduled maintenance-review
+mechanic — that's Stage 4 below, not this. Pause remains a pure manual
+visibility toggle with no computed condition attached. Archive is a
+partial exception to "manual toggle only" as of the change above: setting
+it now depends on a computed check, though the check is "is the plan
+actually finished," not "is this piece learned" in the Stage 3 sense —
+still not an automatic *detector* that decides archival on its own, just a
+gate on the learner's own manual action. Stage 4 is now mostly built (the
+ladder, Tier 1/2 scheduling, post-run-through logging, and Revival's
+auto-triggers are all live); what's still missing is a live "what's due"
+query that surfaces maintenance in the UI beyond the current plan's
+bounded length — see "Explicitly not designed/built here" below.
 
 ## Stage 4 — Maintenance (mostly built)
 

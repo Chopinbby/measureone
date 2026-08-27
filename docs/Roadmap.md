@@ -60,10 +60,15 @@ Pause/Archive (`piece.status`, set from Settings — pulls a piece off the
 Master Agenda and suppresses "behind schedule," with no change to how
 confidence decays; see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built)) —
-this is **not** Maintenance mode above, just a manual visibility toggle. The
-"what does learned mean" question it used to be blocked on is now resolved
-in design (see item 2 below) — Pause/Archive still doesn't need it answered,
-though, since it's scoped to "take this off my daily agenda" regardless.
+this is **not** Maintenance mode above, just a manual visibility toggle.
+Pause is unconditional, still scoped to "take this off my daily agenda"
+regardless of plan state. **Archive is not, as of the same session as Pass
+43/45**: it's now disabled until `isPlanActuallyComplete` says the piece's
+plan is actually finished (see
+[Decisions.md](Decisions.md#lifecycle)) — a real, deliberately unresolved
+gap this opened is that a piece genuinely abandoned mid-plan (not finished,
+never going to be) can't be archived under this rule; see
+[Decisions.md](Decisions.md#open-questions).
 
 **Since Pass 29**, Today's Practice has a fourth view mode, **Interleaved
 practice** — rotates chunks that have graduated past Stabilizing
@@ -98,18 +103,23 @@ last played, anywhere).
 move together) — see [Decisions.md](Decisions.md#ux) and
 [Data-Model.md](Data-Model.md#the-piece-object).
 
-**Since Pass 42**, there's a first, deliberately bounded cross-piece
-summary: `AllPiecesTab`, one row per piece (progress %, confidence %, days
-since last touched, time practiced) plus a total-time-practiced stat,
-reached via a "View all pieces" button on Progress rather than a new
-`NAV_BASE` entry. See [Architecture.md](Architecture.md) for the component
-and exactly which existing per-piece functions it calls. This is *not* the
-"cross-piece repertoire health dashboards" item mentioned above under
-Maintenance mode — no lifecycle-state detection, no health scoring, just a
-summary table — and it's not a consistency/streak view either (which days
-across pieces were touched); both were explicitly scoped out of this first
-version, not forgotten. Either is a reasonable next step if this view turns
-out to earn its place.
+**Since Pass 42**, there's a first cross-piece summary: `AllPiecesTab`, one
+row per piece (progress %, confidence %, days since last touched, time
+practiced *this week*) plus a this-week-total stat, a 14-day cross-piece
+consistency heatmap, and a "Back to {current piece}" button — reached via
+a "View all pieces" button on Progress rather than a new `NAV_BASE` entry.
+See [Architecture.md](Architecture.md) for the component and exactly which
+functions it calls, and [Decisions.md](Decisions.md#cross-piece-views) for
+the scope/placement reasoning, why confidence here can drift slightly from
+other screens for an overdue piece, and why "time practiced" is scoped to
+the current week rather than all-time. This is *not* the "cross-piece
+repertoire health dashboards" item mentioned above under Maintenance mode
+— no lifecycle-state detection, no health scoring, just a summary table
+and a heatmap. The consistency view was originally deferred out of the
+first version as new-aggregation-logic-from-scratch (see Decisions.md);
+it was built once actually requested, reusing each session's `loggedDate`
+rather than writing anything genuinely new to the confidence/scheduling
+engine.
 
 ## Immediate next action
 

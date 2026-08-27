@@ -110,6 +110,50 @@ export function sumPracticeSeconds(piece) {
   );
 }
 
+// Same as sumPracticeSeconds, bounded to sessions logged on or after
+// `sinceDateStr` — still counts a skipped session's time (see the comment
+// on loggedSessions above; this deliberately doesn't call it), just also
+// date-filtered. A session with no loggedDate is excluded rather than
+// assumed in-range — shouldn't happen in practice (validateAndMigratePiece
+// backfills it on every load, storage.js), but a session that can't be
+// placed on the calendar can't be claimed for "this week."
+export function sumPracticeSecondsSince(piece, sinceDateStr) {
+  return Object.values(piece.progress).reduce(
+    (sum, entry) =>
+      sum +
+      (entry.sessions || []).reduce(
+        (s, sess) => s + (sess.loggedDate && sess.loggedDate >= sinceDateStr ? sess.durationSeconds || 0 : 0),
+        0
+      ),
+    0
+  );
+}
+
+// Which of the last `windowDays` calendar days had a real session logged on
+// ANY piece in `pieces` — a cross-piece consistency signal. Unlike
+// ProgressTab's per-piece heatmap (plan-relative day numbers, only
+// comparable within one piece's own timeline), this reads each session's
+// loggedDate directly, so pieces with different start dates land on a
+// shared calendar axis. Reuses loggedSessions() for the same "skipped or
+// provisional isn't a real touch" rule the per-piece heatmap already uses.
+export function computeCrossPieceConsistency(pieces, windowDays = 14) {
+  const touchedDates = new Set();
+  (pieces || []).forEach((piece) => {
+    Object.values((piece && piece.progress) || {}).forEach((entry) => {
+      loggedSessions(entry.sessions).forEach((s) => {
+        if (s.loggedDate) touchedDates.add(s.loggedDate);
+      });
+    });
+  });
+  const today = todayISODate();
+  const days = [];
+  for (let i = windowDays - 1; i >= 0; i--) {
+    const date = addDaysISO(today, -i);
+    days.push({ date, touched: touchedDates.has(date) });
+  }
+  return days;
+}
+
 // Day 1 of a piece's plan is piece.startDate (an explicit date the user sets
 // on the Schedule tab, or that's set automatically at creation/import time)
 // — never piece.createdAt, which is just record-keeping bookkeeping (sort
@@ -172,6 +216,15 @@ export function addDaysISO(dateStr, days) {
   const d = new Date(`${dateStr}T00:00:00`);
   d.setDate(d.getDate() + days);
   return formatISODate(d);
+}
+
+// The Monday on or before `dateStr` (defaults to today) — the start of
+// "this week," always Monday regardless of locale. Date.getDay() is
+// 0=Sunday..6=Saturday; (getDay() + 6) % 7 maps Monday to 0 and walks
+// forward from there, so Sunday (6) correctly resolves to 6 days back.
+export function startOfWeekISO(dateStr = todayISODate()) {
+  const daysSinceMonday = (new Date(`${dateStr}T00:00:00`).getDay() + 6) % 7;
+  return addDaysISO(dateStr, -daysSinceMonday);
 }
 
 // Calendar days from `fromDateStr` through `toDateStr`, inclusive of the

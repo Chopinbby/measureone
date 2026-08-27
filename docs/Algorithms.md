@@ -1171,6 +1171,37 @@ needs it once the piece goes active again. See
 [Decisions.md](Decisions.md#lifecycle) and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#pause--archive-built).
 
+**`classifyDayCompletion(day, piece, currentDay)` (Pass 45)** is a sibling
+function, not a replacement — a *per-day* completion status rather than a
+piece-wide missed count. Returns `"future"` for `day.dayNumber >=
+currentDay`; otherwise `"empty"` if the day's `newChunkIds` +
+`specialChunkIds` + `reviewChunkIds` are all empty (nothing was ever
+scheduled there — a rest day, or any other empty day); otherwise `"done"`
+if every one of those ids has `day.dayNumber` in its own `doneDays`, else
+`"behind"`. Written standalone, off the same `timeline.days[]` shape
+`computeScheduleStatus` reads, so a future Timeline-tab pass can reuse it
+instead of duplicating the logic — currently consumed only by Overview's
+"first week" list (grays a past day regardless of `"done"` / `"behind"` /
+`"empty"`, strikes it through only when `"done"`).
+
+The `"exact day"` check is deliberately stricter than `computeScheduleStatus`'s
+own "ever touched" test (`doneDays.length > 0`) — a chunk logged on some
+*other* day still leaves the day being classified incomplete. `"empty"` is
+its own state rather than folding into `"done"` (a day with nothing
+scheduled trivially satisfies "every item is done" over zero items) —
+kept separate specifically so a caller can gray an empty day out without
+implying real work was completed there; see
+[Decisions.md](Decisions.md#ux) for why this wasn't the original shape.
+
+**Known gap, not fixed:** a consolidation day's `reviewChunkIds` lists
+every practice chunk (so it can never land on the `"empty"` branch), but
+logging that day's run-through (`handleLogRunThrough`, `App.jsx`) only
+ever writes the synthetic `"__consolidation__"` progress entry, never each
+individual chunk's own `doneDays`. A logged consolidation day therefore
+still classifies as `"behind"` here unless those same chunks separately
+happen to have a same-day regular practice session. See
+[Decisions.md](Decisions.md#open-questions).
+
 ## Rescheduling
 
 `getEffectiveTimeline(piece, chunkSet)`: when the user confirms "Reschedule

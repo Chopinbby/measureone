@@ -16,8 +16,12 @@ import {
   elapsedDay,
   getCurrentDay,
   todayISODate,
+  addDaysISO,
   loggedSessions,
   sumPracticeSeconds,
+  sumPracticeSecondsSince,
+  startOfWeekISO,
+  computeCrossPieceConsistency,
   hasPendingProvisionalSession,
 } from "../src/lib/utils.js";
 
@@ -49,6 +53,91 @@ describe("sumPracticeSeconds still counts skipped sessions' time — saving the 
       },
     };
     assert.equal(sumPracticeSeconds(piece), 180, "both the real session's and the skipped session's time count");
+  });
+});
+
+describe("sumPracticeSecondsSince (Pass 43) — same as sumPracticeSeconds, bounded by loggedDate", () => {
+  test("excludes sessions before the cutoff, includes on/after", () => {
+    const piece = {
+      progress: {
+        c1: { sessions: [{ loggedDate: "2026-08-23", durationSeconds: 60 }] },
+        c2: { sessions: [{ loggedDate: "2026-08-24", durationSeconds: 90 }] },
+        c3: { sessions: [{ loggedDate: "2026-08-26", durationSeconds: 30 }] },
+      },
+    };
+    assert.equal(sumPracticeSecondsSince(piece, "2026-08-24"), 120, "the day-before session is excluded");
+  });
+
+  test("a skipped session's time still counts if it's in range — only the date matters here", () => {
+    const piece = {
+      progress: {
+        c1: { sessions: [{ loggedDate: "2026-08-25", skipped: true, durationSeconds: 200 }] },
+      },
+    };
+    assert.equal(sumPracticeSecondsSince(piece, "2026-08-24"), 200);
+  });
+
+  test("a session with no loggedDate is excluded rather than assumed in-range", () => {
+    const piece = { progress: { c1: { sessions: [{ durationSeconds: 500 }] } } };
+    assert.equal(sumPracticeSecondsSince(piece, "2026-08-24"), 0);
+  });
+});
+
+describe("startOfWeekISO (Pass 43) — the Monday on or before a date", () => {
+  test("a mid-week date resolves to that week's Monday", () => {
+    assert.equal(startOfWeekISO("2026-08-26"), "2026-08-24", "2026-08-26 is a Wednesday");
+  });
+
+  test("Monday itself is unchanged", () => {
+    assert.equal(startOfWeekISO("2026-08-24"), "2026-08-24");
+  });
+
+  test("Sunday resolves to the Monday six days earlier, not the following week", () => {
+    assert.equal(startOfWeekISO("2026-08-30"), "2026-08-24", "2026-08-30 is a Sunday, same week as Aug 24");
+  });
+
+  test("[regression] a week spanning the spring-forward DST transition still resolves correctly", () => {
+    // 2026-03-08 is a Sunday (the DST transition itself); its Monday is
+    // 2026-03-02. addDaysISO's setDate() arithmetic operates on calendar
+    // days, not milliseconds, so this should be unaffected by the class of
+    // bug daysBetweenInclusive had — pinned here so a future rewrite that
+    // reintroduces millisecond math gets caught.
+    assert.equal(startOfWeekISO("2026-03-08"), "2026-03-02");
+  });
+});
+
+describe("computeCrossPieceConsistency (Pass 43) — touching ANY piece counts as that day being practiced", () => {
+  // Anchored to todayISODate()/addDaysISO rather than a literal date string,
+  // so this doesn't quietly start failing the day after it's written — see
+  // docs/AI-GUIDELINES.md's note on deriving expected values from the same
+  // primitives the code under test uses, not a second hand-typed date.
+  const targetDate = addDaysISO(todayISODate(), -2);
+
+  test("a session on one piece marks the day touched even if no other piece was touched that day", () => {
+    const pieceA = { progress: { c1: { sessions: [{ day: 1, loggedDate: targetDate, cleanReps: 3, bpm: 90, outcome: "pass" }] } } };
+    const pieceB = { progress: {} };
+    const days = computeCrossPieceConsistency([pieceA, pieceB], 5);
+    const found = days.find((d) => d.date === targetDate);
+    assert.ok(found, "targetDate should be within a 5-day window ending today");
+    assert.equal(found.touched, true);
+  });
+
+  test("a skipped session does not count as touched, same rule as the per-piece heatmap", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, loggedDate: targetDate, skipped: true, durationSeconds: 60 }] } } };
+    const days = computeCrossPieceConsistency([piece], 5);
+    assert.equal(days.find((d) => d.date === targetDate).touched, false);
+  });
+
+  test("returns exactly windowDays entries, contiguous, ending on today", () => {
+    const days = computeCrossPieceConsistency([], 5);
+    assert.equal(days.length, 5);
+    assert.equal(days[days.length - 1].date, todayISODate());
+    assert.equal(days[0].date, addDaysISO(todayISODate(), -4));
+  });
+
+  test("handles empty/null pieces without throwing", () => {
+    assert.doesNotThrow(() => computeCrossPieceConsistency([], 3));
+    assert.doesNotThrow(() => computeCrossPieceConsistency(null, 3));
   });
 });
 

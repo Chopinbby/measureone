@@ -113,6 +113,17 @@ step/panel in both places (moved there from "Schedule" in Pass 24; see
 [Decisions.md](Decisions.md#data-model) for why). Treat any visual or
 behavioral divergence between the two as a bug, not a stylistic choice.
 
+**Worked example of treating divergence as a bug:** the Wizard already
+blocked "Next" on a blank piece name; Settings' "Save changes" never had
+the equivalent check for a blank work title once "Multiple movements" is
+selected. Fixed in two passes (Wizard first, Settings as an explicit,
+separate follow-up once the divergence was noticed) rather than leaving
+Settings unguarded — see
+[Decisions.md](Decisions.md#multi-movement-works). The reverse gap still
+exists, tracked, not silently accepted: Settings still doesn't require
+piece name or total measures the way the Wizard does — see
+[Decisions.md](Decisions.md#open-questions).
+
 **One deliberate exception, not a violation of this:** Tempo zones,
 Recordings, and Documents are reachable from the Wizard's first step too
 (Pass 24), using the same editor components Settings uses — but they're

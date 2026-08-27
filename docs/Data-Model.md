@@ -47,8 +47,12 @@ piece = {
                          // circuits missedCount to 0 for either). Confidence is
                          // unaffected either way — computeAutoConfidence's existing
                          // recency decay already makes an untouched piece's confidence
-                         // fade on its own; status doesn't add a second decay path. See
-                         // Repertoire-Lifecycle.md and Decisions.md#lifecycle.
+                         // fade on its own; status doesn't add a second decay path.
+                         // Setting the value itself is still always the user's own
+                         // click, but as of the same session as Pass 43/45, the control
+                         // for setting it to 'archived' specifically (not 'paused') is
+                         // conditionally disabled — see Repertoire-Lifecycle.md and
+                         // Decisions.md#lifecycle.
   totalMeasures,         // number
   measureDifficulty,     // number[totalMeasures], each 1|2|3 (easy/medium/hard)
   diffMode,              // 'grid' | 'simple' — legacy; 'simple' (the quick-count
@@ -192,6 +196,9 @@ piece = {
                          // startDate). Read by Revival's 60+-days-untouched auto-trigger
                          // condition (computeRevivalTriggers, lib/revival.js, Pass 7) — a piece
                          // whose only activity is run-throughs must not look falsely stale here.
+                         // Also read by AllPiecesTab's "days since last touched" column
+                         // (Pass 42) — the always-fresh-on-load guarantee is exactly why that
+                         // reads correctly for pieces saved long before this field existed.
                          // See Repertoire-Lifecycle.md#revival-auto-triggers and
                          // Decisions.md#spaced-repetition--maintenance.
   ladderConfig,          // { stabilizing, settling, holding, bpmSteps } — piece-level tunable
@@ -244,7 +251,11 @@ ChunkProgress = {
                             // Decisions.md#spaced-repetition--maintenance. loggedDate ("YYYY-MM-DD") is the calendar date
                             // derived from loggedAt for sessions logged going forward, or
                             // backfilled from `day` + piece.startDate for sessions that
-                            // predate the field — see storage.js. outcome ('pass' | 'soft-miss'
+                            // predate the field — see storage.js. Also what AllPiecesTab's
+                            // weekly time-practiced sum and cross-piece consistency heatmap
+                            // read directly (Pass 42 follow-up, lib/utils.js) — a calendar
+                            // date, unlike `day`, is comparable across pieces with different
+                            // startDates. outcome ('pass' | 'soft-miss'
                             // | 'fail') replaces the old free-standing `effectiveness` field —
                             // see Decisions.md#spaced-repetition--maintenance. Old sessions
                             // that only have `effectiveness` are read through

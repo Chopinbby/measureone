@@ -12,9 +12,21 @@ import { RecordingsList } from "../fields/RecordingsList";
 import { DocumentsEditor } from "../fields/DocumentsEditor";
 import { DocumentsList } from "../fields/DocumentsList";
 import { autoChunkSize } from "../../lib/chunking";
+import { isPlanActuallyComplete } from "../../lib/scheduling";
 import { formatMinutes } from "../../lib/utils";
 
-export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus }) {
+// Matches .primary-btn:disabled's look (App.jsx CSS) — .ghost-btn itself has
+// no :disabled rule anywhere in the shared stylesheet, so the grayed-out
+// treatment for the plan-incomplete Archive button is applied inline here
+// rather than via a shared class. No pointerEvents: "none" — that would also
+// remove the button from :hover hit-testing, which silently kills the title
+// tooltip below (confirmed: disabled alone already blocks clicks/keyboard,
+// so it isn't needed for that). The un-guarded .ghost-btn:hover border/
+// background tint still shows on hover as a minor, harmless cosmetic quirk.
+const ARCHIVE_LOCKED_STYLE = { opacity: 0.45, cursor: "not-allowed" };
+const ARCHIVE_LOCKED_TITLE = "Available once this piece's learning plan is actually finished";
+
+export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus }) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
   // the toggle is on but the work title is blank (same rule as the Wizard,
@@ -30,6 +42,7 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
 
   if (!editing || !editDraft) {
     const status = piece.status || "active";
+    const planComplete = isPlanActuallyComplete(piece, chunkSet, timeline);
     return (
       <div className="tab-pane">
         <div className="tab-header"><h1>Settings</h1></div>
@@ -55,7 +68,13 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
                 <button className="ghost-btn" onClick={() => onSetStatus("paused")}>
                   <Pause size={14} /> Pause piece
                 </button>
-                <button className="ghost-btn" onClick={() => onSetStatus("archived")}>
+                <button
+                  className="ghost-btn"
+                  disabled={!planComplete}
+                  style={planComplete ? undefined : ARCHIVE_LOCKED_STYLE}
+                  title={planComplete ? undefined : ARCHIVE_LOCKED_TITLE}
+                  onClick={() => onSetStatus("archived")}
+                >
                   <Archive size={14} /> Archive piece
                 </button>
               </>
@@ -65,7 +84,13 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
                 <button className="ghost-btn" onClick={() => onSetStatus("active")}>
                   <Play size={14} /> Resume piece
                 </button>
-                <button className="ghost-btn" onClick={() => onSetStatus("archived")}>
+                <button
+                  className="ghost-btn"
+                  disabled={!planComplete}
+                  style={planComplete ? undefined : ARCHIVE_LOCKED_STYLE}
+                  title={planComplete ? undefined : ARCHIVE_LOCKED_TITLE}
+                  onClick={() => onSetStatus("archived")}
+                >
                   <Archive size={14} /> Archive piece
                 </button>
               </>
@@ -76,6 +101,12 @@ export function SettingsTab({ piece, editDraft, setEditDraft, onSave, onDelete, 
               </button>
             )}
           </div>
+          {status !== "archived" && !planComplete && (
+            <p className="wizard-hint" style={{ marginTop: 8 }}>
+              Archive unlocks once this piece's plan is actually finished — this one still has
+              practicing left to do. Pause it instead if you want it off your daily agenda for now.
+            </p>
+          )}
         </div>
         <div className="panel">
           <h3>Backup & restore</h3>

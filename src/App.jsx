@@ -1317,7 +1317,17 @@ export default function App() {
     }
 
     openRescheduleModal(
-      [{ pieceId: activePieceId, marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds } }],
+      [
+        {
+          pieceId: activePieceId,
+          // `previous: piece.rescheduleMarker` chains onto this piece's last
+          // reschedule (or null, its first) — see computeEffectiveTimeline
+          // (lib/scheduling.js) for why a second reschedule needs that
+          // chain instead of always re-deriving from the raw, never-
+          // rescheduled schedule.
+          marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds, previous: piece.rescheduleMarker || null },
+        },
+      ],
       "Reschedule remaining chunks?",
       message,
       suggestion
@@ -2039,6 +2049,7 @@ const CSS = `
 .schedule-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(181,71,58,0.08); border: 1px solid rgba(181,71,58,0.3); border-radius: 14px; padding: 16px 20px; }
 .schedule-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
 .schedule-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; max-width: 480px; }
+.schedule-banner-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Non-blocking heads-up, not an alarm — amber rather than schedule-banner's
    brick red, since this never requires action (proceeding as-is is always

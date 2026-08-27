@@ -658,6 +658,63 @@ describe("getEffectiveTimeline — Tier 2 date math must re-anchor to the resche
   });
 });
 
+describe("[regression] getEffectiveTimeline must chain through a piece's reschedule history, not just its latest marker", () => {
+  // Found via manual double-reschedule testing (not a hypothetical): a
+  // chunk placed by a first reschedule, then actually practiced and logged
+  // there, went on to display as an entirely different, never-touched
+  // chunk once a second reschedule ran — see the day-5 assertion below,
+  // which reproduces that exact swap. Root cause: `original` (the source
+  // for every day before the *current* marker's asOfDay) was always the
+  // raw, never-rescheduled computeTimeline result, with no memory of what
+  // an earlier reschedule had actually placed there. The fix chains each
+  // marker to the one before it (`previous`) so `original` is computed
+  // recursively off the marker chain instead of always starting from
+  // scratch.
+  test("a chunk placed by the first reschedule and then practiced still shows there after a second reschedule", () => {
+    const allTenIds = ["c1", "c5", "c9", "c13", "c17", "c21", "c25", "c29", "c33", "c37"];
+    const marker1 = { asOfDay: 5, remainingChunkOrder: allTenIds };
+    // c1 is excluded from marker2's remainingChunkOrder because it's now
+    // touched — exactly how App.jsx's handleReschedule builds a real second
+    // marker (computeScheduleStatus only ever lists untouched chunks).
+    const marker2 = {
+      asOfDay: 7,
+      remainingChunkOrder: allTenIds.filter((id) => id !== "c1"),
+      previous: marker1,
+    };
+    const piece = basePiece({
+      totalMeasures: 40,
+      customChunkSize: 4,
+      daysToLearn: 30,
+      minutesPerDay: 500,
+      // The first reschedule placed c1 on day 5 (asserted via the
+      // "sanity check" below, computed independently); this is what
+      // actually logging it there looks like.
+      progress: { c1: { doneDays: [5], sessions: [{ day: 5, cleanReps: 3, bpm: 60, outcome: "pass" }] } },
+      rescheduleMarker: marker2,
+    });
+    const chunkSet = generateAllChunks(piece);
+
+    // Sanity check, independent of the fix: confirms c1 really does land on
+    // day 5 under marker1 alone, so the rest of this test is exercising the
+    // exact placement a real user would have practiced against.
+    const afterFirstReschedule = getEffectiveTimeline({ ...piece, progress: {}, rescheduleMarker: marker1 }, chunkSet);
+    assert.deepEqual(afterFirstReschedule.days[4].newChunkIds, ["c1"], "test setup sanity check: first reschedule alone must place c1 on day 5");
+
+    const effective = getEffectiveTimeline(piece, chunkSet);
+    assert.deepEqual(effective.days[4].newChunkIds, ["c1"], "day 5 must still show c1 — where it was actually placed and practiced — not revert to whatever day 5 held before any reschedule ever ran");
+    assert.equal(effective.introducedDay.c1, 5, "c1's introducedDay must stay anchored to where it was actually placed (day 5), not fall back to its original pre-any-reschedule introduction day");
+
+    // Prove the fix is load-bearing, not coincidental: recompute what the
+    // OLD (unfixed) code would have shown for day 5 — the raw, never-
+    // rescheduled schedule, exactly what `original` fell back to before
+    // this fix existed. It doesn't just show c1 as unstarted; it shows a
+    // completely different, unrelated chunk in its place, which is the
+    // more dramatic real symptom this test guards against.
+    const unfixedOriginal = computeTimeline(piece, chunkSet);
+    assert.notDeepEqual(unfixedOriginal.days[4].newChunkIds, ["c1"], "confirms the bug this fix guards against was real: the unfixed raw original disagrees with what was actually placed and practiced on day 5");
+  });
+});
+
 describe("[regression, Codex review] computeDaysNeededForMinutesPerDay's review-cost padding must reflect the new one-touch-at-a-time model", () => {
   test("a piece with many chunks gets a smaller day-count estimate than the old fixed-four-reviews-per-item assumption would have produced", () => {
     // 80 measures / 4-measure chunks = 20 chunks, at a minutesPerDay
@@ -833,7 +890,7 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
 
     const [plan] = planRescheduleForPieces({ piece });
 
-    assert.deepEqual(plan.marker, { asOfDay: 6, remainingChunkOrder: remainingChunkIds });
+    assert.deepEqual(plan.marker, { asOfDay: 6, remainingChunkOrder: remainingChunkIds, previous: null });
   });
 
   test("paused and archived pieces are left alone", () => {

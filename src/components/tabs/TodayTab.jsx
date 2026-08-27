@@ -11,7 +11,7 @@ import { InterleavePanel } from "./today/InterleavePanel";
 import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival } from "../../lib/revival";
-import { isPlanActuallyComplete, computeScheduleStatus } from "../../lib/scheduling";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion } from "../../lib/scheduling";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, hasPendingProvisionalSession } from "../../lib/utils";
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
@@ -143,9 +143,71 @@ export function TodayTab({
   // transition/focus block. Distinguished here so the banner can say
   // something true in that case instead of offering a button that would
   // silently no-op — see docs/Decisions.md#scheduling.
-  const hasReschedulableWork =
-    needsRescheduleNudge &&
-    computeScheduleStatus(piece, practiceChunks, timeline, currentDay).remainingChunkIds.length > 0;
+  // Computed unconditionally (not just inside needsRescheduleNudge's "&&"
+  // short-circuit like before) — Pass 47's catch-up action (folded into
+  // ScheduleBanner below) needs the same status regardless of whether the
+  // past-target-date nudge is showing.
+  const scheduleStatus = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
+  const hasReschedulableWork = needsRescheduleNudge && scheduleStatus.remainingChunkIds.length > 0;
+
+  // Pass 47 — an alternative to Reschedule, not a replacement: rescheduling
+  // changes the plan itself, this just offers to go work on old, still-valid
+  // material instead of (or before) today's. Only offered when there's
+  // genuinely untouched work from a day that's already passed — a chunk
+  // introduced *today* and not yet logged doesn't count, that's just normal,
+  // unstarted "today," not "behind."
+  const hasBehindWork =
+    scheduleStatus.remainingChunkIds.length > 0 &&
+    scheduleStatus.remainingChunkIds.some((id) => timeline.introducedDay[id] < currentDay);
+  // Reuses classifyDayCompletion (Pass 45) rather than a second definition
+  // of "incomplete" — scans forward from day 1 so "earliest" really means
+  // earliest, not just the day the first untouched chunk happens to live on
+  // (a day can be "behind" from an unfinished review/transition even once
+  // every chunk it *introduced* is done). Stops before currentDay itself:
+  // classifyDayCompletion treats currentDay and later as "future," never
+  // "behind," so scanning further is guaranteed empty.
+  //
+  // A day classifyDayCompletion calls "behind" can still be one Pass 48
+  // collapses to "Tasks rescheduled" — classifyDayCompletion only reads
+  // doneDays, it has no idea the day's original tasks were swept into a
+  // reschedule and now live somewhere else. Found live, post-review: after
+  // any reschedule, the earliest "behind" day is reliably day 1 again (its
+  // stale newChunkIds are still all undone, by definition), so without this
+  // guard the button would send you to that empty collapsed day instead of
+  // wherever the work actually moved. isMovedId/isFullySwept mirror
+  // TimelineTab.jsx and DayChecklist.jsx's checks exactly — a day this scan
+  // would otherwise land on gets skipped, not returned, so "earliest
+  // incomplete day" keeps meaning a day with something real left to do.
+  const marker = piece.rescheduleMarker;
+  const isMovedId = (id) => {
+    if (!marker) return false;
+    if (marker.remainingChunkOrder.includes(id)) return true;
+    const c = chunkById[id];
+    if (!c || !c.linkedIds) return false;
+    return c.kind === "combo"
+      ? marker.remainingChunkOrder.includes(c.linkedIds[0])
+      : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
+  };
+  const isFullySwept = (d) => {
+    if (marker == null || d.dayNumber >= marker.asOfDay) return false;
+    const ids = [...d.newChunkIds, ...d.specialChunkIds, ...d.reviewChunkIds];
+    return ids.length > 0 && ids.every(isMovedId);
+  };
+  const findEarliestBehindDay = () => {
+    for (const d of timeline.days) {
+      if (d.dayNumber >= currentDay) break;
+      if (isFullySwept(d)) continue;
+      if (classifyDayCompletion(d, piece, currentDay) === "behind") return d.dayNumber;
+    }
+    return null;
+  };
+  // Guards the "shouldn't happen" case named in the pass rather than
+  // assuming hasBehindWork's chunk-level signal and this day-level scan
+  // always agree: if the scan somehow comes up empty, earliestBehindDay
+  // stays null and ScheduleBanner's catch-up button simply doesn't render
+  // (its own gating condition, since it's passed this same value), rather
+  // than rendering a button whose click would silently do nothing.
+  const earliestBehindDay = hasBehindWork ? findEarliestBehindDay() : null;
 
   // computeDueReviews only reads chunkSet.all; TodayTab already receives
   // exactly that list as `chunks`, so it's wrapped rather than threading a
@@ -252,7 +314,15 @@ export function TodayTab({
 
   return (
     <div className="tab-pane">
-      <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
+      <ScheduleBanner
+        piece={piece}
+        chunkSet={chunkSet}
+        timeline={timeline}
+        currentDay={currentDay}
+        onReschedule={onReschedule}
+        earliestBehindDay={earliestBehindDay}
+        onDayChange={onDayChange}
+      />
       {needsRescheduleNudge && (
         <div className="schedule-banner">
           {hasReschedulableWork ? (

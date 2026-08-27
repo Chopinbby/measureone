@@ -27,6 +27,46 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, onS
           <div className="week-grid">
             {week.map((d) => {
               const completion = classifyDayCompletion(d, piece, currentDay);
+              // A day before the reschedule's asOfDay still carries its
+              // pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds —
+              // getEffectiveTimeline (lib/scheduling.js) only replaces days
+              // from asOfDay onward, so an untouched day further back keeps
+              // showing the exact list that got swept into the reschedule,
+              // duplicating tasks that now also appear on their new day.
+              // Collapse only when EVERY id that day originally scheduled
+              // ended up moved — a day with any real remaining content
+              // (done or still legitimately scheduled) renders normally.
+              // Re-derived from the live marker on every render, same as
+              // everything else here — no separate persisted flag.
+              //
+              // remainingChunkOrder (computeScheduleStatus) only ever lists
+              // *practice*-chunk ids, but specialChunkIds/reviewChunkIds
+              // routinely hold a transition or combo id instead — a
+              // transition/combo id is never itself in remainingChunkOrder,
+              // even when it genuinely got carried into the rescheduled
+              // remainder (getEffectiveTimeline moves a transition whenever
+              // either linked chunk remains, and a combo whenever its one
+              // linked chunk does — the same linkedIds check mirrored here).
+              // Checking bare membership alone would treat almost every day
+              // past the very first as "still has real content" purely
+              // because of this id-namespace gap, not because anything on
+              // it was actually left behind.
+              const marker = piece.rescheduleMarker;
+              const isMovedId = (id) => {
+                if (!marker) return false;
+                if (marker.remainingChunkOrder.includes(id)) return true;
+                const c = chunkById[id];
+                if (!c || !c.linkedIds) return false;
+                return c.kind === "combo"
+                  ? marker.remainingChunkOrder.includes(c.linkedIds[0])
+                  : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
+              };
+              const scheduledIds = [...d.newChunkIds, ...d.specialChunkIds, ...d.reviewChunkIds];
+              const isFullySwept =
+                marker != null &&
+                d.dayNumber < marker.asOfDay &&
+                scheduledIds.length > 0 &&
+                scheduledIds.every(isMovedId);
               return (
                 <button
                   key={d.dayNumber}
@@ -44,6 +84,8 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, onS
                     <p className="day-card-note">Full run-through of the piece</p>
                   ) : d.type === "rest" ? (
                     <p className="day-card-note">Rest day</p>
+                  ) : isFullySwept ? (
+                    <p className="day-card-note"><em>Tasks rescheduled</em></p>
                   ) : (
                     <>
                       {d.newChunkIds.length > 0 && (

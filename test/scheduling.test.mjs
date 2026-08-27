@@ -17,6 +17,7 @@ import {
   isPlanActuallyComplete,
   computeMinutesModeAutoExtend,
   computeReschedulePastPlanExtension,
+  classifyDayCompletion,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay } from "../src/lib/utils.js";
 
@@ -276,6 +277,64 @@ describe("Tier 2 — flexes under budget contention, rolls forward, never drops 
     // trigger "behind schedule" off review timing.
     const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, 12);
     assert.equal(status.missedCount, 0, "chunks with a logged session are never counted as missed, regardless of review lateness/rolling");
+  });
+});
+
+describe("Pass 45 — classifyDayCompletion (per-day completion, for Overview's first week / Pass 46's Timeline tab)", () => {
+  test("a day at or after currentDay is always 'future', regardless of what it scheduled", () => {
+    const piece = basePiece({ progress: {} });
+    const day = { dayNumber: 5, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayCompletion(day, piece, 5), "future", "dayNumber === currentDay");
+    assert.equal(classifyDayCompletion(day, piece, 3), "future", "dayNumber > currentDay");
+  });
+
+  test("a past day is 'done' only when every scheduled chunk logged *that exact day*", () => {
+    const piece = basePiece({
+      progress: {
+        c1: { doneDays: [2] },
+        c5: { doneDays: [2, 3] },
+      },
+    });
+    const day = { dayNumber: 2, newChunkIds: ["c1"], specialChunkIds: ["c5"], reviewChunkIds: [] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "done");
+  });
+
+  // Distinguishes this from computeScheduleStatus's broader "ever touched"
+  // check (any doneDays entry at all) — a day is only "done" if the chunk
+  // was logged on *that* day, not merely logged at some point.
+  test("a chunk logged on a different day still leaves this day 'behind'", () => {
+    const piece = basePiece({ progress: { c1: { doneDays: [3] } } });
+    const day = { dayNumber: 2, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "behind");
+  });
+
+  test("one incomplete chunk among several is enough to mark the whole day 'behind'", () => {
+    const piece = basePiece({
+      progress: {
+        c1: { doneDays: [2] },
+        c5: { doneDays: [] },
+      },
+    });
+    const day = { dayNumber: 2, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: ["c5"] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "behind");
+  });
+
+  // "empty" is deliberately its own state, not folded into "done" — a
+  // caller (Overview's first-week list) still grays an empty past day out,
+  // but shouldn't cross off a "Nothing scheduled" row as if real work were
+  // completed there. Was "done" ("vacuously," nothing to miss) until that
+  // read as misleading on request; kept as a named case here so a future
+  // change can't silently re-collapse the two.
+  test("a past day with nothing scheduled at all (e.g. a rest day) is 'empty', not 'done'", () => {
+    const piece = basePiece({ progress: {} });
+    const day = { dayNumber: 2, newChunkIds: [], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "empty");
+  });
+
+  test("a chunk with no progress entry at all counts as not done, same as computeScheduleStatus's own || {} guard", () => {
+    const piece = basePiece({ progress: {} });
+    const day = { dayNumber: 2, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "behind");
   });
 });
 

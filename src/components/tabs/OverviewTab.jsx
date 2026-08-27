@@ -1,4 +1,4 @@
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, Play } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { ManuscriptDoodle, ManuscriptStrip } from "../Manuscript";
 import { RecordingsList } from "../fields/RecordingsList";
@@ -8,6 +8,7 @@ import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
 import { computeRevivalTriggers, isInRevival } from "../../lib/revival";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion } from "../../lib/scheduling";
 import { PIECE_STATUS_LABEL } from "../../lib/constants";
 
 export function OverviewTab({
@@ -27,6 +28,14 @@ export function OverviewTab({
 }) {
   const revivalActive = isInRevival(piece);
   const revivalTriggers = !revivalActive && chunkSet ? computeRevivalTriggers(piece, chunkSet) : { triggered: false, reasons: [] };
+  // Past-plan (Pass 39's real "actually finished" check, not a raw calendar
+  // comparison — CLAUDE.md) means there's nothing left to *learn*, so the
+  // shortcut below relabels toward Master Agenda's existing "Maintenance"
+  // vocabulary instead of implying new material is still being introduced.
+  const planComplete = chunkSet && timeline ? isPlanActuallyComplete(piece, chunkSet, timeline) : false;
+  // For "The first week"'s today-row note below — reused rather than a
+  // separate count, per Pass 45's build note.
+  const { missedCount } = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
@@ -92,6 +101,19 @@ export function OverviewTab({
           )}
         </div>
       </div>
+
+      {/* Suppressed during revival — "Start/Continue revival" above is
+          already the primary action for that state, and two competing
+          primary buttons in the same area would be confusing (Pass 43). */}
+      {!revivalActive && (
+        <button
+          className="primary-btn"
+          style={{ alignSelf: "flex-start" }}
+          onClick={() => onSelectDay(null)}
+        >
+          <Play size={16} /> {planComplete ? "Continue maintenance" : "Continue learning"}
+        </button>
+      )}
 
       {piece.status && piece.status !== "active" && (
         <div className="panel status-note">
@@ -159,15 +181,22 @@ export function OverviewTab({
                 desc = desc[0].toUpperCase() + desc.slice(1);
               }
             }
+            const completion = classifyDayCompletion(d, piece, currentDay);
+            if (d.dayNumber === currentDay && missedCount > 0) {
+              desc += ` (behind ${missedCount} chunk${missedCount === 1 ? "" : "s"})`;
+            }
             return (
               <button
                 key={d.dayNumber}
                 type="button"
                 className="day-preview-row clickable"
+                style={completion === "future" ? undefined : { opacity: 0.55 }}
                 onClick={() => onSelectDay(d.dayNumber)}
               >
                 <span className="day-num mono">Day {d.dayNumber}</span>
-                <span className="day-desc">{desc}</span>
+                <span className="day-desc" style={completion === "done" ? { textDecoration: "line-through" } : undefined}>
+                  {desc}
+                </span>
                 <span className="day-min mono">{formatMinutes(d.minutes)}</span>
               </button>
             );

@@ -1688,6 +1688,8 @@ export default function App() {
             {activeTab === "settings" && (
               <SettingsTab
                 piece={piece}
+                chunkSet={chunkSet}
+                timeline={timeline}
                 editDraft={editDraft}
                 setEditDraft={setEditDraft}
                 onSave={handleSavePiece}

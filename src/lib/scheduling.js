@@ -489,6 +489,46 @@ export function computeScheduleStatus(piece, practiceChunks, timeline, currentDa
   return { missedCount, remainingChunkIds };
 }
 
+// Per-day completion status for a single timeline day, relative to
+// currentDay: "future" | "done" | "behind" | "empty". Pure and side-effect
+// free, written once (Pass 45) specifically so Pass 46 (Timeline tab) can
+// reuse it against the same day objects rather than duplicating this logic.
+//
+// A day at or after currentDay is always "future" — nothing to judge yet.
+// A day before currentDay with nothing scheduled at all (a rest day, or any
+// other day the plan assigned no new material, review, or transition to)
+// is "empty" — there was nothing to do, so it's neither done nor behind.
+// Kept distinct from "done" specifically so a caller can still gray an
+// empty past day out (it's still over) without implying real work was
+// completed there. "empty" used to collapse into "done" ("vacuously,"
+// nothing to miss) — corrected on request, since that read as a
+// struck-through "Nothing scheduled" row on Overview's first-week list. A
+// day with something scheduled is "done" only if every chunk it scheduled
+// (newChunkIds + specialChunkIds + reviewChunkIds) has that exact day
+// number in its own doneDays; otherwise "behind".
+//
+// Deliberately checks each chunk's own doneDays for *that specific day*,
+// not just "has this chunk ever been touched" the way computeScheduleStatus
+// above does — a chunk logged on some other day still leaves this one
+// incomplete.
+//
+// Known gap, not fixed here: a consolidation day's reviewChunkIds lists
+// every practice chunk (never empty, so it can't land on the "empty"
+// branch), but logging that day's run-through (handleLogRunThrough,
+// App.jsx) only ever writes the synthetic "__consolidation__" progress
+// entry, never each individual chunk's own doneDays. So a past
+// consolidation day reads "behind" here even when its run-through was
+// logged, unless those same chunks also happen to have a same-day regular
+// practice session. Flagged for a human call, not resolved — no decision
+// recorded yet, so don't go looking for one in docs/Decisions.md.
+export function classifyDayCompletion(day, piece, currentDay) {
+  if (day.dayNumber >= currentDay) return "future";
+  const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
+  if (!ids.length) return "empty";
+  const allDone = ids.every((id) => ((piece.progress[id] || {}).doneDays || []).includes(day.dayNumber));
+  return allDone ? "done" : "behind";
+}
+
 // Will the not-yet-started work actually fit in the days this plan has
 // left? A rough sanity check on a reschedule, not a scheduling decision:
 // rescheduling packs things in as tightly as it can either way, so this

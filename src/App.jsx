@@ -1684,7 +1684,14 @@ export default function App() {
             {/* Not in NAV_BASE — reached only via the button on Progress,
                 same "button-only tab" pattern as "revival" below (not part
                 of the persistent sidebar). See docs/Architecture.md. */}
-            {activeTab === "all-pieces" && <AllPiecesTab pieces={pieceList} onSelectPiece={switchToPiece} />}
+            {activeTab === "all-pieces" && (
+              <AllPiecesTab
+                pieces={pieceList}
+                onSelectPiece={switchToPiece}
+                currentPieceId={piece.id}
+                currentPieceName={piece.name}
+              />
+            )}
             {activeTab === "settings" && (
               <SettingsTab
                 piece={piece}

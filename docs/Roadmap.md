@@ -103,21 +103,23 @@ last played, anywhere).
 move together) — see [Decisions.md](Decisions.md#ux) and
 [Data-Model.md](Data-Model.md#the-piece-object).
 
-**Since Pass 42**, there's a first, deliberately bounded cross-piece
-summary: `AllPiecesTab`, one row per piece (progress %, confidence %, days
-since last touched, time practiced) plus a total-time-practiced stat,
-reached via a "View all pieces" button on Progress rather than a new
-`NAV_BASE` entry. See [Architecture.md](Architecture.md) for the component
-and exactly which existing per-piece functions it calls, and
-[Decisions.md](Decisions.md#cross-piece-views) for the scope/placement
-reasoning and why confidence here can drift slightly from other screens for
-an overdue piece. This is *not* the
-"cross-piece repertoire health dashboards" item mentioned above under
-Maintenance mode — no lifecycle-state detection, no health scoring, just a
-summary table — and it's not a consistency/streak view either (which days
-across pieces were touched); both were explicitly scoped out of this first
-version, not forgotten. Either is a reasonable next step if this view turns
-out to earn its place.
+**Since Pass 42**, there's a first cross-piece summary: `AllPiecesTab`, one
+row per piece (progress %, confidence %, days since last touched, time
+practiced *this week*) plus a this-week-total stat, a 14-day cross-piece
+consistency heatmap, and a "Back to {current piece}" button — reached via
+a "View all pieces" button on Progress rather than a new `NAV_BASE` entry.
+See [Architecture.md](Architecture.md) for the component and exactly which
+functions it calls, and [Decisions.md](Decisions.md#cross-piece-views) for
+the scope/placement reasoning, why confidence here can drift slightly from
+other screens for an overdue piece, and why "time practiced" is scoped to
+the current week rather than all-time. This is *not* the "cross-piece
+repertoire health dashboards" item mentioned above under Maintenance mode
+— no lifecycle-state detection, no health scoring, just a summary table
+and a heatmap. The consistency view was originally deferred out of the
+first version as new-aggregation-logic-from-scratch (see Decisions.md);
+it was built once actually requested, reusing each session's `loggedDate`
+rather than writing anything genuinely new to the confidence/scheduling
+engine.
 
 ## Immediate next action
 

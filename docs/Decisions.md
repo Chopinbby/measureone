@@ -3444,6 +3444,46 @@ injecting a piece with `measureDifficulty: null` into `localStorage` and
 confirming it was skipped with a logged error rather than crashing the
 page).
 
+**Decision (same-session follow-up): the consistency/streak view scoped
+out of `AllPiecesTab`'s first version, above, was built after all — the
+user tried the page and asked for it directly, along with two smaller
+additions (a "Back to current piece" button, and narrowing "time
+practiced" to the current week).**
+
+- **The consistency heatmap reads `session.loggedDate` directly, not the
+  plan-relative day numbers `ProgressTab`'s own per-piece heatmap uses.**
+  Different pieces have different `startDate`s, so plan-day 5 on one piece
+  and plan-day 5 on another aren't the same calendar day — a cross-piece
+  view needs a shared axis, and every session already carries a real
+  calendar date. This turned out simpler than the per-piece version, not
+  harder: no `__consolidation__` special-casing was needed (its sessions
+  carry `loggedDate` too, confirmed by checking `App.jsx`'s run-through
+  logging directly rather than assuming), where `ProgressTab`'s version
+  has to read `doneDays` separately for that case.
+- **Window is a fixed trailing 14 calendar days**, not the piece's own plan
+  length (which doesn't exist at the cross-piece level) — 14 was chosen to
+  match the existing "of last N days practiced" stat `ProgressTab` already
+  uses, not picked freshly.
+- **"Touched" excludes skipped and provisional sessions**, via the
+  existing `loggedSessions()` — the same rule the per-piece heatmap
+  already uses. Time practiced (a separate stat, below) is more generous
+  on purpose: a skipped session still spent real time, even though it
+  isn't a judged attempt.
+- **"Time practiced" changed from all-time to the current week (Monday
+  through today)**, both the per-row figure and the header total. No
+  existing helper did week-boundary math (checked before writing one); new
+  `startOfWeekISO`/`sumPracticeSecondsSince` (`lib/utils.js`) do only that,
+  reusing `sumPracticeSeconds`'s existing "skipped time still counts" rule
+  rather than introducing a second philosophy about what counts as
+  practice time on the same page.
+- **"Back to current piece"** reuses the exact `onSelectPiece` callback the
+  table's own rows already call — no new navigation mechanism, just a new
+  place to trigger the existing one, passed the currently-open piece's id.
+- All three pieces of new `lib/` logic are tested (`test/utils.test.mjs`),
+  including a DST-transition regression for the Monday calculation and a
+  case that would have caught the two-line `startOfWeekISO` bug this pass
+  actually reintroduced and caught during its own verification.
+
 ## Documentation
 
 **Decision: fold the standalone `measureone-context-summary.md` (previously

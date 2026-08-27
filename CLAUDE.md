@@ -376,9 +376,25 @@ freezing once it falls off its own plan — a considered choice, not an
 oversight; see [`docs/Decisions.md`](docs/Decisions.md#cross-piece-views)
 for why, and what switching to `getCurrentDay` would actually cost. Not the
 full "cross-piece repertoire health dashboard" mentioned earlier in this
-file — no lifecycle-state detection, no consistency/streak view — both
-explicitly scoped out of this first version; see
+file — no lifecycle-state detection — still scoped out; see
 [`docs/Roadmap.md`](docs/Roadmap.md).
+
+**Also since Pass 42** (a same-session follow-up, once the user actually
+tried the page): three additions to `AllPiecesTab`. A "Back to {piece
+name}" button in the header, reusing the same `onSelectPiece` navigation
+the rows already use. "Time practiced" is now **this week only** (Monday
+through today), not all-time — both the per-row column and the header
+total — via two new `lib/utils.js` functions, `startOfWeekISO` and
+`sumPracticeSecondsSince` (no existing helper did week-boundary math). And
+the consistency/streak view named above as explicitly deferred **was
+built after all**, once actually requested: a 14-day cross-piece heatmap
+(`computeCrossPieceConsistency`, `lib/utils.js`) where touching *any*
+piece counts a calendar day as practiced — reads each session's
+`loggedDate` directly rather than the plan-relative day numbers
+`ProgressTab`'s per-piece heatmap uses, since day numbers aren't
+comparable across pieces with different start dates. All three are tested
+at the `lib/` level (`test/utils.test.mjs`), including a DST-boundary
+regression for the Monday calculation.
 
 **In the same session as Pass 43/45 below**, Settings' "Archive piece"
 control (Practice status panel) stopped being unconditional: it's now

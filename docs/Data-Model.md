@@ -251,7 +251,11 @@ ChunkProgress = {
                             // Decisions.md#spaced-repetition--maintenance. loggedDate ("YYYY-MM-DD") is the calendar date
                             // derived from loggedAt for sessions logged going forward, or
                             // backfilled from `day` + piece.startDate for sessions that
-                            // predate the field — see storage.js. outcome ('pass' | 'soft-miss'
+                            // predate the field — see storage.js. Also what AllPiecesTab's
+                            // weekly time-practiced sum and cross-piece consistency heatmap
+                            // read directly (Pass 42 follow-up, lib/utils.js) — a calendar
+                            // date, unlike `day`, is comparable across pieces with different
+                            // startDates. outcome ('pass' | 'soft-miss'
                             // | 'fail') replaces the old free-standing `effectiveness` field —
                             // see Decisions.md#spaced-repetition--maintenance. Old sessions
                             // that only have `effectiveness` are read through

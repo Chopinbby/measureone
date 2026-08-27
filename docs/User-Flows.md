@@ -146,13 +146,16 @@ payoff, was removed outright in Pass 32b — see
 **Since Pass 42, both of the above answer "how is *this* piece doing" —
 a third, narrower question ("how is everything doing, at a glance") has a
 first answer too: a "View all pieces" button on Progress opens
-`AllPiecesTab`, one row per piece (progress %, confidence %, days since
-last touched, time practiced) plus a total-time-practiced stat. Not a
-sidebar tab — reached only from that button, same pattern the Revival tab
-uses. Clicking a row calls `switchToPiece`, landing on that piece's
-Overview. See [Decisions.md](Decisions.md#cross-piece-views) for what this
-deliberately doesn't do yet (no consistency/streak view, no lifecycle
-health scoring).
+`AllPiecesTab`** — one row per piece (progress %, confidence %, days since
+last touched, time practiced *this week*), a this-week-total stat, and a
+14-day cross-piece consistency heatmap (any piece touched counts that
+day). Not a sidebar tab — reached only from that button, same pattern the
+Revival tab uses; a "Back to {current piece}" button in its own header
+returns the way you'd expect. Clicking a row calls `switchToPiece`,
+landing on that piece's Overview. See
+[Decisions.md](Decisions.md#cross-piece-views) for what this still
+doesn't do (no lifecycle health scoring) and the reasoning behind the
+week-vs-all-time and heatmap-window choices.
 
 ## 4. Falling behind and rescheduling
 

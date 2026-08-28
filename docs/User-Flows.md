@@ -164,11 +164,17 @@ week-vs-all-time and heatmap-window choices.
    [Algorithms.md](Algorithms.md#behind-schedule-detection) — this is a
    deliberately narrow trigger, not a same-day comparison).
 2. `ScheduleBanner` surfaces the count and a "Reschedule remaining days"
-   action, shown on both Overview and Today — but only while the plan
-   itself isn't *actually* finished yet (`isPlanActuallyComplete`, Pass
-   39). This is no longer just "has the calendar run out": a piece whose
-   target date has already passed with real work still outstanding keeps
-   showing this banner instead of going quiet.
+   action, shown on Overview, Today, and (**since Pass 46**) Timeline — but
+   only while the plan itself isn't *actually* finished yet
+   (`isPlanActuallyComplete`, Pass 39). This is no longer just "has the
+   calendar run out": a piece whose target date has already passed with
+   real work still outstanding keeps showing this banner instead of going
+   quiet. **Since Pass 47, Today's version of this same banner can carry a
+   second button** — "Go to Day N" — that jumps to the earliest day with
+   real incomplete work instead of rebalancing the plan; an alternative
+   action, not a replacement, shown only when a chunk introduced before
+   today is still untouched (Overview and Timeline don't get this second
+   button, and render the banner exactly as before).
 3. `handleReschedule` estimates whether the remaining material can
    realistically fit in the remaining days at the current pace. If it
    can't, the confirmation dialog names the shortfall and offers a way past
@@ -190,8 +196,21 @@ week-vs-all-time and heatmap-window choices.
    `scheduleMode`.
 4. Confirming sets `piece.rescheduleMarker` (and, when the dialog offered an
    extension, `daysToLearn`/`targetDate` too); `getEffectiveTimeline` then
-   keeps every already-passed day exactly as it was and repacks only the
-   untouched chunks into the days that remain.
+   keeps every already-passed day as it stood the last time the schedule
+   was actually recomputed, and repacks only the untouched chunks into the
+   days that remain. **Since Pass 48**, a past day whose entire original
+   task list ended up moved by this repacking — Timeline and Today's
+   Practice alike — collapses to a plain "Tasks rescheduled" line instead
+   of re-showing content that's now a stale duplicate of wherever it
+   actually landed; a day with any real remaining content (done or still
+   legitimately scheduled) is unaffected and renders in full. **Since the
+   same pass's follow-up**, rescheduling the *same* piece more than once
+   correctly carries forward what an earlier reschedule had actually placed
+   — a real bug, not a hypothetical, where a second reschedule used to
+   silently discard the first one's placements for the days in between,
+   including a session someone had genuinely logged there. See
+   [Algorithms.md](Algorithms.md#rescheduling) and
+   [Decisions.md](Decisions.md#scheduling) for both mechanisms.
 
 **Since Pass 39, Today's Practice can also show a second, separate banner**
 below the "N chunks behind schedule" one: a `"days"`-mode piece whose

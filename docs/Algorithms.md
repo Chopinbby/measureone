@@ -1179,10 +1179,17 @@ currentDay`; otherwise `"empty"` if the day's `newChunkIds` +
 scheduled there — a rest day, or any other empty day); otherwise `"done"`
 if every one of those ids has `day.dayNumber` in its own `doneDays`, else
 `"behind"`. Written standalone, off the same `timeline.days[]` shape
-`computeScheduleStatus` reads, so a future Timeline-tab pass can reuse it
-instead of duplicating the logic — currently consumed only by Overview's
-"first week" list (grays a past day regardless of `"done"` / `"behind"` /
-`"empty"`, strikes it through only when `"done"`).
+`computeScheduleStatus` reads, specifically so it wouldn't need
+duplicating elsewhere — and it hasn't been: **since Pass 46**, the
+Timeline tab's day-card grid reuses the exact same call for its own
+gray/check treatment (a small muted check mark next to the day number
+instead of Overview's strikethrough — a card grid reads differently than a
+text list, even though the classification underneath is identical); **since
+Pass 47**, Today's Practice's catch-up-button day search scans
+`timeline.days` with this same function to find the earliest genuinely
+`"behind"` day. Overview's "first week" list (grays a past day regardless
+of `"done"` / `"behind"` / `"empty"`, strikes it through only when
+`"done"`) was the original, and only, consumer through Pass 45.
 
 The `"exact day"` check is deliberately stricter than `computeScheduleStatus`'s
 own "ever touched" test (`doneDays.length > 0`) — a chunk logged on some
@@ -1199,19 +1206,23 @@ logging that day's run-through (`handleLogRunThrough`, `App.jsx`) only
 ever writes the synthetic `"__consolidation__"` progress entry, never each
 individual chunk's own `doneDays`. A logged consolidation day therefore
 still classifies as `"behind"` here unless those same chunks separately
-happen to have a same-day regular practice session. See
+happen to have a same-day regular practice session — on every surface that
+calls this function, now including Timeline (Pass 46). See
 [Decisions.md](Decisions.md#open-questions).
 
 ## Rescheduling
 
 `getEffectiveTimeline(piece, chunkSet)`: when the user confirms "Reschedule
 remaining days" (see [User-Flows.md](User-Flows.md#4-falling-behind-and-rescheduling)),
-`piece.rescheduleMarker = { asOfDay, remainingChunkOrder }` is set
+`piece.rescheduleMarker = { asOfDay, remainingChunkOrder, previous }` is set
 (`remainingChunkOrder` is the ordered list of practice-chunk ids with zero
-sessions logged). `getEffectiveTimeline` then keeps every day before
-`asOfDay` exactly as originally computed, and re-runs `computeTimeline` on
-just the remaining chunks packed into whatever days are left, splicing the
-two together.
+sessions logged as of *that* reschedule; `previous` is whatever
+`rescheduleMarker` was in effect immediately before this one, or `null` for
+a piece's first-ever reschedule — see the chaining note below).
+`getEffectiveTimeline` keeps every day before `asOfDay` as it stood the
+last time the schedule was actually recomputed, and re-runs `computeTimeline`
+on just the remaining chunks packed into whatever days are left, splicing
+the two together.
 
 **Invariant: everything coming back from that nested call is numbered from
 1 and must be re-based to `asOfDay` before it's merged.** The sub-plan is a
@@ -1230,6 +1241,36 @@ Reschedule button appear to do nothing, even though the marker saved
 correctly and the plan really had been rebalanced. `computeScheduleStatus`
 is the only external reader of `introducedDay`, which is why the symptom
 was confined to that banner.
+
+**A second, later bug in the same function, also real and also found by
+actually rescheduling a piece more than once: "keeps every day before
+`asOfDay` as it stood the last time the schedule was actually recomputed"
+above did not always hold.** Before Pass 48's follow-up fix,
+`getEffectiveTimeline`'s internal `original` — the source for every day
+before the *current* marker's `asOfDay` — was always
+`computeTimeline(piece, chunkSet)` directly: the plan as if the piece had
+*never* been rescheduled, no matter how many times it actually had been.
+A second reschedule therefore discarded whatever the *first* one had
+genuinely placed for the days in between, including a session someone had
+actually logged there — that day would revert to a completely different,
+never-touched chunk, with no way to tell from the display that anything
+was wrong (the underlying `piece.progress[id].doneDays` was never
+corrupted, only what got displayed). Fixed by making `getEffectiveTimeline`
+an outer wrapper around an internal `computeEffectiveTimeline(piece,
+chunkSet, marker)` that takes the marker to compute from explicitly,
+rather than always reading `piece.rescheduleMarker` itself: `original` is
+now `computeEffectiveTimeline(piece, chunkSet, marker.previous || null)` —
+recursing through the whole chain — rather than a direct `computeTimeline`
+call. A once-rescheduled piece (`marker.previous` is `null`) hits exactly
+the same base case as before, so this changes nothing for the overwhelming
+common case; only a piece rescheduled more than once is affected, and only
+for the better. **A piece whose second reschedule already happened before
+this fix landed can't be repaired retroactively** — its marker was saved
+without a `previous` link, and the intermediate placement it would need
+has no other record anywhere; it keeps showing the reverted content until
+rescheduled again, at which point the new marker is built (and chained)
+under the fixed code. See [Decisions.md](Decisions.md#scheduling) for the
+full write-up and the regression test that guards this.
 
 The feasibility check shown in the reschedule confirmation dialog —
 `estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay,
@@ -1294,8 +1335,8 @@ single-piece and bulk paths can't drift apart the way `currentDay` vs.
 
 **`planRescheduleForPieces(pieces)`** (Pass 21, `lib/scheduling.js`) is the
 multi-piece form of the flow above — Master Agenda's "Reschedule all". For
-every piece it builds the same `{ asOfDay, remainingChunkOrder }` marker
-`handleReschedule` would, anchored to *that piece's own* current day (not a
+every piece it builds the same `{ asOfDay, remainingChunkOrder, previous }`
+marker `handleReschedule` would, anchored to *that piece's own* current day (not a
 single shared day number, since pieces in a bulk reschedule usually started
 on different dates), and calls `estimateRescheduleFit` per piece so the
 confirmation can name which ones probably won't fit. A piece is included

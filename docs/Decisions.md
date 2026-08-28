@@ -733,6 +733,67 @@ target date has already fully passed.**
   build clean.
 - See [Algorithms.md](Algorithms.md#rescheduling).
 
+**Decision (Pass 48 follow-up): `getEffectiveTimeline` now chains through
+a piece's whole reschedule history via `rescheduleMarker.previous`, instead
+of always re-deriving the pre-reschedule portion from the raw, never-
+rescheduled schedule.**
+
+- **Why:** found while investigating a P2 issue flagged during Pass 48's
+  own code review, then reproduced live, not left as a hypothetical.
+  Rescheduling a piece a *second* time discarded whatever the *first*
+  reschedule had actually placed for every day between the old `asOfDay`
+  and the new one — `original` (the source for everything before the
+  *current* marker's `asOfDay` inside `getEffectiveTimeline`) was always
+  `computeTimeline(piece, chunkSet)`, the plan as if zero reschedules had
+  ever happened, no matter how many times the piece actually had been.
+  Confirmed with a real sequence: reschedule once, practice and log a
+  chunk on its new placement, reschedule again — the day that chunk was
+  practiced on reverted to showing a completely different, unrelated,
+  never-touched chunk instead. The underlying session was never lost
+  (`piece.progress[id].doneDays` stayed correct throughout); this was
+  purely `getEffectiveTimeline`'s display losing track of it.
+- **Fix:** each new `rescheduleMarker` now also carries `previous` — the
+  marker that was in effect immediately before it, or `null` for a piece's
+  first-ever reschedule. `getEffectiveTimeline`'s internal helper
+  (`computeEffectiveTimeline(piece, chunkSet, marker)`) computes the
+  pre-`asOfDay` portion by recursing on `marker.previous` instead of always
+  calling `computeTimeline` directly — a once-rescheduled piece (the
+  overwhelmingly common case) hits the same base case as before, so nothing
+  changes for it. All three places that construct a marker
+  (`App.jsx`'s `handleReschedule`; `planRescheduleForPieces` and
+  `computeMinutesModeAutoExtend`, both `lib/scheduling.js`) now set
+  `previous: piece.rescheduleMarker || null`.
+- **A real, deliberately-accepted limit: this can't repair a piece whose
+  second reschedule already happened before this fix existed.** That
+  piece's marker was saved without a `previous` link, and the intermediate
+  placement it would need to recover was never persisted anywhere — the
+  history is genuinely gone, not just unfixed. Confirmed directly: a piece
+  from this same session's own earlier testing, already rescheduled twice
+  under the old code, still shows the reverted content after the fix
+  landed; a *freshly* double-rescheduled piece shows correctly. It corrects
+  itself the next time that piece is rescheduled again, since that
+  reschedule's marker is built fresh, under the fixed code.
+- **No cap on the `previous` chain's length** — a piece rescheduled 20
+  times carries 20 links. Accepted as the simpler fix: rescheduling is a
+  deliberate, occasional action, not something expected to run often enough
+  for chain length or recursion depth to matter in practice. Worth
+  revisiting only if that assumption turns out wrong.
+- **Verified:** a new regression test
+  (`test/scheduling.test.mjs`, "getEffectiveTimeline must chain through a
+  piece's reschedule history") reproduces the exact scenario above —
+  confirmed it actually fails with the fix reverted (temporarily restored
+  the old single-`computeTimeline` base case, watched the test fail, then
+  restored the fix and watched it pass), per
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#verify-a-regression-test-can-actually-fail).
+  `npm test`: 412/412 (one pre-existing test's expected marker shape
+  updated to include `previous: null`, not weakened — brought in line with
+  what the single-piece path now correctly produces too). Manually
+  reproduced live in the browser: a chunk practiced on its first-reschedule
+  placement displayed as unstarted, on the wrong day, after a second
+  reschedule with the bug present; displayed correctly, checked, with its
+  real logged session, after the fix.
+- See [Algorithms.md](Algorithms.md#rescheduling).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -2686,14 +2747,145 @@ the logic.**
   (`handleLogRunThrough`, `App.jsx`) only ever writes the synthetic
   `"__consolidation__"` progress entry, never each individual chunk's own
   `doneDays` — so a logged consolidation day still reads `"behind"` here.
-  See [Algorithms.md](Algorithms.md#behind-schedule-detection).
+  See [Algorithms.md](Algorithms.md#behind-schedule-detection). **Since
+  Pass 46**, the Timeline tab reuses this same `classifyDayCompletion` call
+  for its own past-day graying/check mark, so this gap now reads the same
+  way on a third surface, not just Overview's first-week list.
 - **Known gap, not fixed: not revival-aware.** A piece that's both
   mid-revival and behind on its *original* (pre-revival) schedule still
   shows the "(behind N chunks)" note and first-week graying against that
   original plan, not the revival plan the learner is actually following.
   Not a new inconsistency on its own — `ScheduleBanner` already shows "N
   chunks behind schedule" during revival today — but it's a second surface
-  carrying the same one. See [Open questions](#open-questions).
+  carrying the same one. **Since Pass 46, make that three surfaces**: the
+  Timeline tab's own past-day graying/check mark reuses the same
+  `classifyDayCompletion` call, with the same lack of revival-awareness.
+  See [Open questions](#open-questions).
+
+**Decision (Pass 46): the Timeline tab gets completion states and its own
+reschedule entry point — a direct application of Pass 45's shared
+classifier plus one new entry point, nothing more.**
+
+- **Completion states:** every day card runs `classifyDayCompletion(d,
+  piece, currentDay)`. A non-`"future"` day gets a `day-past` class
+  (opacity 0.55, matching the weight Overview already uses); a `"done"` day
+  additionally gets a small, muted `Check` icon next to its day number —
+  not a strikethrough, since a card grid reads differently than Pass 45's
+  text list even though the classification itself is identical, reused
+  rather than duplicated.
+- **Reschedule entry point:** Timeline had none before this. Rather than
+  build a second button/modal pairing, it renders the same `ScheduleBanner`
+  component Overview and Today already do, passed the same
+  `piece`/`chunkSet`/`timeline`/`currentDay`/`onReschedule` props.
+- **Verified:** manually in the browser — a piece rescheduled behind
+  schedule showed matching gray/check states across every past day, and
+  the reschedule banner appeared and worked identically to Overview's.
+  `npm test`: 411/411.
+- See [Algorithms.md](Algorithms.md#behind-schedule-detection).
+
+**Decision (Pass 47): Today's Practice gets a "Go to Day N" catch-up
+button — an alternative to Reschedule, not a replacement — folded into the
+same `ScheduleBanner`, not a second banner.**
+
+- **Why:** the point is to always have a way to get to the last incomplete
+  task, regardless of whether the learner wants to actually rebalance the
+  plan or just go finish what's sitting there. Rescheduling changes the
+  plan itself; this just moves the learner to old, still-valid work.
+- **Visibility:** shows whenever `computeScheduleStatus`'s
+  `remainingChunkIds` is non-empty and at least one of those chunks was
+  introduced on a day before today — **deliberately fires even when
+  today's own checklist also has incomplete items**, not only when
+  today's checklist is empty. Raised directly by the user after the first
+  version read a stricter, "only when today is otherwise done" condition
+  from the pass prose; corrected on the spot ("it should definitely show
+  up if there are incomplete tasks").
+- **Target-finding:** scans `timeline.days` from day 1 forward, using
+  `classifyDayCompletion` (Pass 45) to find the first `"behind"` day,
+  reusing the same definition of "incomplete" every other completion
+  surface already uses rather than inventing a second one.
+- **Merged into `ScheduleBanner`, not a second banner:** built as its own
+  standalone banner first, directly below `ScheduleBanner`; on request,
+  folded into the same banner instead once both existed side by side and
+  visibly stacked. `ScheduleBanner` (`components/ScheduleBanner.jsx`) took
+  two new optional props, `earliestBehindDay`/`onDayChange` — Overview and
+  Timeline don't pass them and render exactly as before; Today's Practice
+  passes both, gets a second button and different copy ("Life happens.
+  Rebalance incomplete tasks across your remaining plan days, or pick up
+  where you left off.") in the same banner. Placed above the first task
+  card, not below the checklist, per explicit request — the point is to be
+  seen without scrolling past everything else first.
+- **Verified:** manually in the browser, both before and after the merge —
+  button appears/hides correctly, jumps to the correct day, and Overview/
+  Timeline's banner is provably unchanged (same copy, same single button).
+  `npm test`: 411/411 throughout.
+- **A real bug found here, fixed in the Pass 48 entry below:** the day
+  search above has no idea a day it finds might later be collapsed by Pass
+  48's fix — see that entry.
+- See [Algorithms.md](Algorithms.md#behind-schedule-detection).
+
+**Decision (Pass 48): a day whose entire original task list was swept
+into a reschedule collapses to a plain "Tasks rescheduled" line — Timeline
+and Today's Practice (single-day view and "View all") alike — instead of
+re-showing content that's since moved elsewhere.**
+
+- **Why:** `getEffectiveTimeline` only replaces days from the reschedule's
+  `asOfDay` onward; an untouched day further back keeps its exact
+  pre-reschedule `newChunkIds`/`specialChunkIds`/`reviewChunkIds`, which is
+  now a stale duplicate of wherever that same content actually got moved.
+- **Only collapses when EVERY original item moved.** A day with any mix of
+  done, still-legitimately-scheduled, and moved items renders completely
+  normally — no per-item filtering within a day, by design (a mixed day
+  can still show a moved item's stale chip alongside its real, current
+  placement elsewhere; accepted as the trade-off for keeping this a
+  whole-day decision, not a per-task one).
+- **No destination reference on the collapsed line** ("Tasks rescheduled,"
+  never "moved to day N") and **no special-casing for more than one
+  reschedule** — re-evaluated against whatever `piece.rescheduleMarker`
+  currently holds on every render, same as everything else here.
+- **A day's list routinely contains a transition or combo id, which is
+  never itself in `rescheduleMarker.remainingChunkOrder`** (that list —
+  built by `computeScheduleStatus` — only ever tracks *practice*-chunk
+  ids), even when the transition/combo genuinely rode along with an
+  untouched neighbor into the rescheduled remainder. A day-1-style day
+  with zero specials is the only case a bare "is this id in
+  `remainingChunkOrder`" check would ever collapse correctly — nearly
+  every day past the first has at least one transition, since a
+  transition is always introduced the day right after both its flanking
+  chunks. Confirmed by direct calculation before deciding the scope:
+  literal list-membership alone would have satisfied this pass's own
+  "several fully-untouched past days" verification criterion for exactly
+  one day. Fixed by recognizing a transition/combo as "moved" whenever its
+  linked practice chunk(s) are in `remainingChunkOrder` — mirroring
+  `getEffectiveTimeline`'s own relocation filter (including combos'
+  asymmetric "only `linkedIds[0]`" rule) rather than inventing a new
+  definition of "moved."
+- **Verified TodayTab's single-day view can reach a fully-swept day** —
+  the pass's own description flagged this as something to check, not
+  assume ("it shouldn't, day nav should skip past it"). It can: Previous/
+  Next-day are plain ±1 steps with no skip logic at all, confirmed by
+  navigating there directly. Not an extra bug to fix — `DayChecklist.jsx`
+  is the same component behind both View all and the single-day view, so
+  the one collapse check already covers this reachable path.
+- **A real bug found and fixed in the same session:** the Pass 47 catch-up
+  button's day search had no idea a day it found could since be collapsed
+  by this — it kept finding the earliest *original* behind day (reliably
+  day 1, once any reschedule has happened) and sending the learner to a
+  screen with nothing on it. Confirmed live: after a reschedule and enough
+  simulated time passing, the button read "Go to Day 1" and led to a bare
+  "Tasks rescheduled" line. Fixed by giving that search the same
+  `isMovedId`/`isFullySwept` check and having it skip a day the check
+  applies to, continuing to scan forward — confirmed live again afterward:
+  the button correctly read "Go to Day 3" (the actual earliest day with
+  real incomplete content) and led there.
+- **Verified:** built a piece with a mixed day (one done chunk, two moved
+  ones) alongside several fully-swept days, rescheduled it, and confirmed
+  in the browser on both Timeline and Today's Practice: fully-swept days
+  read "Tasks rescheduled," the mixed day still rendered its full real
+  checklist, and the moved chunks correctly appeared on their new day.
+  `npm test`: 412/412 (see the getEffectiveTimeline entry above for the
+  regression test).
+- See [Algorithms.md](Algorithms.md#rescheduling) and
+  [Algorithms.md](Algorithms.md#behind-schedule-detection).
 
 ## Data model
 
@@ -3813,17 +4005,20 @@ oversight to silently fix; surface it instead.
   revival plan actually being followed. See [UX](#ux) for the mechanism.
   Not a new problem on its own (`ScheduleBanner` already surfaces original-
   plan "behind schedule" messaging during revival today), but this adds a
-  second surface carrying it. Worth deciding whether either surface should
-  suppress itself during revival, or whether both referencing the original
-  plan is actually fine since revival doesn't replace that history. Not
-  started.
+  second surface carrying it — **and since Pass 46, a third: the Timeline
+  tab's own past-day graying/check mark reuses the same
+  `classifyDayCompletion` call.** Worth deciding whether any of these
+  surfaces should suppress itself during revival, or whether all of them
+  referencing the original plan is actually fine since revival doesn't
+  replace that history. Not started.
 - **A consolidation day's logged run-through doesn't satisfy
   `classifyDayCompletion`'s (Pass 45) per-chunk check.** The consolidation
   day's `reviewChunkIds` lists every practice chunk, but
   `handleLogRunThrough` only writes the synthetic `"__consolidation__"`
   progress entry, never each chunk's own `doneDays` — so a logged
   consolidation day still classifies as "behind" on Overview's first-week
-  list. See [Algorithms.md](Algorithms.md#behind-schedule-detection) and
+  list, and, **since Pass 46, on Timeline too.** See
+  [Algorithms.md](Algorithms.md#behind-schedule-detection) and
   [UX](#ux). Fixing it means deciding whether `classifyDayCompletion`
   should also accept `"__consolidation__"`'s `doneDays` as satisfying a
   consolidation day's practice-chunk ids — not decided. Not started.

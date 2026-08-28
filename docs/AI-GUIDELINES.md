@@ -287,6 +287,37 @@ routes the feature was scoped around while building it. Not a subtle bug —
 a `grep` would have caught it in seconds, if it had been run before calling
 the feature done rather than after.
 
+## Two features built in the same session that read the same underlying signal still need a joint test, not just two separate ones
+
+Verifying each feature against its own intended scenario, right after
+building it, proves that feature works in isolation. It doesn't prove
+anything about what happens when a user's actual path runs through both —
+and a session that ships more than one feature touching the same
+data/state is exactly where that gap tends to hide, because each pass's
+own testing never has a reason to put the *other* pass's changes in front
+of it.
+
+Worked example (Pass 47/48, same session): a "jump to the earliest
+incomplete day" button (Pass 47) and a "collapse a day whose tasks were
+all moved by a reschedule" display fix (Pass 48) both read from the same
+underlying signal — which days are genuinely still behind after a
+reschedule — built and each verified correctly on its own. Pass 47's own
+test used a piece with no reschedule marker at all; Pass 48's own test
+navigated days directly, never through the button. Neither test ever
+exercised the other feature. Asked afterward to critically review "the
+files changed this session" as a skeptical second reviewer — not to re-run
+either pass's own checks — surfaced the gap immediately: the button's day
+search had no idea Pass 48's collapse existed, so after any reschedule it
+reliably pointed at day 1 (the earliest *original* behind day, unaware
+it had since collapsed to a bare "Tasks rescheduled" line) — a functioning
+button leading to a dead end, confirmed live by reproducing the exact
+click. Fixed by having the button's search reuse the same collapse check
+and skip a day it applies to. The general lesson: when a session's own
+passes touch the same signal, "does each pass work" is not the same
+question as "does using one lead correctly into the other" — the second
+one needs its own explicit pass, ideally before calling either feature
+done, not only when a later review happens to ask for it.
+
 ## A doc's claim about existing behavior is a claim, not a fact — check it
 
 When a doc states that something already works a certain way ("X and Y are

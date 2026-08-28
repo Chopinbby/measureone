@@ -185,7 +185,10 @@ piece = {
                          // like any other entry's — it used to skip this key specially, which
                          // was a bug (see the `lastLoggedAt` field below). A synthetic entry
                          // in the same map, not a documented exception until now.
-  rescheduleMarker,      // null | { asOfDay, remainingChunkOrder } — see Algorithms.md#rescheduling
+  rescheduleMarker,      // null | { asOfDay, remainingChunkOrder, previous } — `previous` is the
+                         // marker in effect right before this one (or null), chained so a piece
+                         // rescheduled more than once still carries its whole history — see
+                         // Algorithms.md#rescheduling
   lastPlayedDate,        // string ("YYYY-MM-DD") | null — collected at revival entry; purely
                          // informational (displayed on Piece Overview), not used by any automatic
                          // staleness detection — see Repertoire-Lifecycle.md and #revival below.

@@ -6,8 +6,23 @@ export function SectionsEditor({ draft, set }) {
     set({
       sections: [...draft.sections, { id: `s${Date.now()}`, name: "", start: 1, end: draft.totalMeasures }],
     });
+  // start/end commit independently (each NumberInput fires its own
+  // onCommit), so a patch touching just one of them can leave the pair
+  // backwards — e.g. dragging end below the current start. Re-normalized
+  // with the same min/max swap resizeSections (lib/utils.js) already uses
+  // for the analogous "total measures changed" case, rather than leaving
+  // it possible to save a reversed range: every consumer of section
+  // start/end (weightedDifficultyFromArray, chunksBySectionId, and the
+  // Progress tab's estimated-vs-actual panel among them) assumes start <=
+  // end and doesn't re-check it.
   const updateSection = (i, patch) =>
-    set({ sections: draft.sections.map((s, idx) => (idx === i ? { ...s, ...patch } : s)) });
+    set({
+      sections: draft.sections.map((s, idx) => {
+        if (idx !== i) return s;
+        const merged = { ...s, ...patch };
+        return { ...merged, start: Math.min(merged.start, merged.end), end: Math.max(merged.start, merged.end) };
+      }),
+    });
   const removeSection = (i) => {
     if (draft.sections.length <= 1) return;
     set({ sections: draft.sections.filter((_, idx) => idx !== i) });

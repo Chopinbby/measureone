@@ -733,6 +733,175 @@ target date has already fully passed.**
   build clean.
 - See [Algorithms.md](Algorithms.md#rescheduling).
 
+**Decision (Pass 49): single-section run-throughs become a repeating gate
+(due → not due → due again) instead of unlocking once and staying
+available forever.**
+
+- **Why:** the prior behavior — `computeSectionRunThroughs` showing a
+  section's run-through permanently once every chunk had a single logged
+  session — meant the run-through panel was a permanently-available option
+  sitting in the background rather than a real task tied to actual
+  progress. Requested: a section's run-through should become due again
+  every two further sessions per chunk after the first (threshold
+  sequence 1, 3, 5, 7, ... — a flat "+2" step forever), with a
+  locked/grayed preview on the day before the next threshold is crossed.
+- **Mechanism:** `sectionRunThroughGate(section, piece, bySectionId)`
+  (`lib/chunking.js`), computed fresh on every call from live session
+  counts, no persisted "unlocked" state. `minCount` (the section's slowest
+  chunk's session count) odd ⇒ due; `due` reduces to a parity check since
+  1/3/5/7/... are exactly the odd numbers. `lockedPreview` covers the day
+  a single uniquely-slowest chunk's next session would cross the section
+  into being newly due. See
+  [Algorithms.md](Algorithms.md#section-run-throughs) for the full
+  mechanics, including why the two states are mutually exclusive by
+  construction.
+- **Fixed in the same pass, before ever committing:** the first cut of the
+  gating metric used raw `sessions.length`, the same value
+  `isSectionLearned` checks — which meant a skipped Interleaved attempt or
+  an unconfirmed provisional session (both stored in the same array)
+  advanced the gate as if it were a completed rep. Switched to
+  `loggedSessions(sessions).length` (`lib/utils.js`). Deliberately **not**
+  applied to `isSectionLearned` itself — that function is asking a
+  different question ("has this chunk been touched at all," used by
+  Overview's "sections learned" stat) and the two are allowed to disagree.
+- **Deliberately not decided:** whether section-**pair** run-throughs
+  (`kind: "section-transition"`, "Sections combined") should get this same
+  repeating treatment once they first unlock, or whether staying a
+  one-time "unlock and forget" drill is actually correct for them (they're
+  already a later-stage, whole-piece-touched drill, arguably a different
+  kind of thing than an early check-in). Left untouched on purpose — see
+  [Open questions](#open-questions).
+- **Verified:** `npm test` green (5 new regression tests, confirmed to
+  actually fail by reverting the `loggedSessions()` fix before landing
+  it — 3 of 5 caught the reverted bug immediately, the other 2 were
+  strengthened after passing by coincidence on the first attempt). Manually
+  in the browser: practiced a real section's chunks across several
+  sessions and confirmed the run-through appeared/locked/reappeared at the
+  exact expected thresholds (1, then hidden at 2, then locked at the
+  penultimate session, then due again at 3), including the combo/transition
+  case for a section spanning a hard-difficulty chunk.
+- See [Algorithms.md](Algorithms.md#section-run-throughs).
+
+**Decision (Pass 50): Piece Map's grid shows only base practice chunks;
+transitions and combos are reached through a new "Related chunks" field
+in the chunk-detail modal instead of their own grid tiles.**
+
+- **Why:** the grid previously interleaved practice chunks, transitions,
+  and combos as separate tiles, so it didn't run cleanly m.1 through the
+  piece's last measure. Filtering to `kind === "section"` chunks alone
+  gives that for free, since practice chunks are generated as contiguous,
+  non-overlapping ranges.
+- **Mechanism:** `findRelatedChunks(chunk, allChunks)` (`lib/utils.js`) —
+  `findComboUnderlyingChunks` (`lib/revival.js`) run in reverse, reusing
+  `rangesOverlap`. No `kind` filter needed to keep it correct in both
+  directions: base chunks can never overlap each other by construction, so
+  the same one function finds a base chunk's transitions/combos, or a
+  transition/combo's base chunks, without special-casing. Clicking a
+  related-chunk link opens *that* chunk's own detail in the same modal
+  (`setSelected`, unchanged mechanism) — including its own related chunks
+  in turn, so navigation never dead-ends even though a transition/combo
+  has no grid tile of its own to return to.
+- **Deliberate exception:** the filter is skipped when `PieceMapTab`'s
+  `sequentialMode` prop is set — Revival's reassessment pass
+  (`RevivalTab`) passes a different, already-curated chunk list
+  (practice chunks + transitions, no combos) that it walks one at a time
+  via its own Previous/Next, and unconditionally filtering would have
+  silently dropped transitions from that flow entirely. Discovered by
+  tracing `RevivalTab`'s usage before implementing, not after — a blanket
+  filter would have been a real, silent regression to a feature this pass
+  never intended to touch.
+- **Verified:** `npm test` green (6 new tests for `findRelatedChunks`,
+  mirroring `findComboUnderlyingChunks`'s existing test style). Manually
+  in the browser: confirmed a 64-measure piece's grid ran mm.1–4 through
+  mm.61–64 with no gaps and no transition/combo tiles; confirmed a
+  base-chunk-to-transition-to-base-chunk round trip through "Related
+  chunks," and a base-chunk-to-combo-to-all-three-base-chunks round trip
+  for a section containing a hard-difficulty chunk.
+- See [Architecture.md](Architecture.md).
+
+**Decision (Pass 51): Progress's new "Estimated vs. actual practice time"
+panel covers practice chunks, transitions, combos, and single-section
+run-throughs — not the whole-piece consolidation run-through, and not
+section-pair run-throughs.**
+
+- **Why excluded, whole-piece run-through:** `"__consolidation__"` isn't a
+  real chunk object — no `effort`, no `measureCount`, nothing to derive an
+  estimate from. Structural, not a judgment call.
+- **Why excluded, section-pair run-throughs:** the request's own enumerated
+  list of covered kinds named single-section run-throughs specifically,
+  and this codebase already treats single-section and section-pair
+  run-throughs as two distinct, separately-named mechanisms (Pass 49
+  above). Taken at face value rather than assumed to mean both.
+- **Mechanism:** estimate is `effort * EFFORT_TO_MIN` for the three kinds
+  that already carry a stored `effort`. Section run-throughs don't (see
+  [Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs))
+  — their estimate is derived locally in `ProgressTab.jsx` from the same
+  `measureCount * avgDifficulty` math transitions/combos already use
+  (neither of those has a recurring-material discount either, so no
+  `effortMultiplier` term is missing). "Recently practiced" reuses the
+  Consistency panel's own trailing window rather than a second,
+  independently-chosen number. Actual time sums *all* sessions'
+  `durationSeconds`, skipped/provisional included — same "the time was
+  genuinely spent either way" rule `sumPracticeSeconds` already
+  established, not `loggedSessions()`-filtered like judgment-based
+  metrics elsewhere on this same tab.
+- **Chart scaling deliberately diverges from "Actual vs. planned
+  progress"** (the pattern this panel reuses the visual language of): each
+  item's pair is scaled to its own taller bar, not one shared scale across
+  every item. A shared scale would make a two-minute chunk invisible next
+  to a forty-minute run-through; the point here is each item's own
+  estimate-to-actual ratio, not relative magnitude across different items.
+- **Found and fixed in a follow-up, before this shipped in the sense of
+  being trusted:** a critical review surfaced (by reproducing it live, not
+  just reasoning about it) that a section with a backwards range
+  (`end < start`) made the derived-effort math return `NaN`, which then
+  poisoned *both* bars for that item via a shared `Math.max` denominator —
+  including the otherwise-valid actual-minutes bar. Root-caused to
+  `SectionsEditor.jsx` accepting a backwards range with zero validation
+  (see the entry immediately below); this panel also got its own local
+  guard (skip the item entirely if `measureCount < 1`) as defense for data
+  already malformed before that fix existed.
+- **Verified:** `npm test` green. Manually in the browser: built a real
+  test piece, logged genuine sessions with real minutes across all four
+  covered kinds, and hand-checked every resulting estimate against the
+  underlying formula by hand — all matched exactly, including the derived
+  section-run-through estimate. Separately reproduced the `NaN` case live
+  (a backwards section with a real logged session), confirmed the exact
+  predicted failure, then reproduced the fix removing it.
+- See [Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs).
+
+**Decision/bug fix (same session as Pass 51): `SectionsEditor.jsx`
+accepted a section's `end` before its `start` with no validation at all —
+fixed by normalizing on every edit, not just flagged.**
+
+- **What was wrong:** each start/end `NumberInput` in the Sections editor
+  (Wizard and Settings both use this shared component) commits
+  independently on blur. Nothing checked the pair together, so setting
+  `end` below the section's current `start` (or vice versa) saved
+  cleanly — no error, no red outline, no visual sign anything was wrong.
+  Reachable through completely ordinary use, not a contrived edge case.
+- **Why it mattered:** every consumer of `piece.sections[].start/end`
+  (`weightedDifficultyFromArray`, `chunksBySectionId`, section run-through
+  gating, Piece Map, and now Progress's estimated-vs-actual panel) assumes
+  `start <= end` and never re-checks it. A backwards range made
+  `weightedDifficultyFromArray` divide by a zero-or-negative count,
+  producing `NaN` or `-0` depending on exactly how backwards it was.
+- **Fix:** `updateSection` (`SectionsEditor.jsx`) now normalizes with a
+  min/max swap on every commit — `{ start: Math.min(start, end), end:
+  Math.max(start, end) }` — the same pattern `resizeSections`
+  (`lib/utils.js`) already uses for the analogous "total measures
+  changed" case, rather than inventing a new one. A valid edit (the
+  common case) is unaffected; only an edit that would leave the pair
+  backwards gets auto-corrected.
+- **Verified live, before and after:** reproduced the exact bug (set a
+  12-measure section to `mm. 2–1`, saved, confirmed the `NaN` appeared in
+  Progress's new panel and visibly collapsed both of that item's bars),
+  then applied the fix and reproduced the *same* edit sequence
+  self-correcting to `mm. 1–2` on commit instead. `npm test` green, build
+  clean.
+- See [`CLAUDE.md`](../CLAUDE.md)'s "Rules that matter every session" for
+  the standing invariant this establishes.
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -3827,3 +3996,18 @@ oversight to silently fix; surface it instead.
   [UX](#ux). Fixing it means deciding whether `classifyDayCompletion`
   should also accept `"__consolidation__"`'s `doneDays` as satisfying a
   consolidation day's practice-chunk ids — not decided. Not started.
+- **Should section-pair run-throughs (`kind: "section-transition"`,
+  "Sections combined") get the same repeating due/locked-preview gate
+  single-section run-throughs got in Pass 49, once a pair first unlocks?**
+  Explicitly flagged rather than guessed at when the repeating gate was
+  built — the pass's own scope named single-section run-throughs
+  specifically. Left as the original one-time "unlock once every chunk in
+  the whole piece has a session, then stay available forever" gate. Case
+  for leaving it: a section-pair run-through is already a late-stage,
+  whole-piece-touched drill, not an early check-in, so "repeat forever"
+  may just be noise there in a way it wasn't for the early, per-section
+  case. Case for extending it: consistency — a learner who came to expect
+  the repeating check-in rhythm from single sections might reasonably
+  expect the same from combined ones. Not started. See
+  [Algorithms.md](Algorithms.md#section-run-throughs) and
+  [Scheduling](#scheduling) (Pass 49 decision).

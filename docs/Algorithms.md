@@ -49,16 +49,97 @@ for what each generated `kind` means.
 
 `computeSectionRunThroughs(piece, practiceChunks)` — computed live (not
 persisted, not part of `generateAllChunks`'s output), used only by
-`SectionRunThroughPanel`.
+`SectionRunThroughPanel`. A single-section run-through and a section-pair
+run-through are gated by two genuinely different mechanisms (Pass 49) — see
+the two subsections below.
 
-- A single-section run-through (`kind: "section-runthrough"`) unlocks for a
-  given `piece.sections` entry once **every practice chunk within that
-  section** has at least one logged session.
-- A combined section-pair run-through (`kind: "section-transition"`) between
-  two adjacent, already-learned sections unlocks only once **every practice
-  chunk in the entire piece** has at least one logged session —
-  deliberately a later-stage drill, not an early one, per the code comment
-  at the top of the function.
+### Single-section run-throughs: a repeating gate, not a one-time unlock
+
+**As of Pass 49, a single-section run-through (`kind: "section-runthrough"`)
+does not just unlock once and stay available.** It goes due → not due → due
+again as the section's slowest-progressing chunk picks up more sessions,
+computed fresh on every call from live session counts — no persisted state,
+same pattern as everything else scheduling-related in this codebase.
+
+`sectionRunThroughGate(section, piece, bySectionId)` (`lib/chunking.js`) is
+the gate itself, returning `{ minCount, due, lockedPreview }`:
+
+- **The gating metric** is each assigned chunk's count of *confirmed,
+  logged* sessions — `loggedSessions(sessions).length` (`lib/utils.js`),
+  not raw `sessions.length`. A skipped Interleaved attempt or an
+  unconfirmed provisional one is stored in the same array
+  (`handleLogSession`, `App.jsx`) but isn't a completed rep, so it must not
+  advance a chunk toward unlocking or re-unlocking a run-through — fixed
+  after initial review caught that the first cut of this gate used raw
+  `sessions.length`, the same way `isSectionLearned` still does, and so
+  counted skips/provisionals too. This is a **deliberate divergence** from
+  `isSectionLearned` (unchanged, still raw `sessions.length`, out of scope
+  for this fix): a chunk touched only via a skip or an unconfirmed
+  provisional can read as "learned" (Overview's stat) while contributing 0
+  toward this gate — "has this chunk been touched at all" and "how many
+  real reps does this chunk have" are different questions, so the two
+  functions are allowed to disagree. The section's own count, `minCount`,
+  is the **minimum across its chunks** — the run-through is a play-through
+  of the *whole* section, so it's only meaningful once every included chunk
+  has actually reached that count; the slowest chunk sets the pace for the
+  whole section, not an average or the fastest chunk.
+- **Threshold sequence: 1, 3, 5, 7, ...** — first unlock at 1 (matches the
+  pre-Pass-49 condition exactly, so nothing changed about *when a section
+  first becomes eligible*), then a flat "+2" step forever. This is exactly
+  the odd positive integers, so `due` reduces to a parity check —
+  `minCount % 2 === 1` — rather than needing an explicit threshold list or
+  any memory of which thresholds were already consumed. One consequence
+  worth internalizing: logging the run-through itself does **not** advance
+  `minCount` (it writes to the synthetic `sr_<sectionId>` progress key, not
+  to any practice chunk's `sessions`), so a section can sit due
+  indefinitely if its chunks aren't practiced again — there is no
+  "complete it to dismiss it" interaction, only "the underlying chunks
+  advance past it."
+- **`lockedPreview`** covers the day before a new threshold is crossed:
+  every chunk except a single slowest one has already reached the upcoming
+  threshold, so that one chunk's next logged session is what crosses the
+  whole section into being newly due. This requires the minimum to be held
+  **uniquely** by one chunk — if two or more chunks tie for slowest, a
+  session on just one of them can't cross the section yet (the other still
+  holds it back), so there is no single "next session" to preview.
+  `lockedPreview` and `due` are mutually exclusive by construction (the
+  parity check only runs on the `!due` branch).
+
+`computeSectionRunThroughs` includes a single-section entry whenever
+`gate.due || gate.lockedPreview`, carrying a `locked: gate.lockedPreview`
+field `SectionRunThroughPanel` reads to pick one of two render branches: a
+normal, loggable `ChecklistItem` when due, or a grayed/disabled preview row
+(a small component local to that file, not `ChecklistItem` itself) when
+locked — styled off the same `disabled`-state CSS classes `ChecklistItem`
+already uses for its own checkbox and "Log practice" button before required
+input is filled in, so a locked task reads as a preview of the same kind of
+row rather than a visually distinct one. When neither `due` nor
+`lockedPreview` holds, the section contributes nothing to the list at all —
+this is what makes the panel now read as a real, appearing/disappearing day
+task instead of a permanently-available option sitting in the background
+once unlocked, which was the pre-Pass-49 behavior this replaced.
+
+### Section-pair run-throughs: still a one-time unlock
+
+A combined section-pair run-through (`kind: "section-transition"`) between
+two adjacent, already-learned sections unlocks only once **every practice
+chunk in the entire piece** has at least one logged session — deliberately
+a later-stage drill, not an early one, per the code comment at the top of
+the function — and, once unlocked, **stays available**, unlike the
+repeating gate above. This is the original, pre-Pass-49 mechanism, left
+untouched: `computeSectionRunThroughs` still gates it on
+`allChunksPracticed` (every chunk in the whole piece) plus `isSectionLearned`
+on both neighboring sections (the plain ">= 1 session per chunk" check,
+unaffected by `sectionRunThroughGate`), the same way it always has.
+
+**Open question, deliberately not resolved by Pass 49:** whether section-pair
+run-throughs should get the same repeating threshold once they first
+unlock, or whether staying a one-time "unlock and forget" drill is actually
+right for them (arguably more defensible here — they're already a
+late-stage, whole-piece-touched drill, not an early check-in). Flagged for a
+product decision rather than guessed at — recorded in
+[Decisions.md](Decisions.md#open-questions), which whichever future pass
+resolves this should update alongside the actual change.
 
 ## Timeline / scheduler
 

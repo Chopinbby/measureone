@@ -92,9 +92,11 @@ than jumping to a specific day.
    **Since Pass 23**, each item also carries an inline, editable free-text
    note (reusing `piece.memoryAnchors`, labeled "Notes" in the UI) — "+ Add
    a note" / "Edit note," committing on blur.
-4. `SectionRunThroughPanel` appears once it has anything to show — see
-   [Algorithms.md](Algorithms.md#section-run-throughs) for exactly when a
-   run-through unlocks.
+4. `SectionRunThroughPanel` appears once it has anything to show — since
+   Pass 49, that's not a one-time unlock but a repeating gate (due, then
+   not due, then due again as practice continues), plus a locked/grayed
+   preview the day before the next threshold is crossed; see
+   [Algorithms.md](Algorithms.md#section-run-throughs) for exactly when.
 5. `ReassessPanel` is available for re-rating difficulty on today's measure
    ranges after practicing them — see flow 5.
 
@@ -131,9 +133,11 @@ see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are
   applicable — see [Decisions.md](Decisions.md#ux).
 - **Progress**: "how is it actually going" — rolling-window consistency,
   consistency heatmap, most-improved-this-week, actual-vs-planned chart,
-  projected finish date, tempo trend sparklines, outcome breakdown,
-  confidence-by-difficulty, recurring-material time savings, and recent
-  practice history.
+  **since Pass 51** an estimated-vs-actual practice time chart (every
+  recently-practiced chunk/transition/combo/section-run-through, estimate
+  vs. real logged minutes), projected finish date, tempo trend sparklines,
+  outcome breakdown, confidence-by-difficulty, and recent practice
+  history.
 
 **There was a third tab, Analytics — it is gone as of Pass 20.** Its
 confidence-by-difficulty panel sits near the bottom of Progress, after the

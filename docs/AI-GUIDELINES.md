@@ -336,6 +336,39 @@ and potentially building on a wrong premise. The third would have meant
 telling the user their actual complaint was imaginary. Check all three kinds
 the same way.
 
+## Your own hedged claim in a review is a claim too — verify it, don't just state it more carefully
+
+When a self-review turns up a risk you didn't fully check ("I believe X
+prevents this, but I didn't verify" / "reasonably confident, not certain,
+because..."), the honest hedge is the right call in the moment, but it
+isn't a substitute for going back and actually checking once there's time
+to. Stating uncertainty carefully is not the same discipline as resolving
+it, and the two are easy to conflate because the hedged version already
+*feels* rigorous.
+
+Worked example (Pass 51 review cycle): a critical review of a new Progress
+panel flagged, as a P2, that a section with a backwards measure range
+(`end < start`) would make the estimate math produce `NaN` — but noted
+"never manufactured or observed, just reasoned about" and "I believe
+existing section-editing code prevents this," rating overall confidence
+"reasonably confident" specifically because of that unverified belief.
+Asked to show the issue live rather than just describe it, checking the
+actual `SectionsEditor.jsx` code (not reasoning about what it probably
+did) took under a minute and found the belief was flatly wrong — nothing
+validated `start <= end` at all, and the failure was trivially reachable
+through completely ordinary use. The `NaN` reproduced exactly as
+predicted, plus a worse detail the reasoning-only pass hadn't
+surfaced: it poisoned *both* bars for that item, including the
+otherwise-valid one, via a shared `Math.max` denominator. The fix that
+followed was root-cause (normalize the editor), not a patch on the
+symptom only — available specifically because the actual mechanism, not
+just its existence, had by then been confirmed.
+
+The generalizable habit: when a review produces a hedge, treat "not yet
+verified" as a to-do, not a finished answer — go check it before the
+confidence rating is final, the same instinct as checking a doc's claim
+against the actual code rather than trusting the prose.
+
 ## Avoid duplicate documentation
 
 Each concept has exactly one canonical home in this `docs/` set (see

@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
-import { clamp, formatRange, todayISODate } from "../../lib/utils";
-import { DIFFICULTY_META, CONFIDENCE_PRESETS } from "../../lib/constants";
+import { clamp, formatRange, todayISODate, findRelatedChunks } from "../../lib/utils";
+import { DIFFICULTY_META, CONFIDENCE_PRESETS, ROLE_LABEL } from "../../lib/constants";
 import {
   computeConfidence,
   computeAutoConfidence,
@@ -65,6 +65,23 @@ export function PieceMapTab({
   const [bpmOverrideOpen, setBpmOverrideOpen] = useState(false);
   useEffect(() => setBpmOverrideOpen(false), [selected]);
 
+  // Pass 50 — the grid itself shows only base practice chunks (no gaps,
+  // m.1 through the piece's last measure), so transitions/combos need
+  // their own way to be reached: the "Related chunks" field below.
+  // sequentialMode (Revival's reassessment flow) is left unfiltered — it
+  // walks `chunks` one at a time via Previous/Next using a deliberately
+  // different, revival-curated list (practice chunks + transitions, no
+  // combos — see RevivalTab's `revivalItems`), and filtering it here would
+  // silently drop transitions from that sequence entirely, which this pass
+  // never asked to change.
+  const gridChunks = sequentialMode ? chunks : chunks.filter((c) => c.kind === "section");
+  // Computed for whatever chunk is currently selected, not just a base
+  // one — so following a related-chunk link to a transition's or combo's
+  // own detail view shows its related chunks in turn (including the base
+  // chunk(s) it touches), rather than a one-way dead end.
+  const relatedChunks = selectedChunk ? findRelatedChunks(selectedChunk, chunks) : [];
+  const relatedChunkLabel = (c) => (c.kind === "section" ? "Chunk" : ROLE_LABEL[c.kind] || c.kind);
+
   // Same content, rendered in a different spot depending on mode: inline
   // near the top for ordinary Piece Map, collapsed under "Chunk Info" at
   // the bottom for sequentialMode (Pass 37) — see docs/Decisions.md#ux.
@@ -97,7 +114,7 @@ export function PieceMapTab({
       {!hideHeader && (
         <div className="tab-header">
           <h1>Piece Map</h1>
-          <p className="hero-sub">Color shows confidence. Includes practice chunks, transitions, and focus blocks.</p>
+          <p className="hero-sub">Color shows confidence.</p>
         </div>
       )}
 
@@ -108,7 +125,7 @@ export function PieceMapTab({
       </div>
 
       <div className="map-grid">
-        {chunks.map((c) => {
+        {gridChunks.map((c) => {
           const conf = computeConfidence(c, piece, currentDay);
           const manual = isManualConfidence(c, piece.progress);
           const flag = (piece.progress[c.id] || {}).flag;
@@ -171,6 +188,19 @@ export function PieceMapTab({
                   <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
                 </button>
               </div>
+
+              {relatedChunks.length > 0 && (
+                <div className="field">
+                  <span>Related chunks</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                    {relatedChunks.map((rc) => (
+                      <button type="button" key={rc.id} className="link-btn" onClick={() => setSelected(rc.id)}>
+                        {relatedChunkLabel(rc)} — {formatRange(rc.start, rc.end)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {selectedEntry.needsRelearning && (
                 <div className="field">

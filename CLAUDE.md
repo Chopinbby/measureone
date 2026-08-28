@@ -133,6 +133,30 @@ chunking, scheduling, and confidence are actually computed, see
   `SettingsTab`, never the wizard.
 - **Piece Map chunk detail is a modal, not inline** — this was a deliberate
   UX fix (inline rendering was invisible below the fold); don't revert it.
+- **Piece Map's grid shows only base practice chunks — this is deliberate,
+  not a bug to "fix" by restoring transitions/combos to it.** Reach those
+  through the chunk-detail modal's "Related chunks" field instead (Pass
+  50). The one exception: `PieceMapTab`'s `sequentialMode` (Revival's
+  reassessment pass) renders the grid unfiltered on purpose, since it walks
+  a different, transition-inclusive list via its own Previous/Next — don't
+  filter that branch too.
+- **Section run-throughs must stay a computed-fresh-every-render gate, not
+  a persisted "unlocked" flag.** As of Pass 49, `sectionRunThroughGate`
+  (`lib/chunking.js`) recomputes due/locked state from live session counts
+  on every call — reintroducing any persisted "has this been unlocked"
+  state would silently bring back the exact bug that pass fixed (a
+  run-through that, once available, sat permanently available forever
+  after, whether or not it still made sense). See
+  [`docs/Algorithms.md`](docs/Algorithms.md#section-run-throughs).
+- **`piece.sections` must always have `start <= end` — if you add a second
+  way to create or edit sections, normalize it the same way
+  `SectionsEditor.jsx` does** (a min/max swap on every commit, mirroring
+  `resizeSections` in `lib/utils.js`). Every consumer of section start/end
+  (`weightedDifficultyFromArray`, `chunksBySectionId`, section run-through
+  gating, Piece Map, Progress's estimated-vs-actual panel) assumes this and
+  doesn't re-check it — a backwards section was previously silently
+  save-able through the Settings/Wizard editor with zero validation error,
+  and produced a real `NaN` in the UI before this was fixed.
 - **`chunkSet` and `timeline` are pure derivations** (`useMemo`'d off
   `piece`), never persisted. If something schedule-related needs to persist
   (like the reschedule marker), it goes on `piece` as input data, and the
@@ -438,3 +462,75 @@ revival-aware — a piece mid-revival can show "(behind N chunks)" against
 its *original*, pre-revival plan, not the revival plan actually being
 followed. See [`docs/Decisions.md`](docs/Decisions.md#open-questions) for
 both.
+
+**Since Pass 49**, a single-section run-through no longer unlocks once and
+stays available forever — it's a repeating gate (`sectionRunThroughGate`,
+`lib/chunking.js`): due whenever the section's slowest-progressing chunk's
+*confirmed* session count is odd (1, 3, 5, 7, ... — a flat "+2" step
+forever, matching the pre-existing threshold of 1 for the first unlock),
+gone between thresholds, and shown as a distinct locked/grayed preview row
+on the one day before a chunk's next session would cross it into being
+newly due. "Confirmed" means `loggedSessions()`-filtered — a skipped
+Interleaved attempt or an unconfirmed provisional one must not advance the
+gate, a fix made after the first cut used raw `sessions.length` the same
+way `isSectionLearned` still does (deliberately unchanged; the two
+functions now answer different questions and are allowed to disagree).
+Section-**pair** run-throughs (`kind: "section-transition"`, "Sections
+combined") are untouched — still the original one-time "unlock and stay"
+gate; whether they should get the same repeating treatment is an open
+question, not decided — see
+[`docs/Decisions.md`](docs/Decisions.md#open-questions). See
+[`docs/Algorithms.md`](docs/Algorithms.md#section-run-throughs) for the
+full mechanics.
+
+**Since Pass 50**, Piece Map's grid shows only base practice chunks
+(`kind: "section"`) — no gaps, m.1 through the piece's last measure, no
+transition/combo tiles. Transitions and combos are reached instead through
+a new "Related chunks" field in the chunk-detail modal: every
+transition/combo (or, symmetrically, base chunk) whose range overlaps the
+selected one, as clickable links that open that chunk's own detail in the
+same modal — including *its* related chunks in turn, so navigating never
+dead-ends. `findRelatedChunks` (`lib/utils.js`) is
+`findComboUnderlyingChunks` (`lib/revival.js`) run in reverse. **The grid
+filter is skipped when `sequentialMode` is set** (Revival's reassessment
+pass, embedded in `RevivalTab`, which walks a deliberately different,
+unfiltered chunk list including transitions via its own Previous/Next) —
+filtering unconditionally would have silently dropped transitions from
+that flow. If you touch `PieceMapTab`'s grid again, preserve that
+`sequentialMode` branch.
+
+**Since Pass 51**, Progress has an "Estimated vs. actual practice time"
+panel: for every item with a logged session in the last N days (same
+trailing window Consistency already uses), a paired-bar comparison of
+estimated time (`effort * EFFORT_TO_MIN`) against actual logged time
+(summed `durationSeconds`, skipped/provisional sessions included — same
+"the time was genuinely spent either way" rule `sumPracticeSeconds`
+already uses). Covers practice chunks, transitions, combos, and
+single-section run-throughs; deliberately excludes the whole-piece
+`"__consolidation__"` run-through (not a real chunk object — no `effort`
+to estimate against) and section-pair run-throughs (a distinct mechanism
+per Pass 49 above). **Section run-throughs don't carry a stored `effort`
+field the way the other three kinds do** — this panel derives one locally
+from the same `measureCount * avgDifficulty` math transitions/combos
+already use, guarded against a section whose range is (or was) backwards,
+see the fix below.
+
+**Also since Pass 51** (a same-session follow-up, found via a critical
+review of the panel above, not a Pass 51 requirement itself): fixed
+`SectionsEditor.jsx` silently accepting a section's `end` before its
+`start` — each start/end `NumberInput` commits independently, so nothing
+previously stopped a section from being saved backwards (e.g. mm. 2–1), no
+validation error, no visual indication anything was wrong. Reproduced
+live: it made `weightedDifficultyFromArray` divide by a zero/negative
+count, producing `NaN` that poisoned *both* bars in the new Progress panel
+for that item, including the otherwise-valid actual-minutes one, via a
+shared denominator. Fixed at the root — `SectionsEditor.jsx` now
+normalizes start/end with the same min/max swap `resizeSections`
+(`lib/utils.js`) already uses for the analogous "total measures changed"
+case — plus a defensive guard in the Progress panel itself for data
+already malformed before that fix existed (an old save, a hand-edited
+import). **If you ever add a second way to create or edit
+`piece.sections`, it must reuse that same normalization** — every consumer
+of section start/end (`weightedDifficultyFromArray`, `chunksBySectionId`,
+section run-through gating, Piece Map) assumes `start <= end` and doesn't
+re-check it.

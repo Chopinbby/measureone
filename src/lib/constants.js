@@ -27,9 +27,9 @@ export const MAX_RECOMMENDED_MINUTES_PER_DAY = 120; // warn in the wizard past t
 export const LONG_PLAN_DAYS_MINUTES_MODE = 90;
 
 export const DIFFICULTY_META = {
-  easy: { label: "Easy", color: "var(--teal)" },
-  medium: { label: "Medium", color: "var(--brass)" },
-  hard: { label: "Hard", color: "var(--brick)" },
+  easy: { label: "Workable", color: "var(--teal)" },
+  medium: { label: "Challenging", color: "var(--brass)" },
+  hard: { label: "Difficult", color: "var(--brick)" },
 };
 export const LEVEL_LABEL = { 1: "easy", 2: "medium", 3: "hard" };
 export const REQUIRED_REPS = { easy: 3, medium: 4, hard: 5 };

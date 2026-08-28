@@ -102,9 +102,9 @@ export const REVIVAL_PURPOSE_OPTIONS = [
 // quicker few-taps interface for the revival reassessment pass. See
 // docs/Decisions.md#revival.
 export const CONFIDENCE_PRESETS = [
-  { value: 0, label: "Shaky" },
+  { value: 0, label: "Lost" },
   { value: 25, label: "Rough" },
   { value: 50, label: "OK" },
-  { value: 75, label: "Solid" },
-  { value: 100, label: "Rock solid" },
+  { value: 75, label: "Comfortable" },
+  { value: 100, label: "Solid" },
 ];

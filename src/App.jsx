@@ -1637,7 +1637,6 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
-                onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}

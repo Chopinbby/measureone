@@ -671,6 +671,14 @@ doesn't distinguish which):
   modal now sets the same tri-state flag the Piece Map does (same
   underlying field, same control), rather than a separate weak-spot
   toggle.
+  **Since Pass 54, this is no longer true**: the flag toggle is removed
+  from the chunk-detail modal specifically when `sequentialMode` is true
+  (revival's reassessment), so revival can no longer set this field
+  directly — ordinary (non-revival) Piece Map is now the only way to set
+  `flag`. `computeRevivalPlan`'s flagged-first sort and `RevivalTab`'s
+  "Flagged chunks" panel (below) still read the same field, unchanged —
+  they just won't have anything to show unless a chunk was flagged outside
+  of revival. See [Decisions.md](Decisions.md#revival).
 - **Confidence cap, not a `stage`/ladder read.** Rough/lost flags must
   immediately affect displayed confidence everywhere it shows (Overview,
   Progress — including its confidence-by-difficulty bars — Piece Map, and

@@ -18,7 +18,6 @@ export function RevivalTab({
   currentDay,
   onUpdateBPM,
   onSetManualConfidence,
-  onSetFlag,
   onSetMemoryAnchor,
   onFinishReassessment,
   onReopenReassessment,
@@ -76,9 +75,8 @@ export function RevivalTab({
         <div className="panel">
           <h3>Reassess where things stand</h3>
           <p className="wizard-hint">
-            Rate your confidence on each chunk to set a fresh baseline for practice. Flag anything that
-            feels shaky as "rough", and anything you truly can't remember as "lost". The plan will
-            prioritize these first.
+            Play through the piece from beginning to end. Rate your confidence on each chunk to set a
+            fresh baseline for practice.
           </p>
           <p className="derived-stat" style={{ marginBottom: 14 }}>
             <strong className="mono">{ratedCount}</strong> of <strong className="mono">{revivalItems.length}</strong> rated
@@ -90,7 +88,6 @@ export function RevivalTab({
               currentDay={currentDay}
               onUpdateBPM={onUpdateBPM}
               onSetManualConfidence={onSetManualConfidence}
-              onSetFlag={onSetFlag}
               onSetMemoryAnchor={onSetMemoryAnchor}
               sequentialMode
               initialSelectedId={firstUnratedId}

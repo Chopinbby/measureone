@@ -4057,3 +4057,23 @@ oversight to silently fix; surface it instead.
   expect the same from combined ones. Not started. See
   [Algorithms.md](Algorithms.md#section-run-throughs) and
   [Scheduling](#scheduling) (Pass 49 decision).
+- **`ChecklistItem`'s tab order still isn't literally reps → BPM → Log,
+  even after Pass 53's fix.** Pass 53 fixed the severe symptom — a
+  disabled Log button gets skipped entirely in the browser's tab
+  computation, so tabbing from BPM could overshoot straight into the next
+  card's controls — by gating the button on draft state instead of
+  committed state, so it's enabled well before any tabbing happens.
+  Confirmed live that this closes the "escapes to the next card" failure.
+  What it doesn't close: the "+ Add a note" button and the "Needs more
+  work" checkbox, both unconditionally enabled, still sit between the BPM
+  field and Log in DOM order, so two extra tab stops remain — the actual
+  order is BPM → note button → checkbox → Log, not BPM → Log directly.
+  Three fixes were considered and rejected, each for a real cost: manual
+  `tabIndex` values break globally across every other `ChecklistItem` on
+  the page (positive tab indices are visited page-wide before any default
+  one); reordering the DOM to put Log first would also move it visually,
+  changing the card's layout, which wasn't asked for; giving those two
+  controls `tabIndex={-1}` would fix the sequence but make them permanently
+  unreachable by keyboard, an accessibility regression nothing asked for
+  either. Not started — a product call on whether strict adjacency is
+  worth one of those costs, not a technical gap.

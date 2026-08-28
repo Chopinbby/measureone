@@ -53,8 +53,12 @@ fingerings — same shape and pattern as recordings; see
 (MVP slice — entry flow, chunk/transition reassessment reusing
 `manualConfidence`, manual flagging (a boolean `weakSpot` at the time;
 merged into Pass 6's tri-state rough/lost `progress[id].flag` — see
-[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)),
-revival plan generation, tempo ladder, random start generator, memory
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging);
+**as of Pass 54, only settable from ordinary Piece Map, not from
+revival's own reassessment pass** — see [Decisions.md](Decisions.md#revival)),
+revival plan generation, tempo ladder (**since Pass 55** its starting
+point is collected as a straight BPM value, not a percentage of target,
+both at revival entry and mid-revival), random start generator, memory
 anchors — see [Decisions.md](Decisions.md#revival) and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md)).
 

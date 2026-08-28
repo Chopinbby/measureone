@@ -779,8 +779,9 @@ logged as an open issue — see
 
 There is deliberately no separate "reassessment confidence" field: the
 revival reassessment pass **is** `progress[id].manualConfidence`, exposed
-through a faster 5-preset UI (`CONFIDENCE_PRESETS` in `src/App.jsx`) rather
-than a new 0-100 (or 0-4) field. See
+through a faster 5-preset UI (`CONFIDENCE_PRESETS`, `src/lib/constants.js`
+— labels relabeled Lost/Rough/OK/Comfortable/Solid in Pass 54, same five
+0/25/50/75/100 values) rather than a new 0-100 (or 0-4) field. See
 [Decisions.md](Decisions.md#revival) for why.
 
 ## Known simplifications worth knowing about

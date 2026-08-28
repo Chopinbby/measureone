@@ -268,6 +268,38 @@ whether a listener fires), not by reading an attribute off the element and
 assuming the browser will honor it the way the element's other properties
 suggest.
 
+## A dispatched synthetic event that doesn't bubble the way you assume will silently no-op
+
+When verifying UI in-browser via script (`dispatchEvent` rather than a real
+click/keypress), some event types don't behave the way `{ bubbles: true }`
+implies. `blur`/`focus` don't bubble natively — React's synthetic
+`onBlur`/`onFocus` handling depends on the browser's own focus-change
+machinery, not just event delegation — so a scripted
+`el.dispatchEvent(new Event('blur', { bubbles: true }))` can silently fail
+to trigger a commit-on-blur handler while returning no error at all. The
+element just keeps showing the uncommitted value, which looks identical to
+"the fix doesn't work" until you check with a real interaction instead.
+
+Worked example (session covering Pass 53 and Pass 55's follow-up BPM-field
+conversion): testing whether a `NumberInput` correctly clamped an
+out-of-range value on blur, a script set the field's value and dispatched
+a synthetic `input` then `blur` event. The field kept showing the
+unclamped number afterward — looked like a real clamping bug. It wasn't:
+driving the exact same interaction through the `computer` tool (a real
+click to focus, real keystrokes, a real Tab key to blur) clamped correctly
+on the first try. The `input` event worked as scripted; only `blur` was
+the unreliable half, because dispatching it doesn't reproduce the actual
+focus-change the browser performs on a real Tab press or click-away.
+
+The generalizable habit: prefer real `computer`-tool interactions (click,
+type, Tab, real mouse-driven focus changes) over `dispatchEvent` for
+anything that depends on `blur`/`focus`/`change` firing correctly.
+`dispatchEvent` is fine for read-only inspection or events you've already
+confirmed round-trip correctly (plain `input` events generally do); when a
+scripted interaction produces a surprising "it didn't work" result for
+anything touching commit-on-blur, changing the *input method* is worth
+trying before concluding the code is broken.
+
 ## A guard added for one navigation path needs auditing everywhere that path exists
 
 When you add a confirmation/guard before a state transition (leaving a

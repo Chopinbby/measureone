@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { NumberInput } from "../NumberInput";
-import { clamp, formatMinutes, formatRange } from "../../lib/utils";
+import { formatMinutes, formatRange } from "../../lib/utils";
 import { isManualConfidence } from "../../lib/confidence";
 import { getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
 import { PieceMapTab } from "./PieceMapTab";
@@ -30,6 +30,11 @@ export function RevivalTab({
   onEndRevival,
 }) {
   const revival = piece.revival || {};
+  // The piece's own default target, for expressing the tempo ladder's
+  // starting point as a straight BPM instead of asking for a percentage —
+  // distinct from the per-chunk `targetBPM` resolved further below via
+  // getRevivalTargetBPM.
+  const pieceTargetBPM = piece.targetBPM || null;
   const revivalItems = useMemo(() => [...chunkSet.practiceChunks, ...chunkSet.transitions], [chunkSet]);
   // Combos aren't part of revivalItems (they're not reassessed/rated or
   // given their own base-plan task — see computeRevivalPlan), but an
@@ -61,13 +66,20 @@ export function RevivalTab({
       <div className="panel">
         <h3>Revival settings</h3>
         <label className="field">
-          <span>Tempo ladder starting point (% of target)</span>
+          <span>Tempo ladder starting point (BPM)</span>
           <NumberInput
-            value={Math.round((revival.tempoLadderStartFraction ?? 0.6) * 100)}
-            min={10}
-            max={95}
-            onCommit={(n) => onSetTempoLadderFraction(clamp(n, 10, 95) / 100)}
+            value={pieceTargetBPM ? Math.round((revival.tempoLadderStartFraction ?? 0.6) * pieceTargetBPM) : ""}
+            min={pieceTargetBPM ? Math.round(pieceTargetBPM * 0.1) : 20}
+            max={pieceTargetBPM ? Math.round(pieceTargetBPM * 0.95) : 400}
+            onCommit={(n) => onSetTempoLadderFraction(pieceTargetBPM ? n / pieceTargetBPM : 0.6)}
+            placeholder={pieceTargetBPM ? undefined : "e.g. 88"}
           />
+          {!pieceTargetBPM && (
+            <p className="tip-line">
+              This piece has no target tempo set, so there's nothing to start a fraction of — the
+              tempo ladder will start at a flat default instead.
+            </p>
+          )}
         </label>
       </div>
 

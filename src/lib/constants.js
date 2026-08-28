@@ -91,12 +91,6 @@ export const STAGE_LABEL = {
   holding: "Steady",
 };
 
-export const REVIVAL_PURPOSE_OPTIONS = [
-  { value: "performance", label: "Performance" },
-  { value: "lesson", label: "Lesson" },
-  { value: "enjoyment", label: "Enjoyment" },
-  { value: "checking", label: "Just checking" },
-];
 // Fast-tap presets over the existing 0-100 manualConfidence override — there's
 // no separate persisted 0-4 scale; this just exposes the same field through a
 // quicker few-taps interface for the revival reassessment pass. See

@@ -3759,17 +3759,20 @@ oversight to silently fix; surface it instead.
   - See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
     for `computeScheduleStatus`, and the three decisions immediately above
     this section for the fixes that did ship this session.
-- **Should Revival's "performance tempo override" field move into Settings
+- ~~Should Revival's "performance tempo override" field move into Settings
   (reusing the piece's existing target tempo) instead of living at the top
   of the Revival tab, and should "tempo ladder starting point" move to
   revival setup time (Wizard/`RevivalEntryModal`) instead of only being
-  editable from Revival settings after the fact?** Raised by the user
-  during Pass 24's copy audit, explicitly deferred as out of scope for that
-  pass (it touches `SettingsTab.jsx` and the wizard's revival-adjacent
-  flow, not just Revival-tab copy/layout — see
-  [CLAUDE.md](../CLAUDE.md) Pass 38 note and
-  [Algorithms.md](Algorithms.md#revival) for how both fields are currently
-  read). Not started; a candidate for a future pass, not decided against.
+  editable from Revival settings after the fact?~~ **Resolved by Pass 35 —
+  never cross-referenced back to close this entry until now.** Raised by
+  the user during Pass 24's copy audit, deferred as out of scope for that
+  pass. The first half is moot: `performanceTempo` was removed outright by
+  Pass 35 (see the decision above), not relocated — there's no field left
+  to move into Settings. The second half is exactly what Pass 35 did:
+  `tempoLadderStartFraction` is collected at `RevivalEntryModal` (revival
+  setup time) and stays editable afterward from `RevivalTab`'s "Revival
+  settings" panel — see the Pass 35 decision above for the mechanics, and
+  [Algorithms.md](Algorithms.md#revival) for how the field is read.
 - **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
   `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
   resolution, so two rows added in the same millisecond would share an id.**

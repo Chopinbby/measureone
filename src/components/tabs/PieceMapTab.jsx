@@ -178,16 +178,18 @@ export function PieceMapTab({
             <div className="modal-body">
               {!sequentialMode && detailStats}
 
-              <div className="field">
-                <span>Run-through flag</span>
-                <button
-                  type="button"
-                  className={`flag-toggle ${selectedFlag !== "untouched" ? `flag-${selectedFlag}` : ""}`}
-                  onClick={() => onSetFlag(selectedChunk.id, nextFlag(selectedEntry.flag))}
-                >
-                  <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
-                </button>
-              </div>
+              {!sequentialMode && (
+                <div className="field">
+                  <span>Run-through flag</span>
+                  <button
+                    type="button"
+                    className={`flag-toggle ${selectedFlag !== "untouched" ? `flag-${selectedFlag}` : ""}`}
+                    onClick={() => onSetFlag(selectedChunk.id, nextFlag(selectedEntry.flag))}
+                  >
+                    <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
+                  </button>
+                </div>
+              )}
 
               {relatedChunks.length > 0 && (
                 <div className="field">

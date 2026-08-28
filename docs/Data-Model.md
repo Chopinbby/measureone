@@ -723,7 +723,19 @@ revival = {
                               // job is being the cutoff computeComboEscalations uses to
                               // decide which logged sessions belong to the current run.
                               // That is the only thing that should read it
-  purpose,                   // 'performance' | 'lesson' | 'enjoyment' | 'checking' | null
+  purpose,                   // 'performance' | 'lesson' | 'enjoyment' | 'checking' | null —
+                              // dormant since Pass 55: RevivalEntryModal's "What's this
+                              // revival for?" field (and REVIVAL_PURPOSE_OPTIONS) was
+                              // removed, so nothing collects this anymore and it's always
+                              // null going forward. Left defined on the schema rather
+                              // than stripped (storage.js's fallback and Wizard.jsx's
+                              // defaultPiece() both still default it to null) —
+                              // non-destructive, matching this codebase's usual migration
+                              // philosophy for a field nothing reads. A piece saved before
+                              // Pass 55 may still carry a real value from an earlier
+                              // revival; already unread before this pass (Pass 38 dropped
+                              // its last display surface — see Decisions.md#revival), so
+                              // this doesn't change what happens to old data.
   tempoLadderStartFraction,  // number, default 0.6 — starting point for computeTempoLadder,
                               // as a fraction of target BPM. Collected at revival entry
                               // (RevivalEntryModal) and editable afterward from RevivalTab's
@@ -767,8 +779,9 @@ logged as an open issue — see
 
 There is deliberately no separate "reassessment confidence" field: the
 revival reassessment pass **is** `progress[id].manualConfidence`, exposed
-through a faster 5-preset UI (`CONFIDENCE_PRESETS` in `src/App.jsx`) rather
-than a new 0-100 (or 0-4) field. See
+through a faster 5-preset UI (`CONFIDENCE_PRESETS`, `src/lib/constants.js`
+— labels relabeled Lost/Rough/OK/Comfortable/Solid in Pass 54, same five
+0/25/50/75/100 values) rather than a new 0-100 (or 0-4) field. See
 [Decisions.md](Decisions.md#revival) for why.
 
 ## Known simplifications worth knowing about

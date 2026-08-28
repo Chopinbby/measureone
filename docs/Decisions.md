@@ -3279,15 +3279,58 @@ changes").**
   that already wins over the computed score unconditionally. Rather than
   inventing a new persisted scale to match a brief that assumed one, revival
   reassessment exposes the existing override through `CONFIDENCE_PRESETS`
-  (Shaky/Rough/OK/Solid/Rock solid → 0/25/50/75/100), which is exactly what
-  the brief's "sets a new current confidence baseline, separate from the
-  historical log" requirement already describes. See
+  (originally Shaky/Rough/OK/Solid/Rock solid → 0/25/50/75/100; relabeled
+  Lost/Rough/OK/Comfortable/Solid in Pass 54, same five values — see
+  below), which is exactly what the brief's "sets a new current confidence
+  baseline, separate from the historical log" requirement already
+  describes. See
   [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems).
 - **Alternative considered:** a new `progress[id].revivalConfidence` field
   on a literal 0-4 scale. Rejected — would have created a third "how good is
   this chunk" score alongside `computeConfidence` and `computeProgressTier`,
   which [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)
   already flags as an unresolved problem, not a pattern to repeat.
+
+**Decision (Pass 54): revival's sequential reassessment no longer sets
+`progress[id].flag` — the flag toggle is removed from `PieceMapTab`'s
+chunk-detail modal specifically when `sequentialMode` is true, and
+`CONFIDENCE_PRESETS` is relabeled to match.**
+
+- **What actually changed:** the "Run-through flag" field (`PieceMapTab.jsx`)
+  is now wrapped in `!sequentialMode`, following the exact scoping
+  precedent Pass 37 already established for this same shared component
+  (see the Pass 37 decision below) — ordinary (non-revival) Piece Map
+  keeps the flag toggle exactly as it was, cycling
+  untouched→rough→lost→untouched. Separately (same values, labels only),
+  `CONFIDENCE_PRESETS` (`lib/constants.js`) is now
+  Lost/Rough/OK/Comfortable/Solid — safe as one shared constant rather
+  than a revival-specific copy, since the "Quick rate" row that renders it
+  has always been gated to `sequentialMode`, never shared with non-revival
+  UI.
+- **What this does *not* touch:** `progress[id].flag` itself, its
+  demote-and-pin ladder effect (`applyRunThroughFlag`, see
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)'s
+  "Flag mode on the Piece Map"), its confidence cap, and both of its
+  consumers — `computeRevivalPlan`'s flagged-first sort and `RevivalTab`'s
+  "Flagged chunks" summary panel — are all unchanged. This pass removes
+  one of the two ways `flag` could be set (revival's own sequential
+  reassessment, added alongside Piece Map's own toggle in Pass 6), not the
+  field, the sort, or the panel.
+- **Real, visible consequence, not an oversight:** since revival's
+  reassessment can no longer set `flag` directly, `RevivalTab`'s "Flagged
+  chunks" panel will typically stay empty going forward unless a chunk
+  gets flagged separately through ordinary Piece Map outside of revival.
+  A chunk rated "Lost" via Quick Rate still gets prioritized to the front
+  of the generated plan on its own — `computeRevivalPlan` sorts flagged
+  chunks first, then lowest confidence first, and a "Lost" rating
+  (`manualConfidence: 0`) wins that second tiebreaker unassisted, with no
+  flag involved. Verified live: rating a chunk "Lost" and generating a
+  plan puts it first, with the "Flagged chunks" panel correctly absent
+  (nothing flagged).
+- **Intro copy simplified to match:** "Reassess where things stand" no
+  longer mentions flagging chunks "rough" or "lost" (removed along with
+  the control it described), and gained a new opening instruction — "Play
+  through the piece from beginning to end" — that wasn't there before.
 
 **Decision: `computeRevivalPlan` is a new, separate function — not a reuse
 or parameterization of `computeTimeline`.**
@@ -3716,17 +3759,20 @@ oversight to silently fix; surface it instead.
   - See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
     for `computeScheduleStatus`, and the three decisions immediately above
     this section for the fixes that did ship this session.
-- **Should Revival's "performance tempo override" field move into Settings
+- ~~Should Revival's "performance tempo override" field move into Settings
   (reusing the piece's existing target tempo) instead of living at the top
   of the Revival tab, and should "tempo ladder starting point" move to
   revival setup time (Wizard/`RevivalEntryModal`) instead of only being
-  editable from Revival settings after the fact?** Raised by the user
-  during Pass 24's copy audit, explicitly deferred as out of scope for that
-  pass (it touches `SettingsTab.jsx` and the wizard's revival-adjacent
-  flow, not just Revival-tab copy/layout — see
-  [CLAUDE.md](../CLAUDE.md) Pass 38 note and
-  [Algorithms.md](Algorithms.md#revival) for how both fields are currently
-  read). Not started; a candidate for a future pass, not decided against.
+  editable from Revival settings after the fact?~~ **Resolved by Pass 35 —
+  never cross-referenced back to close this entry until now.** Raised by
+  the user during Pass 24's copy audit, deferred as out of scope for that
+  pass. The first half is moot: `performanceTempo` was removed outright by
+  Pass 35 (see the decision above), not relocated — there's no field left
+  to move into Settings. The second half is exactly what Pass 35 did:
+  `tempoLadderStartFraction` is collected at `RevivalEntryModal` (revival
+  setup time) and stays editable afterward from `RevivalTab`'s "Revival
+  settings" panel — see the Pass 35 decision above for the mechanics, and
+  [Algorithms.md](Algorithms.md#revival) for how the field is read.
 - **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
   `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
   resolution, so two rows added in the same millisecond would share an id.**
@@ -4011,3 +4057,23 @@ oversight to silently fix; surface it instead.
   expect the same from combined ones. Not started. See
   [Algorithms.md](Algorithms.md#section-run-throughs) and
   [Scheduling](#scheduling) (Pass 49 decision).
+- **`ChecklistItem`'s tab order still isn't literally reps → BPM → Log,
+  even after Pass 53's fix.** Pass 53 fixed the severe symptom — a
+  disabled Log button gets skipped entirely in the browser's tab
+  computation, so tabbing from BPM could overshoot straight into the next
+  card's controls — by gating the button on draft state instead of
+  committed state, so it's enabled well before any tabbing happens.
+  Confirmed live that this closes the "escapes to the next card" failure.
+  What it doesn't close: the "+ Add a note" button and the "Needs more
+  work" checkbox, both unconditionally enabled, still sit between the BPM
+  field and Log in DOM order, so two extra tab stops remain — the actual
+  order is BPM → note button → checkbox → Log, not BPM → Log directly.
+  Three fixes were considered and rejected, each for a real cost: manual
+  `tabIndex` values break globally across every other `ChecklistItem` on
+  the page (positive tab indices are visited page-wide before any default
+  one); reordering the DOM to put Log first would also move it visually,
+  changing the card's layout, which wasn't asked for; giving those two
+  controls `tabIndex={-1}` would fix the sequence but make them permanently
+  unreachable by keyboard, an accessibility regression nothing asked for
+  either. Not started — a product call on whether strict adjacency is
+  worth one of those costs, not a technical gap.

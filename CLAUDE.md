@@ -287,9 +287,12 @@ recap in favor of a plain "Returning '{piece}' to its former glory," the
 Overview stat cards and first-week list relabel during an active revival
 ("revived" instead of "learned," "Revive"/"reconsolidate" instead of
 "Learn new"/"review"), and Master Agenda's revival cards no longer show
-the purpose blurb. The revival-mode UI still does not display why this
-revival was started (`revival.purpose`) or when the piece was last played
-anywhere — flagged as a possible follow-up, not treated as settled.
+the purpose blurb. The revival-mode UI still does not display when the
+piece was last played anywhere — flagged as a possible follow-up, not
+treated as settled. (This paragraph originally also flagged that
+`revival.purpose` — why the revival was started — had no display surface
+either; moot as of Pass 55, which removed the field from collection
+entirely rather than just from display. See that entry below.)
 
 **Since Pass 32a**, every piece carries a persisted `sortOrder` (number) that
 the sidebar piece switcher and other piece-listing surfaces sort by instead
@@ -534,3 +537,97 @@ import). **If you ever add a second way to create or edit
 of section start/end (`weightedDifficultyFromArray`, `chunksBySectionId`,
 section run-through gating, Piece Map) assumes `start <= end` and doesn't
 re-check it.
+
+**Since Pass 52**, `DIFFICULTY_META`'s display labels are Workable /
+Challenging / Difficult, not Easy / Medium / Hard — display only. The
+internal `difficultyLabel` enum values (`'easy' | 'medium' | 'hard'`) are
+unchanged and still drive scheduling/confidence/ladder logic
+(`REQUIRED_REPS`, tempo-floor lookups, etc.) — don't confuse the two, and
+don't rename the enum values to match the new labels.
+
+**Since Pass 53**, `NumberInput` has two new optional props, both
+additive — the commit-on-blur/Enter behavior this component exists for is
+untouched for every consumer that doesn't opt in. `onDraftChange(text)`
+fires on every keystroke with the raw, uncommitted text, for a
+gating-only signal (e.g. "has the user typed *something*") that shouldn't
+wait for blur. `acceptPlaceholderOnTab` (boolean prop) makes tabbing out
+of an empty field commit the shown placeholder as if it had been typed —
+only fires when the placeholder is actually a parseable number, so a
+format hint like "e.g. 10" is never affected. `ChecklistItem`'s reps/BPM
+fields use both: the Log button now gates on `hasRepsDraft && hasBpmDraft`
+(set via `onDraftChange`) instead of the committed `reps`/`bpm` values, so
+it enables the instant you start typing rather than waiting for blur —
+what actually gets logged still reads from the committed state,
+unaffected. This also fixes a real tab-order bug: a disabled button is
+removed from the browser's tab sequence entirely, so the old commit-gated
+Log button being disabled at the moment tab-order was computed could
+overshoot straight into the next card. **Residual, deliberately not
+chased further:** tab order still isn't literally reps→BPM→Log adjacent —
+the "+ Add a note" button and the "Needs more work" checkbox, both always
+enabled, still sit between BPM and Log in DOM order, so two extra stops
+remain even though the "escapes to the next card" failure is gone. Every
+fix considered for full adjacency (manual `tabIndex`, reordering the DOM,
+hiding those two controls from keyboard tab order) costs something not
+authorized by that pass — a visual layout change, or making two currently
+keyboard-reachable controls mouse-only — so it was left as a known,
+reported gap rather than resolved unilaterally. `acceptPlaceholderOnTab`
+is also wired into `InterleavePanel`'s twin reps/BPM fields (same pattern,
+requested separately) — but that panel never got the draft-gating change
+above; its Log button still gates on the committed `reps`/`bpm` values
+directly, which is fine since `NumberInput`'s Tab handler calls `commit()`
+either way.
+
+**Since Pass 54**, `PieceMapTab`'s "Run-through flag" field is hidden
+specifically when `sequentialMode` is true (revival's reassessment pass) —
+`{!sequentialMode && (...)}`, the same scoping precedent Pass 37 already
+established for this shared component. Ordinary (non-revival) Piece Map's
+flag toggle is completely untouched, still cycling
+untouched→rough→lost→untouched. `CONFIDENCE_PRESETS` (`lib/constants.js`)
+is relabeled Shaky/Rough/OK/Solid/Rock solid → Lost/Rough/OK/Comfortable/
+Solid, same five 0/25/50/75/100 values. `RevivalTab`'s reassessment intro
+copy dropped the flagging instructions (nothing left to describe) and
+gained a new opening sentence, "Play through the piece from beginning to
+end." **`computeRevivalPlan`'s flagged-first-then-confidence sort is
+completely unchanged** — it still reads `progress[id].flag` exactly as
+before; this pass only removed one of the two ways that field could get
+set (revival's own reassessment), not the field, the sort, or `RevivalTab`'s
+"Flagged chunks" summary panel below it. **Real, visible consequence, not
+a bug:** since revival's reassessment can no longer set `flag` directly,
+that panel will typically stay empty going forward unless a chunk gets
+flagged separately through ordinary Piece Map outside of revival. A chunk
+rated "Lost" via Quick Rate (`manualConfidence: 0`) still sorts to the
+front of the plan on its own — confidence is the second tiebreaker, and
+0 wins it unassisted. Same-session follow-up: the now-dead `onSetFlag`
+prop threading (`App.jsx` → `RevivalTab` → `PieceMapTab`'s embedded,
+`sequentialMode` instance) was removed, since nothing in that render path
+can call it anymore; `handleSetFlag` itself and ordinary Piece Map's own
+`onSetFlag` wiring are untouched.
+
+**Since Pass 55**, `RevivalEntryModal` no longer asks "What's this
+revival for?" — the `purpose` state, `REVIVAL_PURPOSE_OPTIONS`
+(`lib/constants.js`), and the `disabled={!purpose}` gate on "Begin
+revival" are all gone, so that button is now always clickable, gated on
+nothing. `piece.revival.purpose` itself stays defined-but-always-`null`
+on the schema (`storage.js`'s fallback, `Wizard.jsx`'s `defaultPiece()`)
+rather than being stripped — dormant, not removed, matching this
+codebase's usual migration philosophy for a field nothing reads. **If you
+touch `handleStartRevival` (`App.jsx`):** it hardcodes `purpose: null`
+directly rather than reading it from the modal's payload — it used to
+destructure `purpose` straight through, and once the modal stopped
+sending that key, this would have started writing brand-new revival
+objects with *no* `purpose` key at all (`undefined` doesn't survive
+`JSON.stringify`) rather than an explicit `null`, a real shape
+inconsistency between a freshly-migrated piece and a freshly-started
+revival that was caught and fixed the same session. Same-session
+follow-up, per direct request: both places that collect
+`tempoLadderStartFraction` — `RevivalEntryModal` at revival entry, and
+`RevivalTab`'s "Revival settings" panel mid-revival — now take a straight
+BPM value ("Tempo ladder starting point (BPM)") instead of a percentage
+of target. The fraction is derived from `BPM / targetBPM` on commit; the
+field's own `min`/`max` mirror the old 10%–95%-of-target bounds
+(expressed in BPM) so the result can't land outside that range no matter
+what's typed. Falls back to a flat 60% default with an explanatory
+tip-line when a piece has no `targetBPM` to be a fraction of — typing
+into the field in that state doesn't do anything, by design, not a bug.
+`computeTempoLadder` itself and everything downstream of the stored
+fraction are completely unchanged; only the input widget changed.

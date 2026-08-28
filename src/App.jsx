@@ -1069,14 +1069,17 @@ export default function App() {
     else setRevivalModalOpen(true);
   };
 
-  const handleStartRevival = ({ purpose, tempoLadderStartFraction, lastPlayedDate }) => {
+  const handleStartRevival = ({ tempoLadderStartFraction, lastPlayedDate }) => {
     updatePiece((p) => ({
       ...p,
       lastPlayedDate: lastPlayedDate || p.lastPlayedDate || null,
       revival: {
         active: true,
         startedAt: Date.now(),
-        purpose,
+        // Pass 55 — dormant field, never collected anymore; hardcoded
+        // rather than left undefined so every revival object has the same
+        // shape regardless of how it was created (see Data-Model.md).
+        purpose: null,
         tempoLadderStartFraction: tempoLadderStartFraction ?? 0.6,
         reassessmentComplete: false,
         plan: null,
@@ -1637,7 +1640,6 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
-                onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}

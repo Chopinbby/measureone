@@ -27,9 +27,9 @@ export const MAX_RECOMMENDED_MINUTES_PER_DAY = 120; // warn in the wizard past t
 export const LONG_PLAN_DAYS_MINUTES_MODE = 90;
 
 export const DIFFICULTY_META = {
-  easy: { label: "Easy", color: "var(--teal)" },
-  medium: { label: "Medium", color: "var(--brass)" },
-  hard: { label: "Hard", color: "var(--brick)" },
+  easy: { label: "Workable", color: "var(--teal)" },
+  medium: { label: "Challenging", color: "var(--brass)" },
+  hard: { label: "Difficult", color: "var(--brick)" },
 };
 export const LEVEL_LABEL = { 1: "easy", 2: "medium", 3: "hard" };
 export const REQUIRED_REPS = { easy: 3, medium: 4, hard: 5 };
@@ -91,20 +91,14 @@ export const STAGE_LABEL = {
   holding: "Steady",
 };
 
-export const REVIVAL_PURPOSE_OPTIONS = [
-  { value: "performance", label: "Performance" },
-  { value: "lesson", label: "Lesson" },
-  { value: "enjoyment", label: "Enjoyment" },
-  { value: "checking", label: "Just checking" },
-];
 // Fast-tap presets over the existing 0-100 manualConfidence override — there's
 // no separate persisted 0-4 scale; this just exposes the same field through a
 // quicker few-taps interface for the revival reassessment pass. See
 // docs/Decisions.md#revival.
 export const CONFIDENCE_PRESETS = [
-  { value: 0, label: "Shaky" },
+  { value: 0, label: "Lost" },
   { value: 25, label: "Rough" },
   { value: 50, label: "OK" },
-  { value: 75, label: "Solid" },
-  { value: 100, label: "Rock solid" },
+  { value: 75, label: "Comfortable" },
+  { value: 100, label: "Solid" },
 ];

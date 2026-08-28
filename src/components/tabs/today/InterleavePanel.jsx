@@ -208,7 +208,13 @@ export function InterleavePanel({
           <div className="log-row">
             <label>
               <span>Clean reps (aim {requiredReps})</span>
-              <NumberInput value={reps} min={0} onCommit={(n) => setReps(n)} placeholder={String(requiredReps)} />
+              <NumberInput
+                value={reps}
+                min={0}
+                onCommit={(n) => setReps(n)}
+                placeholder={String(requiredReps)}
+                acceptPlaceholderOnTab
+              />
             </label>
             <label>
               <span>BPM achieved</span>
@@ -216,6 +222,7 @@ export function InterleavePanel({
                 value={bpm}
                 min={20}
                 onCommit={(n) => setBpm(n)}
+                acceptPlaceholderOnTab
                 placeholder={
                   practiceBPM != null
                     ? String(practiceBPM)

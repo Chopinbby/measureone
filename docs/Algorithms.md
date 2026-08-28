@@ -1442,7 +1442,13 @@ day-by-day revival plan: practice chunks and transitions (**not** combos —
 a combo relearns through its underlying content, which is already in this
 list as ordinary practice chunks), sorted flagged-first (rough or lost —
 `progress[id].flag`, as of Pass 6; was `weakSpot` before) then
-lowest-confidence-first, greedily packed into days against
+lowest-confidence-first. This sort itself is untouched by Pass 54, which
+only changed *where* `flag` can be set from — the toggle is hidden on the
+`sequentialMode` reassessment card now (ordinary Piece Map only), so a
+chunk reaches this sort's flagged branch only if it was flagged outside
+revival; a "Lost" quick-rate during reassessment reaches the front of the
+plan through the confidence tiebreaker instead, unassisted. Greedily
+packed into days against
 `piece.minutesPerDay` using each item's existing `effort` and
 `EFFORT_TO_MIN`. This stays a fixed list, generated once and never mutated
 afterward — turned out not to need dynamic/outcome-dependent restructuring

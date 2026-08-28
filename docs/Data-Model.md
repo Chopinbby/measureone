@@ -62,6 +62,11 @@ piece = {
   sections,              // [{ id, name, start, end }] — user-defined musical form
                          // (Exposition/Development/etc). Purely descriptive;
                          // NOT the same thing as practice "chunks" below.
+                         // start <= end is a guaranteed invariant, enforced by
+                         // SectionsEditor.jsx normalizing on every edit (a
+                         // min/max swap) — every consumer assumes it and
+                         // doesn't re-check. Wasn't always true: reachable as
+                         // a real, silently-saved bug before that fix.
   recurringMode,         // 'none' | 'basic' | 'advanced' — 'basic' (the quick-count
                          // UI) was similarly removed from RecurringEditor; only
                          // 'none'/'advanced' are reachable from the UI now, but
@@ -587,10 +592,22 @@ This distinction matters and is easy to get backwards:
   to the midpoint of the next. Reserved for the back half of the plan.
 - **Section run-throughs** (`kind: "section-runthrough"`, shown as
   **"Section run-through"**) — a play-through of one full user-defined
-  section, generated once every chunk within it has at least one logged
-  session. Not scheduled by `computeTimeline`; computed live by
-  `computeSectionRunThroughs()` and surfaced only in
-  `SectionRunThroughPanel`. See [Algorithms.md](Algorithms.md#section-run-throughs).
+  section. **Since Pass 49, not a one-time unlock** — it repeatedly comes
+  due (1, then 3, then 5, ... logged sessions on the section's
+  slowest-progressing chunk, a flat "+2" step forever), with a distinct
+  locked/grayed preview state the day before the next threshold is
+  crossed (`locked: true` on the object `computeSectionRunThroughs()`
+  returns). Not scheduled by `computeTimeline`; computed live by
+  `computeSectionRunThroughs()`. Interactable (loggable) only in
+  `SectionRunThroughPanel`; **since Pass 51**, also read (display-only, not
+  a second place to log) by Progress's estimated-vs-actual practice-time
+  panel. See [Algorithms.md](Algorithms.md#section-run-throughs). **Unlike
+  practice chunks/transitions/combos, a section run-through object carries
+  no `effort` field** — there was never a scheduling budget to weigh it
+  against, since it's never part of `computeTimeline`'s placement. A
+  consumer that needs an effort-equivalent (Progress's time-estimate panel
+  is the first) has to derive one itself from `measureCount *
+  avgDifficulty`, the same math transitions/combos use for theirs.
 - **Section transitions** (`kind: "section-transition"`, shown as
   **"Sections combined"**) — a play-through spanning two adjacent sections
   back to back. Unlocks only once *every* chunk in the whole piece has been

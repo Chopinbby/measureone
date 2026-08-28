@@ -137,9 +137,9 @@ run-throughs should get the same repeating threshold once they first
 unlock, or whether staying a one-time "unlock and forget" drill is actually
 right for them (arguably more defensible here — they're already a
 late-stage, whole-piece-touched drill, not an early check-in). Flagged for a
-product decision rather than guessed at — not yet recorded in
-[Decisions.md](Decisions.md), which a future pass resolving this should
-update alongside whichever way it goes.
+product decision rather than guessed at — recorded in
+[Decisions.md](Decisions.md#open-questions), which whichever future pass
+resolves this should update alongside the actual change.
 
 ## Timeline / scheduler
 

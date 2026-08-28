@@ -16,13 +16,21 @@
 
 ## Done
 
-Setup wizard, chunking/timeline engine, Piece Map, Today's Practice (timer,
+Setup wizard, chunking/timeline engine, Piece Map (**since Pass 50** its
+grid is filtered to base practice chunks only, running the piece's full
+length with no gaps and no transition/combo tiles; a "Related chunks"
+field in the chunk-detail modal reaches those instead, as clickable links
+that open each one's own detail in turn), Today's Practice (timer,
 reps/BPM/effectiveness logging — **since Pass 22** also a read-only "Week"
 view alongside Day view/View all, see
 [Decisions.md](Decisions.md#ux); **since Pass 23** a free-text note per
 chunk, editable inline during logging, not just from the Piece Map), Progress
 tab (rolling-window consistency, consistency heatmap, actual-vs-planned,
-projected finish, tempo trend, effectiveness calibration — plus, as of Pass
+**since Pass 51** an estimated-vs-actual practice time panel (every
+recently-practiced chunk/transition/combo/section-run-through, paired
+against `EFFORT_TO_MIN`-based estimate — see
+[Decisions.md](Decisions.md#scheduling)), projected finish, tempo trend,
+effectiveness calibration — plus, as of Pass
 20, confidence-by-difficulty, folded in when the separate Analytics tab was
 removed; see [Decisions.md](Decisions.md#ux). The other folded-in panel,
 recurring-material payoff, was removed again in Pass 32b — pure display
@@ -34,7 +42,8 @@ maintenance-due random-start panel — see
 doesn't fit the days left now offers a concrete way out inline — extend the
 target date, or extend the plan directly in "minutes per day" mode — rather
 than just a warning, see [Decisions.md](Decisions.md#scheduling)), section
-run-throughs, reference
+run-throughs (**since Pass 49** a repeating due/locked-preview gate, not a
+one-time unlock — see [Decisions.md](Decisions.md#scheduling)), reference
 recordings and (**since Pass 24**) reference documents (sheet music PDFs,
 fingerings — same shape and pattern as recordings; see
 [Data-Model.md](Data-Model.md#the-piece-object)), multi-movement works

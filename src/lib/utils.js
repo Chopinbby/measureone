@@ -14,6 +14,23 @@ export function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart <= bEnd && bStart <= aEnd;
 }
 
+// Every other chunk (of any kind) whose range overlaps `chunk`'s —
+// findComboUnderlyingChunks (lib/revival.js: practiceChunks filtered by
+// overlap with one combo) run in reverse: one chunk filtered against the
+// whole set. No kind filter is needed to keep this to "just the
+// transitions/combos touching a base chunk": practice chunks are generated
+// as contiguous, non-overlapping measure ranges (generatePracticeChunks,
+// lib/chunking.js), so a base chunk can never overlap another base chunk —
+// only a transition or combo ever will. That also makes this safe to call
+// with a transition or combo as `chunk` itself (e.g. after following a
+// related-chunk link to its own detail view): it correctly finds the base
+// chunks back the other way, with the same one function either direction.
+export function findRelatedChunks(chunk, allChunks) {
+  return allChunks
+    .filter((c) => c.id !== chunk.id && rangesOverlap(chunk.start, chunk.end, c.start, c.end))
+    .sort((a, b) => a.start - b.start);
+}
+
 export function resizeDifficulty(arr, newTotal) {
   if (!arr) return Array(newTotal).fill(1);
   if (arr.length === newTotal) return arr;

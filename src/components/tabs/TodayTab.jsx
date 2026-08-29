@@ -95,6 +95,7 @@ export function TodayTab({
   onUnlogRunThrough,
   onLogColdStart,
   onUnlogColdStart,
+  onSetOverallConfidence,
   onReschedule,
   onReassessRange,
   onSetMemoryAnchor,
@@ -439,6 +440,7 @@ export function TodayTab({
         day={elapsedDay}
         onLogColdStart={onLogColdStart}
         onUnlogColdStart={onUnlogColdStart}
+        onSetOverallConfidence={onSetOverallConfidence}
       />
 
       <ReassessPanel piece={piece} todaysRanges={todaysRanges} onReassessRange={onReassessRange} />

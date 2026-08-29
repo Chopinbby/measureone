@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { NumberInput } from "../../NumberInput";
 import { coldStartDueThreshold } from "../../../lib/coldStart";
+import { CONFIDENCE_PRESETS } from "../../../lib/constants";
 
 // Offered once every section's own single-section run-through has been
 // logged at least once (coldStartGateMet, lib/coldStart.js) — a signal
@@ -18,10 +19,19 @@ import { coldStartDueThreshold } from "../../../lib/coldStart";
 // logging has — the point of a cold-start check is one uninterrupted
 // play-through, with stops/memory breaks/anything else worth remembering
 // folded into the notes afterward rather than tallied live.
-export function ColdStartPanel({ piece, day, onLogColdStart, onUnlogColdStart }) {
+export function ColdStartPanel({ piece, day, onLogColdStart, onUnlogColdStart, onSetOverallConfidence }) {
   const dueThreshold = coldStartDueThreshold(piece);
   const [avgBpm, setAvgBpm] = useState("");
   const [notes, setNotes] = useState("");
+  // Set right after a successful log, so the optional "rate the piece
+  // overall" follow-up below has somewhere to render — logging always
+  // moves piece.lastLoggedAt to today, which immediately makes
+  // dueThreshold go back to null (see coldStartDueThreshold), so without
+  // this the whole panel would vanish the instant you log, with no chance
+  // to see the follow-up at all. Reset on skip/pick, or simply lost on
+  // navigating away (this tab unmounts) — nothing persisted, since a
+  // skipped nudge should just quietly go away, not nag later.
+  const [justLogged, setJustLogged] = useState(false);
 
   // TodayTab always renders this component — it's this function's own
   // `null` return that makes it disappear, not an unmount — so avgBpm/
@@ -37,7 +47,7 @@ export function ColdStartPanel({ piece, day, onLogColdStart, onUnlogColdStart })
     }
   }, [dueThreshold]);
 
-  if (dueThreshold == null) return null;
+  if (dueThreshold == null && !justLogged) return null;
 
   const entry = piece.progress["__cold_start__"] || {};
   const sessions = entry.sessions || [];
@@ -48,7 +58,48 @@ export function ColdStartPanel({ piece, day, onLogColdStart, onUnlogColdStart })
     onLogColdStart(day, Number(avgBpm), notes);
     setAvgBpm("");
     setNotes("");
+    setJustLogged(true);
   };
+
+  // Optional follow-up (Pass 58) — a completed Cold-Start check is a
+  // natural moment to also update the piece's overall confidence rating,
+  // but this must not turn into a second required form: picking a preset
+  // applies it immediately (same instant-apply escape-hatch pattern
+  // PieceMapTab's own "Quick rate" already uses), and Skip dismisses with
+  // no trace — no partial state, nothing to come back to later.
+  if (justLogged) {
+    return (
+      <div className="panel">
+        <h3>Cold-start check</h3>
+        {lastSession && (
+          <p className="tip-line">
+            Logged: {lastSession.avgBpm} BPM average
+            {lastSession.notes ? ` — "${lastSession.notes}"` : ""}
+          </p>
+        )}
+        <div className="field">
+          <span>How would you rate the piece overall right now? (optional)</span>
+          <div className="segmented">
+            {CONFIDENCE_PRESETS.map((p) => (
+              <button
+                key={p.value}
+                className={piece.manualOverallConfidence === p.value ? "active" : ""}
+                onClick={() => {
+                  onSetOverallConfidence(p.value);
+                  setJustLogged(false);
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button className="ghost-btn" onClick={() => setJustLogged(false)}>
+          Skip
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="panel">

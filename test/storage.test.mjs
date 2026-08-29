@@ -111,6 +111,21 @@ describe("validateAndMigratePiece — representative old piece shapes", () => {
     assert.equal(m.lastLoggedAt, null, "no sessions logged yet");
   });
 
+  test("[Pass 58] a piece saved before manualOverallConfidence existed backfills to null, not undefined", () => {
+    const m = validateAndMigratePiece(fresh);
+    assert.equal(m.manualOverallConfidence, null);
+  });
+
+  test("[Pass 58] an existing manualOverallConfidence value survives migration unchanged", () => {
+    const m = validateAndMigratePiece({ ...fresh, manualOverallConfidence: 62 });
+    assert.equal(m.manualOverallConfidence, 62);
+  });
+
+  test("[Pass 58, regression] an existing manualOverallConfidence of exactly 0 survives migration — must not be coerced back to null by a `||` default", () => {
+    const m = validateAndMigratePiece({ ...fresh, manualOverallConfidence: 0 });
+    assert.equal(m.manualOverallConfidence, 0);
+  });
+
   test("mid-plan piece backfills ladder state on every real chunk, not the synthetic consolidation entry", () => {
     const m = validateAndMigratePiece(midPlan);
     assertChunkBackfilled(m.progress.c1);

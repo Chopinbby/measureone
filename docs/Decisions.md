@@ -3841,6 +3841,88 @@ component state.**
   Flagged rather than asserted with full confidence, per
   [AI-GUIDELINES.md](AI-GUIDELINES.md#when-youre-not-sure).
 
+## Overall piece confidence
+
+**Decision (Pass 58): the aggregation formula is an effort-weighted
+average of `computeConfidence` across every practice chunk, confirmed with
+the user before writing any code (the pass's own explicit instruction,
+since the request itself left this open).**
+
+- **Why:** offered two candidates — a plain (unweighted) mean, or
+  weighting each chunk by its `effort` value. Recommended effort-weighted
+  for consistency with how this codebase already weights everything else
+  time/effort-related (`EFFORT_TO_MIN`-based scheduling, revival, and
+  maintenance math) — a long or hard passage should move a piece-level
+  confidence number more than a short easy one, the same way it already
+  commands more of the practice budget everywhere else. Confirmed by the
+  user before implementation started.
+- **Consequence:** `computeAutoOverallConfidence(piece, practiceChunks,
+  currentDay)` (`lib/confidence.js`) reads each chunk through
+  `computeConfidence` (not `computeAutoConfidence`), so a per-chunk manual
+  override or rough/lost/`needsRelearning` cap already shapes the rollup —
+  no separate handling needed for those cases. See
+  [Algorithms.md](Algorithms.md#overall-piece-confidence-pass-58) for the
+  formula itself and
+  [Data-Model.md](Data-Model.md#overall-piece-confidence-a-rollup-not-a-third-independent-score)
+  for why this isn't a third entrant in the existing "two scores" table.
+
+**Decision: touched `App.jsx` even though it wasn't in this pass's listed
+touched-file set.**
+
+- **Why:** the pass's own "Builds" text requires "a way to set/clear the
+  manual override inline" on `ProgressTab` — that control cannot write
+  `piece.manualOverallConfidence` anywhere without a handler that calls
+  `updatePiece`, and every piece mutation in this app funnels through an
+  App.jsx-owned handler (CLAUDE.md's rule). There was no way to build the
+  explicitly-requested control without this touch. A prior, similar
+  situation (see [Lifecycle](#lifecycle) above) already found that
+  contorting code to avoid a narrowly-scoped touch instruction produces
+  worse code than just making the necessary, minimal touch — the same
+  call was made here: one small handler
+  (`handleSetManualOverallConfidence`), mirroring the existing
+  `handleSetManualConfidence` exactly, one prop threaded into the existing
+  `<ProgressTab>` call. Nothing else in `App.jsx` was touched.
+
+**Decision: initially shipped without the Cold-Start-completion nudge —
+despite Pass 56 having already shipped by the time this pass ran, the
+pass's own stated trigger condition for building it — then built it as an
+explicit same-session follow-up once asked for directly.**
+
+- **Why held back at first:** the pass's own Touches list didn't include
+  `ColdStartPanel.jsx` or the rest of Pass 56's files, and building the
+  nudge meant reaching into an already-shipped, already-committed pass's
+  code for a piece of work the pass description itself framed in
+  explicitly softer language than the override control ("soft
+  connection... not a dependency either direction," "a natural moment to
+  prompt," an "e.g." example) — read as the optional half of this pass,
+  not its structural core, unlike the override control (which is
+  genuinely unbuildable without touching `App.jsx`, per the decision
+  above). Flagged rather than folded in, per this project's own
+  scope-fence instruction.
+- **What shipped once asked for:** `ColdStartPanel` (`src/components/tabs/today/ColdStartPanel.jsx`)
+  now shows a short, genuinely optional "How would you rate the piece
+  overall right now?" prompt immediately after a successful Cold-Start
+  log — five quick-tap presets (`CONFIDENCE_PRESETS`, the same ones
+  `PieceMapTab`'s revival "Quick rate" control already uses) plus a
+  "Skip" button. Picking a preset calls
+  `handleSetManualOverallConfidence` immediately (same instant-apply
+  escape-hatch shape as every other manual-confidence control in this
+  app); Skip dismisses with no trace — nothing is written, and nothing
+  persists to be resumed later if the learner navigates away without
+  answering either way. Explicitly asked to be optional, not just
+  softly-worded as such — confirmed there's no way to reach this prompt
+  that blocks or delays anything else on the page.
+- **Mechanism, not obvious from the diff alone**: logging a Cold-Start
+  session immediately updates `piece.lastLoggedAt` to today, which on the
+  very next render makes `coldStartDueThreshold` go back to `null` (see
+  [Algorithms.md](Algorithms.md#the-repeating-escalating-prompt)) — without
+  a small `justLogged` flag held in local component state, the entire
+  panel (including this new prompt) would vanish the instant you log,
+  before the prompt could ever be seen. `justLogged` is deliberately not
+  persisted anywhere — losing it (by skipping, answering, or just
+  navigating away) is harmless by design, matching "optional" in the
+  strongest sense: there is nothing to come back to later.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

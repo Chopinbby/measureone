@@ -247,26 +247,25 @@ in with routine scheduled consolidation days, losing a distinction worth
 keeping. `gapDays` is captured from the piece's *pre-log* `lastLoggedAt`
 (the gap that actually motivated this test), since the same call is about
 to overwrite `lastLoggedAt` with today's date — the live gap value would
-otherwise be lost the moment the session lands. Log-and-display only for
-this pass: `avgBpm` is stored and shown (the panel's own "last logged"
-line) but nothing computes off it here — no comparison against
+otherwise be lost the moment the session lands. `avgBpm` itself is
+log-and-display only: stored and shown (the panel's own "last logged"
+line) but nothing computes off it — no comparison against
 `targetBPM`/`practiceBPM`, no effect on `computeRevivalTriggers` or
-confidence math. See [Decisions.md](Decisions.md#cold-start-check) for the
-deferred, optional connection to a future manual confidence override.
+confidence math. **The manual-confidence connection this section
+originally deferred is now built** — see
+[Overall piece confidence](#overall-piece-confidence-pass-58) below and
+[Decisions.md](Decisions.md#overall-piece-confidence).
 
-**Not currently surfaced on Progress's "Recent practice history" list**
-(`computePracticeHistory`, `lib/history.js`) — found while documenting
-this, not fixed. That function indexes every progress entry by walking
-its `doneDays` array (`entry.doneDays.forEach(d => idsByDay[d].push(id))`);
-`"__cold_start__"` entries carry no `doneDays` at all (deliberate — a
-Cold-Start check isn't tied to a specific scheduled plan day the way a
-consolidation day is), so they're structurally invisible to that indexing
-pass, unlike `"__consolidation__"` (whose handler does set `doneDays`,
-which is what lets `describeDay`'s dedicated `consolidationLabel` case
-find it). Extending `computePracticeHistory` to also surface
-`"__cold_start__"` sessions would need a similar dedicated case there,
-keyed by each session's own `day` field instead of `doneDays`. Out of
-scope here — `lib/history.js` isn't in this pass's touched-file list.
+**Surfaced on Progress's "Recent practice history" list.** Originally
+found missing while documenting this feature (`computePracticeHistory`,
+`lib/history.js`, indexed every progress entry purely by walking its
+`doneDays` array, and `"__cold_start__"` entries deliberately carry no
+`doneDays` at all — a Cold-Start check isn't tied to a specific scheduled
+plan day the way a consolidation day is, so they were structurally
+invisible to that indexing pass). Fixed the same session it was found:
+`computePracticeHistory` now also indexes `"__cold_start__"` sessions
+directly off each session's own `day` field, deduped per day the same way
+`doneDays` itself would be.
 
 `ColdStartPanel` (`src/components/tabs/today/ColdStartPanel.jsx`) is the
 only surface that reads `coldStartDueThreshold` and renders the offer —
@@ -658,6 +657,89 @@ actually set.
 `getDefaultTargetBPM(piece, chunk)` resolves the effective tempo target for
 a chunk with no explicit per-chunk target: checks `piece.bpmZones` for a
 measure-range match first, then falls back to `piece.targetBPM`.
+
+### Overall piece confidence (Pass 58)
+
+`computeAutoOverallConfidence(piece, practiceChunks, currentDay)`
+(`lib/confidence.js`) rolls every practice chunk's `computeConfidence` up
+into one piece-level number — **effort-weighted**, not a plain mean:
+`sum(computeConfidence(chunk) * chunk.effort) / sum(chunk.effort)`. Chosen
+over an unweighted average (the pass's other candidate formula, confirmed
+with the user before building) for consistency with how this codebase
+already weights everything else time/effort-related — `chunk.effort` is
+the same unit `EFFORT_TO_MIN`-based scheduling, revival, and maintenance
+math already uses throughout (see [Timeline / scheduler](#timeline--scheduler)
+above). Practical effect: a long or difficult passage moves this number
+more than a short easy one — two chunks with equal `effort` reduce to a
+plain average, but a lopsided split (e.g. a 9:1 effort ratio) pulls the
+result sharply toward whichever chunk carries the larger share, even if
+the other chunk's confidence is high.
+
+Scoped to `practiceChunks` only — transitions and combos are excluded,
+matching both candidate formulas the pass proposed. Reads each chunk
+through `computeConfidence` (the manual-override-and-caps-resolved
+function), not `computeAutoConfidence` directly — a per-chunk
+`manualConfidence` override or a rough/lost/`needsRelearning` cap is
+already reflected in what feeds this rollup, not bypassed by it. An empty
+`practiceChunks` list (or zero total effort) returns `0` rather than
+`NaN`.
+
+`computeOverallConfidence(piece, practiceChunks, currentDay)` adds the
+piece-level manual-override precedence, mirroring `computeConfidence`'s
+own `progress[chunkId].manualConfidence` check exactly, just one level up:
+`piece.manualOverallConfidence` (`undefined`/`null` both mean "no
+override, use auto"; any other number — including `0` — wins outright,
+clamped to 0–100 and rounded). `isManualOverallConfidence(piece)` is the
+matching boolean, mirroring `isManualConfidence(chunk, progress)`. Unlike
+per-chunk confidence, there is no rough/lost/`needsRelearning`-style cap
+at this level — those are per-chunk demotions with no piece-wide
+equivalent, and applying them again here (on top of numbers where they're
+already baked into each chunk's own `computeConfidence`) would double-count
+them.
+
+Displayed on `ProgressTab` with an inline set/clear control mirroring
+`PieceMapTab`'s existing (non-`sequentialMode`) confidence-override
+`.field` block exactly — same `NumberInput` + "Reset to automatic" /
+"Set manually" `.manual-conf-row` shape, per the pass's own instruction to
+reuse that pattern rather than invent a new one. The write path
+(`handleSetManualOverallConfidence`, `App.jsx`) is a one-line
+`updatePiece` twin of `handleSetManualConfidence`, direct field write, no
+snapshot to restore — same shape, piece-level instead of per-chunk. See
+[Decisions.md](Decisions.md#overall-piece-confidence) for why this touched
+`App.jsx` even though it wasn't in this pass's originally-listed
+touched-file set.
+
+**Deliberately not wired to `isPieceLearned`** (`lib/ladder.js`, Pass 39)
+or the ladder-stage rollup in either direction — see
+[Data-Model.md](Data-Model.md#overall-piece-confidence-a-rollup-not-a-third-independent-score)
+for the full reasoning.
+
+**Wired to Pass 56's Cold-Start check, as a same-session follow-up**:
+`ColdStartPanel` (`src/components/tabs/today/ColdStartPanel.jsx`) shows a
+short, optional "How would you rate the piece overall right now?" prompt
+immediately after a successful Cold-Start log — five quick-tap presets
+(`CONFIDENCE_PRESETS`, `lib/constants.js`, the same ones `PieceMapTab`'s
+revival "Quick rate" control already uses) that call
+`onSetOverallConfidence` (App.jsx's `handleSetManualOverallConfidence`)
+immediately on tap, plus a "Skip" button that dismisses with no write at
+all. Genuinely optional, not just softly worded as such: nothing is
+required to make the prompt go away, and nothing persists if it's
+skipped or simply navigated away from. Threaded down through
+`TodayTab.jsx` → `ColdStartPanel.jsx`, the same prop-passing shape every
+other cross-tab handler in this app already uses. Held back from the
+original build (see [Decisions.md](Decisions.md#overall-piece-confidence)
+for why) and added once explicitly requested in the same session.
+
+One implementation subtlety worth knowing: logging a Cold-Start session
+immediately moves `piece.lastLoggedAt` to today, which makes
+`coldStartDueThreshold` read `null` again on the very next render (see
+[The repeating, escalating prompt](#the-repeating-escalating-prompt)
+above) — without a small `justLogged` flag held in `ColdStartPanel`'s own
+local state, the whole panel would vanish the instant you log, before the
+follow-up prompt could ever render. That flag is intentionally
+unpersisted (component state only, lost on navigating away) — the prompt
+is meant to be a one-shot, low-stakes nudge, not something the app tracks
+or nags about later.
 
 ### Tempo-climbing nudge (Pass 30)
 

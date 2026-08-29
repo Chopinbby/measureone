@@ -976,6 +976,17 @@ export default function App() {
     });
   };
 
+  // Piece-level twin of handleSetManualConfidence above (Pass 58) — a
+  // direct field write, same escape-hatch shape, just piece.manualOverallConfidence
+  // instead of a per-chunk progress entry. Not in ProgressTab.jsx's own
+  // touched-file scope for this pass, but there's no way to build "a way to
+  // set/clear the manual override inline" (the pass's own words) without a
+  // write path, and every piece mutation in this app funnels through an
+  // App.jsx-owned handler like this one — see CLAUDE.md's updatePiece rule.
+  const handleSetManualOverallConfidence = (value) => {
+    updatePiece((p) => ({ ...p, manualOverallConfidence: value }));
+  };
+
   // Rule 2's manual half of needsRelearning's dual exit (the other half is
   // automatic: 4 consecutive full Stabilizing passes, handled inside
   // computeLadderAdvance itself — lib/ladder.js). Same escape-hatch shape
@@ -1691,6 +1702,7 @@ export default function App() {
                 onUnlogRunThrough={handleUnlogRunThrough}
                 onLogColdStart={handleLogColdStart}
                 onUnlogColdStart={handleUnlogColdStart}
+                onSetOverallConfidence={handleSetManualOverallConfidence}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
@@ -1705,6 +1717,7 @@ export default function App() {
                 timeline={timeline}
                 currentDay={currentDay}
                 onViewAllPieces={() => setActiveTab("all-pieces")}
+                onSetOverallConfidence={handleSetManualOverallConfidence}
               />
             )}
             {/* Not in NAV_BASE — reached only via the button on Progress,

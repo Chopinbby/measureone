@@ -10,6 +10,9 @@ import {
   formatLadderStatus,
   hasClimbingTempo,
   allJudgedSessions,
+  computeAutoOverallConfidence,
+  computeOverallConfidence,
+  isManualOverallConfidence,
 } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
@@ -723,5 +726,115 @@ describe("hasClimbingTempo — Pass 30's tempo-climbing trend detection", () => 
       sessions: [bpmSession(70, 1), { day: 2, cleanReps: 3, outcome: "pass", durationSeconds: 60 }, bpmSession(78, 3), bpmSession(86, 4)],
     };
     assert.equal(hasClimbingTempo(entry), true, "the bpm-less record is skipped over, not counted as a BPM of 0 (which would read as a huge dip)");
+  });
+});
+
+// Overall piece confidence (Pass 58) — an effort-weighted average of
+// computeConfidence across every practice chunk, confirmed with the user
+// over a plain (unweighted) average before building, for consistency with
+// how this codebase already weights everything else time/effort-related
+// (EFFORT_TO_MIN-based scheduling/revival/maintenance math). See
+// docs/Algorithms.md and docs/Decisions.md#cold-start-check's neighboring
+// entry for the full reasoning.
+describe("computeAutoOverallConfidence — effort-weighted average across practice chunks", () => {
+  function pieceWithChunk1Confident() {
+    return {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: { c1: { doneDays: [1], currentBPM: 100, sessions: [{ day: 1, cleanReps: 5, bpm: 100, outcome: "pass" }] } },
+    };
+  }
+
+  test("a single chunk's overall confidence equals that chunk's own computeConfidence", () => {
+    const chunk = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+    const piece = pieceWithChunk1Confident();
+    assert.equal(computeAutoOverallConfidence(piece, [chunk], 1), computeConfidence(chunk, piece, 1));
+  });
+
+  test("equal-effort chunks reduce to a plain average", () => {
+    const c1 = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+    const c2 = { id: "c2", start: 5, end: 8, difficultyLabel: "easy", effort: 4 }; // untouched -> confidence 0
+    const piece = pieceWithChunk1Confident();
+    const c1Confidence = computeConfidence(c1, piece, 1);
+    assert.equal(computeAutoOverallConfidence(piece, [c1, c2], 1), Math.round((c1Confidence + 0) / 2));
+  });
+
+  test("[regression] weighted by effort, not chunk count — a high-effort low-confidence chunk pulls the result down well below the plain average", () => {
+    // c1: confident, but tiny effort (1). c2: untouched (confidence 0), but
+    // effort 9 — nine times c1's weight. A plain average of the two would
+    // land near the midpoint; the effort-weighted result must land much
+    // closer to c2's 0, since c2's effort dominates the denominator.
+    const c1 = { id: "c1", start: 1, end: 1, difficultyLabel: "easy", effort: 1 };
+    const c2 = { id: "c2", start: 2, end: 20, difficultyLabel: "hard", effort: 9 };
+    const piece = pieceWithChunk1Confident();
+    const c1Confidence = computeConfidence(c1, piece, 1);
+    assert.ok(c1Confidence > 50, "test setup check: c1 must read as reasonably confident for this test to be meaningful");
+    const plainAverage = Math.round((c1Confidence + 0) / 2);
+    const result = computeAutoOverallConfidence(piece, [c1, c2], 1);
+    assert.equal(result, Math.round((c1Confidence * 1 + 0 * 9) / 10), "must match the hand-computed effort-weighted formula exactly");
+    assert.ok(result < plainAverage, `effort-weighted result (${result}) must be pulled below the plain average (${plainAverage}) by c2's dominant effort`);
+  });
+
+  test("an empty practiceChunks list returns 0, not NaN", () => {
+    assert.equal(computeAutoOverallConfidence({ progress: {} }, [], 1), 0);
+    assert.equal(computeAutoOverallConfidence({ progress: {} }, null, 1), 0);
+  });
+
+  test("reads through computeConfidence (not computeAutoConfidence), so a per-chunk manual override is reflected in the rollup", () => {
+    const chunk = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+    const piece = { targetBPM: null, bpmZones: [], progress: { c1: { manualConfidence: 42 } } };
+    assert.equal(computeAutoOverallConfidence(piece, [chunk], 1), 42);
+  });
+});
+
+describe("computeOverallConfidence / isManualOverallConfidence — piece-level manual override precedence", () => {
+  const chunk = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+  function pieceWithOverride(manualOverallConfidence) {
+    return {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: { c1: { doneDays: [1], currentBPM: 100, sessions: [{ day: 1, cleanReps: 5, bpm: 100, outcome: "pass" }] } },
+      manualOverallConfidence,
+    };
+  }
+
+  test("no manualOverallConfidence field at all: resolves to auto, isManualOverallConfidence is false", () => {
+    const piece = { targetBPM: null, bpmZones: [], progress: {} };
+    assert.equal(isManualOverallConfidence(piece), false);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), computeAutoOverallConfidence(piece, [chunk], 1));
+  });
+
+  test("manualOverallConfidence: null behaves the same as it being absent — resolves to auto", () => {
+    const piece = pieceWithOverride(null);
+    assert.equal(isManualOverallConfidence(piece), false);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), computeAutoOverallConfidence(piece, [chunk], 1));
+  });
+
+  test("[regression] the manual override takes precedence over the auto-calculated value when set", () => {
+    const piece = pieceWithOverride(15);
+    const auto = computeAutoOverallConfidence(piece, [chunk], 1);
+    assert.notEqual(auto, 15, "test setup check: auto and manual must actually differ, or this test can't prove precedence");
+    assert.equal(isManualOverallConfidence(piece), true);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), 15);
+  });
+
+  test("a manual override of exactly 0 is respected, not treated as unset (0 is falsy but a real, meaningful rating)", () => {
+    const piece = pieceWithOverride(0);
+    assert.equal(isManualOverallConfidence(piece), true);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), 0);
+  });
+
+  test("[regression] clearing the override (back to null) reverts to the current auto-calculated value, not a frozen snapshot", () => {
+    const manualPiece = pieceWithOverride(15);
+    assert.equal(computeOverallConfidence(manualPiece, [chunk], 1), 15);
+    const clearedPiece = { ...manualPiece, manualOverallConfidence: null };
+    assert.equal(isManualOverallConfidence(clearedPiece), false);
+    assert.equal(computeOverallConfidence(clearedPiece, [chunk], 1), computeAutoOverallConfidence(clearedPiece, [chunk], 1));
+  });
+
+  test("manual override is clamped to 0-100 and rounded, same as per-chunk manualConfidence", () => {
+    assert.equal(computeOverallConfidence(pieceWithOverride(150), [chunk], 1), 100);
+    assert.equal(computeOverallConfidence(pieceWithOverride(-20), [chunk], 1), 0);
+    assert.equal(computeOverallConfidence(pieceWithOverride(55.6), [chunk], 1), 56);
   });
 });

@@ -467,3 +467,56 @@ export function isManualConfidence(chunk, progress) {
   const entry = progress[chunk.id] || {};
   return entry.manualConfidence !== undefined && entry.manualConfidence !== null;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Overall piece confidence (Pass 58) — a single continuous stat      */
+/*  rolling up every practice chunk's confidence, with the same        */
+/*  manual-override escape hatch computeConfidence already gives each  */
+/*  individual chunk. Deliberately NOT a replacement for, or read by,  */
+/*  isPieceLearned (lib/ladder.js) — that's a strict "every chunk at   */
+/*  Holding" boolean for a different purpose (is the learning plan     */
+/*  itself done); this is a continuous, always-moving average that     */
+/*  can sit anywhere from 0-100 well before or after a piece is        */
+/*  "learned" in that sense. See docs/Data-Model.md and                */
+/*  docs/Algorithms.md for the full reasoning.                         */
+/* ------------------------------------------------------------------ */
+
+// Effort-weighted average of computeConfidence across every PRACTICE chunk
+// (transitions/combos excluded — same "practiceChunks only" scope the
+// pass's own candidate formulas both used). Weighting by `effort` (the
+// same unit EFFORT_TO_MIN-based scheduling/revival/maintenance math
+// already uses everywhere) means a long or hard passage moves this number
+// more than a short easy one — confirmed with the user before building,
+// over the simpler unweighted-mean alternative, for consistency with how
+// this codebase already weights everything else time/effort-related.
+// Reads each chunk through computeConfidence (not computeAutoConfidence),
+// so a per-chunk manual override or rough/lost/needsRelearning cap is
+// reflected here too — this rolls up what the learner actually SEES per
+// chunk, not a bypass of it.
+export function computeAutoOverallConfidence(piece, practiceChunks, currentDay) {
+  const chunks = practiceChunks || [];
+  if (!chunks.length) return 0;
+  let weightedSum = 0;
+  let totalEffort = 0;
+  chunks.forEach((chunk) => {
+    const effort = chunk.effort || 0;
+    weightedSum += computeConfidence(chunk, piece, currentDay) * effort;
+    totalEffort += effort;
+  });
+  return totalEffort ? Math.round(weightedSum / totalEffort) : 0;
+}
+
+// Manual-vs-auto precedence, same shape as computeConfidence's own
+// entry.manualConfidence check, just at the piece level
+// (piece.manualOverallConfidence) instead of per-chunk.
+export function computeOverallConfidence(piece, practiceChunks, currentDay) {
+  const manual = piece.manualOverallConfidence;
+  if (manual !== undefined && manual !== null) {
+    return clamp(Math.round(manual), 0, 100);
+  }
+  return computeAutoOverallConfidence(piece, practiceChunks, currentDay);
+}
+
+export function isManualOverallConfidence(piece) {
+  return piece.manualOverallConfidence !== undefined && piece.manualOverallConfidence !== null;
+}

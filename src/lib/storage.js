@@ -251,6 +251,14 @@ export function validateAndMigratePiece(piece) {
       plan: null,
     },
     memoryAnchors: piece.memoryAnchors || {},
+    // Overall-piece confidence manual override (Pass 58) — same
+    // undefined-and-null-both-mean-"auto" escape-hatch shape as each
+    // chunk's own progress[id].manualConfidence (isManualOverallConfidence/
+    // computeOverallConfidence, lib/confidence.js). Explicit `!== undefined`
+    // rather than `|| null` so an actual 0 override (a real, deliberately
+    // low rating) survives this backfill instead of being coerced back to
+    // null by `||`'s falsy check.
+    manualOverallConfidence: piece.manualOverallConfidence !== undefined ? piece.manualOverallConfidence : null,
     // Pieces saved before pause/archive existed default to active.
     status: piece.status || "active",
     // Plans saved before startDate existed (or backups that predate it)

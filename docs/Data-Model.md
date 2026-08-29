@@ -226,6 +226,21 @@ piece = {
                          // anchor"); the field/prop names on this object are unchanged. Read
                          // (read-only where no write handler is passed) in ChecklistItem across every
                          // caller — normal practice, maintenance due-review, and revival alike.
+  manualOverallConfidence, // number (0-100) | null — piece-level manual override for the
+                         // "Overall confidence" stat on Progress (Pass 58). Same
+                         // undefined-and-null-both-mean-"auto" escape hatch each chunk's own
+                         // progress[id].manualConfidence already uses, just one level up —
+                         // see computeOverallConfidence/isManualOverallConfidence
+                         // (lib/confidence.js) and
+                         // #overall-piece-confidence-a-rollup-not-a-third-independent-score
+                         // below for how this relates (or doesn't) to the two-scores warning.
+                         // Backfilled to null on migration (storage.js) for pieces saved
+                         // before this field existed; NOT seeded by Wizard.jsx's
+                         // defaultPiece() — validateAndMigratePiece isn't in the piece-create
+                         // path (see lastPlayedDate-adjacent precedent, App.jsx's
+                         // handleComplete), so a just-created piece simply has the field
+                         // absent until first migrated or first overridden, which every
+                         // reader already treats identically to null.
   revival,               // see #revival below
 }
 
@@ -648,16 +663,14 @@ reasons:
   no `doneDays` array on the entry (unlike `"__consolidation__"`, this
   isn't tied to a specific scheduled plan day the way a consolidation day
   is; `day` on each session is just `elapsedDay(piece)` at the time it was
-  logged, for record-keeping). **Known gap, not fixed in Pass 56:**
-  `lib/storage.js`'s `backfillProgressLadderState` and `ladderStateDiffers`
-  special-case `"__consolidation__"` by name (skipping ladder-state
-  backfill/comparison for it, since it isn't a real chunk) but were not
-  updated to do the same for `"__cold_start__"` — out of scope for this
-  pass's file list. Harmless today (every backfilled ladder field lands on
-  the same deterministic default regardless of key, so nothing misbehaves)
-  but adds unused `stage`/`practiceBPM`/etc. clutter to this entry on every
-  reload; worth folding `"__cold_start__"` into both checks alongside
-  `"__consolidation__"` next time either function is touched.
+  logged, for record-keeping). `lib/storage.js`'s
+  `backfillProgressLadderState` and `ladderStateDiffers` skip
+  `"__cold_start__"` the same way they skip `"__consolidation__"` (neither
+  is a real chunk), via a shared `NON_CHUNK_PROGRESS_KEYS` list — initially
+  missed for `"__cold_start__"` specifically (added only to one of the two
+  functions), found on a same-session follow-up review and fixed by
+  introducing that shared list so a third such key later only needs
+  adding in one place.
 - **`sr_<sectionId>`** — a section run-through. Logging one writes a normal
   progress entry under this id, but per the paragraph above it is *never* in
   `all`, on any piece. **This is not an edge case** — it happens the first
@@ -728,6 +741,35 @@ above outright, becomes a new canonical third one, or stays split exactly
 like this (feeding one, not the other) long-term is still not decided —
 revisit once Stage 3 ("learned") is actually defined against real data,
 per that same decision.
+
+### Overall piece confidence: a rollup, not a third independent score
+
+**Pass 58's `piece.manualOverallConfidence` / `computeOverallConfidence`
+(`lib/confidence.js`) is deliberately not a third entrant in the table
+above.** It's an effort-weighted average built directly *from*
+`computeConfidence` across every practice chunk — not an independently
+computed signal the way `computeProgressTier` or the ladder `stage` are.
+Concretely: it inherits whatever `computeConfidence` already says for each
+chunk (including that chunk's own `manualConfidence` override and any
+rough/lost/`needsRelearning` cap), so it can never itself introduce a
+*new* disagreement with `computeConfidence` the way `computeProgressTier`
+can — it's the same information, just rolled up to one piece-level number.
+It has its own, separate manual-override escape hatch
+(`manualOverallConfidence`, distinct from any chunk's `manualConfidence`),
+so a learner can disagree with the *rollup* specifically without touching
+any individual chunk's own override — that's the one place this stat has
+independent state of its own, not a computed disagreement with the table
+above.
+
+**Also distinct from `isPieceLearned`** (`lib/ladder.js`, Pass 39's Stage 3
+rollup) — that's a strict boolean (every chunk's ladder `stage` at
+Holding) answering "is the learning plan itself done," continuous
+`computeOverallConfidence` answers a different, always-moving question
+("how confident does this piece read right now") that can sit anywhere
+from 0–100 well before or after `isPieceLearned` flips true. Deliberately
+not wired to each other — see
+[Decisions.md](Decisions.md#overall-piece-confidence) and
+[Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
 
 ## Revival
 

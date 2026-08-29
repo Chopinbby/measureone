@@ -1166,20 +1166,36 @@ one check.
   below). `gapDays` snapshots the gap that actually motivated the test,
   since the same log call immediately overwrites `piece.lastLoggedAt` with
   today.
-- **Log-and-display only, for this pass.** `avgBpm` is stored and shown
-  (the panel's own "last logged" line) but nothing computes off it here —
+- **`avgBpm`/`notes` themselves are still log-and-display only** — stored
+  and shown (the panel's own "last logged" line, and Progress's "Recent
+  practice history" list), but nothing computes off `avgBpm` specifically:
   no comparison against `targetBPM`/`practiceBPM`, no effect on
   `computeRevivalTriggers` or confidence math. There's no clean structured
   number left to feed those once the feedback shape was simplified to just
   two free-form-ish fields (stops/memory-breaks live in free text, not a
-  dedicated count). See [Decisions.md](Decisions.md#cold-start-check) for
-  the deferred, optional connection to a future manual confidence
-  override, once that exists. **Not currently shown on Progress's own
-  "Recent practice history" list** — found while documenting this feature,
-  not fixed; see
-  [Algorithms.md](Algorithms.md#logging-a-separate-synthetic-key-not-__consolidation__)
-  for why (`computePracticeHistory` indexes by `doneDays`, which
-  `"__cold_start__"` entries deliberately don't have).
+  dedicated count).
+- **Now shown on Progress's "Recent practice history" list** — a gap
+  found while first documenting this feature (`computePracticeHistory`
+  indexed purely by `doneDays`, which `"__cold_start__"` entries
+  deliberately don't have, so a logged check never appeared there at
+  all), fixed in the same session it was found: `computePracticeHistory`
+  (`lib/history.js`) now also indexes `"__cold_start__"` sessions off
+  their own `day` field. See
+  [Algorithms.md](Algorithms.md#logging-a-separate-synthetic-key-not-__consolidation__).
+- **Connected to Pass 58's overall-confidence stat, once Pass 58 shipped.**
+  A successful Cold-Start log now shows a short, genuinely optional "How
+  would you rate the piece overall right now?" prompt — five quick-tap
+  presets (the same ones `PieceMapTab`'s revival "Quick rate" already
+  uses) plus "Skip." Picking one immediately sets
+  `piece.manualOverallConfidence`; Skip writes nothing at all, and the
+  prompt itself is never persisted or resumed later if left unanswered.
+  Originally scoped out of Pass 58's own build (reaching into this file
+  wasn't in that pass's touched-file list), then added as an explicit
+  same-session follow-up once directly requested — see
+  [Decisions.md](Decisions.md#overall-piece-confidence) for the full
+  reasoning and
+  [Algorithms.md](Algorithms.md#overall-piece-confidence-pass-58) for the
+  mechanics.
 - **Deferred**: the exact escalation sequence past 14 days (doubling is a
   default, not a considered tuning choice); any equivalent "cold test" for
   a piece still learning or mid-revival — this is scoped to the

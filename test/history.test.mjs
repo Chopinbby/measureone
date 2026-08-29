@@ -144,6 +144,77 @@ describe("computePracticeHistory — the whole-piece run-through", () => {
   });
 });
 
+describe("computePracticeHistory — the Cold-Start check (Pass 56)", () => {
+  // Unlike __consolidation__, a __cold_start__ entry deliberately carries
+  // no doneDays (a Cold-Start check isn't tied to a specific scheduled
+  // plan day) — computePracticeHistory indexes it straight off each
+  // session's own `day` field instead. Found missing and fixed as a
+  // follow-up: the first cut of Pass 56 left this key invisible to
+  // history entirely, since the doneDays-only indexing loop silently
+  // skipped it (same as the "an entry with no doneDays contributes
+  // nothing" rule above) — a __cold_start__ entry legitimately having no
+  // doneDays.
+  const coldStart = (sessions) => ({ __cold_start__: { sessions } });
+
+  test("[regression] a __cold_start__ entry with no doneDays still appears — the general 'no doneDays, no history' rule must not swallow it", () => {
+    const history = computePracticeHistory(piece(coldStart([{ day: 4, avgBpm: 90 }])), []);
+    assert.equal(history.length, 1);
+    assert.equal(history[0].day, 4);
+  });
+
+  test("a bare cold-start check is labelled without a BPM figure", () => {
+    const history = computePracticeHistory(piece(coldStart([{ day: 4 }])), []);
+    assert.equal(history[0].label, "Cold-start check");
+  });
+
+  test("a logged average BPM is shown", () => {
+    const history = computePracticeHistory(piece(coldStart([{ day: 4, avgBpm: 96 }])), []);
+    assert.equal(history[0].label, "Cold-start check (96 BPM avg)");
+  });
+
+  test("a zero avgBpm is shown rather than treated as missing", () => {
+    const history = computePracticeHistory(piece(coldStart([{ day: 4, avgBpm: 0 }])), []);
+    assert.equal(history[0].label, "Cold-start check (0 BPM avg)");
+  });
+
+  test("the most recent attempt that day supplies the BPM figure", () => {
+    const history = computePracticeHistory(
+      piece(coldStart([{ day: 4, avgBpm: 70 }, { day: 4, avgBpm: 96 }])),
+      []
+    );
+    assert.equal(history[0].label, "Cold-start check (96 BPM avg)");
+  });
+
+  test("only that day's sessions are considered", () => {
+    const history = computePracticeHistory(
+      piece({ __cold_start__: { sessions: [{ day: 4, avgBpm: 70 }, { day: 9, avgBpm: 96 }] } }),
+      []
+    );
+    assert.deepEqual(history.map((h) => h.label), ["Cold-start check (96 BPM avg)", "Cold-start check (70 BPM avg)"]);
+  });
+
+  test("two same-day sessions collapse into one history entry, not one per session", () => {
+    const history = computePracticeHistory(
+      piece(coldStart([{ day: 4, avgBpm: 70 }, { day: 4, avgBpm: 96 }])),
+      []
+    );
+    assert.equal(history.length, 1, "one row for the day, not one per attempt");
+  });
+
+  test("joins with a real chunk logged the same day, in order", () => {
+    const history = computePracticeHistory(
+      piece({ c1: logged(4), __cold_start__: { sessions: [{ day: 4, avgBpm: 96 }] } }),
+      [chunk("c1", 1, 4)]
+    );
+    assert.equal(history[0].label, "mm. 1–4, Cold-start check (96 BPM avg)");
+  });
+
+  test("a __cold_start__ session with no day is ignored rather than producing an invalid history row", () => {
+    assert.doesNotThrow(() => computePracticeHistory(piece(coldStart([{ avgBpm: 96 }])), []));
+    assert.deepEqual(computePracticeHistory(piece(coldStart([{ avgBpm: 96 }])), []), []);
+  });
+});
+
 describe("computePracticeHistory — day ordering and limit", () => {
   test("days come back newest first", () => {
     const history = computePracticeHistory(piece({ c1: logged(1, 5, 3) }), [chunk("c1", 1, 4)]);

@@ -24,6 +24,7 @@ import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
+import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
@@ -496,6 +497,29 @@ export default function App() {
       const doneDays = stillHasDay ? prevEntry.doneDays : (prevEntry.doneDays || []).filter((d) => d !== day);
       progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress };
+    });
+  };
+
+  // Cold-Start check (Pass 56) — a whole-piece cold play-through offered
+  // once every section's own single-section run-through has been logged
+  // at least once, then re-offered at a widening gap since anything was
+  // last logged on the piece. Both handlers are thin wrappers: the actual
+  // logic (why this writes a separate "__cold_start__" key rather than
+  // reusing "__consolidation__", the gapDays computation, the escalating
+  // due-threshold check) lives in lib/coldStart.js so it's unit-testable
+  // per CLAUDE.md's "logic that needs a regression test belongs in
+  // src/lib/" rule. See docs/Algorithms.md#cold-start-check.
+  const handleLogColdStart = (day, avgBpm, notes) => {
+    updatePiece((p) => {
+      const { progress, lastLoggedAt } = applyColdStartLog(p, day, avgBpm, notes);
+      return { ...p, progress, lastLoggedAt };
+    });
+  };
+
+  const handleUnlogColdStart = () => {
+    updatePiece((p) => {
+      const result = applyColdStartUnlog(p);
+      return result ? { ...p, ...result } : p;
     });
   };
 
@@ -1665,6 +1689,8 @@ export default function App() {
                 onDiscardProvisionalSession={handleDiscardProvisionalSession}
                 onLogRunThrough={handleLogRunThrough}
                 onUnlogRunThrough={handleUnlogRunThrough}
+                onLogColdStart={handleLogColdStart}
+                onUnlogColdStart={handleUnlogColdStart}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
                 onSetMemoryAnchor={handleSetMemoryAnchor}

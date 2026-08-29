@@ -9,6 +9,7 @@ import {
   resolveRequiredReps,
   formatLadderStatus,
   hasClimbingTempo,
+  allJudgedSessions,
 } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
@@ -525,6 +526,78 @@ describe("A skipped session (Interleaved mode, Pass 29) is excluded wherever ses
     };
     const entry = { stage: null, sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] };
     assert.equal(formatLadderStatus(entry, ladderConfig, "2026-08-16"), null);
+  });
+});
+
+// allJudgedSessions (found in review while building Pass 56's Cold-Start
+// check) — Progress's Outcome Breakdown panel needs every session that
+// actually has a resolvable pass/soft-miss/fail judgment, not just every
+// non-skipped/non-provisional one. loggedSessions() alone lets a
+// "__consolidation__" or "__cold_start__" session through (neither is
+// skipped or provisional), but sessionOutcome() can't classify either
+// shape (no outcome/effectiveness), which used to silently inflate the
+// Outcome Breakdown's denominator without ever landing in a bucket —
+// pulling every real percentage down. See
+// docs/Decisions.md#cold-start-check.
+describe("allJudgedSessions — the Outcome Breakdown denominator", () => {
+  test("a real judged session (outcome set) is included", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, cleanReps: 3, bpm: 90, outcome: "pass" }] } } };
+    assert.equal(allJudgedSessions(piece).length, 1);
+  });
+
+  test("a legacy pre-outcome session (only effectiveness set) is still included — sessionOutcome resolves it", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, effectiveness: "high" }] } } };
+    assert.equal(allJudgedSessions(piece).length, 1);
+  });
+
+  test("a skipped session is excluded (already true via loggedSessions)", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("a provisional session is excluded (already true via loggedSessions)", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, cleanReps: 2, bpm: 80, outcome: "fail", provisional: true }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("[regression] a __consolidation__ session (stopCount, no outcome/effectiveness) is excluded", () => {
+    const piece = { progress: { __consolidation__: { doneDays: [3], sessions: [{ day: 3, stopCount: 2 }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("[regression] a __cold_start__ session (avgBpm, no outcome/effectiveness) is excluded", () => {
+    const piece = { progress: { __cold_start__: { sessions: [{ day: 5, avgBpm: 96, notes: "fine", gapDays: 3 }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("[regression] the actual dilution scenario: real judged sessions plus cold-start/consolidation sessions — only the judged ones count", () => {
+    const piece = {
+      progress: {
+        c1: {
+          sessions: [
+            { day: 1, cleanReps: 4, bpm: 90, outcome: "pass" },
+            { day: 2, cleanReps: 4, bpm: 92, outcome: "pass" },
+          ],
+        },
+        c2: { sessions: [{ day: 1, cleanReps: 2, bpm: 70, outcome: "fail" }] },
+        __consolidation__: { doneDays: [3], sessions: [{ day: 3, stopCount: 1 }] },
+        __cold_start__: { sessions: [{ day: 10, avgBpm: 100, notes: "", gapDays: 5 }] },
+      },
+    };
+    const sessions = allJudgedSessions(piece);
+    // 2 pass + 1 fail = 3 judged sessions — NOT 5 (which is what the bug's
+    // inflated denominator would have produced, since it counted the
+    // consolidation and cold-start sessions too without ever bucketing
+    // them, silently understating every real percentage).
+    assert.equal(sessions.length, 3);
+    assert.equal(sessions.filter((s) => s.outcome === "pass").length, 2);
+    assert.equal(sessions.filter((s) => s.outcome === "fail").length, 1);
+  });
+
+  test("handles a piece with no progress, or no sessions at all, without throwing", () => {
+    assert.doesNotThrow(() => allJudgedSessions({ progress: {} }));
+    assert.deepEqual(allJudgedSessions({ progress: {} }), []);
+    assert.deepEqual(allJudgedSessions({ progress: { c1: {} } }), []);
   });
 });
 

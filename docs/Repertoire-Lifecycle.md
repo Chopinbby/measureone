@@ -1102,6 +1102,92 @@ everything on today's plan.
   unresolved design question); cross-piece interleaving (stays
   single-piece like the rest of the Today tab).
 
+### Cold-Start check (built, Pass 56)
+
+A whole-piece cold play-through — no warm-up, no stopping to fix
+anything — offered once every section has genuinely been covered, then
+re-offered at a widening gap since the piece was last touched at all.
+Answers a question none of the mechanisms above answer: section
+run-throughs above only ever check *practice-chunk* coverage per section;
+Stage 3's `isPieceLearned` (every chunk at ladder Holding) is a much
+stricter bar, aimed at a different question ("is the learning plan
+itself done"). A piece can clear this gate well before it's "learned" in
+that sense — the two are deliberately independent, never combined into
+one check.
+
+- **The gate**: `coldStartGateMet(piece)` (`src/lib/coldStart.js`) —
+  every section's own single-section run-through
+  (`piece.progress["sr_" + section.id]`) has at least one logged session.
+  Section-**pair** run-throughs aren't part of this gate — single-section
+  coverage only. Because a section's run-through can only ever become due
+  once every chunk assigned to it has been touched
+  (`isSectionLearned`, above), this one check already implies the whole
+  piece has been covered once too — no separate "every chunk in the piece
+  has a session" check needed alongside it.
+- **The prompt**: `coldStartDueThreshold(piece, today)` escalates through
+  **3, 7, 14, then doubling forever** (28, 56, 112, ...) days since
+  anything was logged on the piece (`piece.lastLoggedAt`, same
+  `daysBetweenInclusive`-based gap `computeRevivalTriggers`'s staleness
+  trigger already uses). A periodic nudge, not a persistent due-item like
+  the section run-throughs above or the maintenance due-list: it's due
+  only on the exact day a new threshold is crossed, then reads as
+  "nothing new" every day after that until the next one — a live
+  recomputation (comparing today's crossed threshold against the same
+  computation one day earlier), not a persisted "already shown" flag, so
+  a fresh gap cycle after any new session is logged just falls out for
+  free rather than needing an explicit reset. See
+  [Algorithms.md](Algorithms.md#the-repeating-escalating-prompt) for the
+  full mechanics, including a write-timing hazard a more literal
+  "persisted `lastPromptedThreshold`, explicitly reset" design would have
+  hit.
+- **Logging**: `ColdStartPanel`
+  (`src/components/tabs/today/ColdStartPanel.jsx`), surfaced on Today's
+  Practice below the section run-throughs, offers exactly two fields —
+  **average BPM** (a single number) and **notes** (free text, with a
+  transparent suggestion placeholder: *"e.g. how many times you stopped,
+  what felt shaky, any memory breaks"*, same convention as the
+  memory-anchor/notes field elsewhere in the app). Deliberately no
+  separate structured stop-count input the way `"__consolidation__"`'s
+  consolidation-day logging has — the point of a cold-start check is one
+  uninterrupted play-through, with anything worth remembering about it
+  folded into the notes afterward rather than tallied live. Writes to a
+  new synthetic `piece.progress["__cold_start__"]` key
+  (`applyColdStartLog`/`applyColdStartUnlog`), sessions shaped
+  `{ day, avgBpm, notes, gapDays, loggedAt, loggedDate }` —
+  **deliberately not folded into `"__consolidation__"`'s existing
+  sessions**, since `computeRevivalTriggers` already reads every
+  `"__consolidation__"` session's `stopCount` indiscriminately — mixing in
+  a `stopCount`-less session shape would corrupt that trigger, and would
+  also have blurred a deliberately-cold gap test into
+  `"__consolidation__"`'s routine consolidation-day entries on Progress's
+  "Recent practice history" list, since that list *does* pick up
+  `"__consolidation__"` sessions (it wouldn't have picked up `
+  "__cold_start__"` ones on its own either way — see the gap noted just
+  below). `gapDays` snapshots the gap that actually motivated the test,
+  since the same log call immediately overwrites `piece.lastLoggedAt` with
+  today.
+- **Log-and-display only, for this pass.** `avgBpm` is stored and shown
+  (the panel's own "last logged" line) but nothing computes off it here —
+  no comparison against `targetBPM`/`practiceBPM`, no effect on
+  `computeRevivalTriggers` or confidence math. There's no clean structured
+  number left to feed those once the feedback shape was simplified to just
+  two free-form-ish fields (stops/memory-breaks live in free text, not a
+  dedicated count). See [Decisions.md](Decisions.md#cold-start-check) for
+  the deferred, optional connection to a future manual confidence
+  override, once that exists. **Not currently shown on Progress's own
+  "Recent practice history" list** — found while documenting this feature,
+  not fixed; see
+  [Algorithms.md](Algorithms.md#logging-a-separate-synthetic-key-not-__consolidation__)
+  for why (`computePracticeHistory` indexes by `doneDays`, which
+  `"__cold_start__"` entries deliberately don't have).
+- **Deferred**: the exact escalation sequence past 14 days (doubling is a
+  default, not a considered tuning choice); any equivalent "cold test" for
+  a piece still learning or mid-revival — this is scoped to the
+  post-full-coverage case specifically; comparing `avgBpm` against
+  `targetBPM`/`practiceBPM` or surfacing a derived delta; extending the
+  repeating-threshold treatment to section-pair run-throughs (a separate
+  open question from Pass 49, untouched here).
+
 ### Explicitly not designed/built here
 
 - Revival's internal structure/pacing beyond the trigger conditions and

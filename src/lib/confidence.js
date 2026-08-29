@@ -174,6 +174,24 @@ export function sessionOutcome(session) {
   return null;
 }
 
+// Every logged, judged session across the whole piece — the denominator
+// Progress's Outcome Breakdown panel needs. loggedSessions() alone isn't
+// enough: it drops skipped/provisional sessions, but a "__consolidation__"
+// or "__cold_start__" session is neither of those — it's a synthetic,
+// non-chunk progress entry with no outcome/effectiveness at all (a
+// stopCount or an avgBpm instead), so sessionOutcome() returns null for
+// it. Left in, it would inflate the denominator without ever landing in
+// any pass/soft-miss/fail bucket, silently pulling every real percentage
+// down — the same dilution bug already fixed once for skipped sessions
+// (see docs/Decisions.md#spaced-repetition--maintenance), reappearing via
+// a session shape that fix didn't anticipate. Found in review, not by the
+// original Cold-Start pass. See docs/Decisions.md#cold-start-check.
+export function allJudgedSessions(piece) {
+  return Object.values((piece && piece.progress) || {})
+    .flatMap((entry) => loggedSessions(entry.sessions))
+    .filter((s) => sessionOutcome(s) !== null);
+}
+
 // Tuning knobs for hasClimbingTempo below — hand-picked, not derived from
 // any study, same status as every other constant of this kind in this file
 // (see docs/Research.md's inventory of these; this one isn't added there

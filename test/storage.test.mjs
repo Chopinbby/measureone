@@ -118,6 +118,30 @@ describe("validateAndMigratePiece — representative old piece shapes", () => {
     assert.deepEqual(m.progress.__consolidation__, { doneDays: [3] });
   });
 
+  test("[regression, Pass 56 follow-up] the synthetic __cold_start__ entry is left alone too, not just __consolidation__", () => {
+    // backfillProgressLadderState (lib/storage.js) originally special-cased
+    // only "__consolidation__" by name — "__cold_start__" (Pass 56) was
+    // added later and initially missed, so it silently fell through to the
+    // generic per-chunk branch and picked up unused stage/practiceBPM/etc.
+    // ladder fields on every reload. Fixed via a shared
+    // NON_CHUNK_PROGRESS_KEYS list both functions read from.
+    const withColdStart = {
+      id: "p_cold",
+      name: "Prelude",
+      totalMeasures: 40,
+      startDate: "2026-07-01",
+      progress: {
+        c1: { doneDays: [1], sessions: [{ day: 1, cleanReps: 3, bpm: 60, effectiveness: "good" }] },
+        __cold_start__: { sessions: [{ day: 5, avgBpm: 96, notes: "fine", gapDays: 3, loggedDate: "2026-07-05" }] },
+      },
+    };
+    const m = validateAndMigratePiece(withColdStart);
+    assertChunkBackfilled(m.progress.c1);
+    assert.deepEqual(m.progress.__cold_start__, {
+      sessions: [{ day: 5, avgBpm: 96, notes: "fine", gapDays: 3, loggedDate: "2026-07-05" }],
+    });
+  });
+
   test("mid-plan piece backfills session loggedDate from day + startDate, preserving old fields", () => {
     const m = validateAndMigratePiece(midPlan);
     assert.equal(m.progress.c1.sessions[0].loggedDate, "2026-06-01");
@@ -674,6 +698,24 @@ describe("diffImportedPiece — Pass 13 import divergence detection", () => {
   test("the synthetic __consolidation__ entry is never compared, even if it differs", () => {
     const existing = { updatedAt: 3000, progress: { c1: ladderChunk(), __consolidation__: { doneDays: [1] } } };
     const imported = { updatedAt: 3000, progress: { c1: ladderChunk(), __consolidation__: { doneDays: [1, 2] } } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("[regression, Pass 56 follow-up] the synthetic __cold_start__ entry is never compared either", () => {
+    // ladderStateDiffers originally special-cased only "__consolidation__"
+    // by name — a piece with real ladder agreement on every actual chunk,
+    // but differing __cold_start__ sessions between the two sides, would
+    // have been wrongly flagged as a genuine divergence needing the
+    // ImportPiecesModal picker, even though __cold_start__ carries no
+    // ladder state to actually disagree on.
+    const existing = {
+      updatedAt: 3000,
+      progress: { c1: ladderChunk(), __cold_start__: { sessions: [{ day: 1, avgBpm: 90 }] } },
+    };
+    const imported = {
+      updatedAt: 3000,
+      progress: { c1: ladderChunk(), __cold_start__: { sessions: [{ day: 1, avgBpm: 90 }, { day: 5, avgBpm: 100 }] } },
+    };
     assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
   });
 });

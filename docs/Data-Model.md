@@ -632,6 +632,32 @@ reasons:
 - **`__consolidation__`** — a synthetic key for whole-piece run-throughs
   (`handleLogRunThrough`), never a chunk at all. Long-established; most code
   that walks `piece.progress` already special-cases it explicitly.
+- **`__cold_start__`** — a synthetic key for the Cold-Start check (Pass 56,
+  `handleLogColdStart`/`applyColdStartLog`, `lib/coldStart.js`): a
+  whole-piece cold play-through logged after every section has been
+  covered, offered again at a widening gap since the piece was last
+  touched. Deliberately **not** folded into `"__consolidation__"` even
+  though both are whole-piece play-throughs logged outside the normal
+  per-chunk flow — see
+  [Algorithms.md](Algorithms.md#logging-a-separate-synthetic-key-not-__consolidation__)
+  for why keeping them structurally separate matters (mainly:
+  `computeRevivalTriggers` reads every `"__consolidation__"` session's
+  `stopCount` indiscriminately, and a Cold-Start session carries no
+  `stopCount` at all). Sessions are shaped
+  `{ day, avgBpm, notes, gapDays, loggedAt, loggedDate }` — no `stopCount`,
+  no `doneDays` array on the entry (unlike `"__consolidation__"`, this
+  isn't tied to a specific scheduled plan day the way a consolidation day
+  is; `day` on each session is just `elapsedDay(piece)` at the time it was
+  logged, for record-keeping). **Known gap, not fixed in Pass 56:**
+  `lib/storage.js`'s `backfillProgressLadderState` and `ladderStateDiffers`
+  special-case `"__consolidation__"` by name (skipping ladder-state
+  backfill/comparison for it, since it isn't a real chunk) but were not
+  updated to do the same for `"__cold_start__"` — out of scope for this
+  pass's file list. Harmless today (every backfilled ladder field lands on
+  the same deterministic default regardless of key, so nothing misbehaves)
+  but adds unused `stage`/`practiceBPM`/etc. clutter to this entry on every
+  reload; worth folding `"__cold_start__"` into both checks alongside
+  `"__consolidation__"` next time either function is touched.
 - **`sr_<sectionId>`** — a section run-through. Logging one writes a normal
   progress entry under this id, but per the paragraph above it is *never* in
   `all`, on any piece. **This is not an edge case** — it happens the first

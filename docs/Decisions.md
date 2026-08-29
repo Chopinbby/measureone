@@ -3665,6 +3665,182 @@ directory rather than keeping it as a separate, un-tracked file.**
   file) and in [Roadmap.md](Roadmap.md); nothing from it should be treated as
   living only in that external file going forward.
 
+## Cold-Start check
+
+**Decision (Pass 56): the escalating 3/7/14/28/... "prompt due" check is
+implemented as a pure, uncached recomputation off `piece.lastLoggedAt`
+alone — comparing today's crossed threshold against the same computation
+one day earlier — rather than a persisted "which threshold was last shown"
+flag written by an automatic effect.**
+
+- **Why:** the pass's own text suggested a fairly specific mechanism —
+  "track which threshold has already been shown this gap cycle (e.g. a
+  `lastPromptedThreshold` value)... reset it to null whenever any new
+  session gets logged," and named Pass 39's `computeMinutesModeAutoExtend`
+  effect (auto-applied, scoped to the active piece) as the established
+  pattern for this class of problem. Building that literally first
+  surfaced a real timing hazard: an effect that writes "this was shown"
+  the moment a threshold becomes due triggers a re-render whose *very
+  next* computation reads its own just-written state and immediately
+  un-shows the panel it had only just decided to show — functionally
+  never visible to a real user, despite technically rendering for one
+  React commit. Making that work at all requires either (a) extra
+  same-day-tolerance bookkeeping (a `lastPromptedDate` alongside the
+  threshold, so the write doesn't retroactively hide the render that
+  triggered it) *and* a separate cross-cycle anchor (so a stale
+  high-water-mark from an old, escalated cycle doesn't wrongly suppress a
+  lower threshold in a brand new one — three persisted fields in total,
+  worked through and rejected in favor of), or (b) the live-derivation
+  approach actually shipped, which needs no stored state and has no
+  self-cancellation hazard to guard against in the first place, per
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems)'s
+  spirit of not introducing a new kind of persisted "unlocked" state when
+  an existing pattern already covers it — see the very similar reasoning
+  for [Algorithms.md's section run-throughs](Algorithms.md#section-run-throughs)-style live derivations
+  throughout this codebase (`sectionRunThroughGate`, `chunkSet`/`timeline`,
+  `isPlanActuallyComplete`).
+- **What's preserved, what's different:** every literal behavior the pass
+  asked for still holds — fires once on the day a threshold is newly
+  crossed, stays quiet through the days in between, escalates through
+  3 → 7 → 14 → 28 → ..., and a fresh gap cycle after any new session is
+  logged is never suppressed by memory of an old, more-escalated cycle
+  (verified in `test/coldStart.test.mjs`, including a regression test for
+  exactly that cross-cycle case). What's different is purely internal:
+  `piece` gains no new persisted field for this at all — `App.jsx` needed
+  no new `useState`/`useEffect` beyond the two log/unlog handlers
+  (`handleLogColdStart`/`handleUnlogColdStart`), since `TodayTab`/
+  `ColdStartPanel` compute `coldStartDueThreshold(piece)` fresh on every
+  render, the same way `TodayTab` already computes `elapsedDay`/
+  `pastPlan`/`dueItems` locally without needing App.jsx to precompute and
+  thread them down.
+- **Consequence:** this is an interpretive judgment call on an
+  underspecified implementation detail, not a product-behavior deviation —
+  flagged here explicitly per
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#when-youre-not-sure) so a human can
+  course-correct if a literal persisted-flag mechanism was actually
+  wanted for some reason not visible from the pass description alone
+  (e.g. wanting the "already shown" state visible/editable in an exported
+  backup). See [Algorithms.md](Algorithms.md#the-repeating-escalating-prompt)
+  for the full mechanics.
+
+**Decision: Cold-Start sessions write to a new synthetic
+`piece.progress["__cold_start__"]` key, never appended to
+`"__consolidation__"`'s existing sessions array.**
+
+- **Why:** `computeRevivalTriggers` (`lib/revival.js`) already reads every
+  `"__consolidation__"` session's `stopCount` indiscriminately for its
+  ">5 stops" trigger. A Cold-Start session's shape carries no `stopCount`
+  at all (see the feedback-shape decision below) — blending the two would
+  silently corrupt that trigger's meaning the moment a Cold-Start session
+  landed among consolidation-day ones. Separately, Progress's recent
+  practice-history list would blend a deliberately-cold gap test in with
+  routine scheduled consolidation days, losing a distinction worth
+  keeping (the two answer different questions: "did today's scheduled
+  run-through go smoothly" vs. "how does this piece hold up after being
+  left alone for a while").
+- **Consequence, since fixed (same session, on review):** `lib/storage.js`'s
+  `backfillProgressLadderState` and `ladderStateDiffers` special-cased
+  `"__consolidation__"` by name and were initially **not** updated to do
+  the same for `"__cold_start__"` — `lib/storage.js` wasn't in the
+  originating pass's touched-file list. Harmless in practice (every
+  backfilled ladder field landed on the same deterministic default
+  regardless of key) but inconsistent, and found during a follow-up
+  critical review. Fixed by introducing a shared `NON_CHUNK_PROGRESS_KEYS`
+  list both functions read from, so a third such key later only needs
+  adding in one place. See
+  [Data-Model.md](Data-Model.md#pieceprogress-keys-are-not-guaranteed-to-exist-in-the-chunk-set).
+  The same review pass found `computePracticeHistory` (`lib/history.js`)
+  had an analogous, actually-user-visible gap — `"__cold_start__"`
+  deliberately carries no `doneDays`, and that function indexed purely off
+  `doneDays`, so a logged Cold-Start session never appeared on Progress's
+  "Recent practice history" list at all. Fixed by indexing
+  `"__cold_start__"` sessions off their own `day` field instead (deduped
+  per day, mirroring `doneDays`' own semantics) — see
+  [Algorithms.md](Algorithms.md#logging-a-separate-synthetic-key-not-__consolidation__).
+
+**Decision: the feedback form is exactly two fields — `avgBpm` (a number)
+and `notes` (free text) — with no structured stop-count/memory-break/used-score
+inputs, and the result is log-and-display only; nothing computes off it
+yet.**
+
+- **Why:** simplified from a richer first scoping pass, resolved before
+  implementation started (not a call made during this session). Stops and
+  memory breaks are folded into the free-text notes instead of tallied
+  live, which is also why this pass's logging panel doesn't reuse
+  `"__consolidation__"`'s dedicated "Times stopped" `NumberInput` — a
+  cold-start check is meant to be one uninterrupted play-through, with
+  reflection afterward, not a live tally during it.
+- **Deferred, not decided against:** Pass 58 (not yet built) is expected
+  to add a manual "overall piece confidence" override, and a completed
+  Cold-Start result is a natural moment to prompt updating it — noted as a
+  soft, optional connection in the originating pass description, not a
+  hard dependency either direction, and nothing here was built toward it.
+  Comparing `avgBpm` against `targetBPM`/`practiceBPM` and surfacing a
+  derived delta was also explicitly left for a future pass, not built.
+
+**Decision (same session, found via an independent critical review pass):
+`ProgressTab`'s "Outcome breakdown" panel silently diluted its own
+percentages whenever a `"__consolidation__"` or `"__cold_start__"` session
+existed — fixed by excluding both from the denominator, not just skipped/
+provisional sessions.**
+
+- **Why:** `allSessions` there was built from `loggedSessions(entry.sessions)`
+  across every progress entry, which only drops `skipped`/`provisional`
+  sessions. A `"__consolidation__"` or `"__cold_start__"` session is
+  neither — it's a synthetic, non-chunk entry with a `stopCount` or
+  `avgBpm` instead of an `outcome`/`effectiveness`, so `sessionOutcome()`
+  returns `null` for it. Left in, it inflated the denominator
+  (`allSessions.length`) without ever landing in the pass/soft-miss/fail
+  numerator, silently pulling every real percentage down — bars that no
+  longer summed to 100%, with no error anywhere. **This is not a new class
+  of bug**: the identical mechanism was already found and fixed once for
+  skipped sessions specifically (see
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance),
+  "Outcome breakdown" item) — that fix (routing through `loggedSessions()`)
+  just never anticipated a session that's neither skipped/provisional NOR
+  chunk-shaped. `"__consolidation__"` has silently had this exact problem
+  since Pass 6; Cold-Start added a second source of it, which is what
+  surfaced it on review.
+- **Fix:** a new `allJudgedSessions(piece)` (`lib/confidence.js`, next to
+  `sessionOutcome`) — `loggedSessions()` plus a
+  `.filter(s => sessionOutcome(s) !== null)` — replaces the inline
+  computation in `ProgressTab.jsx`. Extracted to `lib/` rather than left
+  inline specifically so the fix has a regression test
+  (`test/confidence.test.mjs`), per CLAUDE.md's "logic that needs a
+  regression test belongs in `src/lib/`" rule — a component-level inline
+  computation can't be unit-tested at all in this codebase (no rendering
+  harness). Verified live: a piece with 4 real pass sessions, 1 real fail,
+  and 1 `"__cold_start__"` session now correctly shows 80%/0%/20% (summing
+  to 100%), not diluted by the cold-start session sitting in neither
+  bucket.
+- **Not otherwise audited**: whether any *other* Progress-tab stat has the
+  same class of gap for `"__consolidation__"`/`"__cold_start__"` wasn't
+  exhaustively re-checked beyond what this review pass happened to trace
+  (the Consistency panel's separate `practicedDays` counter was checked
+  and found to already handle both keys correctly, via its own generic
+  `loggedSessions` pass — no fix needed there).
+
+**Decision: `ColdStartPanel`'s `avgBpm`/`notes` form fields are cleared by
+a `useEffect` keyed on `coldStartDueThreshold`, not left as plain
+component state.**
+
+- **Why:** found via review — `TodayTab` always renders
+  `<ColdStartPanel>` unconditionally; it's the component's own `null`
+  return (not an unmount) that makes it disappear once due-threshold logic
+  says nothing's currently due. Without an explicit reset, a note typed
+  but never submitted would survive the panel going quiet (e.g. the user
+  logs a different, regular session on the piece, resetting the gap) and
+  could silently reappear pre-filled the next time a threshold fires days
+  later, in the same continuous browser session.
+- **Not independently verified end-to-end**: reproducing the exact
+  multi-day, no-reload sequence live isn't practical (the app has no
+  "advance the calendar" affordance to test with), so this is verified by
+  code inspection — the effect's dependency (`dueThreshold`, a primitive)
+  correctly re-fires on every null→non-null transition — plus a live check
+  that the change doesn't regress the normal show/submit/clear flow.
+  Flagged rather than asserted with full confidence, per
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#when-youre-not-sure).
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { FocusPanel } from "./today/FocusPanel";
 import { SectionRunThroughPanel } from "./today/SectionRunThroughPanel";
+import { ColdStartPanel } from "./today/ColdStartPanel";
 import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
@@ -91,6 +92,8 @@ export function TodayTab({
   onDiscardProvisionalSession,
   onLogRunThrough,
   onUnlogRunThrough,
+  onLogColdStart,
+  onUnlogColdStart,
   onReschedule,
   onReassessRange,
   onSetMemoryAnchor,
@@ -404,6 +407,17 @@ export function TodayTab({
         currentDay={currentDay}
         onLogSession={onLogSession}
         onUnlogSession={onUnlogSession}
+      />
+
+      {/* Cold-Start is a periodic nudge, not a daily task — it renders
+          only on the day a new gap threshold is actually crossed (see
+          coldStartDueThreshold, lib/coldStart.js), so it sits below even
+          the section run-throughs. */}
+      <ColdStartPanel
+        piece={piece}
+        day={elapsedDay}
+        onLogColdStart={onLogColdStart}
+        onUnlogColdStart={onUnlogColdStart}
       />
 
       <ReassessPanel piece={piece} todaysRanges={todaysRanges} onReassessRange={onReassessRange} />

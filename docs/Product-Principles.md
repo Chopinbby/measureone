@@ -40,7 +40,10 @@ The confidence formula is a hand-tuned heuristic (see
 it, they win: `manualConfidence` overrides the computed score entirely,
 everywhere it's used. The same pattern applies to difficulty (reassess any
 measure range directly) and tempo targets (per-chunk override beats the
-piece-wide default). Hand-tuned automation should never trap the user with an
+piece-wide default). **Since Pass 58**, it applies one level up too:
+`piece.manualOverallConfidence` overrides the piece-wide effort-weighted
+confidence rollup, same undefined/null-means-auto precedence, same set/clear
+control shape. Hand-tuned automation should never trap the user with an
 answer they know is wrong.
 
 ## Practice should reduce overwhelm

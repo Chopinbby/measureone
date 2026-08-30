@@ -270,7 +270,22 @@ changed.
 |---|---|---|---|
 | Stabilizing | every 4 days | 4 consecutive full passes | none |
 | Settling | every 7 days | 4 consecutive full passes | ~70–75% of target |
-| Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | starts ~85%, +5 points per successful pass, caps 100% |
+| Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | **retired (Pass 61)** — meeting the rep requirement is sufficient on its own; see the periodic harder check below |
+
+**Since Pass 61**, Holding no longer has a tempo floor at all — the
+escalating ~85%-to-100%-of-target gate in the table's original design (and
+built, before this pass, as `tempoFloorStartFraction`/
+`tempoFloorStepFraction`/`tempoFloorCapFraction`) is gone from
+`clearsStageFloor`'s Holding branch, which now always returns true. In its
+place: every 4th logged Holding review (the 4th, 8th, 12th... since the
+chunk's most recent fresh entry into Holding) needs one more clean rep than
+usual, tracked by a new `progress[id].holdingReviewCount` and resolved by
+`resolveRequiredReps` (`lib/confidence.js`) at the point `ChecklistItem`
+displays and judges the requirement — see
+[Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder) for
+the full mechanics. This is a rep-only mechanism; `classifySessionOutcome`'s
+separate tempo check (`bpm >= practiceBPM`, deciding whether a session
+counts as a pass at all) is completely untouched.
 
 **Implemented and wired into logging**: `computeLadderAdvance` in
 `src/lib/ladder.js` is called from `handleLogSession` (`App.jsx`) on every
@@ -457,6 +472,36 @@ evidence.
   stage yet. Reopened at the user's explicit request; see
   [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
   three options presented and why this one needed new persisted state.
+  **Superseded again (Pass 59) for the pass/soft-miss steps specifically —
+  the flat `bpmSteps.pass`/`bpmSteps.softMiss` deltas above are now only a
+  fallback for a chunk with no `targetBPM` to measure against.** The normal
+  case ratchets `practiceBPM` by a step *proportional to the remaining gap*
+  to `targetBPM` (a new per-chunk adaptive rate, `progress[id].tempoRatchetK`,
+  defaulting to 0.3, capped at `ladderConfig.tempoRatchet.kCapBpm`, default
+  8 BPM) — and, as part of the same pass, **a soft miss no longer steps
+  `practiceBPM` down at all**; it halves the chunk's own ratchet rate and
+  still steps forward, just more slowly. See
+  [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59) for the full
+  mechanics (including the overlearning bonus for a session that clearly
+  beats what was asked) and
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for why.
+  **Extended (Pass 60) with "tempo maintenance mode":** once `practiceBPM`
+  is already at or above `ladderConfig.tempoRatchet.tempoAchievedThreshold`
+  (default 85%) of `targetBPM`, the pass/soft-miss step-size calculation
+  substitutes a small, pinned rate (`ladderConfig.tempoRatchet.maintenanceK`,
+  default 0.05) for the chunk's own tracked `tempoRatchetK` at the moment
+  the step is computed — **not persisted anywhere**; it's a live check
+  (`isInTempoMaintenance`, `lib/ladder.js`) recomputed off `practiceBPM`/
+  `targetBPM` every time it's needed, so it exits on its own the instant a
+  fail's `practiceBPM` reset drops back below the threshold, no separate
+  exit logic required. The chunk's own `tempoRatchetK` keeps
+  stepping/halving/recovering underneath exactly as described just above,
+  completely unaffected — maintenance mode only ever substitutes at the
+  point a step size is actually computed, never overwrites what's tracked.
+  **Deliberately not connected to anything else yet**: not `isPieceLearned`,
+  not `isPlanActuallyComplete`, not Pass 30's "tempo climbing" nudge —
+  see [Decisions.md](Decisions.md#spaced-repetition--maintenance) for what's
+  still an open question here and why it's staying open on purpose.
 - **What actually shipped, different from the original sketch above:**
   `ChecklistItem.jsx` kept free-text "clean reps" and "BPM achieved"
   `NumberInput` fields rather than replacing them with a fixed "attempt at
@@ -489,10 +534,14 @@ called from `ChecklistItem.jsx` on every log and passed to
    check runs before the jump — see
    [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 2. **Soft miss** — some clean reps, not enough in a row at that tempo.
-   `practiceBPM` steps down, consecutive-pass count resets, **stage does
-   not change**. New tier — the fix for "plateau via frustration": no
-   honest way existed to log "close, but not quite" without it reading as
-   failure against a fixed distant number.
+   Consecutive-pass count resets, **stage does not change**. New tier — the
+   fix for "plateau via frustration": no honest way existed to log "close,
+   but not quite" without it reading as failure against a fixed distant
+   number. **As of Pass 59, `practiceBPM` no longer steps down here** — it
+   still moves, just forward, at half the chunk's normal ratchet rate (see
+   [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59)); the tier's own
+   meaning ("close, but not quite — not a fail") is unchanged, only which
+   direction the tempo consequence moves.
 3. **Real fail** — self-report override ("needs more work"), zero clean
    reps, or repeated soft-misses — but **only when both the current and the
    previous shortfall were reps-driven** (fewer than the required clean
@@ -671,6 +720,14 @@ doesn't distinguish which):
   modal now sets the same tri-state flag the Piece Map does (same
   underlying field, same control), rather than a separate weak-spot
   toggle.
+  **Since Pass 54, this is no longer true**: the flag toggle is removed
+  from the chunk-detail modal specifically when `sequentialMode` is true
+  (revival's reassessment), so revival can no longer set this field
+  directly — ordinary (non-revival) Piece Map is now the only way to set
+  `flag`. `computeRevivalPlan`'s flagged-first sort and `RevivalTab`'s
+  "Flagged chunks" panel (below) still read the same field, unchanged —
+  they just won't have anything to show unless a chunk was flagged outside
+  of revival. See [Decisions.md](Decisions.md#revival).
 - **Confidence cap, not a `stage`/ladder read.** Rough/lost flags must
   immediately affect displayed confidence everywhere it shows (Overview,
   Progress — including its confidence-by-difficulty bars — Piece Map, and
@@ -1101,6 +1158,108 @@ everything on today's plan.
   consecutive-clean-reps requirement in early stages (a separate,
   unresolved design question); cross-piece interleaving (stays
   single-piece like the rest of the Today tab).
+
+### Cold-Start check (built, Pass 56)
+
+A whole-piece cold play-through — no warm-up, no stopping to fix
+anything — offered once every section has genuinely been covered, then
+re-offered at a widening gap since the piece was last touched at all.
+Answers a question none of the mechanisms above answer: section
+run-throughs above only ever check *practice-chunk* coverage per section;
+Stage 3's `isPieceLearned` (every chunk at ladder Holding) is a much
+stricter bar, aimed at a different question ("is the learning plan
+itself done"). A piece can clear this gate well before it's "learned" in
+that sense — the two are deliberately independent, never combined into
+one check.
+
+- **The gate**: `coldStartGateMet(piece)` (`src/lib/coldStart.js`) —
+  every section's own single-section run-through
+  (`piece.progress["sr_" + section.id]`) has at least one logged session.
+  Section-**pair** run-throughs aren't part of this gate — single-section
+  coverage only. Because a section's run-through can only ever become due
+  once every chunk assigned to it has been touched
+  (`isSectionLearned`, above), this one check already implies the whole
+  piece has been covered once too — no separate "every chunk in the piece
+  has a session" check needed alongside it.
+- **The prompt**: `coldStartDueThreshold(piece, today)` escalates through
+  **3, 7, 14, then doubling forever** (28, 56, 112, ...) days since
+  anything was logged on the piece (`piece.lastLoggedAt`, same
+  `daysBetweenInclusive`-based gap `computeRevivalTriggers`'s staleness
+  trigger already uses). A periodic nudge, not a persistent due-item like
+  the section run-throughs above or the maintenance due-list: it's due
+  only on the exact day a new threshold is crossed, then reads as
+  "nothing new" every day after that until the next one — a live
+  recomputation (comparing today's crossed threshold against the same
+  computation one day earlier), not a persisted "already shown" flag, so
+  a fresh gap cycle after any new session is logged just falls out for
+  free rather than needing an explicit reset. See
+  [Algorithms.md](Algorithms.md#the-repeating-escalating-prompt) for the
+  full mechanics, including a write-timing hazard a more literal
+  "persisted `lastPromptedThreshold`, explicitly reset" design would have
+  hit.
+- **Logging**: `ColdStartPanel`
+  (`src/components/tabs/today/ColdStartPanel.jsx`), surfaced on Today's
+  Practice below the section run-throughs, offers exactly two fields —
+  **average BPM** (a single number) and **notes** (free text, with a
+  transparent suggestion placeholder: *"e.g. how many times you stopped,
+  what felt shaky, any memory breaks"*, same convention as the
+  memory-anchor/notes field elsewhere in the app). Deliberately no
+  separate structured stop-count input the way `"__consolidation__"`'s
+  consolidation-day logging has — the point of a cold-start check is one
+  uninterrupted play-through, with anything worth remembering about it
+  folded into the notes afterward rather than tallied live. Writes to a
+  new synthetic `piece.progress["__cold_start__"]` key
+  (`applyColdStartLog`/`applyColdStartUnlog`), sessions shaped
+  `{ day, avgBpm, notes, gapDays, loggedAt, loggedDate }` —
+  **deliberately not folded into `"__consolidation__"`'s existing
+  sessions**, since `computeRevivalTriggers` already reads every
+  `"__consolidation__"` session's `stopCount` indiscriminately — mixing in
+  a `stopCount`-less session shape would corrupt that trigger, and would
+  also have blurred a deliberately-cold gap test into
+  `"__consolidation__"`'s routine consolidation-day entries on Progress's
+  "Recent practice history" list, since that list *does* pick up
+  `"__consolidation__"` sessions (it wouldn't have picked up `
+  "__cold_start__"` ones on its own either way — see the gap noted just
+  below). `gapDays` snapshots the gap that actually motivated the test,
+  since the same log call immediately overwrites `piece.lastLoggedAt` with
+  today.
+- **`avgBpm`/`notes` themselves are still log-and-display only** — stored
+  and shown (the panel's own "last logged" line, and Progress's "Recent
+  practice history" list), but nothing computes off `avgBpm` specifically:
+  no comparison against `targetBPM`/`practiceBPM`, no effect on
+  `computeRevivalTriggers` or confidence math. There's no clean structured
+  number left to feed those once the feedback shape was simplified to just
+  two free-form-ish fields (stops/memory-breaks live in free text, not a
+  dedicated count).
+- **Now shown on Progress's "Recent practice history" list** — a gap
+  found while first documenting this feature (`computePracticeHistory`
+  indexed purely by `doneDays`, which `"__cold_start__"` entries
+  deliberately don't have, so a logged check never appeared there at
+  all), fixed in the same session it was found: `computePracticeHistory`
+  (`lib/history.js`) now also indexes `"__cold_start__"` sessions off
+  their own `day` field. See
+  [Algorithms.md](Algorithms.md#logging-a-separate-synthetic-key-not-__consolidation__).
+- **Connected to Pass 58's overall-confidence stat, once Pass 58 shipped.**
+  A successful Cold-Start log now shows a short, genuinely optional "How
+  would you rate the piece overall right now?" prompt — five quick-tap
+  presets (the same ones `PieceMapTab`'s revival "Quick rate" already
+  uses) plus "Skip." Picking one immediately sets
+  `piece.manualOverallConfidence`; Skip writes nothing at all, and the
+  prompt itself is never persisted or resumed later if left unanswered.
+  Originally scoped out of Pass 58's own build (reaching into this file
+  wasn't in that pass's touched-file list), then added as an explicit
+  same-session follow-up once directly requested — see
+  [Decisions.md](Decisions.md#overall-piece-confidence) for the full
+  reasoning and
+  [Algorithms.md](Algorithms.md#overall-piece-confidence-pass-58) for the
+  mechanics.
+- **Deferred**: the exact escalation sequence past 14 days (doubling is a
+  default, not a considered tuning choice); any equivalent "cold test" for
+  a piece still learning or mid-revival — this is scoped to the
+  post-full-coverage case specifically; comparing `avgBpm` against
+  `targetBPM`/`practiceBPM` or surfacing a derived delta; extending the
+  repeating-threshold treatment to section-pair run-throughs (a separate
+  open question from Pass 49, untouched here).
 
 ### Explicitly not designed/built here
 

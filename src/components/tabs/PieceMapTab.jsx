@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome } from "lucide-react";
+import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome, AlertTriangle } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
-import { clamp, formatRange, todayISODate } from "../../lib/utils";
-import { DIFFICULTY_META, CONFIDENCE_PRESETS } from "../../lib/constants";
+import { clamp, formatRange, todayISODate, findRelatedChunks } from "../../lib/utils";
+import { DIFFICULTY_META, CONFIDENCE_PRESETS, ROLE_LABEL } from "../../lib/constants";
 import {
   computeConfidence,
   computeAutoConfidence,
@@ -12,6 +12,7 @@ import {
   formatLadderStatus,
   hasClimbingTempo,
 } from "../../lib/confidence";
+import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../lib/ladder";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
 // logging"): undefined ("untouched") -> 'rough' -> 'lost' -> undefined.
@@ -57,6 +58,32 @@ export function PieceMapTab({
   // Same fallback chain used in three places below (the field itself, and
   // the bpm-track gate/width) — computed once so they can't drift.
   const resolvedTargetBPM = selectedChunk ? selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk) || null : null;
+  // Pass 62 — forward-projects the chunk's own current ladder state
+  // (same fields App.jsx's handleLogSession builds for computeLadderAdvance)
+  // to estimate how many calendar days away its tempo goal is, live off
+  // whatever's currently persisted — recomputed on every render, no
+  // persisted "warned" flag, same pattern selectedClimbing above uses.
+  const tempoSimulation = selectedChunk
+    ? simulateTempoConvergence(
+        {
+          stage: selectedEntry.stage,
+          consecutivePasses: selectedEntry.consecutivePasses,
+          consecutiveStabilizingFails: selectedEntry.consecutiveStabilizingFails,
+          practiceBPM: selectedEntry.practiceBPM,
+          targetBPM: resolvedTargetBPM,
+          tier1Done: selectedEntry.tier1Done,
+          needsRelearning: selectedEntry.needsRelearning,
+          stabilizingEntryBPM: selectedEntry.stabilizingEntryBPM,
+          settlingEntryBPM: selectedEntry.settlingEntryBPM,
+          holdingEntryBPM: selectedEntry.holdingEntryBPM,
+          tempoRatchetK: selectedEntry.tempoRatchetK,
+          holdingReviewCount: selectedEntry.holdingReviewCount,
+        },
+        piece.ladderConfig,
+        todayISODate()
+      )
+    : null;
+  const tempoWarning = tempoConvergenceExceedsWarning(tempoSimulation);
   // Pass 37 (sequentialMode/revival reassessment only — see
   // docs/Decisions.md#ux): Target BPM defaults to a read-only display of
   // resolvedTargetBPM rather than an always-open input, since most chunks
@@ -64,6 +91,23 @@ export function PieceMapTab({
   // Next/Previous doesn't carry an open editor onto the next chunk.
   const [bpmOverrideOpen, setBpmOverrideOpen] = useState(false);
   useEffect(() => setBpmOverrideOpen(false), [selected]);
+
+  // Pass 50 — the grid itself shows only base practice chunks (no gaps,
+  // m.1 through the piece's last measure), so transitions/combos need
+  // their own way to be reached: the "Related chunks" field below.
+  // sequentialMode (Revival's reassessment flow) is left unfiltered — it
+  // walks `chunks` one at a time via Previous/Next using a deliberately
+  // different, revival-curated list (practice chunks + transitions, no
+  // combos — see RevivalTab's `revivalItems`), and filtering it here would
+  // silently drop transitions from that sequence entirely, which this pass
+  // never asked to change.
+  const gridChunks = sequentialMode ? chunks : chunks.filter((c) => c.kind === "section");
+  // Computed for whatever chunk is currently selected, not just a base
+  // one — so following a related-chunk link to a transition's or combo's
+  // own detail view shows its related chunks in turn (including the base
+  // chunk(s) it touches), rather than a one-way dead end.
+  const relatedChunks = selectedChunk ? findRelatedChunks(selectedChunk, chunks) : [];
+  const relatedChunkLabel = (c) => (c.kind === "section" ? "Chunk" : ROLE_LABEL[c.kind] || c.kind);
 
   // Same content, rendered in a different spot depending on mode: inline
   // near the top for ordinary Piece Map, collapsed under "Chunk Info" at
@@ -88,6 +132,17 @@ export function PieceMapTab({
       {ladderStatus && ladderStatus.dueLabel && (
         <div><span className="lbl">Next review</span><span className="val">{ladderStatus.dueLabel}</span></div>
       )}
+      {tempoWarning && (
+        <div>
+          <span className="lbl">Tempo goal</span>
+          <span className="val warn">
+            <AlertTriangle size={12} />{" "}
+            {tempoSimulation.converged
+              ? `${tempoSimulation.days}+ days away — over ${TEMPO_CONVERGENCE_WARNING_DAYS / 30} months at this pace`
+              : "may never reach at this pace — check tempo ratchet settings"}
+          </span>
+        </div>
+      )}
       {selectedChunk.recurringNote && <div><span className="lbl">Repeats</span><span className="val">{selectedChunk.recurringNote}</span></div>}
     </div>
   );
@@ -97,7 +152,7 @@ export function PieceMapTab({
       {!hideHeader && (
         <div className="tab-header">
           <h1>Piece Map</h1>
-          <p className="hero-sub">Color shows confidence. Includes practice chunks, transitions, and focus blocks.</p>
+          <p className="hero-sub">Color shows confidence.</p>
         </div>
       )}
 
@@ -108,7 +163,7 @@ export function PieceMapTab({
       </div>
 
       <div className="map-grid">
-        {chunks.map((c) => {
+        {gridChunks.map((c) => {
           const conf = computeConfidence(c, piece, currentDay);
           const manual = isManualConfidence(c, piece.progress);
           const flag = (piece.progress[c.id] || {}).flag;
@@ -161,16 +216,31 @@ export function PieceMapTab({
             <div className="modal-body">
               {!sequentialMode && detailStats}
 
-              <div className="field">
-                <span>Run-through flag</span>
-                <button
-                  type="button"
-                  className={`flag-toggle ${selectedFlag !== "untouched" ? `flag-${selectedFlag}` : ""}`}
-                  onClick={() => onSetFlag(selectedChunk.id, nextFlag(selectedEntry.flag))}
-                >
-                  <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
-                </button>
-              </div>
+              {!sequentialMode && (
+                <div className="field">
+                  <span>Run-through flag</span>
+                  <button
+                    type="button"
+                    className={`flag-toggle ${selectedFlag !== "untouched" ? `flag-${selectedFlag}` : ""}`}
+                    onClick={() => onSetFlag(selectedChunk.id, nextFlag(selectedEntry.flag))}
+                  >
+                    <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
+                  </button>
+                </div>
+              )}
+
+              {relatedChunks.length > 0 && (
+                <div className="field">
+                  <span>Related chunks</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                    {relatedChunks.map((rc) => (
+                      <button type="button" key={rc.id} className="link-btn" onClick={() => setSelected(rc.id)}>
+                        {relatedChunkLabel(rc)} — {formatRange(rc.start, rc.end)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {selectedEntry.needsRelearning && (
                 <div className="field">

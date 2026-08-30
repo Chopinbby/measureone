@@ -3,12 +3,14 @@ import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { FocusPanel } from "./today/FocusPanel";
 import { SectionRunThroughPanel } from "./today/SectionRunThroughPanel";
+import { ColdStartPanel } from "./today/ColdStartPanel";
+import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
 import { WeekView } from "./today/WeekView";
 import { InterleavePanel } from "./today/InterleavePanel";
-import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
+import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival } from "../../lib/revival";
 import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion } from "../../lib/scheduling";
@@ -91,6 +93,9 @@ export function TodayTab({
   onDiscardProvisionalSession,
   onLogRunThrough,
   onUnlogRunThrough,
+  onLogColdStart,
+  onUnlogColdStart,
+  onSetOverallConfidence,
   onReschedule,
   onReassessRange,
   onSetMemoryAnchor,
@@ -212,10 +217,22 @@ export function TodayTab({
   // computeDueReviews only reads chunkSet.all; TodayTab already receives
   // exactly that list as `chunks`, so it's wrapped rather than threading a
   // second prop through App.jsx.
+  //
+  // Unconditional as of Pass 66 — this used to run only once pastPlan was
+  // true (DueReviewPanel below is what originally motivated it). Always
+  // computing it here closes the gap for a piece still inside its plan:
+  // the merge just below folds the result into today's own checklist
+  // instead of leaving it usable only in the past-plan panel.
   const dueItems = useMemo(
-    () => (pastPlan ? computeDueReviews(piece, { all: chunks }, todayISODate()) : []),
-    [pastPlan, piece, chunks]
+    () => computeDueReviews(piece, { all: chunks }, todayISODate()),
+    [piece, chunks]
   );
+
+  // Only for real "today", still inside the plan: a past/future day paged
+  // to via day nav is a specific scheduled day, not "as of today" status,
+  // so live due-as-of-today reviews don't belong merged into it — see
+  // mergeLiveDueReviews (lib/maintenance.js) for the de-dup rule.
+  const dayForChecklist = !pastPlan && isRealToday ? mergeLiveDueReviews(day, dueItems) : day;
 
   // Past the plan, "today's work" is the due list rather than a plan day,
   // and sessions there are keyed to elapsedDay — so Reassess offers the
@@ -311,6 +328,16 @@ export function TodayTab({
     .map((id) => chunkById[id])
     .filter(Boolean)
     .map((c) => ({ start: c.start, end: c.end }));
+
+  // Random Start (Pass 57) — the same "don't let yourself always start
+  // from the top" pool RevivalTab/MasterAgendaTab already use (chunkEntry,
+  // components/tabs/revival/RandomStartPanel.jsx), scoped here to whatever
+  // in this piece already has 2+ logged sessions: practice chunks,
+  // transitions, and combos alike (chunkEntry already labels all three
+  // correctly, so no filtering to practice chunks only).
+  const randomStartPool = chunks
+    .filter((c) => ((piece.progress[c.id] || {}).sessions || []).length >= 2)
+    .map((c) => chunkEntry(c, piece.memoryAnchors && piece.memoryAnchors[c.id]));
 
   return (
     <div className="tab-pane">
@@ -414,7 +441,7 @@ export function TodayTab({
           <DayChecklist
             piece={piece}
             chunks={chunks}
-            day={day}
+            day={dayForChecklist}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
             onConfirmProvisionalSession={onConfirmProvisionalSession}
@@ -474,6 +501,28 @@ export function TodayTab({
         currentDay={currentDay}
         onLogSession={onLogSession}
         onUnlogSession={onUnlogSession}
+      />
+
+      {/* Scoped to the regular (non-past-plan) view — past the plan,
+          Master Agenda's own maintenance-due random-start pool already
+          covers this idea across every piece's due work. Hidden entirely
+          (rather than shown disabled) below 2 entries, matching Master
+          Agenda's own threshold for the same component (there's no single
+          chunk-level state to point to an explanation the way Pass 29's
+          Interleaved-mode gate has, and a 1-entry pool has nothing to
+          actually randomize between). */}
+      {!pastPlan && randomStartPool.length > 1 && <RandomStartPanel entries={randomStartPool} />}
+
+      {/* Cold-Start is a periodic nudge, not a daily task — it renders
+          only on the day a new gap threshold is actually crossed (see
+          coldStartDueThreshold, lib/coldStart.js), so it sits below even
+          the section run-throughs. */}
+      <ColdStartPanel
+        piece={piece}
+        day={elapsedDay}
+        onLogColdStart={onLogColdStart}
+        onUnlogColdStart={onUnlogColdStart}
+        onSetOverallConfidence={onSetOverallConfidence}
       />
 
       <ReassessPanel piece={piece} todaysRanges={todaysRanges} onReassessRange={onReassessRange} />

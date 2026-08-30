@@ -62,6 +62,11 @@ piece = {
   sections,              // [{ id, name, start, end }] — user-defined musical form
                          // (Exposition/Development/etc). Purely descriptive;
                          // NOT the same thing as practice "chunks" below.
+                         // start <= end is a guaranteed invariant, enforced by
+                         // SectionsEditor.jsx normalizing on every edit (a
+                         // min/max swap) — every consumer assumes it and
+                         // doesn't re-check. Wasn't always true: reachable as
+                         // a real, silently-saved bug before that fix.
   recurringMode,         // 'none' | 'basic' | 'advanced' — 'basic' (the quick-count
                          // UI) was similarly removed from RecurringEditor; only
                          // 'none'/'advanced' are reachable from the UI now, but
@@ -224,6 +229,21 @@ piece = {
                          // anchor"); the field/prop names on this object are unchanged. Read
                          // (read-only where no write handler is passed) in ChecklistItem across every
                          // caller — normal practice, maintenance due-review, and revival alike.
+  manualOverallConfidence, // number (0-100) | null — piece-level manual override for the
+                         // "Overall confidence" stat on Progress (Pass 58). Same
+                         // undefined-and-null-both-mean-"auto" escape hatch each chunk's own
+                         // progress[id].manualConfidence already uses, just one level up —
+                         // see computeOverallConfidence/isManualOverallConfidence
+                         // (lib/confidence.js) and
+                         // #overall-piece-confidence-a-rollup-not-a-third-independent-score
+                         // below for how this relates (or doesn't) to the two-scores warning.
+                         // Backfilled to null on migration (storage.js) for pieces saved
+                         // before this field existed; NOT seeded by Wizard.jsx's
+                         // defaultPiece() — validateAndMigratePiece isn't in the piece-create
+                         // path (see lastPlayedDate-adjacent precedent, App.jsx's
+                         // handleComplete), so a just-created piece simply has the field
+                         // absent until first migrated or first overridden, which every
+                         // reader already treats identically to null.
   revival,               // see #revival below
 }
 
@@ -418,12 +438,21 @@ ChunkProgress = {
                                // a chunk — the USER-SELECTED starting tempo, one of three distinct
                                // tempo concepts (suggested / user-selected / demonstrated) split
                                // apart in lib/confidence.js's getSuggestedStartingBPM block comment
-                               // and Algorithms.md#starting-suggested-and-demonstrated-tempo. Then
-                               // ratchets via ladderConfig.bpmSteps (+2 pass / -2 soft-miss / -2
-                               // fail) on every logged session — except a session with 3+ clean
-                               // reps at a bpm above the current value jumps practiceBPM straight
-                               // to that bpm instead (computeDemonstratedTempoBaseline,
-                               // lib/ladder.js), the third ("demonstrated") tempo concept.
+                               // and Algorithms.md#starting-suggested-and-demonstrated-tempo. As of
+                               // Pass 59, steps by a gap-proportional amount on a pass/soft-miss —
+                               // see tempoRatchetK below — with ladderConfig.bpmSteps (+2 pass / -2
+                               // soft-miss / -2 fail) now only the FALLBACK for a chunk with no
+                               // targetBPM to be proportional against (a real fail always uses its
+                               // own separate reset logic, below, regardless of targetBPM) — except
+                               // a session with 3+ clean reps at a bpm above the current value jumps
+                               // practiceBPM straight to that bpm instead
+                               // (computeDemonstratedTempoBaseline, lib/ladder.js), the third
+                               // ("demonstrated") tempo concept, which still takes priority over the
+                               // ratchet step exactly as it did over the old flat one. A pass whose
+                               // logged bpm clearly beats what was asked can also widen the step past
+                               // the normal ratchet formula (the "overlearning bonus," Pass 59) — the
+                               // only path allowed to push practiceBPM above targetBPM, capped at
+                               // 1.15×.
                                // Two more exceptions on a real fail: (Pass 11) the exact fail that
                                // turns needsRelearning on resets practiceBPM to
                                // getSuggestedStartingBPM instead, when that suggestion is available;
@@ -449,6 +478,46 @@ ChunkProgress = {
                                 // matching its current stage, seeded from its current practiceBPM —
                                 // see storage.js's backfillProgressLadderState. See
                                 // Decisions.md#spaced-repetition--maintenance.
+  tempoRatchetK,                // number | null, default null (Pass 59) — this chunk's own current
+                                 // gap-proportional tempo-ratchet rate (see practiceBPM above),
+                                 // defaulting to ladderConfig.tempoRatchet.k (0.3) when null/absent —
+                                 // resolved at read time by computeLadderAdvance, never backfilled
+                                 // to the literal default number. A soft-miss halves it (still
+                                 // stepping practiceBPM forward, just more slowly); two qualifying
+                                 // passes in a row restore it to the default; a real fail resets it
+                                 // to the default outright, same as every other practiceBPM-adjacent
+                                 // reset on a fail. Once practiceBPM is close enough to targetBPM
+                                 // (ladderConfig.tempoRatchet.tempoAchievedThreshold, Pass 60 —
+                                 // "tempo maintenance mode"), the step-size calculation substitutes
+                                 // a small pinned rate (maintenanceK) in place of this tracked value
+                                 // at the point of use only — this field itself keeps
+                                 // stepping/halving/recovering underneath, completely unaffected;
+                                 // there's nothing to "restore" on exit since it was never
+                                 // overwritten. Backfills to null (not the literal default), same
+                                 // false-import-conflict reasoning as the entry-BPM fields — an
+                                 // untouched chunk migrated once vs. a raw export predating this
+                                 // field must compare as equal, not as a genuine disagreement.
+  holdingReviewCount,           // number | null, default null (Pass 61) — count of logged Holding
+                                 // reviews (pass, soft-miss, OR fail all count) since this chunk
+                                 // most recently, freshly entered Holding; resets to 0 on that fresh
+                                 // entry (via promotion from Settling — Holding has no ceiling to
+                                 // promote out of and no floor to fail out of without also leaving
+                                 // Holding, so a fresh 0 is only ever reachable that one way).
+                                 // Drives resolveRequiredReps (lib/confidence.js): on the review
+                                 // where this count-plus-one is a multiple of 4 (the 4th, 8th,
+                                 // 12th... since that fresh entry), the required-clean-reps
+                                 // threshold for that one session is baseline + 1, reverting to
+                                 // baseline every other review — replaces Holding's old escalating
+                                 // tempo floor (ladderConfig.holding.tempoFloor*, below — now
+                                 // unread for Holding, though the fields themselves are still saved
+                                 // and still editable in Settings, an intentionally-flagged loose
+                                 // end, not an oversight) outright; meeting the rep requirement is
+                                 // now sufficient on its own for a Holding pass to count toward
+                                 // interval growth, no tempo condition attached. Backfills to null
+                                 // (not 0), same false-import-conflict reasoning as tempoRatchetK
+                                 // just above — found and fixed the same session this field was
+                                 // added, having reintroduced that exact bug class for a brand-new
+                                 // field. See Decisions.md#spaced-repetition--maintenance.
   nextDueDate,                 // string ("YYYY-MM-DD") | null — this chunk's next scheduled ladder
                                 // review, recomputed on every logged session. Load-bearing since
                                 // Pass 5: computeTimeline reads this directly to place the chunk's
@@ -479,8 +548,10 @@ ChunkProgress = {
 
 Piece-level tunable data for the spaced-repetition maintenance ladder — see
 [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
-for the full design. Hardcoded defaults for now (no editing UI); stored so a
-later UI pass is additive rather than needing its own migration.
+for the full design. Hand-picked defaults, but **editable since Pass 17** —
+`LadderConfigEditor` (`src/components/fields/LadderConfigEditor.jsx`),
+under Settings' "Maintenance ladder" panel — not the hardcoded-only state
+this section originally described.
 
 ```js
 ladderConfig = {
@@ -496,18 +567,46 @@ ladderConfig = {
     tempoFloorStartFraction, tempoFloorStepFraction, tempoFloorCapFraction,
   },
   // startIntervalDays: 14. maxIntervalDays: 70 (10 weeks) — hand-picked
-  // point within the doc's ~8–12-week cap range. tempoFloorStartFraction:
-  // 0.85, tempoFloorStepFraction: 0.05 ("+5 points per successful pass"),
-  // tempoFloorCapFraction: 1. No growth-rate field here — Holding's
-  // interval growth is computed entirely from the same 0.6×/1×/1.4×
-  // effectiveness multiplier concept adaptiveReviewOffsets introduced
-  // (scheduling.js) — lib/ladder.js keeps its own small duplicated copy of
-  // the multiplier itself now, per the doc's "not a second multiplier
-  // system" instruction — see Decisions.md#spaced-repetition--maintenance.
+  // point within the doc's ~8–12-week cap range. No growth-rate field here
+  // — Holding's interval growth is computed entirely from the same
+  // 0.6×/1×/1.4× effectiveness multiplier concept adaptiveReviewOffsets
+  // introduced (scheduling.js) — lib/ladder.js keeps its own small
+  // duplicated copy of the multiplier itself now, per the doc's "not a
+  // second multiplier system" instruction — see
+  // Decisions.md#spaced-repetition--maintenance.
+  // tempoFloorStartFraction: 0.85, tempoFloorStepFraction: 0.05, tempoFloorCapFraction: 1
+  // — **retired as of Pass 61**: clearsStageFloor's Holding branch
+  // (lib/ladder.js) no longer reads any of these three fields; a Holding
+  // pass counts toward interval growth as soon as it meets the rep
+  // requirement, full stop (see progress[id].holdingReviewCount above for
+  // the periodic rep-only harder check that replaced this). The three
+  // fields themselves are left in the schema and stay directly editable
+  // in LadderConfigEditor under "Holding" — a deliberately flagged loose
+  // end (a user can "tune" a setting that now does nothing), not an
+  // oversight — see Decisions.md#spaced-repetition--maintenance.
   bpmSteps: { pass, softMiss, fail },
   // pass: 2, softMiss: -2, fail: -2 — how much practiceBPM moves per
-  // outcome. fail matches the other two rather than the doc's original
-  // ~8-10 pullback — a user decision, see Decisions.md.
+  // outcome on a chunk with no targetBPM to be gap-proportional against
+  // (see tempoRatchet below for the primary, in-use mechanism as of
+  // Pass 59). fail's flat fallback matches the other two rather than the
+  // doc's original ~8-10 pullback — a user decision, see Decisions.md —
+  // though in practice a real fail almost always uses its own separate
+  // entry-tempo reset instead (see progress[id].practiceBPM above), not
+  // this flat step.
+  tempoRatchet: { k, kCapBpm, tempoAchievedThreshold, maintenanceK },
+  // k: 0.3, kCapBpm: 8 (Pass 59) — the default gap-proportional rate a
+  // pass/soft-miss steps practiceBPM by (clamp(round(k * gap), 1,
+  // kCapBpm)), and its per-session BPM ceiling. Each chunk tracks its own
+  // current rate (progress[id].tempoRatchetK, above), seeded from this
+  // default. tempoAchievedThreshold: 0.85, maintenanceK: 0.05 (Pass 60) —
+  // once a chunk's practiceBPM is at/above this fraction of targetBPM
+  // ("tempo maintenance mode," isInTempoMaintenance in lib/ladder.js), the
+  // step-size calculation substitutes this small pinned rate for the
+  // chunk's own tracked k, at the point of use only — the tracked rate
+  // itself is never overwritten. No editing UI yet for any of these four
+  // fields specifically (LadderConfigEditor's own "Tempo ratchet" heading
+  // still only exposes bpmSteps, not this object — a pre-existing,
+  // unrelated labeling gap, not something this session's changes caused).
 }
 ```
 
@@ -528,9 +627,12 @@ its original `daysToLearn` — see
 [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query) and
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
-Still not built against this config: any editing UI for the values below
-(stage lengths, tempo floors, BPM step sizes) — they remain hardcoded
-defaults, stored per-piece so a later UI pass is additive.
+Stage lengths, graduation pass-counts, tempo floors, and `bpmSteps` are all
+editable via `LadderConfigEditor` (Pass 17, see above). The four
+`tempoRatchet` fields are the one part of this config still without their
+own editing UI — `LadderConfigEditor`'s "Tempo ratchet" heading currently
+exposes `bpmSteps` instead, a pre-existing labeling gap unrelated to
+`tempoRatchet` itself.
 
 `defaultPiece()` in `src/components/Wizard.jsx` is the literal source of truth
 for this shape and its defaults — read it directly if this table and the code
@@ -590,10 +692,22 @@ This distinction matters and is easy to get backwards:
   to the midpoint of the next. Reserved for the back half of the plan.
 - **Section run-throughs** (`kind: "section-runthrough"`, shown as
   **"Section run-through"**) — a play-through of one full user-defined
-  section, generated once every chunk within it has at least one logged
-  session. Not scheduled by `computeTimeline`; computed live by
-  `computeSectionRunThroughs()` and surfaced only in
-  `SectionRunThroughPanel`. See [Algorithms.md](Algorithms.md#section-run-throughs).
+  section. **Since Pass 49, not a one-time unlock** — it repeatedly comes
+  due (1, then 3, then 5, ... logged sessions on the section's
+  slowest-progressing chunk, a flat "+2" step forever), with a distinct
+  locked/grayed preview state the day before the next threshold is
+  crossed (`locked: true` on the object `computeSectionRunThroughs()`
+  returns). Not scheduled by `computeTimeline`; computed live by
+  `computeSectionRunThroughs()`. Interactable (loggable) only in
+  `SectionRunThroughPanel`; **since Pass 51**, also read (display-only, not
+  a second place to log) by Progress's estimated-vs-actual practice-time
+  panel. See [Algorithms.md](Algorithms.md#section-run-throughs). **Unlike
+  practice chunks/transitions/combos, a section run-through object carries
+  no `effort` field** — there was never a scheduling budget to weigh it
+  against, since it's never part of `computeTimeline`'s placement. A
+  consumer that needs an effort-equivalent (Progress's time-estimate panel
+  is the first) has to derive one itself from `measureCount *
+  avgDifficulty`, the same math transitions/combos use for theirs.
 - **Section transitions** (`kind: "section-transition"`, shown as
   **"Sections combined"**) — a play-through spanning two adjacent sections
   back to back. Unlocks only once *every* chunk in the whole piece has been
@@ -618,6 +732,30 @@ reasons:
 - **`__consolidation__`** — a synthetic key for whole-piece run-throughs
   (`handleLogRunThrough`), never a chunk at all. Long-established; most code
   that walks `piece.progress` already special-cases it explicitly.
+- **`__cold_start__`** — a synthetic key for the Cold-Start check (Pass 56,
+  `handleLogColdStart`/`applyColdStartLog`, `lib/coldStart.js`): a
+  whole-piece cold play-through logged after every section has been
+  covered, offered again at a widening gap since the piece was last
+  touched. Deliberately **not** folded into `"__consolidation__"` even
+  though both are whole-piece play-throughs logged outside the normal
+  per-chunk flow — see
+  [Algorithms.md](Algorithms.md#logging-a-separate-synthetic-key-not-__consolidation__)
+  for why keeping them structurally separate matters (mainly:
+  `computeRevivalTriggers` reads every `"__consolidation__"` session's
+  `stopCount` indiscriminately, and a Cold-Start session carries no
+  `stopCount` at all). Sessions are shaped
+  `{ day, avgBpm, notes, gapDays, loggedAt, loggedDate }` — no `stopCount`,
+  no `doneDays` array on the entry (unlike `"__consolidation__"`, this
+  isn't tied to a specific scheduled plan day the way a consolidation day
+  is; `day` on each session is just `elapsedDay(piece)` at the time it was
+  logged, for record-keeping). `lib/storage.js`'s
+  `backfillProgressLadderState` and `ladderStateDiffers` skip
+  `"__cold_start__"` the same way they skip `"__consolidation__"` (neither
+  is a real chunk), via a shared `NON_CHUNK_PROGRESS_KEYS` list — initially
+  missed for `"__cold_start__"` specifically (added only to one of the two
+  functions), found on a same-session follow-up review and fixed by
+  introducing that shared list so a third such key later only needs
+  adding in one place.
 - **`sr_<sectionId>`** — a section run-through. Logging one writes a normal
   progress entry under this id, but per the paragraph above it is *never* in
   `all`, on any piece. **This is not an edge case** — it happens the first
@@ -689,6 +827,35 @@ like this (feeding one, not the other) long-term is still not decided —
 revisit once Stage 3 ("learned") is actually defined against real data,
 per that same decision.
 
+### Overall piece confidence: a rollup, not a third independent score
+
+**Pass 58's `piece.manualOverallConfidence` / `computeOverallConfidence`
+(`lib/confidence.js`) is deliberately not a third entrant in the table
+above.** It's an effort-weighted average built directly *from*
+`computeConfidence` across every practice chunk — not an independently
+computed signal the way `computeProgressTier` or the ladder `stage` are.
+Concretely: it inherits whatever `computeConfidence` already says for each
+chunk (including that chunk's own `manualConfidence` override and any
+rough/lost/`needsRelearning` cap), so it can never itself introduce a
+*new* disagreement with `computeConfidence` the way `computeProgressTier`
+can — it's the same information, just rolled up to one piece-level number.
+It has its own, separate manual-override escape hatch
+(`manualOverallConfidence`, distinct from any chunk's `manualConfidence`),
+so a learner can disagree with the *rollup* specifically without touching
+any individual chunk's own override — that's the one place this stat has
+independent state of its own, not a computed disagreement with the table
+above.
+
+**Also distinct from `isPieceLearned`** (`lib/ladder.js`, Pass 39's Stage 3
+rollup) — that's a strict boolean (every chunk's ladder `stage` at
+Holding) answering "is the learning plan itself done," continuous
+`computeOverallConfidence` answers a different, always-moving question
+("how confident does this piece read right now") that can sit anywhere
+from 0–100 well before or after `isPieceLearned` flips true. Deliberately
+not wired to each other — see
+[Decisions.md](Decisions.md#overall-piece-confidence) and
+[Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
+
 ## Revival
 
 Revival (recovering a piece that was learned once but has gone stale — see
@@ -709,7 +876,19 @@ revival = {
                               // job is being the cutoff computeComboEscalations uses to
                               // decide which logged sessions belong to the current run.
                               // That is the only thing that should read it
-  purpose,                   // 'performance' | 'lesson' | 'enjoyment' | 'checking' | null
+  purpose,                   // 'performance' | 'lesson' | 'enjoyment' | 'checking' | null —
+                              // dormant since Pass 55: RevivalEntryModal's "What's this
+                              // revival for?" field (and REVIVAL_PURPOSE_OPTIONS) was
+                              // removed, so nothing collects this anymore and it's always
+                              // null going forward. Left defined on the schema rather
+                              // than stripped (storage.js's fallback and Wizard.jsx's
+                              // defaultPiece() both still default it to null) —
+                              // non-destructive, matching this codebase's usual migration
+                              // philosophy for a field nothing reads. A piece saved before
+                              // Pass 55 may still carry a real value from an earlier
+                              // revival; already unread before this pass (Pass 38 dropped
+                              // its last display surface — see Decisions.md#revival), so
+                              // this doesn't change what happens to old data.
   tempoLadderStartFraction,  // number, default 0.6 — starting point for computeTempoLadder,
                               // as a fraction of target BPM. Collected at revival entry
                               // (RevivalEntryModal) and editable afterward from RevivalTab's
@@ -753,8 +932,9 @@ logged as an open issue — see
 
 There is deliberately no separate "reassessment confidence" field: the
 revival reassessment pass **is** `progress[id].manualConfidence`, exposed
-through a faster 5-preset UI (`CONFIDENCE_PRESETS` in `src/App.jsx`) rather
-than a new 0-100 (or 0-4) field. See
+through a faster 5-preset UI (`CONFIDENCE_PRESETS`, `src/lib/constants.js`
+— labels relabeled Lost/Rough/OK/Comfortable/Solid in Pass 54, same five
+0/25/50/75/100 values) rather than a new 0-100 (or 0-4) field. See
 [Decisions.md](Decisions.md#revival) for why.
 
 ## Known simplifications worth knowing about

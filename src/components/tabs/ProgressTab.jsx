@@ -1,10 +1,20 @@
 import { Sparkline } from "../Sparkline";
+import { NumberInput } from "../NumberInput";
 import { computePracticeHistory } from "../../lib/history";
 import { formatRange, loggedSessions } from "../../lib/utils";
-import { SESSION_OUTCOME_META, DIFFICULTY_META } from "../../lib/constants";
-import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
+import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
+import {
+  computeConfidence,
+  computeConfidenceAsOf,
+  getDefaultTargetBPM,
+  sessionOutcome,
+  allJudgedSessions,
+  computeOverallConfidence,
+  isManualOverallConfidence,
+} from "../../lib/confidence";
+import { sectionLabel, weightedDifficultyFromArray } from "../../lib/chunking";
 
-export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPieces }) {
+export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPieces, onSetOverallConfidence }) {
   const practiceChunks = chunks.filter((c) => c.kind === "section");
 
   // #1 Rolling-window consistency — not a streak: a plain fraction of the
@@ -46,13 +56,13 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
     .filter((t) => t.sessions.length >= 2 && t.targetBPM);
 
   // #4 Outcome breakdown — % distribution of pass/soft-miss/fail across
-  // every logged session in the piece. Replaces the old free-standing
-  // "how did it feel" self-report, folded into this same judgment — see
+  // every logged, JUDGED session in the piece (allJudgedSessions,
+  // lib/confidence.js — see there for why loggedSessions() alone isn't
+  // enough). Replaces the old free-standing "how did it feel" self-report,
+  // folded into this same judgment — see
   // docs/Decisions.md#spaced-repetition--maintenance. sessionOutcome()
-  // also covers sessions logged before that change. Excludes skipped
-  // sessions entirely (Pass 29) — they weren't judged, so they shouldn't
-  // sit in the denominator pulling every real percentage down.
-  const allSessions = Object.values(piece.progress).flatMap((entry) => loggedSessions(entry.sessions));
+  // also covers sessions logged before that change.
+  const allSessions = allJudgedSessions(piece);
   const outcomeBreakdown = Object.entries(SESSION_OUTCOME_META).map(([value, meta]) => {
     const count = allSessions.filter((s) => sessionOutcome(s) === value).length;
     return { value, ...meta, count, pct: allSessions.length ? Math.round((count / allSessions.length) * 100) : 0 };
@@ -79,6 +89,78 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
   }
   const maxCum = Math.max(plannedByDay[timeline.days.length] || 1, 1);
   const chartDays = timeline.days.slice(0, Math.min(timeline.days.length, Math.max(currentDay + 3, 14)));
+
+  // Estimated vs. actual practice time — "recently practiced" reuses the
+  // Consistency panel's own trailing window (consistencyWindow/Start,
+  // computed above) rather than a second, independently-chosen number, per
+  // the pass's own instruction to match an existing recency window if one
+  // exists on this tab.
+  //
+  // Covers practice chunks, transitions, and combos (all three already
+  // carry a precomputed `effort`) plus single-section run-throughs. It does
+  // NOT cover the whole-piece "__consolidation__" run-through: that entry's
+  // sessions carry a stopCount, not cleanReps/bpm, and — more fundamentally
+  // — it isn't a real chunk object at all, so there's no `effort` (or
+  // measureCount/avgDifficulty to derive one from) to estimate against in
+  // the first place. It also does NOT cover combined section-pair
+  // run-throughs (kind: "section-transition", "Sections combined" in the
+  // UI) — the pass's own enumerated list of covered kinds names single
+  // "section run-throughs" specifically, and this app's docs already treat
+  // single-section and section-pair run-throughs as two distinct,
+  // separately-named mechanisms (see docs/Algorithms.md#section-run-throughs).
+  const timeSessions = (sessions) => (sessions || []).filter((s) => s.day >= consistencyStart && s.day <= currentDay);
+  const actualMinutesFor = (sessions) => timeSessions(sessions).reduce((sum, s) => sum + (s.durationSeconds || 0), 0) / 60;
+
+  const regularTimeItems = chunks
+    .map((c) => {
+      const entry = piece.progress[c.id] || {};
+      if (!timeSessions(entry.sessions).length) return null;
+      return {
+        id: c.id,
+        label: formatRange(c.start, c.end),
+        start: c.start,
+        estimatedMinutes: c.effort * EFFORT_TO_MIN,
+        actualMinutes: actualMinutesFor(entry.sessions),
+      };
+    })
+    .filter(Boolean);
+
+  // Section run-throughs (lib/chunking.js's computeSectionRunThroughs)
+  // don't carry a stored `effort` field the way the other three kinds do —
+  // built directly here instead, from piece.sections + the same
+  // measureCount * avgDifficulty math transitions/combos already use for
+  // theirs (neither of those has a recurring-material discount to apply
+  // either, so no effortMultiplier term is missing here). See this
+  // session's summary for why this isn't computeSectionRunThroughs' own
+  // gated output: that function only returns a section currently due or
+  // about to be — a section practiced inside this window but not due
+  // again right now would otherwise silently vanish from this panel.
+  const runThroughTimeItems = (piece.sections || [])
+    .map((section, i) => {
+      const entry = piece.progress[`sr_${section.id}`] || {};
+      if (!timeSessions(entry.sessions).length) return null;
+      const measureCount = section.end - section.start + 1;
+      // A section saved with end < start (SectionsEditor now normalizes
+      // this on every edit, but an already-malformed one can still reach
+      // here — an old save, or a hand-edited/imported backup) has no valid
+      // range to average a difficulty over: weightedDifficultyFromArray
+      // would divide by a zero or negative count and hand back NaN/-0.
+      // Same reasoning as excluding the whole-piece run-through above —
+      // no real estimate to compare against, so this item is left out
+      // entirely rather than shown with a nonsense number.
+      if (measureCount < 1) return null;
+      const { avg } = weightedDifficultyFromArray(piece.measureDifficulty, section.start, section.end);
+      return {
+        id: `sr_${section.id}`,
+        label: `Play through: ${sectionLabel(section, i)}`,
+        start: section.start,
+        estimatedMinutes: measureCount * avg * EFFORT_TO_MIN,
+        actualMinutes: actualMinutesFor(entry.sessions),
+      };
+    })
+    .filter(Boolean);
+
+  const timeComparisonItems = [...regularTimeItems, ...runThroughTimeItems].sort((a, b) => a.start - b.start);
 
   // #5 Projected finish at current pace — a forward-looking companion to
   // the chart above, based on recent (not average) velocity.
@@ -117,11 +199,46 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
   // case means.
   const history = computePracticeHistory(piece, chunks);
 
+  // Overall piece confidence (Pass 58) — see lib/confidence.js for the
+  // effort-weighted rollup and the manual-override precedence.
+  const overallConfidence = computeOverallConfidence(piece, practiceChunks, currentDay);
+  const isOverallManual = isManualOverallConfidence(piece);
+
   return (
     <div className="tab-pane">
       <div className="tab-header day-nav">
         <h1>Progress</h1>
         <button className="ghost-btn" onClick={onViewAllPieces}>View all pieces</button>
+      </div>
+
+      <div className="panel">
+        <h3>Overall confidence</h3>
+        <div className="field">
+          <span>Confidence override</span>
+          {isOverallManual ? (
+            <div className="manual-conf-row">
+              <NumberInput
+                value={piece.manualOverallConfidence}
+                min={0}
+                max={100}
+                onCommit={(n) => onSetOverallConfidence(n)}
+              />
+              <button className="ghost-btn" onClick={() => onSetOverallConfidence(null)}>
+                Reset to automatic
+              </button>
+            </div>
+          ) : (
+            <div className="manual-conf-row">
+              <p className="wizard-hint" style={{ margin: 0, flex: 1 }}>
+                Effort-weighted average across every practice chunk — auto-calculated at {overallConfidence}% right
+                now.
+              </p>
+              <button className="ghost-btn" onClick={() => onSetOverallConfidence(overallConfidence)}>
+                Set manually
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="stat-grid-2">
@@ -172,6 +289,45 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
           <span><i className="dot" style={{ background: "var(--ink-faint)" }} />Planned</span>
           <span><i className="dot" style={{ background: "var(--brass)" }} />Actual</span>
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Estimated vs. actual practice time</h3>
+        {timeComparisonItems.length === 0 ? (
+          <p className="wizard-hint" style={{ margin: 0 }}>
+            Nothing logged in the last {consistencyWindow} day{consistencyWindow === 1 ? "" : "s"} yet.
+          </p>
+        ) : (
+          <>
+            <p className="wizard-hint" style={{ marginTop: 0 }}>
+              Items with a logged session in the last {consistencyWindow} day{consistencyWindow === 1 ? "" : "s"}.
+              Each pair is scaled to its own taller bar, not a shared scale, so a quick chunk and a long
+              run-through are equally readable side by side.
+            </p>
+            <div className="progress-chart">
+              {timeComparisonItems.map((item) => {
+                const maxOfPair = Math.max(item.estimatedMinutes, item.actualMinutes, 0.01);
+                return (
+                  <div
+                    key={item.id}
+                    className="progress-chart-col"
+                    title={`${item.label}: ${Math.round(item.actualMinutes)}m actual / ${Math.round(item.estimatedMinutes)}m estimated`}
+                  >
+                    <div className="progress-chart-bars">
+                      <div className="progress-chart-bar planned" style={{ height: `${(item.estimatedMinutes / maxOfPair) * 100}%` }} />
+                      <div className="progress-chart-bar actual" style={{ height: `${(item.actualMinutes / maxOfPair) * 100}%` }} />
+                    </div>
+                    <span className="progress-chart-label mono">{item.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="chart-legend">
+              <span><i className="dot" style={{ background: "var(--ink-faint)" }} />Estimated</span>
+              <span><i className="dot" style={{ background: "var(--brass)" }} />Actual</span>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="panel">

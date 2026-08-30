@@ -16,13 +16,21 @@
 
 ## Done
 
-Setup wizard, chunking/timeline engine, Piece Map, Today's Practice (timer,
+Setup wizard, chunking/timeline engine, Piece Map (**since Pass 50** its
+grid is filtered to base practice chunks only, running the piece's full
+length with no gaps and no transition/combo tiles; a "Related chunks"
+field in the chunk-detail modal reaches those instead, as clickable links
+that open each one's own detail in turn), Today's Practice (timer,
 reps/BPM/effectiveness logging — **since Pass 22** also a read-only "Week"
 view alongside Day view/View all, see
 [Decisions.md](Decisions.md#ux); **since Pass 23** a free-text note per
 chunk, editable inline during logging, not just from the Piece Map), Progress
 tab (rolling-window consistency, consistency heatmap, actual-vs-planned,
-projected finish, tempo trend, effectiveness calibration — plus, as of Pass
+**since Pass 51** an estimated-vs-actual practice time panel (every
+recently-practiced chunk/transition/combo/section-run-through, paired
+against `EFFORT_TO_MIN`-based estimate — see
+[Decisions.md](Decisions.md#scheduling)), projected finish, tempo trend,
+effectiveness calibration — plus, as of Pass
 20, confidence-by-difficulty, folded in when the separate Analytics tab was
 removed; see [Decisions.md](Decisions.md#ux). The other folded-in panel,
 recurring-material payoff, was removed again in Pass 32b — pure display
@@ -41,7 +49,8 @@ day collapses instead of showing its stale task list, and rescheduling the
 same piece more than once now correctly chains through its whole history
 instead of losing what an earlier reschedule had placed — see
 [Decisions.md](Decisions.md#scheduling)), section
-run-throughs, reference
+run-throughs (**since Pass 49** a repeating due/locked-preview gate, not a
+one-time unlock — see [Decisions.md](Decisions.md#scheduling)), reference
 recordings and (**since Pass 24**) reference documents (sheet music PDFs,
 fingerings — same shape and pattern as recordings; see
 [Data-Model.md](Data-Model.md#the-piece-object)), multi-movement works
@@ -51,8 +60,12 @@ fingerings — same shape and pattern as recordings; see
 (MVP slice — entry flow, chunk/transition reassessment reusing
 `manualConfidence`, manual flagging (a boolean `weakSpot` at the time;
 merged into Pass 6's tri-state rough/lost `progress[id].flag` — see
-[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)),
-revival plan generation, tempo ladder, random start generator, memory
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging);
+**as of Pass 54, only settable from ordinary Piece Map, not from
+revival's own reassessment pass** — see [Decisions.md](Decisions.md#revival)),
+revival plan generation, tempo ladder (**since Pass 55** its starting
+point is collected as a straight BPM value, not a percentage of target,
+both at revival entry and mid-revival), random start generator, memory
 anchors — see [Decisions.md](Decisions.md#revival) and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md)).
 
@@ -128,6 +141,34 @@ it was built once actually requested, reusing each session's `loggedDate`
 rather than writing anything genuinely new to the confidence/scheduling
 engine.
 
+**Since Pass 56**, a Cold-Start check: once every section's own
+single-section run-through has been logged at least once, the app offers
+a periodic, escalating nudge (3, 7, 14, 28, ... days since anything was
+logged on the piece) to play the whole thing through cold — no warm-up —
+and log average BPM plus free-text notes. Log-and-display only; nothing
+computes off the result yet. See
+[Algorithms.md](Algorithms.md#cold-start-check) and
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#cold-start-check-built-pass-56).
+
+**Since Pass 57**, Today's Practice has its own `RandomStartPanel` —
+`RandomStartPanel` (previously Revival/Master-Agenda-only) pooling every
+chunk/transition/combo in the current piece with 2+ logged sessions, so a
+practice session doesn't always start from the same place. Hidden below
+2 qualifying entries.
+
+**Since Pass 58**, Progress has a piece-level "Overall confidence" stat —
+an effort-weighted average of `computeConfidence` across every practice
+chunk, with its own manual override (same escape-hatch pattern as
+per-chunk `manualConfidence`). Connected to Pass 56's Cold-Start check as
+a same-session follow-up: completing a Cold-Start log now offers a short,
+optional "rate the piece overall" prompt. See
+[Algorithms.md](Algorithms.md#overall-piece-confidence-pass-58) and
+[Decisions.md](Decisions.md#overall-piece-confidence). This is a
+different question from item 2 below ("a genuinely *learned*... model") —
+that item is about *deriving* the scheduling constants from real data;
+this stat is a display rollup of the existing hand-tuned
+`computeConfidence`, not a new model.
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold
@@ -152,7 +193,13 @@ assuming this section is stale.
    a continuous spaced-repetition ladder (Stabilizing → Settling →
    Holding) that every chunk/transition/combo now actually advances
    along, driven by a three-tier session outcome (full pass/soft
-   miss/real fail) with a per-chunk `practiceBPM` ratchet
+   miss/real fail) with a per-chunk `practiceBPM` ratchet — **gap-proportional
+   as of Pass 59** (`ladderConfig.tempoRatchet`), with a "tempo maintenance
+   mode" pinned-rate substitution once close to target (Pass 60), replacing
+   the original flat step (now the fallback for a chunk with no
+   `targetBPM`) — and **Holding's own tempo floor retired outright as of
+   Pass 61**, replaced by a periodic rep-only harder check
+   (`progress[id].holdingReviewCount`)
    (`computeLadderAdvance`, `src/lib/ladder.js`, called from
    `handleLogSession` on every logged session) — see
    [Data-Model.md](Data-Model.md#the-piece-object) and

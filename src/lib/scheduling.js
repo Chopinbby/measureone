@@ -41,14 +41,20 @@ function computeRestDayFlags(totalDays, practiceDaysPerWeek) {
 export function computeDaysNeededForMinutesPerDay(chunkSet, minutesPerDay, practiceDaysPerWeek) {
   const minutes = Math.max(5, Number(minutesPerDay) || 30);
   const dayBudget = (minutes * 0.65) / EFFORT_TO_MIN;
-  // Every introduced item also costs some spaced-review load later at a
-  // flat 3 minutes per touch (see computeTimeline's minutesFor) — effort
-  // alone (the raw introduction cost) undercounts what a day actually ends
-  // up costing once review load lands on top of it. Folding an estimate of
-  // that in here, converted to the same effort-point units as everything
-  // else in this budget, is what keeps this estimate from landing on a day
-  // count that's technically "enough" for introduction alone but still
-  // runs well over budget once review is added.
+  // Every introduced item also costs some spaced-review load later — each
+  // review touch is priced the same as the chunk's own introduction
+  // (chunk.effort), matching computeTimeline's minutesFor and
+  // computeDueReviews, both of which price a review at
+  // chunk.effort * EFFORT_TO_MIN rather than a flat per-touch minute
+  // figure (the flat rate this replaced undercounted a hard chunk's review
+  // cost specifically, which could make a minutes-mode day count come out
+  // too optimistic for a piece full of difficult passages). Effort alone
+  // (the raw introduction cost) undercounts what a day actually ends up
+  // costing once review load lands on top of it; folding that in here,
+  // already in the same effort-point units as everything else in this
+  // budget, is what keeps this estimate from landing on a day count that's
+  // technically "enough" for introduction alone but still runs well over
+  // budget once review is added.
   //
   // Budgets for 2 touches per item, not REVIEW_OFFSETS.length (4) — that
   // fixed four-touch assumption predates the ladder scheduler
@@ -62,11 +68,11 @@ export function computeDaysNeededForMinutesPerDay(chunkSet, minutesPerDay, pract
   // used (how many times a chunk is logged, how it performs), which this
   // function has no visibility into. Same "known limitation, not a hard
   // cap" spirit as the rest of this estimate — see the comment below.
-  const reviewEffortPerItem = (2 * 3) / EFFORT_TO_MIN;
+  const REVIEW_TOUCHES_PER_ITEM = 2;
   let learningDaysNeeded = 1;
   let acc = 0;
   chunkSet.all.forEach((c) => {
-    const itemEffort = c.effort + reviewEffortPerItem;
+    const itemEffort = c.effort * (1 + REVIEW_TOUCHES_PER_ITEM);
     if (acc + itemEffort > dayBudget && acc > 0) {
       learningDaysNeeded++;
       acc = 0;
@@ -258,10 +264,19 @@ export function computeTimeline(piece, chunkSet) {
   });
 
   const chunkById = Object.fromEntries(all.map((c) => [c.id, c]));
+  // A review is priced the same as introducing the chunk fresh —
+  // chunk.effort * EFFORT_TO_MIN, same formula for all three roles, and the
+  // same rate computeDueReviews (lib/maintenance.js) already uses for its
+  // live due-review estimate. Previously reviewMin used a flat 3
+  // minutes/touch regardless of the chunk's own difficulty, which
+  // undercounted how long a hard chunk's review actually takes and could
+  // make a minutes-mode plan's day count come out too optimistic once
+  // review load was folded in (see computeDaysNeededForMinutesPerDay below,
+  // which had the same flat-rate assumption baked into its day-count math).
   const minutesFor = (d) => {
     const newMin = d.newChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
     const specialMin = d.specialChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
-    const reviewMin = d.reviewChunkIds.length * 3;
+    const reviewMin = d.reviewChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
     return newMin + specialMin + reviewMin;
   };
 

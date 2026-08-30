@@ -56,6 +56,18 @@ function consolidationLabel(piece, day) {
   return last && last.stopCount != null ? `Full run-through (stopped ${last.stopCount}x)` : "Full run-through";
 }
 
+// The Cold-Start check (Pass 56) is logged against its own synthetic
+// progress key too (applyColdStartLog, lib/coldStart.js) — same reason as
+// consolidationLabel above, handled before either chunk-set lookup is
+// attempted. Its average BPM, when present, comes off the last session
+// logged that day, same "most recent same-day attempt wins" convention
+// consolidationLabel uses for stopCount.
+function coldStartLabel(piece, day) {
+  const sessions = ((piece.progress.__cold_start__ || {}).sessions || []).filter((s) => s.day === day);
+  const last = sessions[sessions.length - 1];
+  return last && last.avgBpm != null ? `Cold-start check (${last.avgBpm} BPM avg)` : "Cold-start check";
+}
+
 function describeDay(piece, chunkById, orderedSections, ids, day) {
   const items = [];
   let unresolvedCount = 0;
@@ -63,6 +75,8 @@ function describeDay(piece, chunkById, orderedSections, ids, day) {
   ids.forEach((id) => {
     if (id === "__consolidation__") {
       items.push(consolidationLabel(piece, day));
+    } else if (id === "__cold_start__") {
+      items.push(coldStartLabel(piece, day));
     } else if (chunkById[id]) {
       items.push(formatRange(chunkById[id].start, chunkById[id].end));
     } else {
@@ -100,12 +114,26 @@ export function computePracticeHistory(piece, chunks, limit = 10) {
   const orderedSections = [...((piece && piece.sections) || [])].sort((a, b) => a.start - b.start);
 
   const idsByDay = {};
+  const addId = (day, id) => {
+    if (day == null) return;
+    if (!idsByDay[day]) idsByDay[day] = [];
+    idsByDay[day].push(id);
+  };
+
   Object.entries((piece && piece.progress) || {}).forEach(([id, entry]) => {
-    ((entry || {}).doneDays || []).forEach((d) => {
-      if (!idsByDay[d]) idsByDay[d] = [];
-      idsByDay[d].push(id);
-    });
+    ((entry || {}).doneDays || []).forEach((d) => addId(d, id));
   });
+
+  // "__cold_start__" (Pass 56) carries no doneDays — a Cold-Start check
+  // isn't tied to a specific scheduled plan day the way a consolidation
+  // day is, so the loop above never picks it up. Indexed here instead,
+  // straight off each session's own `day` field — deduped to one entry per
+  // day (same as doneDays' own semantics) so a day with several same-day
+  // attempts doesn't repeat the "Cold-start check" label once per session.
+  const coldStartDays = new Set(
+    ((((piece && piece.progress) || {}).__cold_start__ || {}).sessions || []).map((s) => s.day)
+  );
+  coldStartDays.forEach((d) => addId(d, "__cold_start__"));
 
   return Object.keys(idsByDay)
     .map(Number)

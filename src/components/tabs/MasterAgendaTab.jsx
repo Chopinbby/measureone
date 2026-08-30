@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend } from "../../lib/scheduling";
-import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
+import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
 import { isPieceLearned } from "../../lib/ladder";
@@ -162,8 +162,20 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             return;
           }
 
-          const day = timeline.days[dayNumber - 1];
-          if (!day) return;
+          const rawDay = timeline.days[dayNumber - 1];
+          if (!rawDay) return;
+
+          // Pass 66: fold the live due-reviews query into this day's own
+          // reviewChunkIds (and, since a review is now priced the same way
+          // as introducing a chunk fresh — see minutesFor/computeDueReviews
+          // — its minutes too), same mergeLiveDueReviews helper TodayTab
+          // uses — a review whose nextDueDate has already passed while the
+          // piece is still inside its active plan otherwise has no surface
+          // here either. Only for real "today", matching the due-list
+          // branch above (computeDueReviews is "as of today" only, never a
+          // forward-looking window for a browsed date).
+          const liveDue = selectedDate === todayISODate() ? computeDueReviews(piece, chunkSet, selectedDate) : [];
+          const day = mergeLiveDueReviews(rawDay, liveDue);
 
           totalMinutes += day.minutes;
 

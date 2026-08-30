@@ -56,6 +56,13 @@ export function ChecklistItem({
   const conf = computeConfidence(chunk, piece, day);
   const [reps, setReps] = useState("");
   const [bpm, setBpm] = useState("");
+  // Pass 53 — gates the Log button on whatever's been typed, not on the
+  // commit-on-blur values above: waiting for blur before enabling the
+  // button meant tabbing/clicking straight from BPM to Log never worked,
+  // since Log was still disabled at that instant. Submission itself still
+  // reads reps/bpm (the committed state), never these flags directly.
+  const [hasRepsDraft, setHasRepsDraft] = useState(false);
+  const [hasBpmDraft, setHasBpmDraft] = useState(false);
   const [manualFail, setManualFail] = useState(false);
   const [timerRunning, setTimerRunning] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
@@ -98,7 +105,7 @@ export function ChecklistItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);
 
-  const canLog = reps !== "" && bpm !== "";
+  const canLog = hasRepsDraft && hasBpmDraft;
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   const practiceBPM = entry.practiceBPM ?? null;
   // Single source of truth for "how many reps does this chunk actually
@@ -110,8 +117,11 @@ export function ChecklistItem({
   // the actual resolution (including the run-through flat-rep override)
   // into resolveRequiredReps (lib/confidence.js) — this component has no
   // JSX-free test path of its own, and that logic needs to be unit
-  // testable on its own.
-  const requiredReps = resolveRequiredReps(chunk);
+  // testable on its own. Pass 61 — entry.stage/entry.holdingReviewCount
+  // were already in scope (the same `entry` this component reads
+  // everywhere else), so no new prop needed here for Holding's periodic
+  // harder-check bump to apply.
+  const requiredReps = resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount);
   const outcomeMeta = session && SESSION_OUTCOME_META[sessionOutcome(session)];
   // First encounter = nothing has ever been logged for this chunk yet, i.e.
   // there's no user-selected starting tempo (practiceBPM) or session history
@@ -198,6 +208,8 @@ export function ChecklistItem({
     });
     setReps("");
     setBpm("");
+    setHasRepsDraft(false);
+    setHasBpmDraft(false);
     setManualFail(false);
     setDurationSeconds(0);
     setTimerRunning(false);
@@ -284,6 +296,15 @@ export function ChecklistItem({
             {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
           </p>
         ) : null}
+        {/* Pass 59 — the tempo-ratchet overlearning bonus is the only path
+            that can push practiceBPM above targetBPM (the normal step and
+            computeDemonstratedTempoBaseline both cap at targetBPM), so this
+            condition is exactly "the overlearning bonus fired". */}
+        {practiceBPM != null && targetBPM && practiceBPM > targetBPM ? (
+          <p className="tip-line">
+            Overlearning: practice tempo ({practiceBPM} BPM) is now above target ({targetBPM} BPM).
+          </p>
+        ) : null}
         <p className="tip-line"><strong>{requirementText}</strong></p>
         <p className="tip-line">
           Spaced Repetition:{" "}
@@ -322,7 +343,14 @@ export function ChecklistItem({
         <div className="log-row">
           <label>
             <span>Clean reps (aim {requiredReps})</span>
-            <NumberInput value={reps} min={0} onCommit={(n) => setReps(n)} placeholder={String(requiredReps)} />
+            <NumberInput
+              value={reps}
+              min={0}
+              onCommit={(n) => setReps(n)}
+              onDraftChange={(text) => setHasRepsDraft(text !== "")}
+              placeholder={String(requiredReps)}
+              acceptPlaceholderOnTab
+            />
           </label>
           <label>
             <span>BPM achieved</span>
@@ -330,6 +358,8 @@ export function ChecklistItem({
               value={bpm}
               min={20}
               onCommit={(n) => setBpm(n)}
+              onDraftChange={(text) => setHasBpmDraft(text !== "")}
+              acceptPlaceholderOnTab
               placeholder={
                 practiceBPM != null
                   ? String(practiceBPM)

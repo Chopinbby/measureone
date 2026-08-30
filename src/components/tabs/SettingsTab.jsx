@@ -176,10 +176,14 @@ export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft
       <div className="tab-header"><h1>Edit piece</h1></div>
       <div className="panel"><h3>Piece</h3><BasicsFields draft={editDraft} set={setEditDraft} onMultiPartChange={setMultiPart} /></div>
       <div className="panel"><h3>Sections</h3><SectionsEditor draft={editDraft} set={setEditDraft} /></div>
+      {/* Tempo zones sits right after Sections, matching the Wizard's order
+          — sections are the more natural thing to set first, and tempo
+          zones can copy their ranges from them (BpmZonesEditor's "Copy
+          ranges from sections" button). */}
+      <div className="panel"><h3>Tempo zones</h3><BpmZonesEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Difficulty</h3><DifficultyEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Recurring material</h3><RecurringEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Schedule</h3><ScheduleFields draft={editDraft} set={setEditDraft} isRevival={!!editDraft.revival?.active} /></div>
-      <div className="panel"><h3>Tempo zones</h3><BpmZonesEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Maintenance ladder</h3><LadderConfigEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Recordings</h3><RecordingsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="panel"><h3>Documents</h3><DocumentsEditor draft={editDraft} set={setEditDraft} /></div>

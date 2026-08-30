@@ -49,16 +49,230 @@ for what each generated `kind` means.
 
 `computeSectionRunThroughs(piece, practiceChunks)` — computed live (not
 persisted, not part of `generateAllChunks`'s output), used only by
-`SectionRunThroughPanel`.
+`SectionRunThroughPanel`. A single-section run-through and a section-pair
+run-through are gated by two genuinely different mechanisms (Pass 49) — see
+the two subsections below.
 
-- A single-section run-through (`kind: "section-runthrough"`) unlocks for a
-  given `piece.sections` entry once **every practice chunk within that
-  section** has at least one logged session.
-- A combined section-pair run-through (`kind: "section-transition"`) between
-  two adjacent, already-learned sections unlocks only once **every practice
-  chunk in the entire piece** has at least one logged session —
-  deliberately a later-stage drill, not an early one, per the code comment
-  at the top of the function.
+### Single-section run-throughs: a repeating gate, not a one-time unlock
+
+**As of Pass 49, a single-section run-through (`kind: "section-runthrough"`)
+does not just unlock once and stay available.** It goes due → not due → due
+again as the section's slowest-progressing chunk picks up more sessions,
+computed fresh on every call from live session counts — no persisted state,
+same pattern as everything else scheduling-related in this codebase.
+
+`sectionRunThroughGate(section, piece, bySectionId)` (`lib/chunking.js`) is
+the gate itself, returning `{ minCount, due, lockedPreview }`:
+
+- **The gating metric** is each assigned chunk's count of *confirmed,
+  logged* sessions — `loggedSessions(sessions).length` (`lib/utils.js`),
+  not raw `sessions.length`. A skipped Interleaved attempt or an
+  unconfirmed provisional one is stored in the same array
+  (`handleLogSession`, `App.jsx`) but isn't a completed rep, so it must not
+  advance a chunk toward unlocking or re-unlocking a run-through — fixed
+  after initial review caught that the first cut of this gate used raw
+  `sessions.length`, the same way `isSectionLearned` still does, and so
+  counted skips/provisionals too. This is a **deliberate divergence** from
+  `isSectionLearned` (unchanged, still raw `sessions.length`, out of scope
+  for this fix): a chunk touched only via a skip or an unconfirmed
+  provisional can read as "learned" (Overview's stat) while contributing 0
+  toward this gate — "has this chunk been touched at all" and "how many
+  real reps does this chunk have" are different questions, so the two
+  functions are allowed to disagree. The section's own count, `minCount`,
+  is the **minimum across its chunks** — the run-through is a play-through
+  of the *whole* section, so it's only meaningful once every included chunk
+  has actually reached that count; the slowest chunk sets the pace for the
+  whole section, not an average or the fastest chunk.
+- **Threshold sequence: 1, 3, 5, 7, ...** — first unlock at 1 (matches the
+  pre-Pass-49 condition exactly, so nothing changed about *when a section
+  first becomes eligible*), then a flat "+2" step forever. This is exactly
+  the odd positive integers, so `due` reduces to a parity check —
+  `minCount % 2 === 1` — rather than needing an explicit threshold list or
+  any memory of which thresholds were already consumed. One consequence
+  worth internalizing: logging the run-through itself does **not** advance
+  `minCount` (it writes to the synthetic `sr_<sectionId>` progress key, not
+  to any practice chunk's `sessions`), so a section can sit due
+  indefinitely if its chunks aren't practiced again — there is no
+  "complete it to dismiss it" interaction, only "the underlying chunks
+  advance past it."
+- **`lockedPreview`** covers the day before a new threshold is crossed:
+  every chunk except a single slowest one has already reached the upcoming
+  threshold, so that one chunk's next logged session is what crosses the
+  whole section into being newly due. This requires the minimum to be held
+  **uniquely** by one chunk — if two or more chunks tie for slowest, a
+  session on just one of them can't cross the section yet (the other still
+  holds it back), so there is no single "next session" to preview.
+  `lockedPreview` and `due` are mutually exclusive by construction (the
+  parity check only runs on the `!due` branch).
+
+`computeSectionRunThroughs` includes a single-section entry whenever
+`gate.due || gate.lockedPreview`, carrying a `locked: gate.lockedPreview`
+field `SectionRunThroughPanel` reads to pick one of two render branches: a
+normal, loggable `ChecklistItem` when due, or a grayed/disabled preview row
+(a small component local to that file, not `ChecklistItem` itself) when
+locked — styled off the same `disabled`-state CSS classes `ChecklistItem`
+already uses for its own checkbox and "Log practice" button before required
+input is filled in, so a locked task reads as a preview of the same kind of
+row rather than a visually distinct one. When neither `due` nor
+`lockedPreview` holds, the section contributes nothing to the list at all —
+this is what makes the panel now read as a real, appearing/disappearing day
+task instead of a permanently-available option sitting in the background
+once unlocked, which was the pre-Pass-49 behavior this replaced.
+
+### Section-pair run-throughs: still a one-time unlock
+
+A combined section-pair run-through (`kind: "section-transition"`) between
+two adjacent, already-learned sections unlocks only once **every practice
+chunk in the entire piece** has at least one logged session — deliberately
+a later-stage drill, not an early one, per the code comment at the top of
+the function — and, once unlocked, **stays available**, unlike the
+repeating gate above. This is the original, pre-Pass-49 mechanism, left
+untouched: `computeSectionRunThroughs` still gates it on
+`allChunksPracticed` (every chunk in the whole piece) plus `isSectionLearned`
+on both neighboring sections (the plain ">= 1 session per chunk" check,
+unaffected by `sectionRunThroughGate`), the same way it always has.
+
+**Open question, deliberately not resolved by Pass 49:** whether section-pair
+run-throughs should get the same repeating threshold once they first
+unlock, or whether staying a one-time "unlock and forget" drill is actually
+right for them (arguably more defensible here — they're already a
+late-stage, whole-piece-touched drill, not an early check-in). Flagged for a
+product decision rather than guessed at — recorded in
+[Decisions.md](Decisions.md#open-questions), which whichever future pass
+resolves this should update alongside the actual change.
+
+## Cold-Start check
+
+`coldStartGateMet(piece)`, `coldStartDueThreshold(piece, today)`,
+`applyColdStartLog(piece, day, avgBpm, notes, today)`,
+`applyColdStartUnlog(piece)` — all in `src/lib/coldStart.js` (Pass 56). A
+whole-piece cold play-through, offered once every section has genuinely
+been covered, then re-offered at a widening gap since the piece was last
+touched at all. Distinct from both the section run-throughs above (which
+gate on *practice-chunk* coverage per section) and from
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)'s
+`isPieceLearned` (which requires every chunk at ladder Holding — a much
+stricter bar for a different purpose, whether the *learning plan* is
+done). A piece can clear this gate well before `isPieceLearned` is true;
+the two are deliberately never combined into one check.
+
+### The gate: every section's own run-through, at least once
+
+`coldStartGateMet(piece)` is exactly
+`piece.sections.every(s => ((piece.progress["sr_" + s.id] || {}).sessions
+|| []).length > 0)` — raw `sessions.length`, matching `isSectionLearned`'s
+convention (`lib/chunking.js`), **not** `loggedSessions()`-filtered the way
+`sectionRunThroughGate` is. `sectionRunThroughGate` and `isSectionLearned`
+already deliberately diverge on that exact question for their own reasons
+(see [Section run-throughs](#section-run-throughs) above); this gate sides
+with `isSectionLearned`'s simpler reading, per the pass's own reasoning: a
+section's single-section run-through can only ever become due once
+`isSectionLearned` holds for it (every assigned chunk touched at least
+once), so requiring one logged `sr_<sectionId>` session per section
+already implies the whole piece has been covered — no separate "every
+chunk in the piece has a session" check is needed alongside it. Section-**pair**
+run-throughs (`kind: "section-transition"`) are not part of this gate —
+single-section coverage only.
+
+`piece.sections` is never actually empty in normal use (`SectionsEditor`
+floors at 1 section, `defaultPiece()` seeds one) — but `Array.every()` on
+an empty array is vacuously `true`, so the function guards that case
+explicitly and returns `false`, the same way `countLearnedSections`
+already guards the identical edge case elsewhere in `chunking.js`. A
+hand-edited or malformed import with zero sections can't misread as
+"gate met" with nothing behind it.
+
+### The repeating, escalating prompt
+
+`coldStartDueThreshold(piece, today)` returns the threshold that should be
+surfaced right now — one of **3, 7, 14, then doubling forever (28, 56,
+112, ...)** — or `null` if the gate isn't met or nothing new is due. The
+first three rungs are fixed by the pass; doubling past 14 is this pass's
+own reasonable-default choice for the otherwise-unspecified tail (matching
+the spirit of the maintenance ladder's own Holding-stage interval growth —
+see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages) —
+not derived from any study, same hand-picked status as this app's other
+scheduling constants, [Research.md](Research.md)).
+
+**Deliberately a pure, uncached recomputation — including "was this
+already shown" — rather than a persisted shown/dismissed flag on `piece`.**
+The mechanism: compute the highest threshold `daysSinceLogged` (`=
+daysBetweenInclusive(piece.lastLoggedAt, today) - 1`, same formula
+`computeRevivalTriggers` already uses for its own staleness check) has
+crossed, then compute the same thing one day earlier
+(`daysSinceLogged - 1`) — "yesterday's" value. The threshold is due only
+when the two disagree, i.e. only on the exact day a new threshold is
+crossed; every day after that, until the next threshold, both
+computations agree and the function reads `null`. This satisfies the
+pass's "doesn't re-fire daily once crossed" requirement with no stored
+state to go stale across gap cycles, and — just as important — no risk of
+a write-driven effect hiding the panel the instant it renders. A more
+literal reading of the pass's "track a `lastPromptedThreshold` value,
+reset it on a new session" framing was tried first and rejected here: an
+automatic "mark as shown" write, applied the way Pass 39's
+`computeMinutesModeAutoExtend` effect applies its patch, would trigger a
+re-render whose *very next* computation reads its own just-written state
+and immediately un-shows the panel it had only just decided to show —
+functionally invisible to a real user despite technically having rendered
+for one frame. Because this is a live derivation off `piece.lastLoggedAt`
+alone, "reset whenever any new session gets logged" (the pass's framing)
+falls out for free: a new session moves `lastLoggedAt` forward (every
+existing logging handler already does this, unchanged by this feature),
+collapsing `daysSinceLogged` back near zero with nothing to explicitly
+reset. Same "computed fresh every call, never a persisted unlocked flag"
+spirit as `sectionRunThroughGate` above and this codebase's other
+schedule-derived state (`chunkSet`/`timeline`, `isPlanActuallyComplete`).
+
+`today` defaults to the real `todayISODate()` but is injectable, mirroring
+`isExportReminderDue`'s `now` parameter (`lib/storage.js`) — lets tests
+simulate the passage of days by varying `piece.lastLoggedAt` against a
+fixed "today," the same style `revival.test.mjs` already uses for
+`computeRevivalTriggers`'s staleness trigger, without needing to mock the
+system clock.
+
+### Logging: a separate synthetic key, not `"__consolidation__"`
+
+`applyColdStartLog`/`applyColdStartUnlog` write to a new synthetic
+`piece.progress["__cold_start__"]` entry — sessions shaped
+`{ day, avgBpm, notes, gapDays, loggedAt, loggedDate }` — deliberately
+**not** appended to `"__consolidation__"`'s existing sessions array, even
+though the two are superficially similar (both a whole-piece play-through
+logged outside the normal per-chunk flow). Two reasons: (1)
+`computeRevivalTriggers` already reads every `"__consolidation__"`
+session's `stopCount` indiscriminately for its ">5 stops" trigger — a
+Cold-Start session carries no `stopCount` at all, so blending the two
+would silently corrupt that trigger's meaning; (2) Progress's recent
+practice-history list would otherwise blend a deliberately-cold gap test
+in with routine scheduled consolidation days, losing a distinction worth
+keeping. `gapDays` is captured from the piece's *pre-log* `lastLoggedAt`
+(the gap that actually motivated this test), since the same call is about
+to overwrite `lastLoggedAt` with today's date — the live gap value would
+otherwise be lost the moment the session lands. `avgBpm` itself is
+log-and-display only: stored and shown (the panel's own "last logged"
+line) but nothing computes off it — no comparison against
+`targetBPM`/`practiceBPM`, no effect on `computeRevivalTriggers` or
+confidence math. **The manual-confidence connection this section
+originally deferred is now built** — see
+[Overall piece confidence](#overall-piece-confidence-pass-58) below and
+[Decisions.md](Decisions.md#overall-piece-confidence).
+
+**Surfaced on Progress's "Recent practice history" list.** Originally
+found missing while documenting this feature (`computePracticeHistory`,
+`lib/history.js`, indexed every progress entry purely by walking its
+`doneDays` array, and `"__cold_start__"` entries deliberately carry no
+`doneDays` at all — a Cold-Start check isn't tied to a specific scheduled
+plan day the way a consolidation day is, so they were structurally
+invisible to that indexing pass). Fixed the same session it was found:
+`computePracticeHistory` now also indexes `"__cold_start__"` sessions
+directly off each session's own `day` field, deduped per day the same way
+`doneDays` itself would be.
+
+`ColdStartPanel` (`src/components/tabs/today/ColdStartPanel.jsx`) is the
+only surface that reads `coldStartDueThreshold` and renders the offer —
+gated on the piece prop alone, no new App.jsx state or effect needed given
+the live-derivation design above; `App.jsx`'s `handleLogColdStart`/
+`handleUnlogColdStart` are thin wrappers around the two `apply*` functions,
+mirroring `handleLogRunThrough`/`handleUnlogRunThrough`'s shape.
 
 ## Timeline / scheduler
 
@@ -209,11 +423,21 @@ transitions, combos) accumulating effort until adding the next item would
 exceed the effort-equivalent of one day's budget, at which point a new day
 starts. Each item's accumulated cost includes not just its own introduction
 effort but a rough estimate of the review load it will generate later (2
-touches at a flat 3 minutes each, converted to effort-point units) —
+touches, each priced the same as introducing the chunk fresh —
+`c.effort * REVIEW_TOUCHES_PER_ITEM`, `REVIEW_TOUCHES_PER_ITEM = 2`) —
 omitting that would under-count what a day actually costs once
 `computeTimeline`'s spaced review lands on top of introduction, and the day
 count would come out "technically sufficient" for introduction alone while
-still running well over budget in practice. **The "2 touches" figure was 4
+still running well over budget in practice. **Each touch was priced at a
+flat 3 minutes, regardless of the chunk's own difficulty, before a
+same-session follow-up to Pass 66** — found while wiring that pass's live
+due-review merge into a plan day's own minutes total and discovered to
+disagree with `computeDueReviews`, which already priced a review at
+`chunk.effort * EFFORT_TO_MIN`; underestimating a hard chunk's review cost
+here specifically risked a `scheduleMode: "minutes"` plan under-provisioning
+days for exactly the material most likely to need real review time. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for the full
+before/after. **The "2 touches" figure was 4
 (`REVIEW_OFFSETS.length`) before Pass 5 of the maintenance-ladder build** —
 that fixed four-touch assumption matched the old `REVIEW_OFFSETS`-based
 placement, but `computeTimeline` no longer guarantees any fixed number of
@@ -444,6 +668,89 @@ actually set.
 a chunk with no explicit per-chunk target: checks `piece.bpmZones` for a
 measure-range match first, then falls back to `piece.targetBPM`.
 
+### Overall piece confidence (Pass 58)
+
+`computeAutoOverallConfidence(piece, practiceChunks, currentDay)`
+(`lib/confidence.js`) rolls every practice chunk's `computeConfidence` up
+into one piece-level number — **effort-weighted**, not a plain mean:
+`sum(computeConfidence(chunk) * chunk.effort) / sum(chunk.effort)`. Chosen
+over an unweighted average (the pass's other candidate formula, confirmed
+with the user before building) for consistency with how this codebase
+already weights everything else time/effort-related — `chunk.effort` is
+the same unit `EFFORT_TO_MIN`-based scheduling, revival, and maintenance
+math already uses throughout (see [Timeline / scheduler](#timeline--scheduler)
+above). Practical effect: a long or difficult passage moves this number
+more than a short easy one — two chunks with equal `effort` reduce to a
+plain average, but a lopsided split (e.g. a 9:1 effort ratio) pulls the
+result sharply toward whichever chunk carries the larger share, even if
+the other chunk's confidence is high.
+
+Scoped to `practiceChunks` only — transitions and combos are excluded,
+matching both candidate formulas the pass proposed. Reads each chunk
+through `computeConfidence` (the manual-override-and-caps-resolved
+function), not `computeAutoConfidence` directly — a per-chunk
+`manualConfidence` override or a rough/lost/`needsRelearning` cap is
+already reflected in what feeds this rollup, not bypassed by it. An empty
+`practiceChunks` list (or zero total effort) returns `0` rather than
+`NaN`.
+
+`computeOverallConfidence(piece, practiceChunks, currentDay)` adds the
+piece-level manual-override precedence, mirroring `computeConfidence`'s
+own `progress[chunkId].manualConfidence` check exactly, just one level up:
+`piece.manualOverallConfidence` (`undefined`/`null` both mean "no
+override, use auto"; any other number — including `0` — wins outright,
+clamped to 0–100 and rounded). `isManualOverallConfidence(piece)` is the
+matching boolean, mirroring `isManualConfidence(chunk, progress)`. Unlike
+per-chunk confidence, there is no rough/lost/`needsRelearning`-style cap
+at this level — those are per-chunk demotions with no piece-wide
+equivalent, and applying them again here (on top of numbers where they're
+already baked into each chunk's own `computeConfidence`) would double-count
+them.
+
+Displayed on `ProgressTab` with an inline set/clear control mirroring
+`PieceMapTab`'s existing (non-`sequentialMode`) confidence-override
+`.field` block exactly — same `NumberInput` + "Reset to automatic" /
+"Set manually" `.manual-conf-row` shape, per the pass's own instruction to
+reuse that pattern rather than invent a new one. The write path
+(`handleSetManualOverallConfidence`, `App.jsx`) is a one-line
+`updatePiece` twin of `handleSetManualConfidence`, direct field write, no
+snapshot to restore — same shape, piece-level instead of per-chunk. See
+[Decisions.md](Decisions.md#overall-piece-confidence) for why this touched
+`App.jsx` even though it wasn't in this pass's originally-listed
+touched-file set.
+
+**Deliberately not wired to `isPieceLearned`** (`lib/ladder.js`, Pass 39)
+or the ladder-stage rollup in either direction — see
+[Data-Model.md](Data-Model.md#overall-piece-confidence-a-rollup-not-a-third-independent-score)
+for the full reasoning.
+
+**Wired to Pass 56's Cold-Start check, as a same-session follow-up**:
+`ColdStartPanel` (`src/components/tabs/today/ColdStartPanel.jsx`) shows a
+short, optional "How would you rate the piece overall right now?" prompt
+immediately after a successful Cold-Start log — five quick-tap presets
+(`CONFIDENCE_PRESETS`, `lib/constants.js`, the same ones `PieceMapTab`'s
+revival "Quick rate" control already uses) that call
+`onSetOverallConfidence` (App.jsx's `handleSetManualOverallConfidence`)
+immediately on tap, plus a "Skip" button that dismisses with no write at
+all. Genuinely optional, not just softly worded as such: nothing is
+required to make the prompt go away, and nothing persists if it's
+skipped or simply navigated away from. Threaded down through
+`TodayTab.jsx` → `ColdStartPanel.jsx`, the same prop-passing shape every
+other cross-tab handler in this app already uses. Held back from the
+original build (see [Decisions.md](Decisions.md#overall-piece-confidence)
+for why) and added once explicitly requested in the same session.
+
+One implementation subtlety worth knowing: logging a Cold-Start session
+immediately moves `piece.lastLoggedAt` to today, which makes
+`coldStartDueThreshold` read `null` again on the very next render (see
+[The repeating, escalating prompt](#the-repeating-escalating-prompt)
+above) — without a small `justLogged` flag held in `ColdStartPanel`'s own
+local state, the whole panel would vanish the instant you log, before the
+follow-up prompt could ever render. That flag is intentionally
+unpersisted (component state only, lost on navigating away) — the prompt
+is meant to be a one-shot, low-stakes nudge, not something the app tracks
+or nags about later.
+
 ### Tempo-climbing nudge (Pass 30)
 
 `hasClimbingTempo(entry)` (`lib/confidence.js`) is a pure, stateless
@@ -554,8 +861,11 @@ itself (it needs the full chunk's `difficultyLabel` and the piece's
 `bpmZones` to resolve `requiredReps`/the effective target, neither of
 which the handler has from just a chunk id):
 
-`requiredReps` itself is resolved by `resolveRequiredReps(chunk)`
-(`lib/confidence.js`, Pass 27) — normally `REQUIRED_REPS[chunk.difficultyLabel]`
+`requiredReps` itself is resolved by `resolveRequiredReps(chunk, stage,
+holdingReviewCount)` (`lib/confidence.js`, Pass 27; `stage`/
+`holdingReviewCount` added Pass 61, both optional — see
+[Holding's periodic harder check](#holdings-periodic-harder-check-pass-61)
+below) — normally `REQUIRED_REPS[chunk.difficultyLabel]`
 (3/4/5), but a flat **2** for `chunk.kind === "section-runthrough"` or
 `"section-transition"` (a whole section, or two combined sections, played
 straight through), regardless of difficulty label. A run-through's
@@ -598,17 +908,23 @@ signal instead of reading as neutral.
 (`lib/ladder.js`) — a pure function, called from `handleLogSession`
 (`App.jsx`) on every logged session, implementing the Stabilizing →
 Settling → Holding stages:
-- **Full pass:** `practiceBPM` steps up (`ladderConfig.bpmSteps.pass`,
-  default +2) — *unless* this session also clears the demonstrated-tempo
-  override below, in which case `practiceBPM` jumps straight to the
-  achieved bpm instead of stepping by +2. Counts toward graduation only
+- **Full pass:** `practiceBPM` steps up by the gap-proportional tempo
+  ratchet ([Tempo ratchet](#tempo-ratchet-pass-59) below; falls back to the
+  flat `ladderConfig.bpmSteps.pass`, default +2, only when there's no
+  `targetBPM` to be proportional against) — *unless* this session also
+  clears the demonstrated-tempo override below, in which case `practiceBPM`
+  jumps straight to the achieved bpm instead. Counts toward graduation only
   once `practiceBPM` clears the current stage's tempo floor (Stabilizing
-  has none; Settling/Holding gate on a fraction of `targetBPM`) — the
-  floor gates progress, not the pass/fail judgment itself, and is
-  evaluated against `practiceBPM` *before* this session's step/override.
+  has none; Settling gates on a flat fraction of `targetBPM`; **Holding's
+  own floor is retired as of Pass 61** — a Holding pass counts
+  unconditionally, meeting the rep requirement already being enough on its
+  own — see [Holding's periodic harder check](#holdings-periodic-harder-check-pass-61)
+  below) — the floor gates progress, not the pass/fail judgment itself, and
+  for Stabilizing/Settling is evaluated against `practiceBPM` *before* this
+  session's step/override.
   Graduating resets the pass counter and moves to the next stage (Holding
-  has no ceiling — it just keeps accruing passes, which drives its own
-  escalating tempo floor and interval growth, below).
+  has no ceiling — it just keeps accruing passes, which drives its interval
+  growth, below; **not** a tempo floor any more, as of Pass 61).
   **Known gap, re-reviewed in Pass 14 and deliberately left open (the
   user's explicit call):** because the floor check runs against the
   *pre-session* `practiceBPM`, a session whose demonstrated-tempo jump
@@ -622,10 +938,14 @@ Settling → Holding stages:
   graduation." Reordering `computeLadderAdvance` to fix it was judged not
   worth the risk relative to the symptom; revisit if it actually shows up
   in real use. See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
-- **Soft miss:** `practiceBPM` steps down (default −2), the pass counter
-  resets, stage does not change — unless this session also clears the
-  demonstrated-tempo override below, in which case `practiceBPM` still
-  jumps up despite the overall miss (see rationale below).
+- **Soft miss:** as of Pass 59, `practiceBPM` steps **forward** (never
+  backward, unlike the old flat `ladderConfig.bpmSteps.softMiss` default of
+  −2, which only remains reachable with no `targetBPM` to ratchet against)
+  at half the chunk's current tempo-ratchet rate ([Tempo
+  ratchet](#tempo-ratchet-pass-59) below) — the pass counter still resets,
+  and stage still does not change — unless this session also clears the
+  demonstrated-tempo override below, in which case `practiceBPM` jumps up
+  to the achieved bpm despite the overall miss (see rationale below).
 - **Real fail:** `practiceBPM` resets to the recorded entry tempo for the
   stage this fail demotes INTO —
   `stabilizingEntryBPM`/`settlingEntryBPM`/`holdingEntryBPM`, whichever the
@@ -666,8 +986,11 @@ Settling → Holding stages:
   than "go back to where this stage last was." A piece with no target BPM
   configured has nothing to suggest, so `computeLadderAdvance` falls back
   to the entry-tempo reset (or its own −2 fallback) in that case rather
-  than resetting to nothing. While flagged, `computeTimeline` and
-  `computeDueReviews` both
+  than resetting to nothing. As of Pass 59, a real fail also resets the
+  chunk's `tempoRatchetK` back to `ladderConfig.tempoRatchet.k`, regardless
+  of which of the three `practiceBPM`-reset paths above actually fired —
+  see [Tempo ratchet](#tempo-ratchet-pass-59) below. While flagged,
+  `computeTimeline` and `computeDueReviews` both
   skip the chunk outright — see
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built)
   for the full four-rule design and
@@ -695,6 +1018,270 @@ lands on. A live "what's due" query that works *outside* the current plan's
 bounded `daysToLearn` window is built as of Pass 8 — see
 [What's due — the live maintenance query](#whats-due--the-live-maintenance-query)
 below.
+
+### Holding's periodic harder check (Pass 61)
+
+Replaces Holding's old escalating tempo floor (`clearsStageFloor`'s Holding
+branch now always returns `true` — Stabilizing/Settling below are
+unchanged) with a rep-only mechanism: every 4th logged Holding review since
+the chunk's most recent fresh entry into Holding needs one more clean rep
+than the baseline requirement, reverting to baseline on every other review.
+
+- **`progress[id].holdingReviewCount`** (`lib/ladder.js`) is the new
+  persisted counter this reads. `nextHoldingReviewCount(stage, newStage,
+  holdingReviewCount)` is the one rule all three `computeLadderAdvance`
+  outcome branches (fail/soft-miss/pass) route through: resets to `0` the
+  moment `newStage === "holding"` while the incoming `stage` wasn't (a
+  fresh promotion — only reachable from Settling, since Holding has no
+  ceiling to promote out of and no floor to fail out of without also
+  leaving Holding); increments by 1 whenever the incoming `stage` already
+  was `"holding"`, **regardless of outcome** — a fail counts too, even
+  though it demotes the chunk out of Holding in the same call (the review
+  that just happened was still logged while in Holding; the field simply
+  stops being read once `stage` isn't `"holding"` and resets again on the
+  next re-promotion, so this has no practical consequence either way);
+  otherwise carried through unchanged (a chunk never touching Holding this
+  call). Note this `0` is `computeLadderAdvance`'s own *point-of-use*
+  resolution once a chunk is actually active in Holding — the *persisted*
+  default for a chunk that's never touched Holding at all is `null`, not
+  `0` (`storage.js`'s migration backfill, and both of `App.jsx`'s
+  `ladderSnapshot` capture sites); a real fix, found and applied the same
+  session — see [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+  for the false-import-conflict bug this avoids, the exact same class
+  `tempoRatchetK` already had once.
+- **`resolveRequiredReps(chunk, stage, holdingReviewCount)`**
+  (`lib/confidence.js`) is where the count actually turns into a harder
+  requirement for one specific session. Both new parameters are optional
+  and default to "no bump" when omitted (`stage !== "holding"` short-circuits
+  to the plain baseline) — this matters for backward compatibility:
+  `computeAutoConfidence`'s own call site (below) is deliberately
+  **unchanged**, still calling `resolveRequiredReps(chunk)` with no stage
+  awareness at all, since that function scores *every past session*
+  retrospectively and applying today's `holdingReviewCount` backward onto
+  sessions logged before the chunk was ever in Holding would be wrong, not
+  requested by this pass. `ChecklistItem`'s call site
+  (`resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount)`)
+  needed no new prop threaded in — `entry` (`piece.progress[chunk.id]`) was
+  already in scope there, with both fields already on it.
+- **The math:** `holdingReviewCount` as stored is the count of *prior*
+  Holding reviews (0 before the chunk has ever had one), so the review
+  about to be logged — the one `resolveRequiredReps` is being asked about,
+  before it's actually logged — is `holdingReviewCount + 1`. When that
+  number is a multiple of 4 (4, 8, 12, ...), the resolved requirement is
+  `baseline + 1`; every other review resolves to plain `baseline`. Applies
+  on top of whatever `resolveRequiredReps` already resolves as the
+  baseline, including the flat 2-rep run-through override (Pass 27) — a
+  run-through chunk's 4th Holding review needs 3, not 2.
+- **Deliberately rep-only, not tempo-related at all.**
+  `classifySessionOutcome`'s separate `clearsTempo` check (`bpm >=
+  practiceBPM`, deciding whether a session counts as a pass in the first
+  place) is completely untouched by this pass — the two mechanisms answer
+  different questions (whether a session clears the tempo bar at all, vs.
+  whether an already-classified pass counts toward Holding's interval
+  growth), and only the latter changed here.
+- **The old `ladderConfig.holding.tempoFloorStartFraction`/
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields are left in
+  place, not removed** — `clearsStageFloor` simply no longer reads them for
+  Holding. Flagged, not silently cleaned up: they're still part of the
+  saved schema, and still directly exposed and editable — correctly
+  labeled "Tempo floor, starting fraction" / "step per pass" / "cap
+  fraction" — under `LadderConfigEditor`'s "Holding" heading. A user can
+  find and "tune" a setting that now does nothing, with no indication
+  anywhere in that UI that it's gone inert. See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the full
+  discovery.
+
+### Tempo ratchet (Pass 59)
+
+Before this pass, a full pass or soft-miss stepped `practiceBPM` by a flat
+`ladderConfig.bpmSteps` delta (+2 / −2) regardless of how far `practiceBPM`
+actually was from `targetBPM` — a chunk 40 BPM below target crept up at the
+same 2-BPM-per-session pace as one already 2 BPM away. `tempoRatchetStepSize`
+(`lib/ladder.js`, not exported — internal to `computeLadderAdvance`) replaces
+that flat delta on the **pass** and **soft-miss** branches only; the **fail**
+branch's flat `bpmSteps.fail` step is untouched (see below for why).
+
+```
+gap  = targetBPM - practiceBPM
+step = clamp(round(k * gap), 1, ladderConfig.tempoRatchet.kCapBpm)
+```
+
+- `k` is `progress[id].tempoRatchetK` — a new persisted per-chunk flat
+  scalar field, alongside (not nested inside) `stage`/`practiceBPM`/the
+  three `...EntryBPM` fields, so `storage.js`'s ladder-state diffing/merge
+  (`ladderStateDiffers`/`mergeProgress`'s `LADDER_STATE_FIELDS`) compares it
+  by `!==` the same way as every other flat ladder field. Defaults to
+  `ladderConfig.tempoRatchet.k` (0.3) when absent — `computeLadderAdvance`
+  itself resolves that at read time (`chunkLadderState.tempoRatchetK ??
+  ladderConfig.tempoRatchet.k`), and `storage.js`'s
+  `backfillProgressLadderState` backfills a chunk with none recorded to
+  `null`, same as the entry-BPM fields, **not** to the literal default
+  number. **Corrected after review, same session:** the first version of
+  this backfill wrote the literal `0.3` instead, reasoning "there's no
+  sane non-null default the way entry-BPM has" — true numerically, but it
+  meant an untouched, migrated chunk carried a real `0.3` while a backup
+  exported before this field existed had no `tempoRatchetK` key at all;
+  `ladderStateDiffers`' `!==` comparison read that as a genuine
+  disagreement and forced the import-conflict picker on an otherwise
+  byte-identical re-import (reproduced directly, not theoretical — see
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance)). `null` on
+  both sides avoids the false conflict the same way it already does for
+  the entry-BPM fields.
+- The 1-BPM floor (`max(..., 1)`) keeps a pass/soft-miss always moving
+  `practiceBPM` forward by at least 1, even when `gap` is at or below zero
+  (a chunk already at or past `targetBPM`) — it never *stalls* a session's
+  worth of progress to zero, though `stepBPM`'s own existing
+  cap-at-`targetBPM` can still flatten the net *result* back down to
+  `targetBPM` regardless (see the overlearning bonus below for the one path
+  that's allowed to exceed that cap).
+- `ladderConfig.tempoRatchet.kCapBpm` (default 8) is the ceiling — without
+  it, a chunk very far from target (e.g. `targetBPM` set well above a
+  freshly-lowered `practiceBPM`) could take an implausibly large single-session
+  jump.
+- **No `targetBPM`** (a piece with nothing to be proportional against)
+  falls back to the pre-existing flat `bpmSteps.pass`/`bpmSteps.softMiss`
+  step exactly as before this pass — `tempoRatchetStepSize` returns `null`
+  in that case rather than inventing a gap-based number from nothing, and
+  the caller branches on that.
+
+**Soft-miss now moves `practiceBPM` forward, not backward** — a genuine
+behavior change from the flat `bpmSteps.softMiss` (default −2) it replaces.
+Confirmed with the user: a soft-miss still isn't a full pass and shouldn't
+progress the chunk at the normal rate, but penalizing tempo on a
+soft-miss (as the old flat step did) fought against the ratchet's own logic
+once the step became gap-proportional, so a soft-miss instead **halves
+`tempoRatchetK`** before computing the step, applying the step at that
+newly-halved rate — forward, just slower. The halved value is what
+persists to `progress[id].tempoRatchetK`, so a *second* consecutive
+soft-miss halves again (0.3 → 0.15 → 0.075 → …), asymptotically approaching
+(but never reaching) the 1-BPM floor rather than ever reversing direction.
+
+**k-recovery** reuses `consecutivePasses` rather than introducing a new
+counter — `computeLadderAdvance` already resets that counter to 0 on every
+soft-miss and demote, so two qualifying passes in a row (the same
+floor-clearing count graduation itself uses, read as `passesIfCounted`
+before graduation potentially zeroes it) is already directly observable as
+that counter reaching 2 within the same stage. When it does,
+`tempoRatchetK` is restored to `ladderConfig.tempoRatchet.k` outright — a
+no-op if it was already at the default, a real recovery if a recent
+soft-miss had halved it.
+
+**A real fail resets `tempoRatchetK` to the default**, unconditionally,
+alongside whichever of the three existing `practiceBPM`-reset paths fired
+(the per-stage entry-tempo reset, rule 4's `suggestedStartingBPM` reset, or
+the flat `bpmSteps.fail` fallback) — the fail branch's `practiceBPM` logic
+itself is untouched by this pass; only `tempoRatchetK` is new state added
+alongside it. There was no adaptive-rate state for a fail to touch before
+this pass existed.
+
+#### Overlearning bonus
+
+When a full pass's logged `bpm` clearly beats what was actually asked for
+that session (`outcome.bpm > practiceBPM` — not just meets it), the step
+widens: `max(normalStep, round(0.5 * (outcome.bpm - practiceBPM)))`. The
+**result** (`practiceBPM` after applying that widened step), not the bonus
+amount itself, is capped at `1.15 * targetBPM` — computed and capped
+separately from `stepBPM`'s own `Math.min(stepped, targetBPM)`, since this
+bonus is deliberately the one path allowed to push `practiceBPM` *above*
+`targetBPM` (rounded to a clean integer — `1.15 * targetBPM` is not always
+a whole number, and raw JS float arithmetic can land a hair under the
+intended cap, e.g. `1.15 * 100 === 114.99999999999999`). This bonus only
+applies when there's a `targetBPM` to cap against, and only in the branch
+where `computeDemonstratedTempoBaseline` (below) does **not** already
+apply — that mechanism keeps taking priority exactly as it did before this
+pass, including its own cap-at-`targetBPM` (never `1.15×`), so a
+demonstrated-tempo override can never itself read as "overlearning."
+
+`ChecklistItem` (`src/components/tabs/today/ChecklistItem.jsx`) surfaces an
+"Overlearning" note whenever the chunk's current `practiceBPM` sits above
+`targetBPM` — reading the persisted values directly rather than a flag
+returned by `computeLadderAdvance`, since the bonus is the *only* path that
+can produce that state (every other path — the flat step, the ratchet step,
+and `computeDemonstratedTempoBaseline` — caps at `targetBPM`, never above
+it), so the condition alone is an exact proxy for "the bonus fired and is
+still in effect." It stops showing again the moment an ordinary
+(non-overlearning) pass steps `practiceBPM` back down to `targetBPM` — see
+the note in [Decisions.md](Decisions.md#spaced-repetition--maintenance) about that being an
+accepted, deliberate consequence of the formula rather than something this
+pass tries to prevent.
+
+`ladderConfig.tempoRatchet = { k, kCapBpm }` joins `DEFAULT_LADDER_CONFIG`
+and is merged field-by-field in `mergeLadderConfig` (`storage.js`), the
+same way `bpmSteps` already is — so a piece with an existing `ladderConfig`
+saved before this field existed doesn't crash on the next logged session.
+No editing UI yet (same as `bpmSteps` before Pass 17's `LadderConfigEditor`
+existed) — see [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+### Tempo convergence simulation (Pass 62)
+
+`simulateTempoConvergence(chunkLadderState, ladderConfig, startDate)`
+(`lib/ladder.js`) answers a question nothing before this pass could: "at
+the current pace, roughly how far away is this chunk's tempo goal?" It
+forward-projects a chunk's own current ladder card by calling
+`computeLadderAdvance` — the real function, not a re-derivation of its
+math — repeatedly, feeding it a synthetic `{ result: "pass", effectiveness:
+"good" }` outcome each time (a neutral, best-case assumption: "always
+passes," but not the extra-optimistic "high" effectiveness on top of that),
+summing the calendar days each simulated `nextDueDate` consumes, until
+either the chunk's practiceBPM crosses its tempo goal or a fixed iteration
+cap is hit.
+
+**The tempo goal is `tempoAchievedThreshold` × `targetBPM`** (Pass 60's
+"tempo maintenance mode" bar — see above), not `targetBPM` outright.
+Crossing that threshold is what already flips a chunk's own step size down
+to the tiny, pinned `maintenanceK` rate (`isInTempoMaintenance`), so
+demanding a literal 100%-of-target finish line here would mean simulating
+past the point this module's own math already treats the chunk as "there."
+
+**`MAX_SIMULATION_STEPS` (500) guarantees termination.** Under the current
+tempo-ratchet math a pass's step size floors at 1 BPM whenever there's a
+real gap left to close (`tempoRatchetStepSize`'s own `Math.max(1, ...)`),
+so in practice this loop already terminates well under the cap for
+realistic BPM ranges. But the cap isn't decorative: `ladderConfig.
+tempoRatchet.kCapBpm` is user-editable (Settings' `LadderConfigEditor`,
+Pass 17), and a `kCapBpm` of exactly `0` collapses that floor's outer
+`Math.min` to `0` — every simulated step then moves `practiceBPM` by
+exactly zero, forever, with nothing left in the formula to break the tie.
+A chunk in that state genuinely cannot converge; the cap is what stops the
+loop from hanging rather than reporting that honestly. Hitting the cap
+without converging (`converged: false`) is treated as automatically
+exceeding the warning bar — strictly worse than any finite projection, not
+a separate case the caller has to reason about.
+
+**The warning bar itself is a fixed 90 days (`TEMPO_CONVERGENCE_WARNING_
+DAYS`)** — three calendar months, hand-picked the same way every other
+tunable constant in this file is (see `docs/Research.md`). Deliberately
+**not** compared against `piece.targetDate`, `daysToLearn`, or
+`scheduleMode` at all — `simulateTempoConvergence` doesn't take a `piece`
+argument and never reads any piece-level scheduling field, so the same
+chunk ladder state produces byte-identical output whether the surrounding
+piece is `scheduleMode: "days"` or `"minutes"` (verified directly in
+`test/ladder.test.mjs`). This is a statement about the chunk's own pace in
+isolation, not about whether it fits inside any particular plan.
+
+**Live-derived, not persisted** — same pattern `hasClimbingTempo`
+(Pass 30) and `isPieceLearned` (Pass 39) already use: no "warned" flag is
+ever written to `progress[id]`. `PieceMapTab`'s chunk-detail modal
+(`tempoWarning`) recomputes it fresh on every render from whatever's
+currently in `piece.progress[id]`/`piece.ladderConfig`, using
+`todayISODate()` as the simulation's start date — so logging a real
+session that meaningfully changes the chunk's trajectory updates or clears
+the warning on the very next render, no reload needed (confirmed live:
+a chunk starting at practiceBPM 20/target 200 in Holding read "266+ days
+away"; logging one more real full-pass session dropped it to "252+ days
+away" immediately, with no page reload in between).
+
+`tempoConvergenceExceedsWarning(simulation)` is the small helper the
+caller actually branches display on — `false` when `!simulation.
+applicable` (no `targetBPM` to aim for, or no `practiceBPM` yet because the
+chunk has never been practiced — nothing to project forward from either
+way), `true` unconditionally when the cap was hit without converging, and
+otherwise `simulation.days > TEMPO_CONVERGENCE_WARNING_DAYS`.
+
+Surfaced in `PieceMapTab`'s chunk-detail modal, alongside Stage/Next review
+(the same `detail-stats` block Pass 15 introduced) — a "Tempo goal" row
+that only renders at all when the warning condition is true, styled with
+the same `--brick` warning color `needsRelearning`'s hint already uses.
 
 ### Starting, suggested, and demonstrated tempo
 
@@ -786,7 +1373,9 @@ to avoid:
    session with **3 or more clean reps at a bpm above the chunk's current
    `practiceBPM`** replaces the baseline outright with the achieved bpm
    (capped at `targetBPM`, same cap the normal step uses), instead of the
-   usual incremental `ladderConfig.bpmSteps.pass` (+2) nudge. Applies on
+   usual gap-proportional tempo-ratchet step ([Tempo
+   ratchet](#tempo-ratchet-pass-59) above; the old flat `+2` before Pass 59).
+   Applies on
    both `pass` and `soft-miss` outcomes (both log a real `cleanReps` count
    — a `soft-miss` can still genuinely demonstrate a higher tempo, e.g. a
    hard chunk needing 5 reps for a full pass but already showing 3 clean
@@ -928,6 +1517,57 @@ Both call sites (`MasterAgendaTab`, `TodayTab`) use this one function
 rather than each running its own query — Master Agenda just renders less of
 the same result. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+**Since Pass 66, both call sites run this query unconditionally — not just
+once a piece has run out its whole bounded plan.** Before this, a review
+whose `nextDueDate` had already passed while the piece was still
+comfortably inside its active plan had no live surface at all: its
+placement day (`computeTimeline`'s own once-per-piece scheduling — see
+[Timeline / scheduler](#timeline--scheduler)) had already gone by, and the
+query itself only ever ran once `dayNumber > timeline.days.length`
+(`TodayTab`'s `pastPlan`, `MasterAgendaTab`'s equivalent check). Paging
+day-nav back to that exact past day was the only way to see it, and there
+was no way to log it from "today" at all.
+
+`mergeLiveDueReviews(day, dueItems)` (`lib/maintenance.js`) is the merge
+this now runs through: it folds `computeDueReviews`'s result into a plan
+day's own `reviewChunkIds`, filtering out any chunk id already present —
+a review due *exactly* today is already placed there by `computeTimeline`
+itself, so without the filter it would render (and count) twice. Both
+`TodayTab`'s day-view checklist and `MasterAgendaTab`'s per-piece review
+chip row call it the same way, scoped to real "today" only (day-nav
+browsing a past or future day, or Master Agenda's date picker on a
+non-today date, shows that day's own plan as scheduled — live "as of
+today" due-ness has no meaning for a day that isn't today). Also folds
+each merged item's `minutes` into `day.minutes`/`totalTime` — safe because
+`computeTimeline`'s `minutesFor` and `computeDueReviews` now price a
+review identically (`chunk.effort * EFFORT_TO_MIN`, the same rate
+introducing the chunk fresh uses). **This wasn't always true**: at first
+`minutesFor` priced a review at a flat 3 minutes regardless of difficulty,
+which disagreed with `computeDueReviews`'s difficulty-based estimate —
+`mergeLiveDueReviews` originally left `minutes` deliberately unmerged for
+exactly that reason, until a same-session follow-up brought the two rates
+into agreement (see [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+and the `computeDaysNeededForMinutesPerDay` note above, which had the same
+flat-rate assumption baked into its day-count math).
+
+**`mergeLiveDueReviews` skips consolidation ("full run-through") days
+entirely** (`if (day.type === "consolidation") return day;`), found in a
+self-review after the merge above shipped: neither `TodayTab`'s
+`ConsolidationPanel` nor `MasterAgendaTab`'s card renders `reviewChunkIds`
+or `minutes` for that day type at all, so merging a transition/combo's
+overdue live-due review in would have silently inflated `day.minutes` (and
+Master Agenda's total-planned figure) with no line item anywhere
+accounting for it — reproduced live, not theoretical. The item still
+surfaces normally on any other day, or via the unrelated past-plan path.
+See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+The review's *original* placement day is untouched by this and keeps
+reading "behind" via [`classifyDayCompletion`](#detecting-that-a-piece-has-run-past-its-plan)
+exactly as before — that's accurate history (the review really did come
+due on that day and wasn't logged), not the bug. Only "is there a live,
+current way to see and act on this today" was missing, and that's what
+Pass 66 closes.
 
 ### `isInterleaveEligible` — Interleaved mode's eligibility rule (Pass 29)
 
@@ -1402,7 +2042,13 @@ day-by-day revival plan: practice chunks and transitions (**not** combos —
 a combo relearns through its underlying content, which is already in this
 list as ordinary practice chunks), sorted flagged-first (rough or lost —
 `progress[id].flag`, as of Pass 6; was `weakSpot` before) then
-lowest-confidence-first, greedily packed into days against
+lowest-confidence-first. This sort itself is untouched by Pass 54, which
+only changed *where* `flag` can be set from — the toggle is hidden on the
+`sequentialMode` reassessment card now (ordinary Piece Map only), so a
+chunk reaches this sort's flagged branch only if it was flagged outside
+revival; a "Lost" quick-rate during reassessment reaches the front of the
+plan through the confidence tiebreaker instead, unassisted. Greedily
+packed into days against
 `piece.minutesPerDay` using each item's existing `effort` and
 `EFFORT_TO_MIN`. This stays a fixed list, generated once and never mutated
 afterward — turned out not to need dynamic/outcome-dependent restructuring

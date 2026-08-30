@@ -24,6 +24,7 @@ import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
+import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
@@ -499,6 +500,29 @@ export default function App() {
     });
   };
 
+  // Cold-Start check (Pass 56) — a whole-piece cold play-through offered
+  // once every section's own single-section run-through has been logged
+  // at least once, then re-offered at a widening gap since anything was
+  // last logged on the piece. Both handlers are thin wrappers: the actual
+  // logic (why this writes a separate "__cold_start__" key rather than
+  // reusing "__consolidation__", the gapDays computation, the escalating
+  // due-threshold check) lives in lib/coldStart.js so it's unit-testable
+  // per CLAUDE.md's "logic that needs a regression test belongs in
+  // src/lib/" rule. See docs/Algorithms.md#cold-start-check.
+  const handleLogColdStart = (day, avgBpm, notes) => {
+    updatePiece((p) => {
+      const { progress, lastLoggedAt } = applyColdStartLog(p, day, avgBpm, notes);
+      return { ...p, progress, lastLoggedAt };
+    });
+  };
+
+  const handleUnlogColdStart = () => {
+    updatePiece((p) => {
+      const result = applyColdStartUnlog(p);
+      return result ? { ...p, ...result } : p;
+    });
+  };
+
   // `sessionInput` = { cleanReps, bpm, outcome, durationSeconds, targetBPM,
   // suggestedStartingBPM } — outcome is already classified by the caller
   // (classifySessionOutcome, lib/confidence.js), since that needs the full
@@ -613,6 +637,22 @@ export default function App() {
         stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
         settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
         holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
+        // Tempo-ratchet adaptive rate (Pass 59, lib/ladder.js) — same
+        // reasoning as the three entry-BPM fields above: without this in
+        // the snapshot, undoing a session that halved/reset/recovered
+        // tempoRatchetK would leave that new rate standing even though the
+        // session that caused it was itself undone.
+        tempoRatchetK: prevEntry.tempoRatchetK ?? null,
+        // Holding review count (Pass 61, lib/ladder.js) — same reasoning
+        // again: without this in the snapshot, undoing a session that
+        // incremented or reset holdingReviewCount would leave that new
+        // count standing even though the session that caused it was
+        // itself undone. `?? null`, not `?? 0` — same false-conflict fix
+        // as the storage.js backfill (see that comment): a chunk that's
+        // never touched Holding has no count to be "0" of, and writing a
+        // materialized `0` here would resurface the same bug via undo
+        // instead of via migration.
+        holdingReviewCount: prevEntry.holdingReviewCount ?? null,
       };
       const sessions = [
         ...(prevEntry.sessions || []),
@@ -655,6 +695,8 @@ export default function App() {
           stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
           settlingEntryBPM: prevEntry.settlingEntryBPM,
           holdingEntryBPM: prevEntry.holdingEntryBPM,
+          tempoRatchetK: prevEntry.tempoRatchetK,
+          holdingReviewCount: prevEntry.holdingReviewCount,
         },
         { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
         p.ladderConfig
@@ -675,6 +717,8 @@ export default function App() {
         stabilizingEntryBPM: advance.stabilizingEntryBPM,
         settlingEntryBPM: advance.settlingEntryBPM,
         holdingEntryBPM: advance.holdingEntryBPM,
+        tempoRatchetK: advance.tempoRatchetK,
+        holdingReviewCount: advance.holdingReviewCount,
         // A real logged session moves the ladder forward for real —
         // clears any pending flagSnapshot (see handleSetFlag below) so
         // later clearing a rough/lost flag can't discard this genuine
@@ -769,6 +813,15 @@ export default function App() {
             ...("stabilizingEntryBPM" in snapshot ? { stabilizingEntryBPM: snapshot.stabilizingEntryBPM } : {}),
             ...("settlingEntryBPM" in snapshot ? { settlingEntryBPM: snapshot.settlingEntryBPM } : {}),
             ...("holdingEntryBPM" in snapshot ? { holdingEntryBPM: snapshot.holdingEntryBPM } : {}),
+            // Tempo-ratchet adaptive rate (Pass 59) — same optional,
+            // not-part-of-isValidSnapshot treatment as the entry-BPM
+            // fields above: an older snapshot never recorded it, and
+            // there's no correct constant to invent in its place.
+            ...("tempoRatchetK" in snapshot ? { tempoRatchetK: snapshot.tempoRatchetK } : {}),
+            // Holding review count (Pass 61) — same optional treatment: an
+            // older snapshot never recorded it, and there's no correct
+            // constant to invent in its place.
+            ...("holdingReviewCount" in snapshot ? { holdingReviewCount: snapshot.holdingReviewCount } : {}),
           };
           // A rough/lost flag still carrying its flagSnapshot can only have
           // been applied AFTER this session, with nothing logged since —
@@ -837,6 +890,9 @@ export default function App() {
         stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
         settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
         holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
+        tempoRatchetK: prevEntry.tempoRatchetK ?? null,
+        // Same `?? null` fix as handleLogSession's snapshot above — not `?? 0`.
+        holdingReviewCount: prevEntry.holdingReviewCount ?? null,
       };
 
       const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : target.bpm;
@@ -854,6 +910,8 @@ export default function App() {
           stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
           settlingEntryBPM: prevEntry.settlingEntryBPM,
           holdingEntryBPM: prevEntry.holdingEntryBPM,
+          tempoRatchetK: prevEntry.tempoRatchetK,
+          holdingReviewCount: prevEntry.holdingReviewCount,
         },
         { result: target.outcome, effectiveness, asOfDate: loggedDate, cleanReps: target.cleanReps, bpm: target.bpm },
         p.ladderConfig
@@ -877,6 +935,8 @@ export default function App() {
         stabilizingEntryBPM: advance.stabilizingEntryBPM,
         settlingEntryBPM: advance.settlingEntryBPM,
         holdingEntryBPM: advance.holdingEntryBPM,
+        tempoRatchetK: advance.tempoRatchetK,
+        holdingReviewCount: advance.holdingReviewCount,
         flagSnapshot: undefined,
       };
       return { ...p, progress, lastLoggedAt: loggedDate };
@@ -950,6 +1010,17 @@ export default function App() {
       progress[chunkId] = entry;
       return { ...p, progress };
     });
+  };
+
+  // Piece-level twin of handleSetManualConfidence above (Pass 58) — a
+  // direct field write, same escape-hatch shape, just piece.manualOverallConfidence
+  // instead of a per-chunk progress entry. Not in ProgressTab.jsx's own
+  // touched-file scope for this pass, but there's no way to build "a way to
+  // set/clear the manual override inline" (the pass's own words) without a
+  // write path, and every piece mutation in this app funnels through an
+  // App.jsx-owned handler like this one — see CLAUDE.md's updatePiece rule.
+  const handleSetManualOverallConfidence = (value) => {
+    updatePiece((p) => ({ ...p, manualOverallConfidence: value }));
   };
 
   // Rule 2's manual half of needsRelearning's dual exit (the other half is
@@ -1069,14 +1140,17 @@ export default function App() {
     else setRevivalModalOpen(true);
   };
 
-  const handleStartRevival = ({ purpose, tempoLadderStartFraction, lastPlayedDate }) => {
+  const handleStartRevival = ({ tempoLadderStartFraction, lastPlayedDate }) => {
     updatePiece((p) => ({
       ...p,
       lastPlayedDate: lastPlayedDate || p.lastPlayedDate || null,
       revival: {
         active: true,
         startedAt: Date.now(),
-        purpose,
+        // Pass 55 — dormant field, never collected anymore; hardcoded
+        // rather than left undefined so every revival object has the same
+        // shape regardless of how it was created (see Data-Model.md).
+        purpose: null,
         tempoLadderStartFraction: tempoLadderStartFraction ?? 0.6,
         reassessmentComplete: false,
         plan: null,
@@ -1657,7 +1731,6 @@ export default function App() {
                 currentDay={currentDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
-                onSetFlag={handleSetFlag}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
@@ -1685,6 +1758,9 @@ export default function App() {
                 onDiscardProvisionalSession={handleDiscardProvisionalSession}
                 onLogRunThrough={handleLogRunThrough}
                 onUnlogRunThrough={handleUnlogRunThrough}
+                onLogColdStart={handleLogColdStart}
+                onUnlogColdStart={handleUnlogColdStart}
+                onSetOverallConfidence={handleSetManualOverallConfidence}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
@@ -1699,6 +1775,7 @@ export default function App() {
                 timeline={timeline}
                 currentDay={currentDay}
                 onViewAllPieces={() => setActiveTab("all-pieces")}
+                onSetOverallConfidence={handleSetManualOverallConfidence}
               />
             )}
             {/* Not in NAV_BASE — reached only via the button on Progress,
@@ -2115,6 +2192,7 @@ const CSS = `
 .detail-stats > div { display: flex; justify-content: space-between; font-size: 13.5px; border-bottom: 1px solid var(--line); padding-bottom: 7px; }
 .detail-stats .lbl { color: var(--ink-soft); }
 .detail-stats .val { font-weight: 600; }
+.detail-stats .val.warn { color: var(--brick); display: inline-flex; align-items: center; gap: 4px; text-align: right; }
 .chunk-info { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .chunk-info summary { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); list-style: none; }
 .chunk-info summary::-webkit-details-marker { display: none; }

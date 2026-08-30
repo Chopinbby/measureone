@@ -1,17 +1,24 @@
 import { useState } from "react";
 import { X, ChevronLeft, RefreshCw } from "lucide-react";
 import { NumberInput } from "./NumberInput";
-import { REVIVAL_PURPOSE_OPTIONS } from "../lib/constants";
-import { clamp } from "../lib/utils";
 
 /* ------------------------------------------------------------------ */
 /*  Revival entry (collects context before the reassessment pass)     */
 /* ------------------------------------------------------------------ */
 
 export function RevivalEntryModal({ piece, onCancel, onStart }) {
-  const [purpose, setPurpose] = useState(null);
-  const [tempoLadderStartFraction, setTempoLadderStartFraction] = useState(0.6);
+  // computeTempoLadder (lib/revival.js) still wants a fraction of target —
+  // asking the user to type a BPM instead and deriving the fraction here is
+  // just a friendlier input for the same underlying value; nothing
+  // downstream changes. min/max on the BPM field below mirror the old
+  // 10%-95%-of-target bounds, expressed in BPM instead of percent, so this
+  // can't produce a fraction outside that range while targetBPM is set.
+  const targetBPM = piece.targetBPM || null;
+  const [startBPM, setStartBPM] = useState(() => (targetBPM ? Math.round(targetBPM * 0.6) : ""));
   const [lastPlayedDate, setLastPlayedDate] = useState(piece.lastPlayedDate || new Date().toISOString().slice(0, 10));
+  // No target BPM to be a fraction of — falls back to the old flat default
+  // rather than computing a fraction against nothing.
+  const tempoLadderStartFraction = targetBPM && startBPM !== "" ? Number(startBPM) / targetBPM : 0.6;
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true">
@@ -24,8 +31,8 @@ export function RevivalEntryModal({ piece, onCancel, onStart }) {
         </div>
         <div className="modal-body">
           <p className="wizard-hint">
-            Bring "{piece.name || "this piece"}" back after time away. A few quick questions, then we'll
-            go through it chunk by chunk to see where things actually stand.
+            Bring "{piece.name || "this piece"}" back after time away. Set the date you last played it
+            and the average BPM you'd like to start practicing the piece.
           </p>
           <label className="field">
             <span>When did you last play it?</span>
@@ -37,24 +44,21 @@ export function RevivalEntryModal({ piece, onCancel, onStart }) {
             />
           </label>
           <label className="field">
-            <span>Tempo ladder starting point (% of target)</span>
+            <span>Tempo ladder starting point (BPM)</span>
             <NumberInput
-              value={Math.round(tempoLadderStartFraction * 100)}
-              min={10}
-              max={95}
-              onCommit={(n) => setTempoLadderStartFraction(clamp(n, 10, 95) / 100)}
+              value={startBPM}
+              min={targetBPM ? Math.round(targetBPM * 0.1) : 20}
+              max={targetBPM ? Math.round(targetBPM * 0.95) : 400}
+              onCommit={(n) => setStartBPM(n)}
+              placeholder={targetBPM ? String(Math.round(targetBPM * 0.6)) : "e.g. 88"}
             />
+            {!targetBPM && (
+              <p className="tip-line">
+                This piece has no target tempo set, so there's nothing to start a fraction of — the
+                tempo ladder will start at a flat default instead.
+              </p>
+            )}
           </label>
-          <div className="field">
-            <span>What's this revival for?</span>
-            <div className="segmented">
-              {REVIVAL_PURPOSE_OPTIONS.map((o) => (
-                <button key={o.value} className={purpose === o.value ? "active" : ""} onClick={() => setPurpose(o.value)}>
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
         <div className="modal-foot">
           <button className="ghost-btn" onClick={onCancel}>
@@ -62,10 +66,8 @@ export function RevivalEntryModal({ piece, onCancel, onStart }) {
           </button>
           <button
             className="primary-btn"
-            disabled={!purpose}
             onClick={() =>
               onStart({
-                purpose,
                 tempoLadderStartFraction,
                 lastPlayedDate,
               })

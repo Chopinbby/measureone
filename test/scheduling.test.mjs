@@ -255,9 +255,21 @@ describe("Tier 2 — flexes under budget contention, rolls forward, never drops 
 
     // Confirm the smoothing pass actually did something: not all three are
     // still clustered on day 9 (the naive, unsmoothed placement).
+    //
+    // Before the difficulty-based review-cost follow-up (minutesFor pricing
+    // a review at chunk.effort * EFFORT_TO_MIN instead of a flat 3
+    // minutes), this same fixture left exactly one review behind on day 9 —
+    // three flat 3-minute reviews (9 minutes total) weren't overloaded
+    // enough for the smoothing pass's own diminishing-returns cutoff (the
+    // "+6" move-worth-it margin) to bother relocating all three. Now each of
+    // these 4-measure chunks reviews at 10 minutes (matching its own
+    // introduction cost), so day 9's real pileup is 30 minutes — clearly
+    // over budget — and every one of the three clears the relocation
+    // threshold, landing on three separate later days instead. Re-verified
+    // by temporarily reverting the review-pricing fix and re-running this
+    // test to see the old "exactly one stays" outcome return.
     const stillOnDay9 = Object.values(dayOf).filter((d) => d === 9).length;
-    assert.ok(stillOnDay9 < 3, "at least one of the three rolled off day 9 to relieve the overload");
-    assert.ok(stillOnDay9 >= 1, "at least one review stays on day 9 (the smoothing pass's own diminishing-returns cutoff)");
+    assert.equal(stillOnDay9, 0, "all three rolled off day 9 — a 30-minute same-day review pileup is enough to clear the smoothing pass's relocation threshold for every one of them");
   });
 
   test("a rolled/late Tier 2 review never counts toward computeScheduleStatus's missed count", () => {
@@ -716,7 +728,7 @@ describe("[regression] getEffectiveTimeline must chain through a piece's resched
 });
 
 describe("[regression, Codex review] computeDaysNeededForMinutesPerDay's review-cost padding must reflect the new one-touch-at-a-time model", () => {
-  test("a piece with many chunks gets a smaller day-count estimate than the old fixed-four-reviews-per-item assumption would have produced", () => {
+  test("a piece with many chunks gets a smaller day-count estimate than the stale fixed-four-reviews-per-item assumption would have produced", () => {
     // 80 measures / 4-measure chunks = 20 chunks, at a minutesPerDay
     // budget (100) large enough that the per-item review-padding
     // constant actually changes how many items fit per day (at smaller
@@ -724,14 +736,31 @@ describe("[regression, Codex review] computeDaysNeededForMinutesPerDay's review-
     // budget regardless of the review constant, so the two formulas
     // would coincidentally agree — this input was chosen by actually
     // comparing old vs. new output across a range of budgets, not
-    // guessed). Asserting the exact expected value (14, computed from the
-    // fixed source) rather than a vague "some number," and separately
-    // confirmed by temporarily reverting the fix and re-running this test
-    // to see it fail (28) before restoring it.
+    // guessed).
+    //
+    // Expected value updated by a later, separate fix (difficulty-based
+    // review costing — minutesFor and this function now both price a
+    // review touch at chunk.effort * EFFORT_TO_MIN, not a flat 3 minutes).
+    // That fix legitimately raised this number back up from 14 to 28: the
+    // original 14 was itself computed on top of a since-corrected
+    // under-estimate (every review costing a flat, difficulty-blind 3
+    // minutes), so once review cost was corrected to scale with how hard
+    // the chunk actually is, the true amount of day-count padding needed
+    // came out higher again — this is the fixed-touches-per-item guard
+    // (2, not the stale REVIEW_OFFSETS.length of 4) reflected through the
+    // corrected per-touch cost, not a reversion of the touches-per-item
+    // fix itself. That the result (28) happens to match what the truly
+    // stale 4-touches/flat-3-min formula would have produced is a
+    // numeric coincidence for this specific input, not a sign either fix
+    // was undone — the two formulas disagree in general (8.8 vs. 12
+    // effort-points padding per item here) and only land on the same
+    // final day count after several rounding/ceiling steps. Re-verified
+    // by temporarily reverting the review-pricing fix and re-running this
+    // test to see it fail back to 14.
     const piece = basePiece({ totalMeasures: 80, customChunkSize: 4, recurringMode: "none" });
     const chunkSet = generateAllChunks(piece);
     const days = computeDaysNeededForMinutesPerDay(chunkSet, 100, 7);
-    assert.equal(days, 14, "the old REVIEW_OFFSETS.length-based formula would have produced 28 days for this same input — half again as much padding as actually needed under the new one-touch-at-a-time model");
+    assert.equal(days, 28, "difficulty-based review costing raises the padding for this input back up from the old flat-cost estimate of 14 days");
   });
 
   test("still pads for some review load, not zero — a budget that fits introduction alone but leaves no room for any review still gets padded to more days", () => {

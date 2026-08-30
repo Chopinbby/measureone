@@ -89,6 +89,14 @@ export function getSuggestedStartingBPM(piece, chunk) {
 const RUN_THROUGH_KINDS = ["section-runthrough", "section-transition"];
 const RUN_THROUGH_REQUIRED_REPS = 2;
 
+// Pass 61 — replaces Holding's old escalating tempo floor with a periodic
+// rep-only harder check: every HOLDING_HARDER_CHECK_INTERVAL-th logged
+// Holding review (the 4th, 8th, 12th...) needs
+// HOLDING_HARDER_CHECK_BONUS more clean rep than the baseline, reverting
+// to baseline on every other review. See resolveRequiredReps below.
+const HOLDING_HARDER_CHECK_INTERVAL = 4;
+const HOLDING_HARDER_CHECK_BONUS = 1;
+
 // How many clean reps `chunk` actually needs to count as a full pass —
 // single source of truth for ChecklistItem's requirement display, its
 // input field's label, AND its classifySessionOutcome call (Pass 15's
@@ -112,8 +120,26 @@ const RUN_THROUGH_REQUIRED_REPS = 2;
 // cleanReps, and never calls classifySessionOutcome — confirmed by reading
 // the code, not assumed, since there's no requiredReps to resolve there in
 // the first place, and no chunk object either (it isn't a real chunk).
-export function resolveRequiredReps(chunk) {
-  return RUN_THROUGH_KINDS.includes(chunk.kind) ? RUN_THROUGH_REQUIRED_REPS : REQUIRED_REPS[chunk.difficultyLabel] || 4;
+//
+// `stage`/`holdingReviewCount` (Pass 61) are optional, and both default to
+// "no bump" when omitted — this call site can't classify a session with
+// stale/wrong requirements just because a caller doesn't have them handy
+// yet. Only `computeAutoConfidence` below (which scores every past session
+// retrospectively, off the chunk's *current* holdingReviewCount) and
+// `resolveRequiredReps`'s other existing callers still call it with just
+// `chunk` — deliberately unchanged, since applying today's review-count
+// bump backwards onto sessions logged before the chunk was even in
+// Holding isn't what this pass asked for.
+//
+// The bump only ever applies at `stage === "holding"`: it's evaluated
+// against the review about to be logged (`holdingReviewCount` is the count
+// of *prior* Holding reviews, so `+1` is this one), landing on the 4th,
+// 8th, 12th... since the chunk's most recent fresh entry into Holding.
+export function resolveRequiredReps(chunk, stage, holdingReviewCount) {
+  const baseline = RUN_THROUGH_KINDS.includes(chunk.kind) ? RUN_THROUGH_REQUIRED_REPS : REQUIRED_REPS[chunk.difficultyLabel] || 4;
+  if (stage !== "holding") return baseline;
+  const upcomingReviewCount = (holdingReviewCount || 0) + 1;
+  return upcomingReviewCount % HOLDING_HARDER_CHECK_INTERVAL === 0 ? baseline + HOLDING_HARDER_CHECK_BONUS : baseline;
 }
 
 // Classifies one logged attempt into the three-tier outcome model
@@ -172,6 +198,24 @@ export function sessionOutcome(session) {
   if (session.effectiveness === "high") return "pass";
   if (session.effectiveness === "good") return "soft-miss";
   return null;
+}
+
+// Every logged, judged session across the whole piece — the denominator
+// Progress's Outcome Breakdown panel needs. loggedSessions() alone isn't
+// enough: it drops skipped/provisional sessions, but a "__consolidation__"
+// or "__cold_start__" session is neither of those — it's a synthetic,
+// non-chunk progress entry with no outcome/effectiveness at all (a
+// stopCount or an avgBpm instead), so sessionOutcome() returns null for
+// it. Left in, it would inflate the denominator without ever landing in
+// any pass/soft-miss/fail bucket, silently pulling every real percentage
+// down — the same dilution bug already fixed once for skipped sessions
+// (see docs/Decisions.md#spaced-repetition--maintenance), reappearing via
+// a session shape that fix didn't anticipate. Found in review, not by the
+// original Cold-Start pass. See docs/Decisions.md#cold-start-check.
+export function allJudgedSessions(piece) {
+  return Object.values((piece && piece.progress) || {})
+    .flatMap((entry) => loggedSessions(entry.sessions))
+    .filter((s) => sessionOutcome(s) !== null);
 }
 
 // Tuning knobs for hasClimbingTempo below — hand-picked, not derived from
@@ -448,4 +492,57 @@ export function formatLadderStatus(entry, ladderConfig, asOfDate) {
 export function isManualConfidence(chunk, progress) {
   const entry = progress[chunk.id] || {};
   return entry.manualConfidence !== undefined && entry.manualConfidence !== null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Overall piece confidence (Pass 58) — a single continuous stat      */
+/*  rolling up every practice chunk's confidence, with the same        */
+/*  manual-override escape hatch computeConfidence already gives each  */
+/*  individual chunk. Deliberately NOT a replacement for, or read by,  */
+/*  isPieceLearned (lib/ladder.js) — that's a strict "every chunk at   */
+/*  Holding" boolean for a different purpose (is the learning plan     */
+/*  itself done); this is a continuous, always-moving average that     */
+/*  can sit anywhere from 0-100 well before or after a piece is        */
+/*  "learned" in that sense. See docs/Data-Model.md and                */
+/*  docs/Algorithms.md for the full reasoning.                         */
+/* ------------------------------------------------------------------ */
+
+// Effort-weighted average of computeConfidence across every PRACTICE chunk
+// (transitions/combos excluded — same "practiceChunks only" scope the
+// pass's own candidate formulas both used). Weighting by `effort` (the
+// same unit EFFORT_TO_MIN-based scheduling/revival/maintenance math
+// already uses everywhere) means a long or hard passage moves this number
+// more than a short easy one — confirmed with the user before building,
+// over the simpler unweighted-mean alternative, for consistency with how
+// this codebase already weights everything else time/effort-related.
+// Reads each chunk through computeConfidence (not computeAutoConfidence),
+// so a per-chunk manual override or rough/lost/needsRelearning cap is
+// reflected here too — this rolls up what the learner actually SEES per
+// chunk, not a bypass of it.
+export function computeAutoOverallConfidence(piece, practiceChunks, currentDay) {
+  const chunks = practiceChunks || [];
+  if (!chunks.length) return 0;
+  let weightedSum = 0;
+  let totalEffort = 0;
+  chunks.forEach((chunk) => {
+    const effort = chunk.effort || 0;
+    weightedSum += computeConfidence(chunk, piece, currentDay) * effort;
+    totalEffort += effort;
+  });
+  return totalEffort ? Math.round(weightedSum / totalEffort) : 0;
+}
+
+// Manual-vs-auto precedence, same shape as computeConfidence's own
+// entry.manualConfidence check, just at the piece level
+// (piece.manualOverallConfidence) instead of per-chunk.
+export function computeOverallConfidence(piece, practiceChunks, currentDay) {
+  const manual = piece.manualOverallConfidence;
+  if (manual !== undefined && manual !== null) {
+    return clamp(Math.round(manual), 0, 100);
+  }
+  return computeAutoOverallConfidence(piece, practiceChunks, currentDay);
+}
+
+export function isManualOverallConfidence(piece) {
+  return piece.manualOverallConfidence !== undefined && piece.manualOverallConfidence !== null;
 }

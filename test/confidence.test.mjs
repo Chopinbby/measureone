@@ -9,6 +9,10 @@ import {
   resolveRequiredReps,
   formatLadderStatus,
   hasClimbingTempo,
+  allJudgedSessions,
+  computeAutoOverallConfidence,
+  computeOverallConfidence,
+  isManualOverallConfidence,
 } from "../src/lib/confidence.js";
 
 function makeChunk(overrides = {}) {
@@ -436,6 +440,87 @@ describe("resolveRequiredReps — Pass 27's flat run-through rep count", () => {
   });
 });
 
+describe("resolveRequiredReps — Pass 61's Holding periodic harder check", () => {
+  const chunk = { kind: "section", difficultyLabel: "medium" }; // baseline 4
+
+  test("stage/holdingReviewCount omitted entirely — behaves exactly as before this pass (backward compatible with every existing call site)", () => {
+    assert.equal(resolveRequiredReps(chunk), 4);
+  });
+
+  test("not in Holding — never bumped, regardless of holdingReviewCount", () => {
+    for (const stage of ["stabilizing", "settling", undefined, null]) {
+      for (const holdingReviewCount of [0, 3, 7, 100]) {
+        assert.equal(resolveRequiredReps(chunk, stage, holdingReviewCount), 4, `stage=${stage}, holdingReviewCount=${holdingReviewCount}`);
+      }
+    }
+  });
+
+  test("in Holding, the review about to be logged is the 4th/8th/12th (holdingReviewCount 3/7/11 going in) — baseline + 1", () => {
+    for (const holdingReviewCount of [3, 7, 11]) {
+      assert.equal(
+        resolveRequiredReps(chunk, "holding", holdingReviewCount),
+        5,
+        `holdingReviewCount=${holdingReviewCount} going in means this is review #${holdingReviewCount + 1}`
+      );
+    }
+  });
+
+  test("in Holding, every other review — baseline, unchanged", () => {
+    for (const holdingReviewCount of [0, 1, 2, 4, 5, 6, 8, 9, 10, 12]) {
+      assert.equal(resolveRequiredReps(chunk, "holding", holdingReviewCount), 4, `holdingReviewCount=${holdingReviewCount}`);
+    }
+  });
+
+  test("holdingReviewCount omitted (null/undefined) while in Holding is treated as 0 — the upcoming review is #1, not bumped", () => {
+    assert.equal(resolveRequiredReps(chunk, "holding", undefined), 4);
+    assert.equal(resolveRequiredReps(chunk, "holding", null), 4);
+  });
+
+  test("the bump applies on top of the run-through flat 2-rep baseline too, not just the difficulty-based table", () => {
+    const runThrough = { kind: "section-runthrough", difficultyLabel: "hard" };
+    assert.equal(resolveRequiredReps(runThrough, "holding", 0), 2, "ordinary review — still the flat run-through baseline");
+    assert.equal(resolveRequiredReps(runThrough, "holding", 3), 3, "4th review — baseline 2 + 1");
+  });
+});
+
+describe("classifySessionOutcome — base tempo check is unaffected by Pass 61 (clearsStageFloor is retired for Holding, clearsTempo is a completely separate mechanism)", () => {
+  // clearsStageFloor decides whether an already-classified pass counts
+  // toward Holding's interval growth — a concern of computeLadderAdvance
+  // (lib/ladder.js), not of classifySessionOutcome, which decides whether
+  // a session is a pass/soft-miss/fail at all in the first place via its
+  // own, separate `clearsTempo` check (bpm >= practiceBPM). Pass 61 only
+  // retired the former; this file's classifySessionOutcome import is
+  // untouched by that pass, and this test proves it stays that way —
+  // requiredReps met but bpm under practiceBPM still reads as a soft-miss,
+  // exactly as it always has, with no stage/holdingReviewCount concept
+  // anywhere in this function's signature.
+  test("required reps hit but bpm under practiceBPM is still a soft-miss, not a pass — same as always, nothing Holding-specific here", () => {
+    const outcome = classifySessionOutcome({
+      cleanReps: 4,
+      bpm: 95,
+      requiredReps: 4,
+      practiceBPM: 100,
+      manualFail: false,
+      previousOutcome: null,
+      previousCleanReps: null,
+    });
+    assert.equal(outcome, "soft-miss", "reps met, tempo not cleared — the base clearsTempo check, untouched by Pass 61");
+  });
+
+  test("required reps hit AND bpm at/above practiceBPM is a full pass — same formula regardless of stage, since this function never took a stage argument", () => {
+    const outcome = classifySessionOutcome({
+      cleanReps: 4,
+      bpm: 100,
+      requiredReps: 4,
+      practiceBPM: 100,
+      manualFail: false,
+      previousOutcome: null,
+      previousCleanReps: null,
+    });
+    assert.equal(outcome, "pass");
+  });
+});
+
 describe("computeAutoConfidence uses resolveRequiredReps too, not its own separate REQUIRED_REPS lookup (Pass 27 follow-up)", () => {
   test("a hard run-through logged at its own full requirement (2 reps) scores confidence the same as an ordinary chunk completed at ITS full requirement", () => {
     const runThrough = { id: "sr_s1", kind: "section-runthrough", difficultyLabel: "hard", start: 1, end: 8, recurring: false };
@@ -525,6 +610,78 @@ describe("A skipped session (Interleaved mode, Pass 29) is excluded wherever ses
     };
     const entry = { stage: null, sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] };
     assert.equal(formatLadderStatus(entry, ladderConfig, "2026-08-16"), null);
+  });
+});
+
+// allJudgedSessions (found in review while building Pass 56's Cold-Start
+// check) — Progress's Outcome Breakdown panel needs every session that
+// actually has a resolvable pass/soft-miss/fail judgment, not just every
+// non-skipped/non-provisional one. loggedSessions() alone lets a
+// "__consolidation__" or "__cold_start__" session through (neither is
+// skipped or provisional), but sessionOutcome() can't classify either
+// shape (no outcome/effectiveness), which used to silently inflate the
+// Outcome Breakdown's denominator without ever landing in a bucket —
+// pulling every real percentage down. See
+// docs/Decisions.md#cold-start-check.
+describe("allJudgedSessions — the Outcome Breakdown denominator", () => {
+  test("a real judged session (outcome set) is included", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, cleanReps: 3, bpm: 90, outcome: "pass" }] } } };
+    assert.equal(allJudgedSessions(piece).length, 1);
+  });
+
+  test("a legacy pre-outcome session (only effectiveness set) is still included — sessionOutcome resolves it", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, effectiveness: "high" }] } } };
+    assert.equal(allJudgedSessions(piece).length, 1);
+  });
+
+  test("a skipped session is excluded (already true via loggedSessions)", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, skipped: true, durationSeconds: 60 }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("a provisional session is excluded (already true via loggedSessions)", () => {
+    const piece = { progress: { c1: { sessions: [{ day: 1, cleanReps: 2, bpm: 80, outcome: "fail", provisional: true }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("[regression] a __consolidation__ session (stopCount, no outcome/effectiveness) is excluded", () => {
+    const piece = { progress: { __consolidation__: { doneDays: [3], sessions: [{ day: 3, stopCount: 2 }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("[regression] a __cold_start__ session (avgBpm, no outcome/effectiveness) is excluded", () => {
+    const piece = { progress: { __cold_start__: { sessions: [{ day: 5, avgBpm: 96, notes: "fine", gapDays: 3 }] } } };
+    assert.equal(allJudgedSessions(piece).length, 0);
+  });
+
+  test("[regression] the actual dilution scenario: real judged sessions plus cold-start/consolidation sessions — only the judged ones count", () => {
+    const piece = {
+      progress: {
+        c1: {
+          sessions: [
+            { day: 1, cleanReps: 4, bpm: 90, outcome: "pass" },
+            { day: 2, cleanReps: 4, bpm: 92, outcome: "pass" },
+          ],
+        },
+        c2: { sessions: [{ day: 1, cleanReps: 2, bpm: 70, outcome: "fail" }] },
+        __consolidation__: { doneDays: [3], sessions: [{ day: 3, stopCount: 1 }] },
+        __cold_start__: { sessions: [{ day: 10, avgBpm: 100, notes: "", gapDays: 5 }] },
+      },
+    };
+    const sessions = allJudgedSessions(piece);
+    // 2 pass + 1 fail = 3 judged sessions — NOT 5 (which is what the bug's
+    // inflated denominator would have produced, since it counted the
+    // consolidation and cold-start sessions too without ever bucketing
+    // them, silently understating every real percentage).
+    assert.equal(sessions.length, 3);
+    assert.equal(sessions.filter((s) => s.outcome === "pass").length, 2);
+    assert.equal(sessions.filter((s) => s.outcome === "fail").length, 1);
+  });
+
+  test("handles a piece with no progress, or no sessions at all, without throwing", () => {
+    assert.doesNotThrow(() => allJudgedSessions({ progress: {} }));
+    assert.deepEqual(allJudgedSessions({ progress: {} }), []);
+    assert.deepEqual(allJudgedSessions({ progress: { c1: {} } }), []);
   });
 });
 
@@ -650,5 +807,115 @@ describe("hasClimbingTempo — Pass 30's tempo-climbing trend detection", () => 
       sessions: [bpmSession(70, 1), { day: 2, cleanReps: 3, outcome: "pass", durationSeconds: 60 }, bpmSession(78, 3), bpmSession(86, 4)],
     };
     assert.equal(hasClimbingTempo(entry), true, "the bpm-less record is skipped over, not counted as a BPM of 0 (which would read as a huge dip)");
+  });
+});
+
+// Overall piece confidence (Pass 58) — an effort-weighted average of
+// computeConfidence across every practice chunk, confirmed with the user
+// over a plain (unweighted) average before building, for consistency with
+// how this codebase already weights everything else time/effort-related
+// (EFFORT_TO_MIN-based scheduling/revival/maintenance math). See
+// docs/Algorithms.md and docs/Decisions.md#cold-start-check's neighboring
+// entry for the full reasoning.
+describe("computeAutoOverallConfidence — effort-weighted average across practice chunks", () => {
+  function pieceWithChunk1Confident() {
+    return {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: { c1: { doneDays: [1], currentBPM: 100, sessions: [{ day: 1, cleanReps: 5, bpm: 100, outcome: "pass" }] } },
+    };
+  }
+
+  test("a single chunk's overall confidence equals that chunk's own computeConfidence", () => {
+    const chunk = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+    const piece = pieceWithChunk1Confident();
+    assert.equal(computeAutoOverallConfidence(piece, [chunk], 1), computeConfidence(chunk, piece, 1));
+  });
+
+  test("equal-effort chunks reduce to a plain average", () => {
+    const c1 = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+    const c2 = { id: "c2", start: 5, end: 8, difficultyLabel: "easy", effort: 4 }; // untouched -> confidence 0
+    const piece = pieceWithChunk1Confident();
+    const c1Confidence = computeConfidence(c1, piece, 1);
+    assert.equal(computeAutoOverallConfidence(piece, [c1, c2], 1), Math.round((c1Confidence + 0) / 2));
+  });
+
+  test("[regression] weighted by effort, not chunk count — a high-effort low-confidence chunk pulls the result down well below the plain average", () => {
+    // c1: confident, but tiny effort (1). c2: untouched (confidence 0), but
+    // effort 9 — nine times c1's weight. A plain average of the two would
+    // land near the midpoint; the effort-weighted result must land much
+    // closer to c2's 0, since c2's effort dominates the denominator.
+    const c1 = { id: "c1", start: 1, end: 1, difficultyLabel: "easy", effort: 1 };
+    const c2 = { id: "c2", start: 2, end: 20, difficultyLabel: "hard", effort: 9 };
+    const piece = pieceWithChunk1Confident();
+    const c1Confidence = computeConfidence(c1, piece, 1);
+    assert.ok(c1Confidence > 50, "test setup check: c1 must read as reasonably confident for this test to be meaningful");
+    const plainAverage = Math.round((c1Confidence + 0) / 2);
+    const result = computeAutoOverallConfidence(piece, [c1, c2], 1);
+    assert.equal(result, Math.round((c1Confidence * 1 + 0 * 9) / 10), "must match the hand-computed effort-weighted formula exactly");
+    assert.ok(result < plainAverage, `effort-weighted result (${result}) must be pulled below the plain average (${plainAverage}) by c2's dominant effort`);
+  });
+
+  test("an empty practiceChunks list returns 0, not NaN", () => {
+    assert.equal(computeAutoOverallConfidence({ progress: {} }, [], 1), 0);
+    assert.equal(computeAutoOverallConfidence({ progress: {} }, null, 1), 0);
+  });
+
+  test("reads through computeConfidence (not computeAutoConfidence), so a per-chunk manual override is reflected in the rollup", () => {
+    const chunk = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+    const piece = { targetBPM: null, bpmZones: [], progress: { c1: { manualConfidence: 42 } } };
+    assert.equal(computeAutoOverallConfidence(piece, [chunk], 1), 42);
+  });
+});
+
+describe("computeOverallConfidence / isManualOverallConfidence — piece-level manual override precedence", () => {
+  const chunk = { id: "c1", start: 1, end: 4, difficultyLabel: "easy", effort: 4 };
+  function pieceWithOverride(manualOverallConfidence) {
+    return {
+      targetBPM: 100,
+      bpmZones: [],
+      progress: { c1: { doneDays: [1], currentBPM: 100, sessions: [{ day: 1, cleanReps: 5, bpm: 100, outcome: "pass" }] } },
+      manualOverallConfidence,
+    };
+  }
+
+  test("no manualOverallConfidence field at all: resolves to auto, isManualOverallConfidence is false", () => {
+    const piece = { targetBPM: null, bpmZones: [], progress: {} };
+    assert.equal(isManualOverallConfidence(piece), false);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), computeAutoOverallConfidence(piece, [chunk], 1));
+  });
+
+  test("manualOverallConfidence: null behaves the same as it being absent — resolves to auto", () => {
+    const piece = pieceWithOverride(null);
+    assert.equal(isManualOverallConfidence(piece), false);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), computeAutoOverallConfidence(piece, [chunk], 1));
+  });
+
+  test("[regression] the manual override takes precedence over the auto-calculated value when set", () => {
+    const piece = pieceWithOverride(15);
+    const auto = computeAutoOverallConfidence(piece, [chunk], 1);
+    assert.notEqual(auto, 15, "test setup check: auto and manual must actually differ, or this test can't prove precedence");
+    assert.equal(isManualOverallConfidence(piece), true);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), 15);
+  });
+
+  test("a manual override of exactly 0 is respected, not treated as unset (0 is falsy but a real, meaningful rating)", () => {
+    const piece = pieceWithOverride(0);
+    assert.equal(isManualOverallConfidence(piece), true);
+    assert.equal(computeOverallConfidence(piece, [chunk], 1), 0);
+  });
+
+  test("[regression] clearing the override (back to null) reverts to the current auto-calculated value, not a frozen snapshot", () => {
+    const manualPiece = pieceWithOverride(15);
+    assert.equal(computeOverallConfidence(manualPiece, [chunk], 1), 15);
+    const clearedPiece = { ...manualPiece, manualOverallConfidence: null };
+    assert.equal(isManualOverallConfidence(clearedPiece), false);
+    assert.equal(computeOverallConfidence(clearedPiece, [chunk], 1), computeAutoOverallConfidence(clearedPiece, [chunk], 1));
+  });
+
+  test("manual override is clamped to 0-100 and rounded, same as per-chunk manualConfidence", () => {
+    assert.equal(computeOverallConfidence(pieceWithOverride(150), [chunk], 1), 100);
+    assert.equal(computeOverallConfidence(pieceWithOverride(-20), [chunk], 1), 0);
+    assert.equal(computeOverallConfidence(pieceWithOverride(55.6), [chunk], 1), 56);
   });
 });

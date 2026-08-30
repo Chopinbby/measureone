@@ -23,6 +23,7 @@ import {
   startOfWeekISO,
   computeCrossPieceConsistency,
   hasPendingProvisionalSession,
+  findRelatedChunks,
 } from "../src/lib/utils.js";
 
 describe("loggedSessions (Pass 29) — filters out skipped sessions, keeps real ones", () => {
@@ -244,5 +245,50 @@ describe("[regression] elapsedDay and getCurrentDay must share one counting impl
     const future = { startDate: "2099-01-01" };
     assert.equal(elapsedDay(future), 1);
     assert.equal(getCurrentDay(future, 30), 1);
+  });
+});
+
+describe("findRelatedChunks (Pass 50) — findComboUnderlyingChunks (lib/revival.js) run in reverse", () => {
+  // Same measure layout as lib/revival.js's own findComboUnderlyingChunks
+  // fixture (test/revival.test.mjs), plus a transition, for direct
+  // comparability: c1(1-4), c5(5-8, hard anchor), c9(9-12); combo spans
+  // midpoint-to-midpoint (3-10); a transition between c1 and c5 spans 3-6.
+  const c1 = { id: "c1", kind: "section", start: 1, end: 4 };
+  const c5 = { id: "c5", kind: "section", start: 5, end: 8 };
+  const c9 = { id: "c9", kind: "section", start: 9, end: 12 };
+  const combo = { id: "x_c5", kind: "combo", start: 3, end: 10 };
+  const transition = { id: "t_c1_c5", kind: "transition", start: 3, end: 6 };
+  const allChunks = [c1, c5, c9, combo, transition];
+
+  test("from a base chunk, finds the transition/combo touching it, not other base chunks", () => {
+    const related = findRelatedChunks(c1, allChunks).map((c) => c.id).sort();
+    assert.deepEqual(related, ["t_c1_c5", "x_c5"], "c1 doesn't overlap c5 or c9 — only the transition and combo reaching back into it");
+  });
+
+  test("excludes a chunk truly outside its range", () => {
+    const farChunk = { id: "c99", start: 50, end: 54 };
+    const related = findRelatedChunks(c1, [...allChunks, farChunk]);
+    assert.ok(!related.some((c) => c.id === "c99"));
+  });
+
+  test("never includes the pivot chunk itself", () => {
+    const related = findRelatedChunks(c5, allChunks);
+    assert.ok(!related.some((c) => c.id === "c5"));
+  });
+
+  test("run in reverse — from the combo, finds every base chunk it underlies (matches findComboUnderlyingChunks)", () => {
+    const related = findRelatedChunks(combo, allChunks).map((c) => c.id).sort();
+    assert.deepEqual(related, ["c1", "c5", "c9", "t_c1_c5"], "the combo overlaps all three base chunks and the transition");
+  });
+
+  test("run from a transition, finds its two flanking base chunks (and the combo, since it also spans this range)", () => {
+    const related = findRelatedChunks(transition, allChunks).map((c) => c.id).sort();
+    assert.deepEqual(related, ["c1", "c5", "x_c5"]);
+  });
+
+  test("results are sorted by start measure ascending", () => {
+    const related = findRelatedChunks(combo, allChunks);
+    const starts = related.map((c) => c.start);
+    assert.deepEqual(starts, [...starts].sort((a, b) => a - b));
   });
 });

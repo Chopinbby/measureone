@@ -36,6 +36,12 @@ comments.
 | rough/lost confidence caps | 55 / 20 | `computeConfidence` (Pass 6) | Real data on how much a single rough/lost run-through should actually discount confidence, vs. these hand-picked values chosen to land the display in the Piece Map's existing "Developing"/"Needs work" tiers |
 | tempo-climbing trend window | last 4 judged sessions, min 3 to evaluate, min +4 BPM net rise to count as "climbing" | `hasClimbingTempo` (Pass 30, `lib/confidence.js`) | Real data on what window size and rise threshold actually separates a genuine tempo trend from ordinary session-to-session noise — picked as a plausible default, explicitly flagged in code as "a small tuning detail, not worth pre-deciding" at the time |
 | minutes-mode auto-extend step | 14 days | `computeMinutesModeAutoExtend` (Pass 39, `lib/scheduling.js`) — how far a `scheduleMode: "minutes"` piece's plan grows each time it auto-extends past its own day count while not yet learned | Not derived from anything; picked to roughly match Holding's own default `startIntervalDays` so the number isn't arbitrary-looking, but there's no actual coupling between the two. Real backing would mean data on how often re-extending this often actually keeps pace with how long a piece typically takes to reach Holding once introduction is done |
+| section run-through repeating threshold | 1, 3, 5, 7, ... (a flat "+2" step forever) | `sectionRunThroughGate` (Pass 49, `lib/chunking.js`) — how many more confirmed sessions on a section's slowest chunk it takes before that section's run-through comes due again | Specified directly by the feature request, not derived from anything. Real backing would mean data on whether a flat +2 step is the right cadence for a whole-section check-in regardless of section length/difficulty, or whether it should scale with either |
+| Cold-Start check escalation sequence | 3, 7, 14 days (fixed by the feature request), then doubling forever (28, 56, 112, ...) | `highestColdStartThreshold` (Pass 56, `lib/coldStart.js`) — how long since anything was logged on a piece before it's offered a cold-play-through check-in, and how the nudge re-escalates if ignored | The first three rungs came from the feature request directly; doubling past 14 is this pass's own reasonable-default choice for the unspecified tail, chosen to match the spirit of the maintenance ladder's own Holding-stage interval growth above, not derived from anything. Real backing would mean data on what gap actually predicts a piece has gone stale enough to be worth a cold self-test, and whether escalating at all changes whether the nudge gets acted on |
+| effort-weighted overall-confidence rollup | `sum(confidence × effort) / sum(effort)` | `computeAutoOverallConfidence` (Pass 58, `lib/confidence.js`) | Not a single hand-picked number so much as a hand-picked *formula* — confirmed with the user (effort-weighted over a plain average) for consistency with how `EFFORT_TO_MIN`-based math already weights everything else, not because either formula is known to better predict how confident a piece actually feels to play |
+| tempo-ratchet default rate / cap | `k`: 0.3, `kCapBpm`: 8 BPM/session | `ladderConfig.tempoRatchet` (Pass 59, `lib/ladder.js`) — the gap-proportional rate a pass/soft-miss steps `practiceBPM` by (`step = clamp(round(k * gap), 1, kCapBpm)`), replacing the flat `bpmSteps` delta as the primary mechanism (that flat delta is now only a fallback for a chunk with no `targetBPM`) | Real data on what adaptive rate actually tracks how quickly a learner can close a tempo gap without overshooting into sloppy playing |
+| tempo-maintenance threshold / rate | `tempoAchievedThreshold`: 0.85, `maintenanceK`: 0.05 | `ladderConfig.tempoRatchet` (Pass 60, `lib/ladder.js`) — once `practiceBPM` is at/above this fraction of `targetBPM`, step size switches to the small pinned `maintenanceK` instead of the chunk's own tracked rate | Real data on where "close enough to target" actually starts, and how small a step is enough to keep nudging forward without risking an oversized jump near the top |
+| Holding periodic harder-check cadence / bonus | every 4th review, +1 clean rep | `HOLDING_HARDER_CHECK_INTERVAL`/`HOLDING_HARDER_CHECK_BONUS` (Pass 61, `lib/confidence.js`) — replaces Holding's old escalating tempo floor (see the now-corrected "Tempo floors" row below) with a periodic rep-only check instead | Real data on what cadence and bonus size actually catches genuine skill decay in a long-term-retention stage, vs. this pass's flat, unvalidated pick |
 
 `computeProgressTier`'s old ≥5/≥10 clean-rep thresholds (a hand-picked
 constant in this same spirit) no longer exist — Pass 6 replaced them with
@@ -94,16 +100,20 @@ specific choices rather than pure intuition:
   [Product-Principles.md#maximize-long-term-repertoire-not-just-todays-session](Product-Principles.md#maximize-long-term-repertoire-not-just-todays-session))
   matter, beyond the intuition they were originally designed from.
 
-New hand-picked constants this design introduces (not yet in code — will
-need the same "not derived from a study" tracking as the table above once
-implemented):
+This design's own hand-picked constants, since built and live (**stage
+math since Pass 1–5; the tempo-ratchet/maintenance-mode/Holding-harder-check
+refinements since Passes 59–61** — the table above now carries those
+directly, since they're in code, not "will need tracking once
+implemented"). Two rows below are corrected from the original
+pre-implementation sketch, not just re-stated, since what actually shipped
+diverged from the original guess:
 
 | Constant | Value | What it should eventually be backed by |
 |---|---|---|
 | Ladder stage intervals | Stabilizing 4d / Settling 7d / Holding starts 14d, expands ~1.5–2×, caps ~8–12wk | Same forgetting-curve-shape question already open below, specifically for a *practiced-then-consolidated* passage rather than a freshly-introduced one |
 | Graduation pass-count | 4 consecutive full passes (Stabilizing and Settling) | Motor-learning research on repetitions-to-consolidation, same open question as `REQUIRED_REPS` above |
-| Tempo floors | Settling ~70–75%, Holding starts ~85% +5/pass, caps 100% | Real data on what tempo fraction predicts durable retention vs. just current fluency |
-| `practiceBPM` step sizes | +2 full pass / −2 soft miss / ~−8 to −10 real fail | Real variance in how learners actually respond to incremental tempo pressure |
+| Tempo floor (Settling only) | ~70–75% of target | Real data on what tempo fraction predicts durable retention vs. just current fluency. **Corrected (Pass 61): Holding no longer has a tempo floor at all** — the original sketch's "starts ~85% +5/pass, caps 100%" was built and later retired outright, replaced by the periodic rep-only harder check in the table above; a Holding pass now counts toward interval growth as soon as it meets the rep requirement, full stop |
+| `practiceBPM` step sizes | Gap-proportional by default (see tempo-ratchet row above); the flat `bpmSteps` delta (+2 pass / −2 soft-miss / −2 fail) is the fallback only, for a chunk with no `targetBPM` to be proportional against | Real variance in how learners actually respond to incremental tempo pressure. **Corrected (Pass 26/59): fail no longer uses a steeper pullback** — it resets to the chunk's own recorded entry tempo for the stage it demotes into (falling back to the same flat step as pass/soft-miss only when nothing's recorded), not the originally-sketched ~−8 to −10 |
 | Revival auto-trigger thresholds | stop count > 5; 2+ chunks (or 1 combo) lost in a run-through; 60+ days untouched | Product judgment calls, not research-backed — flagged here so that's explicit |
 
 ## Open research questions

@@ -2,10 +2,27 @@ import { Trash2, Plus } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 
 export function SectionsEditor({ draft, set }) {
-  const addSection = () =>
+  // Picks up where the furthest-reaching existing section left off (its
+  // end + 1) instead of always starting a new section back at measure 1 —
+  // clamped to totalMeasures so a piece already fully covered by existing
+  // sections can't produce a start past the end of the piece (which would
+  // violate the start <= end invariant below, since end is capped at
+  // totalMeasures too). Falls back to 1 when there are no sections yet.
+  //
+  // The highest `end` across every section, not just the last one in
+  // array order — sections can be edited out of the order they were
+  // created (e.g. added with default full-range guesses, then tightened up
+  // in a different order later), and array order doesn't track that. Using
+  // only the last entry could suggest a start that lands inside an
+  // already-used range instead of genuinely picking up where things left
+  // off.
+  const addSection = () => {
+    const lastEnd = Math.max(0, ...draft.sections.map((s) => s.end));
+    const start = Math.min(lastEnd + 1, draft.totalMeasures);
     set({
-      sections: [...draft.sections, { id: `s${Date.now()}`, name: "", start: 1, end: draft.totalMeasures }],
+      sections: [...draft.sections, { id: `s${Date.now()}`, name: "", start, end: draft.totalMeasures }],
     });
+  };
   // start/end commit independently (each NumberInput fires its own
   // onCommit), so a patch touching just one of them can leave the pair
   // backwards — e.g. dragging end below the current start. Re-normalized

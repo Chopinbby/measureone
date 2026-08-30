@@ -94,7 +94,11 @@ export function defaultPiece() {
 /*  Setup Wizard (new piece only)                                     */
 /* ------------------------------------------------------------------ */
 
-const STEPS = ["Piece", "Sections", "Difficulty", "Repeats", "Timeline", "Review"];
+// Repeats sits right after Sections (not Difficulty) so the wizard's two
+// measure-range-entry steps (Sections' section ranges, Repeats' recurring
+// passage ranges) are adjacent — Difficulty's grid-click UI doesn't share
+// that input shape and reads fine coming after either one.
+const STEPS = ["Piece", "Sections", "Repeats", "Difficulty", "Timeline", "Review"];
 
 // `joinWork` — {workId, workName, composer} — is set when the wizard was opened
 // via "Add a movement" from an existing work, so the new part starts already
@@ -200,18 +204,16 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
               />
 
               {/* Optional extras, all skippable — canAdvance() for step 0
-                  only checks name/totalMeasures, so none of these ever
-                  block moving on. Tempo zones/recordings/documents stay
-                  fully editable later from Settings too (their own
-                  dedicated panels there are unchanged) — this just means a
-                  learner who already knows their target tempo or has a
-                  reference link in hand doesn't have to detour through
-                  Settings right after finishing setup to enter it. */}
+                  only checks name/totalMeasures, so neither of these ever
+                  blocks moving on. Recordings/documents stay fully editable
+                  later from Settings too (their own dedicated panels there
+                  are unchanged) — this just means a learner who already has
+                  a reference link in hand doesn't have to detour through
+                  Settings right after finishing setup to enter it. Tempo
+                  zones moved to the Sections step below (see the comment
+                  there) — sections are the more natural thing to set first,
+                  and tempo zones can now copy their ranges from them. */}
               <div className="panel" style={{ marginTop: 20 }}>
-                <h3>Tempo zones — optional</h3>
-                <BpmZonesEditor draft={draft} set={set} />
-              </div>
-              <div className="panel" style={{ marginTop: 14 }}>
                 <h3>Recordings — optional</h3>
                 <RecordingsEditor draft={draft} set={set} />
               </div>
@@ -225,18 +227,27 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
             <div className="wizard-pane">
               <h2>How is the piece organized?</h2>
               <SectionsEditor draft={draft} set={set} />
+              {/* Tempo zones live here, after sections, rather than on the
+                  Piece step where they used to sit — sections are the more
+                  natural thing to define first, and BpmZonesEditor's "Copy
+                  ranges from sections" button needs draft.sections to
+                  already have something worth copying. */}
+              <div className="panel" style={{ marginTop: 20 }}>
+                <h3>Tempo zones — optional</h3>
+                <BpmZonesEditor draft={draft} set={set} />
+              </div>
             </div>
           )}
           {step === 2 && (
             <div className="wizard-pane">
-              <h2>How hard is each part?</h2>
-              <DifficultyEditor draft={draft} set={set} />
+              <h2>Any recurring material?</h2>
+              <RecurringEditor draft={draft} set={set} />
             </div>
           )}
           {step === 3 && (
             <div className="wizard-pane">
-              <h2>Any recurring material?</h2>
-              <RecurringEditor draft={draft} set={set} />
+              <h2>How hard is each part?</h2>
+              <DifficultyEditor draft={draft} set={set} />
             </div>
           )}
           {step === 4 && (

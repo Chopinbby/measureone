@@ -158,7 +158,13 @@ assuming this section is stale.
    a continuous spaced-repetition ladder (Stabilizing → Settling →
    Holding) that every chunk/transition/combo now actually advances
    along, driven by a three-tier session outcome (full pass/soft
-   miss/real fail) with a per-chunk `practiceBPM` ratchet
+   miss/real fail) with a per-chunk `practiceBPM` ratchet — **gap-proportional
+   as of Pass 59** (`ladderConfig.tempoRatchet`), with a "tempo maintenance
+   mode" pinned-rate substitution once close to target (Pass 60), replacing
+   the original flat step (now the fallback for a chunk with no
+   `targetBPM`) — and **Holding's own tempo floor retired outright as of
+   Pass 61**, replaced by a periodic rep-only harder check
+   (`progress[id].holdingReviewCount`)
    (`computeLadderAdvance`, `src/lib/ladder.js`, called from
    `handleLogSession` on every logged session) — see
    [Data-Model.md](Data-Model.md#the-piece-object) and

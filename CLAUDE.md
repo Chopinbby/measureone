@@ -631,3 +631,65 @@ tip-line when a piece has no `targetBPM` to be a fraction of — typing
 into the field in that state doesn't do anything, by design, not a bug.
 `computeTempoLadder` itself and everything downstream of the stored
 fraction are completely unchanged; only the input widget changed.
+
+**Since Pass 66**, `computeDueReviews` (`lib/maintenance.js`) runs
+unconditionally at both call sites (`TodayTab`, `MasterAgendaTab`) instead
+of only once a piece has run out its whole bounded plan — a review overdue
+*inside* an active plan now has a live surface immediately, not just once
+the plan is exhausted. `mergeLiveDueReviews(day, dueItems)`
+(`lib/maintenance.js`) folds the result into a plan day's own
+`reviewChunkIds`, de-duplicated against a review already placed there
+because it's due exactly today. Scoped to real "today" only in both tabs —
+day-nav/date-picker browsing a different day is unaffected. The review's
+original, now-past placement day still reads "behind" via
+`classifyDayCompletion` exactly as before; only the "can I see and act on
+this today" gap closed.
+
+**Same-session follow-up, per direct request:** reviews are now priced by
+difficulty everywhere, not just in `computeDueReviews`. Implementing the
+merge above surfaced a genuine pre-existing inconsistency: `computeTimeline`
+priced a review at a flat 3 minutes regardless of the chunk's own
+difficulty, while `computeDueReviews` already priced one at
+`chunk.effort * EFFORT_TO_MIN` (the same rate new-chunk introduction uses).
+**If you touch review-cost estimation, both of these now agree and must
+keep agreeing:**
+- `computeTimeline`'s `minutesFor` (`lib/scheduling.js`) prices
+  `reviewChunkIds` the same way as `newChunkIds`/`specialChunkIds` —
+  `chunk.effort * EFFORT_TO_MIN` — not a flat per-touch minute figure.
+- `computeDaysNeededForMinutesPerDay` (`lib/scheduling.js`, the
+  `scheduleMode: "minutes"` day-count estimator) prices each chunk's
+  review padding the same way: `c.effort * REVIEW_TOUCHES_PER_ITEM`
+  (`REVIEW_TOUCHES_PER_ITEM = 2`, unchanged from before — only what each
+  touch costs changed), not a flat-minutes constant converted into
+  effort-points. Underestimating a hard chunk's review cost here directly
+  risks a `scheduleMode: "minutes"` plan not actually fitting its own
+  stated daily budget once review load lands on top of introduction — the
+  reason this was worth fixing alongside the display-only case, not
+  deferred.
+- `mergeLiveDueReviews` now folds a merged item's `minutes` into
+  `day.minutes` too (previously left deliberately unmerged, back when the
+  two sides disagreed) — safe now that both sides price a review
+  identically.
+- Two pre-existing regression tests in `test/scheduling.test.mjs` had
+  their expected numbers change as a direct, verified consequence (not a
+  sign either fix was undone) — see their updated comments for the exact
+  before/after math: the Tier 2 same-day-pileup smoothing test (heavier
+  real review cost means the smoothing pass now relocates the full pileup,
+  not just some of it) and the `computeDaysNeededForMinutesPerDay` padding
+  test (the correct day-count padding for that fixture is legitimately
+  larger once review cost stops being under-counted).
+
+**Same-session follow-up, found in a self-review before committing:**
+`mergeLiveDueReviews` (`lib/maintenance.js`) skips consolidation ("full
+run-through") days entirely — `if (day.type === "consolidation") return
+day;`. Neither `TodayTab`'s `ConsolidationPanel` nor `MasterAgendaTab`'s
+card renders `reviewChunkIds` or `minutes` for a consolidation day at all,
+so merging a transition/combo's overdue live-due review in on that day
+type was silently inflating `day.minutes` (and therefore Master Agenda's
+total-planned figure) with no line item anywhere on screen to explain the
+extra time — a real number-doesn't-match-what's-shown bug, not a
+theoretical one, confirmed live in the browser both before and after the
+fix. **If you touch `mergeLiveDueReviews` or either consolidation-day
+render branch:** the guard belongs in `mergeLiveDueReviews` itself, not
+duplicated at each call site, since both callers rely on it unconditionally
+to decide what's safe to merge.

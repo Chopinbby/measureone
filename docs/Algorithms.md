@@ -290,11 +290,21 @@ transitions, combos) accumulating effort until adding the next item would
 exceed the effort-equivalent of one day's budget, at which point a new day
 starts. Each item's accumulated cost includes not just its own introduction
 effort but a rough estimate of the review load it will generate later (2
-touches at a flat 3 minutes each, converted to effort-point units) —
+touches, each priced the same as introducing the chunk fresh —
+`c.effort * REVIEW_TOUCHES_PER_ITEM`, `REVIEW_TOUCHES_PER_ITEM = 2`) —
 omitting that would under-count what a day actually costs once
 `computeTimeline`'s spaced review lands on top of introduction, and the day
 count would come out "technically sufficient" for introduction alone while
-still running well over budget in practice. **The "2 touches" figure was 4
+still running well over budget in practice. **Each touch was priced at a
+flat 3 minutes, regardless of the chunk's own difficulty, before a
+same-session follow-up to Pass 66** — found while wiring that pass's live
+due-review merge into a plan day's own minutes total and discovered to
+disagree with `computeDueReviews`, which already priced a review at
+`chunk.effort * EFFORT_TO_MIN`; underestimating a hard chunk's review cost
+here specifically risked a `scheduleMode: "minutes"` plan under-provisioning
+days for exactly the material most likely to need real review time. See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for the full
+before/after. **The "2 touches" figure was 4
 (`REVIEW_OFFSETS.length`) before Pass 5 of the maintenance-ladder build** —
 that fixed four-touch assumption matched the old `REVIEW_OFFSETS`-based
 placement, but `computeTimeline` no longer guarantees any fixed number of
@@ -1009,6 +1019,57 @@ Both call sites (`MasterAgendaTab`, `TodayTab`) use this one function
 rather than each running its own query — Master Agenda just renders less of
 the same result. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+**Since Pass 66, both call sites run this query unconditionally — not just
+once a piece has run out its whole bounded plan.** Before this, a review
+whose `nextDueDate` had already passed while the piece was still
+comfortably inside its active plan had no live surface at all: its
+placement day (`computeTimeline`'s own once-per-piece scheduling — see
+[Timeline / scheduler](#timeline--scheduler)) had already gone by, and the
+query itself only ever ran once `dayNumber > timeline.days.length`
+(`TodayTab`'s `pastPlan`, `MasterAgendaTab`'s equivalent check). Paging
+day-nav back to that exact past day was the only way to see it, and there
+was no way to log it from "today" at all.
+
+`mergeLiveDueReviews(day, dueItems)` (`lib/maintenance.js`) is the merge
+this now runs through: it folds `computeDueReviews`'s result into a plan
+day's own `reviewChunkIds`, filtering out any chunk id already present —
+a review due *exactly* today is already placed there by `computeTimeline`
+itself, so without the filter it would render (and count) twice. Both
+`TodayTab`'s day-view checklist and `MasterAgendaTab`'s per-piece review
+chip row call it the same way, scoped to real "today" only (day-nav
+browsing a past or future day, or Master Agenda's date picker on a
+non-today date, shows that day's own plan as scheduled — live "as of
+today" due-ness has no meaning for a day that isn't today). Also folds
+each merged item's `minutes` into `day.minutes`/`totalTime` — safe because
+`computeTimeline`'s `minutesFor` and `computeDueReviews` now price a
+review identically (`chunk.effort * EFFORT_TO_MIN`, the same rate
+introducing the chunk fresh uses). **This wasn't always true**: at first
+`minutesFor` priced a review at a flat 3 minutes regardless of difficulty,
+which disagreed with `computeDueReviews`'s difficulty-based estimate —
+`mergeLiveDueReviews` originally left `minutes` deliberately unmerged for
+exactly that reason, until a same-session follow-up brought the two rates
+into agreement (see [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+and the `computeDaysNeededForMinutesPerDay` note above, which had the same
+flat-rate assumption baked into its day-count math).
+
+**`mergeLiveDueReviews` skips consolidation ("full run-through") days
+entirely** (`if (day.type === "consolidation") return day;`), found in a
+self-review after the merge above shipped: neither `TodayTab`'s
+`ConsolidationPanel` nor `MasterAgendaTab`'s card renders `reviewChunkIds`
+or `minutes` for that day type at all, so merging a transition/combo's
+overdue live-due review in would have silently inflated `day.minutes` (and
+Master Agenda's total-planned figure) with no line item anywhere
+accounting for it — reproduced live, not theoretical. The item still
+surfaces normally on any other day, or via the unrelated past-plan path.
+See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+The review's *original* placement day is untouched by this and keeps
+reading "behind" via [`classifyDayCompletion`](#detecting-that-a-piece-has-run-past-its-plan)
+exactly as before — that's accurate history (the review really did come
+due on that day and wasn't logged), not the bug. Only "is there a live,
+current way to see and act on this today" was missing, and that's what
+Pass 66 closes.
 
 ### `isInterleaveEligible` — Interleaved mode's eligibility rule (Pass 29)
 

@@ -1888,6 +1888,143 @@ unclamped elapsed-day derivation in each surface, not by `getCurrentDay`
   regression, and arguably wrong next to a completed plan given the
   "a late review is slack, never a failure" rule — but out of scope.
 
+**Decision (built — Pass 66): `computeDueReviews` runs unconditionally at
+both call sites, not just once a piece is past its whole bounded plan —
+closing the gap where a review overdue *inside* an active plan had no live
+surface until the plan ran out.**
+
+- **Why:** a chunk's `nextDueDate` is a real calendar date (the Pass 8
+  decision above), and `computeTimeline` places each review on exactly one
+  plan day at generation time. If that placement day passed without the review being
+  logged, the review was stuck: `computeDueReviews` — the function built
+  specifically to answer "what's due" independent of the bounded plan —
+  only ever *ran* once the whole plan had run out (`TodayTab`'s `pastPlan`
+  gate, `MasterAgendaTab`'s equivalent `dayNumber > timeline.days.length`
+  branch). A piece with 50 days left in a 60-day plan and one review 9 days
+  overdue had no way to see or log it from "today" at all — only by paging
+  day-nav back to the exact day it was originally placed on.
+- **Two ways to close it, resolved before starting:** (a) drop the
+  `pastPlan`/past-plan gate on the existing call and merge its result into
+  the current day's own `reviewChunkIds`; or (b) teach `computeTimeline`
+  itself to roll a past-due review forward onto today. (b) was rejected:
+  it would give `computeTimeline` a `currentDay`/"now" input it has never
+  needed, complicating its signature and meaning `chunkSet`/`timeline`'s
+  existing memoization (a pure derivation off `piece` alone — see
+  `CLAUDE.md`) would need to key on the current day too. It also wouldn't
+  cover the already-past-plan case on its own — `computeDueReviews` would
+  still be needed there regardless — so (b) likely builds two mechanisms
+  for one problem. (a) reuses a function that's already correct and
+  already tested, and touches nothing about `computeTimeline`'s contract.
+- **Consequence:** `mergeLiveDueReviews(day, dueItems)`
+  (`lib/maintenance.js`) folds `computeDueReviews`'s result into a plan
+  day's own `reviewChunkIds`, filtering out any id already present so a
+  review due *exactly* today (already placed there by `computeTimeline`)
+  doesn't render twice. Both `TodayTab`'s day-view checklist and
+  `MasterAgendaTab`'s per-piece review chip row call it, scoped to real
+  "today" only — day-nav browsing a different day, or Master Agenda's date
+  picker on a non-today date, still shows that day's plan as originally
+  scheduled, since due-ness is "as of today" only (the Pass 8 decision
+  above's "scoped out" note is unchanged by this pass). `minutes`/`totalTime`
+  deliberately isn't merged: a plan day costs a review at a flat 3 minutes
+  (`computeTimeline`'s `minutesFor`) while `computeDueReviews` costs one at
+  `chunk.effort * EFFORT_TO_MIN` — genuinely two different estimates, and
+  folding them together would mix rather than reconcile them. Flagged, not
+  resolved: which of the two should govern if this is ever reconciled is
+  an open question.
+- **Untouched by this pass:** the review's original, now-past placement
+  day still reads "behind" via `classifyDayCompletion` exactly as before —
+  that's accurate history, not the bug this pass fixes. `computeScheduleStatus`'s
+  "never counts a review as missed" policy (no-penalty design, see the
+  Pass 5 decision above) is also untouched — this pass is about
+  visibility, not about making a late review count against the schedule.
+  Interleaved mode's eligible-item list (`TodayTab`'s `interleaveItems`)
+  and the Reassess panel's `todaysRanges` still read the plan day's
+  *original*, unmerged `reviewChunkIds` — a newly-surfaced live-due item
+  is loggable from the day checklist but doesn't yet appear in either of
+  those; flagged as a possible follow-up, not decided.
+- See [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
+
+**Same-session follow-up, per direct request: a review is now priced by
+difficulty everywhere, not just in `computeDueReviews` — closing the exact
+`minutes`/`totalTime` disagreement flagged above, and correcting a
+day-count risk in `scheduleMode: "minutes"` planning that the disagreement
+had been masking.**
+
+- **Why:** underestimating how long a hard chunk's review actually takes
+  isn't just a cosmetic display gap — for a `scheduleMode: "minutes"`
+  piece, the day-count estimator (`computeDaysNeededForMinutesPerDay`) folds
+  an assumed review cost into how many days it decides the plan needs. If
+  that assumption runs low specifically for the hardest chunks, the
+  estimator can under-provision days for exactly the material most likely
+  to need real review time — a plan that looks like it fits the stated
+  daily budget on paper but doesn't once review load actually lands.
+- **Consequence:** `computeTimeline`'s `minutesFor` (`lib/scheduling.js`)
+  now prices `reviewChunkIds` with the identical formula it already used
+  for `newChunkIds`/`specialChunkIds` — `chunk.effort * EFFORT_TO_MIN` —
+  replacing a flat 3-minutes-per-touch figure that ignored the chunk's own
+  difficulty. `computeDaysNeededForMinutesPerDay` gets the matching fix:
+  each chunk's review-padding term changes from a flat, difficulty-blind
+  constant (`(2 * 3) / EFFORT_TO_MIN`, added once per item) to
+  `c.effort * REVIEW_TOUCHES_PER_ITEM` (`REVIEW_TOUCHES_PER_ITEM = 2`,
+  unchanged — only what each touch costs changed, not how many touches are
+  assumed). `mergeLiveDueReviews` (the Pass 66 decision immediately above)
+  now folds a merged item's `minutes` into `day.minutes` too, since the two
+  sides no longer disagree.
+- **Consequence for existing tests, verified as expected rather than a
+  regression:** two pre-existing tests in `test/scheduling.test.mjs` had
+  their expected numeric outputs change. A Tier 2 same-day-review-pileup
+  smoothing test previously left exactly one of three same-day reviews
+  behind (three flat-3-minute reviews, 9 minutes total, wasn't enough of an
+  overload to relocate all of them); with accurate per-chunk pricing the
+  same pileup is 30 minutes, clearing the smoothing pass's relocation
+  threshold for all three. A `computeDaysNeededForMinutesPerDay` padding
+  test's expected day count rose from 14 back to 28 for its fixture — the
+  14 was itself computed on top of the same under-costed assumption being
+  fixed here, so once review cost is corrected, the true padding this
+  fixture needs is legitimately higher; both tests' comments were rewritten
+  with the exact math rather than just the new numbers, and both were
+  confirmed to fail back to their old values when the fix was temporarily
+  reverted.
+- **Untouched:** `REVIEW_TOUCHES_PER_ITEM`'s value (2, a deliberately rough
+  stand-in for "the first couple of ladder touches a chunk will likely
+  pick up") — this fix changed what each touch costs, not how many touches
+  are assumed. The `+6`-minute move-worth-it threshold in Tier 2's
+  smoothing pass (`lib/scheduling.js`) is also untouched — a general
+  anti-churn margin, not itself derived from the per-review cost figure,
+  so it wasn't in scope for this fix even though its practical effect
+  shifted as a result of reviews now costing more on heavy-pileup days.
+
+**Same-session follow-up, found in a critical self-review before
+committing (not part of the original request): `mergeLiveDueReviews`
+skips consolidation days entirely, closing a silent minutes-inflation gap
+the merge itself introduced.**
+
+- **Why:** neither `TodayTab`'s `ConsolidationPanel` nor
+  `MasterAgendaTab`'s card renders `reviewChunkIds` or `minutes` for a
+  consolidation ("full run-through") day — it's just "play through the
+  whole piece," by design, unrelated to this pass. Before this guard, a
+  transition or combo with an overdue live-due review landing on a piece's
+  consolidation day would still get merged in, silently adding its minutes
+  to `day.minutes` — and therefore Master Agenda's total-planned figure —
+  with no line item anywhere on screen accounting for the extra time. Not
+  a hypothetical: reproduced live (a 60-day piece whose consolidation day
+  landed on "today," with an overdue transition review) — the total read
+  higher than `minutesPerDay` with nothing on the card explaining why,
+  before the fix; confirmed reading back to exactly `minutesPerDay` after
+  it.
+- **Consequence:** `mergeLiveDueReviews(day, dueItems)` now returns `day`
+  unchanged, untouched, when `day.type === "consolidation"` — before doing
+  anything else. The overdue item isn't lost: it still surfaces normally
+  on any other day, or once the piece is past its whole plan (the
+  unrelated `pastPlan`/`DueReviewPanel` path, which never reads a `day`
+  object at all). This only stops it from being double-counted into a day
+  that was never going to itemize it either way.
+- **Consequence for tests:** one new regression test in
+  `test/maintenance.test.mjs` asserts `mergeLiveDueReviews` returns the
+  *exact same object* (not just an equal one) for a consolidation day fed
+  a genuinely overdue item — confirming no merge is attempted at all,
+  not just that the visible result happens to look unchanged.
+
 **Decision: day counting goes through `daysBetweenInclusive` everywhere —
 fixing a DST undercount that made due reviews permanently invisible for
 pieces started before the spring transition.**

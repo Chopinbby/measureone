@@ -613,6 +613,22 @@ export default function App() {
         stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
         settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
         holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
+        // Tempo-ratchet adaptive rate (Pass 59, lib/ladder.js) — same
+        // reasoning as the three entry-BPM fields above: without this in
+        // the snapshot, undoing a session that halved/reset/recovered
+        // tempoRatchetK would leave that new rate standing even though the
+        // session that caused it was itself undone.
+        tempoRatchetK: prevEntry.tempoRatchetK ?? null,
+        // Holding review count (Pass 61, lib/ladder.js) — same reasoning
+        // again: without this in the snapshot, undoing a session that
+        // incremented or reset holdingReviewCount would leave that new
+        // count standing even though the session that caused it was
+        // itself undone. `?? null`, not `?? 0` — same false-conflict fix
+        // as the storage.js backfill (see that comment): a chunk that's
+        // never touched Holding has no count to be "0" of, and writing a
+        // materialized `0` here would resurface the same bug via undo
+        // instead of via migration.
+        holdingReviewCount: prevEntry.holdingReviewCount ?? null,
       };
       const sessions = [
         ...(prevEntry.sessions || []),
@@ -655,6 +671,8 @@ export default function App() {
           stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
           settlingEntryBPM: prevEntry.settlingEntryBPM,
           holdingEntryBPM: prevEntry.holdingEntryBPM,
+          tempoRatchetK: prevEntry.tempoRatchetK,
+          holdingReviewCount: prevEntry.holdingReviewCount,
         },
         { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
         p.ladderConfig
@@ -675,6 +693,8 @@ export default function App() {
         stabilizingEntryBPM: advance.stabilizingEntryBPM,
         settlingEntryBPM: advance.settlingEntryBPM,
         holdingEntryBPM: advance.holdingEntryBPM,
+        tempoRatchetK: advance.tempoRatchetK,
+        holdingReviewCount: advance.holdingReviewCount,
         // A real logged session moves the ladder forward for real —
         // clears any pending flagSnapshot (see handleSetFlag below) so
         // later clearing a rough/lost flag can't discard this genuine
@@ -769,6 +789,15 @@ export default function App() {
             ...("stabilizingEntryBPM" in snapshot ? { stabilizingEntryBPM: snapshot.stabilizingEntryBPM } : {}),
             ...("settlingEntryBPM" in snapshot ? { settlingEntryBPM: snapshot.settlingEntryBPM } : {}),
             ...("holdingEntryBPM" in snapshot ? { holdingEntryBPM: snapshot.holdingEntryBPM } : {}),
+            // Tempo-ratchet adaptive rate (Pass 59) — same optional,
+            // not-part-of-isValidSnapshot treatment as the entry-BPM
+            // fields above: an older snapshot never recorded it, and
+            // there's no correct constant to invent in its place.
+            ...("tempoRatchetK" in snapshot ? { tempoRatchetK: snapshot.tempoRatchetK } : {}),
+            // Holding review count (Pass 61) — same optional treatment: an
+            // older snapshot never recorded it, and there's no correct
+            // constant to invent in its place.
+            ...("holdingReviewCount" in snapshot ? { holdingReviewCount: snapshot.holdingReviewCount } : {}),
           };
           // A rough/lost flag still carrying its flagSnapshot can only have
           // been applied AFTER this session, with nothing logged since —
@@ -837,6 +866,9 @@ export default function App() {
         stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
         settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
         holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
+        tempoRatchetK: prevEntry.tempoRatchetK ?? null,
+        // Same `?? null` fix as handleLogSession's snapshot above — not `?? 0`.
+        holdingReviewCount: prevEntry.holdingReviewCount ?? null,
       };
 
       const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : target.bpm;
@@ -854,6 +886,8 @@ export default function App() {
           stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
           settlingEntryBPM: prevEntry.settlingEntryBPM,
           holdingEntryBPM: prevEntry.holdingEntryBPM,
+          tempoRatchetK: prevEntry.tempoRatchetK,
+          holdingReviewCount: prevEntry.holdingReviewCount,
         },
         { result: target.outcome, effectiveness, asOfDate: loggedDate, cleanReps: target.cleanReps, bpm: target.bpm },
         p.ladderConfig
@@ -877,6 +911,8 @@ export default function App() {
         stabilizingEntryBPM: advance.stabilizingEntryBPM,
         settlingEntryBPM: advance.settlingEntryBPM,
         holdingEntryBPM: advance.holdingEntryBPM,
+        tempoRatchetK: advance.tempoRatchetK,
+        holdingReviewCount: advance.holdingReviewCount,
         flagSnapshot: undefined,
       };
       return { ...p, progress, lastLoggedAt: loggedDate };

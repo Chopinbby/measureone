@@ -3,8 +3,9 @@
 // App.jsx's handleLogSession on every logged session.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible, isPieceLearned } from "../src/lib/ladder.js";
+import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible, isPieceLearned, isInTempoMaintenance } from "../src/lib/ladder.js";
 import { mergeLadderConfig } from "../src/lib/storage.js";
+import { resolveRequiredReps } from "../src/lib/confidence.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
 const LADDER_CONFIG = {
@@ -18,6 +19,7 @@ const LADDER_CONFIG = {
     tempoFloorCapFraction: 1,
   },
   bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+  tempoRatchet: { k: 0.3, kCapBpm: 8 },
 };
 
 const baseState = (overrides = {}) => ({
@@ -36,7 +38,9 @@ describe("Graduation", () => {
     assert.equal(r.stage, "settling");
     assert.equal(r.graduated, true);
     assert.equal(r.consecutivePasses, 0);
-    assert.equal(r.practiceBPM, 62);
+    // Pass 59: gap-proportional step, not the old flat +2 — gap=100-60=40,
+    // k=0.3 -> 12, capped at kCapBpm (8) -> 60+8.
+    assert.equal(r.practiceBPM, 68);
     assert.equal(r.nextDueDate, "2026-01-08", "follows the NEW stage's (Settling, 7d) cadence");
   });
 
@@ -78,7 +82,8 @@ describe("Tempo floor gating", () => {
     );
     assert.equal(r.stage, "settling");
     assert.equal(r.consecutivePasses, 3, "graduation counter unchanged — this pass didn't clear the floor");
-    assert.equal(r.practiceBPM, 62, "practiceBPM still ratchets up regardless of floor-gating");
+    // Pass 59: gap-proportional step (gap=40, k=0.3 -> 12, capped at 8).
+    assert.equal(r.practiceBPM, 68, "practiceBPM still ratchets up regardless of floor-gating");
   });
 
   test("Settling: full pass exactly AT the tempo floor does count (>=, not >)", () => {
@@ -107,6 +112,109 @@ describe("Tempo floor gating", () => {
     );
     assert.equal(r.consecutivePasses, 1);
   });
+
+  test("[Pass 61] Holding's old escalating tempo floor is retired — a pass counts toward interval growth regardless of practiceBPM's fraction of target", () => {
+    // Old mechanism (before this pass) would have required practiceBPM at
+    // or above ~85%+ of targetBPM here (tempoFloorStartFraction), growing
+    // with consecutivePasses. 10 BPM against a 100 BPM target is nowhere
+    // close, and the pass still counts — meeting the rep requirement
+    // (already implied by outcome.result === "pass" being classified as a
+    // full pass in the first place) is sufficient on its own now.
+    const r = computeLadderAdvance(
+      baseState({ stage: "holding", consecutivePasses: 0, practiceBPM: 10, targetBPM: 100 }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "holding");
+    assert.equal(r.consecutivePasses, 1, "the old floor no longer gates this — it counts toward interval growth unconditionally");
+    // startIntervalDays (14) at a neutral (undefined-effectiveness, 1x)
+    // multiplier stays 14 regardless of consecutivePasses — same 14-day
+    // result the "graduates to Holding" test above gets from Jan 1.
+    assert.equal(r.nextDueDate, "2026-01-15", "the counted pass drives Holding's interval math normally, unaffected by the low practiceBPM");
+  });
+
+  test("[Pass 61] still gates on the rep requirement itself — a Holding session that doesn't even classify as a full pass never reaches this at all (unaffected, since clearsStageFloor only ever runs on the pass branch)", () => {
+    // Not a clearsStageFloor case per se — a sanity check that retiring the
+    // tempo floor didn't accidentally also loosen what counts as "pass" in
+    // the first place. classifySessionOutcome (confidence.js) is what
+    // decides that, untouched by this pass — see the dedicated
+    // classifySessionOutcome regression tests in confidence.test.mjs.
+    const r = computeLadderAdvance(
+      baseState({ stage: "holding", consecutivePasses: 3, practiceBPM: 90, targetBPM: 100 }),
+      { result: "soft-miss", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.consecutivePasses, 0, "a soft-miss still resets the counter — clearsStageFloor never runs for a non-pass outcome");
+  });
+});
+
+describe("[Pass 61] holdingReviewCount — increments in Holding, resets on fresh entry", () => {
+  test("fresh promotion into Holding (Settling's 4th pass graduating) resets holdingReviewCount to 0", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "settling", consecutivePasses: 3, practiceBPM: 70, targetBPM: 100, holdingReviewCount: 7 }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "holding");
+    assert.equal(r.holdingReviewCount, 0, "a fresh entry into Holding always starts the count over, regardless of what it was during an earlier stint");
+  });
+
+  test("a chunk with no holdingReviewCount recorded yet (undefined) defaults to 0 going in", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "holding", consecutivePasses: 0, practiceBPM: 100, targetBPM: 100 }), // no holdingReviewCount key at all
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.holdingReviewCount, 1, "defaulted to 0, then incremented by this one logged review");
+  });
+
+  test("increments by exactly 1 per logged review while already in Holding, across all three outcomes (pass, soft-miss, fail all count)", () => {
+    const pass = computeLadderAdvance(
+      baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 2 }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(pass.holdingReviewCount, 3);
+
+    const softMiss = computeLadderAdvance(
+      baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 2 }),
+      { result: "soft-miss", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(softMiss.holdingReviewCount, 3, "a soft-miss counts too, not just a full pass");
+
+    const fail = computeLadderAdvance(
+      baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 2 }),
+      { result: "fail", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(fail.holdingReviewCount, 3, "a fail counts too — it demotes the chunk out of Holding, but the review that just happened was still logged while in Holding");
+    assert.equal(fail.stage, "settling", "sanity: the fail did demote out of Holding, as expected");
+  });
+
+  test("unrelated to Holding entirely (Stabilizing/Settling, no promotion into Holding this call) — carries the value through unchanged", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "stabilizing", consecutivePasses: 0, holdingReviewCount: 5 }), // stray value, shouldn't be read or touched here
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "stabilizing");
+    assert.equal(r.holdingReviewCount, 5, "not read or reset outside Holding — carried through as-is");
+  });
+
+  test("[integration] chained Holding reviews line up with resolveRequiredReps' 4th-review bump end to end", () => {
+    let state = baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 0 });
+    const seenRequiredReps = [];
+    for (let i = 0; i < 5; i++) {
+      // Mirrors ChecklistItem.jsx's call: resolve BEFORE logging, off the
+      // count as it stands going into this review.
+      seenRequiredReps.push(resolveRequiredReps({ kind: "section", difficultyLabel: "medium" }, state.stage, state.holdingReviewCount));
+      state = computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    }
+    // Reviews 1,2,3: baseline (4). Review 4: bumped (5). Review 5: back to baseline (4).
+    assert.deepEqual(seenRequiredReps, [4, 4, 4, 5, 4]);
+    assert.equal(state.holdingReviewCount, 5, "5 reviews logged, count reflects all of them");
+  });
 });
 
 describe("Demotion", () => {
@@ -134,7 +242,7 @@ describe("Demotion", () => {
     assert.equal(nearZero.practiceBPM, 0);
   });
 
-  test("Soft-miss keeps the stage, resets the pass counter, and steps practiceBPM down 2", () => {
+  test("Pass 59: soft-miss keeps the stage, resets the pass counter, and steps practiceBPM FORWARD at a halved ratchet rate (no longer the old flat -2)", () => {
     const r = computeLadderAdvance(
       baseState({ stage: "settling", consecutivePasses: 3, practiceBPM: 80, targetBPM: 100 }),
       { result: "soft-miss", asOfDate: "2026-01-01" },
@@ -142,7 +250,9 @@ describe("Demotion", () => {
     );
     assert.equal(r.stage, "settling");
     assert.equal(r.consecutivePasses, 0);
-    assert.equal(r.practiceBPM, 78);
+    // halved k = 0.15, gap = 20 -> round(0.15*20) = 3 -> 80+3.
+    assert.equal(r.practiceBPM, 83, "moves forward, not backward — a soft-miss no longer costs tempo");
+    assert.equal(r.tempoRatchetK, 0.15, "k halved from the default 0.3");
     assert.equal(r.demoted, false);
   });
 
@@ -395,13 +505,17 @@ describe("computeLadderAdvance wires the demonstrated-tempo override into practi
     assert.equal(r.practiceBPM, 85);
   });
 
-  test("a pass with only 2 clean reps (below the override threshold) falls back to the normal +2 step", () => {
+  test("Pass 59: a pass with only 2 clean reps (below the demonstrated-tempo override threshold) falls back to the gap-proportional ratchet step, not the old flat +2", () => {
     const r = computeLadderAdvance(
       baseState({ practiceBPM: 75 }),
       { result: "pass", cleanReps: 2, bpm: 85, asOfDate: "2026-01-01" },
       LADDER_CONFIG
     );
-    assert.equal(r.practiceBPM, 77);
+    // gap=100-75=25, k=0.3 -> round(7.5)=8, capped at kCapBpm (8) -> 75+8.
+    // (bpm 85 > practiceBPM 75 also qualifies for the overlearning bonus,
+    // but the bonus step — round(0.5*10)=5 — is smaller than the ratchet
+    // step here, so max(ratchetStep, bonusStep) still lands on 8.)
+    assert.equal(r.practiceBPM, 83);
   });
 
   test("a soft-miss with 3 clean reps above the baseline still overrides practiceBPM upward, despite the overall miss", () => {
@@ -422,9 +536,10 @@ describe("computeLadderAdvance wires the demonstrated-tempo override into practi
     assert.equal(r.practiceBPM, 73); // normal fail step: -2
   });
 
-  test("existing pass behavior (no outcome.cleanReps/bpm supplied) is unaffected — falls back to the normal +2 step", () => {
+  test("Pass 59: existing pass behavior (no outcome.cleanReps/bpm supplied) falls back to the gap-proportional ratchet step, not the old flat +2", () => {
     const r = computeLadderAdvance(baseState({ practiceBPM: 75 }), { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
-    assert.equal(r.practiceBPM, 77);
+    // gap=25, k=0.3 -> round(7.5)=8, capped at kCapBpm (8) -> 75+8.
+    assert.equal(r.practiceBPM, 83);
   });
 });
 
@@ -447,7 +562,9 @@ describe("Per-stage entry-BPM tempo reset on a real fail", () => {
     // Seed the baseline via the first-ever session, then climb well past it.
     const seeded = computeLadderAdvance(baseState({ stage: null, practiceBPM: 40 }), { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
     assert.equal(seeded.stabilizingEntryBPM, 40);
-    assert.equal(seeded.practiceBPM, 42);
+    // Pass 59: gap-proportional step (gap=100-40=60, k=0.3 -> 18, capped
+    // at kCapBpm 8) — not the old flat +2.
+    assert.equal(seeded.practiceBPM, 48);
     let state = seeded;
     for (let i = 0; i < 5; i++) {
       state = computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
@@ -467,8 +584,9 @@ describe("Per-stage entry-BPM tempo reset on a real fail", () => {
     const graduating = computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
     assert.equal(graduating.stage, "settling");
     assert.equal(graduating.graduated, true);
-    assert.equal(graduating.practiceBPM, 42, "sanity: the graduating pass still steps +2 like any other pass");
-    assert.equal(graduating.settlingEntryBPM, 42, "Settling's entry tempo is recorded as the tempo the chunk graduated in AT");
+    // Pass 59: gap-proportional step (gap=60, k=0.3 -> 18, capped at 8).
+    assert.equal(graduating.practiceBPM, 48, "sanity: the graduating pass steps by the gap-proportional ratchet amount");
+    assert.equal(graduating.settlingEntryBPM, 48, "Settling's entry tempo is recorded as the tempo the chunk graduated in AT");
     assert.equal(graduating.stabilizingEntryBPM, 40, "Stabilizing's own entry tempo (from earlier) is untouched by this graduation");
 
     // Climb well past 42 while in Settling. computeLadderAdvance's return
@@ -487,11 +605,11 @@ describe("Per-stage entry-BPM tempo reset on a real fail", () => {
 
     // Now fail — demotes Settling -> Stabilizing. Per the user's decision,
     // this must reset to STABILIZING's recorded entry tempo (40, from the
-    // very first session), not Settling's (42) and not a flat -2 off the
+    // very first session), not Settling's (48) and not a flat -2 off the
     // climbed value.
     const failedFromSettling = computeLadderAdvance(state, { result: "fail", asOfDate: "2026-02-01" }, LADDER_CONFIG);
     assert.equal(failedFromSettling.stage, "stabilizing");
-    assert.equal(failedFromSettling.practiceBPM, 40, "resets to the STAGE IT'S DEMOTED INTO's entry tempo (Stabilizing's, 40) — not Settling's (42)");
+    assert.equal(failedFromSettling.practiceBPM, 40, "resets to the STAGE IT'S DEMOTED INTO's entry tempo (Stabilizing's, 40) — not Settling's (48)");
   });
 
   test("rule 4 (needsRelearning's suggestedStartingBPM reset) still wins outright over the entry-tempo reset", () => {
@@ -623,5 +741,326 @@ describe("isPieceLearned (Pass 39's Stage 3 rollup — every practice chunk at H
 
   test("an empty piece (no practice chunks) is defensively not 'learned'", () => {
     assert.equal(isPieceLearned({ progress: {} }, { practiceChunks: [] }), false);
+  });
+});
+
+// Pass 59 — the tempo ratchet: replaces the flat bpmSteps.pass/softMiss
+// deltas with a step proportional to the remaining gap to targetBPM, at a
+// per-chunk adaptive rate (progress[id].tempoRatchetK). See
+// docs/Algorithms.md#tempo-ratchet and docs/Decisions.md#tempo-ratchet.
+describe("Pass 59: tempo ratchet — gap-proportional step size", () => {
+  // step = clamp(round(k * gap), 1, kCapBpm), where gap = targetBPM -
+  // practiceBPM. Each case drives computeLadderAdvance's PASS branch with
+  // no cleanReps/bpm, so neither computeDemonstratedTempoBaseline nor the
+  // overlearning bonus apply — the resulting practiceBPM is exactly
+  // practiceBPM + that clamped step (subject to stepBPM's own
+  // cap-at-target/floor-at-0, same as always).
+  const cases = [
+    [60, 100, 0.3, 8, 68, "a large gap (40) rounds up past the ceiling — clamped at kCapBpm (8)"],
+    [97, 100, 0.3, 8, 98, "a small gap (3) rounds down to 1, still respecting the 1bpm floor"],
+    [90, 100, 0.3, 8, 93, "a mid-size gap (10) rounds cleanly to 3, under the ceiling"],
+    [50, 60, 0.01, 8, 51, "a tiny k would round the raw step to 0 — the 1bpm floor kicks in instead"],
+    [0, 1000, 0.3, 3, 3, "a huge gap would blow past a smaller kCapBpm (3) without the ceiling"],
+  ];
+  cases.forEach(([practiceBPM, targetBPM, k, kCapBpm, expected, label]) => {
+    test(label, () => {
+      const config = { ...LADDER_CONFIG, tempoRatchet: { k, kCapBpm } };
+      const r = computeLadderAdvance(baseState({ practiceBPM, targetBPM }), { result: "pass", asOfDate: "2026-01-01" }, config);
+      assert.equal(r.practiceBPM, expected);
+    });
+  });
+
+  test("gap <= 0 (practiceBPM already at targetBPM) still computes a 1bpm floor step internally, but stepBPM's own cap-at-target keeps the result pinned at targetBPM", () => {
+    const r = computeLadderAdvance(baseState({ practiceBPM: 100, targetBPM: 100 }), { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(r.practiceBPM, 100);
+  });
+});
+
+describe("Pass 59: tempo ratchet — k-adaptation lifecycle (halve on soft-miss, recover after two clean passes, reset on fail)", () => {
+  test("a soft-miss halves tempoRatchetK and still steps practiceBPM forward (not zero, not backward) at the halved rate", () => {
+    const r = computeLadderAdvance(baseState({ practiceBPM: 80, targetBPM: 100 }), { result: "soft-miss", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(r.tempoRatchetK, 0.15, "halved from the default 0.3");
+    // halved k=0.15, gap=20 -> round(3)=3 -> 80+3.
+    assert.equal(r.practiceBPM, 83, "still moves forward, just at half the usual ratchet rate");
+  });
+
+  test("two consecutive clean passes after a soft-miss fully restore tempoRatchetK to the configured default", () => {
+    const afterSoftMiss = computeLadderAdvance(baseState({ practiceBPM: 80, targetBPM: 100 }), { result: "soft-miss", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(afterSoftMiss.tempoRatchetK, 0.15);
+    assert.equal(afterSoftMiss.consecutivePasses, 0, "soft-miss resets the pass counter — the recovery count starts fresh from here");
+
+    // computeLadderAdvance doesn't echo targetBPM back (see the header note
+    // on the chunkLadderState shape) — a real caller re-reads it fresh from
+    // the chunk/piece every call, so this loop must re-supply it too.
+    const firstPass = computeLadderAdvance({ ...afterSoftMiss, targetBPM: 100 }, { result: "pass", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(firstPass.tempoRatchetK, 0.15, "one clean pass alone doesn't recover k yet");
+
+    const secondPass = computeLadderAdvance({ ...firstPass, targetBPM: 100 }, { result: "pass", asOfDate: "2026-01-09" }, LADDER_CONFIG);
+    assert.equal(secondPass.tempoRatchetK, 0.3, "the 2nd consecutive clean pass restores k to the configured default");
+  });
+
+  test("repeated soft-misses keep halving k further — there's no floor on k itself, only on the resulting BPM step", () => {
+    const first = computeLadderAdvance(baseState({ practiceBPM: 80, targetBPM: 100 }), { result: "soft-miss", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(first.tempoRatchetK, 0.15);
+    const second = computeLadderAdvance({ ...first, targetBPM: 100 }, { result: "soft-miss", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(second.tempoRatchetK, 0.075);
+    assert.ok(second.practiceBPM > first.practiceBPM, "still steps forward — the 1bpm floor guarantees this regardless of how small k gets");
+  });
+
+  test("a fail resets tempoRatchetK to default via the fallback flat-step practiceBPM-reset path", () => {
+    const halved = computeLadderAdvance(baseState({ practiceBPM: 80, targetBPM: 100 }), { result: "soft-miss", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(halved.tempoRatchetK, 0.15, "sanity: k is non-default going into the fail");
+    const failed = computeLadderAdvance({ ...halved, stabilizingEntryBPM: null, targetBPM: 100 }, { result: "fail", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(failed.tempoRatchetK, 0.3, "k resets to default even on the plain flat-step fail path");
+  });
+
+  test("a fail resets tempoRatchetK to default via the per-stage entry-BPM practiceBPM-reset path", () => {
+    const halved = computeLadderAdvance(
+      baseState({ practiceBPM: 80, targetBPM: 100, stabilizingEntryBPM: 40 }),
+      { result: "soft-miss", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    const failed = computeLadderAdvance({ ...halved, targetBPM: 100 }, { result: "fail", asOfDate: "2026-01-05" }, LADDER_CONFIG);
+    assert.equal(failed.practiceBPM, 40, "sanity: this fail actually took the entry-BPM reset path, not the flat step");
+    assert.equal(failed.tempoRatchetK, 0.3, "k still resets to default on this path too");
+  });
+
+  test("a fail resets tempoRatchetK to default via rule 4's needsRelearning suggestedStartingBPM-reset path", () => {
+    const halved = computeLadderAdvance(baseState({ practiceBPM: 80, targetBPM: 100 }), { result: "soft-miss", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    // soft-miss always resets consecutiveStabilizingFails to 0 — carry a
+    // fresh count of 1 through by hand so the upcoming fail is the 2nd
+    // consecutive Stabilizing fail (the one that fires rule 4).
+    const flaggingFail = computeLadderAdvance(
+      { ...halved, targetBPM: 100, consecutiveStabilizingFails: 1, suggestedStartingBPM: 30 },
+      { result: "fail", asOfDate: "2026-01-05" },
+      LADDER_CONFIG
+    );
+    assert.equal(flaggingFail.needsRelearning, true, "sanity: this fail actually triggered rule 4");
+    assert.equal(flaggingFail.practiceBPM, 30, "sanity: rule 4's reset fired, not the entry-BPM reset or the flat step");
+    assert.equal(flaggingFail.tempoRatchetK, 0.3, "k still resets to default on this path too");
+  });
+});
+
+// [Regression, found on critical review] k-recovery reuses
+// consecutivePasses/passesIfCounted exactly as this pass was asked to
+// (rather than adding a new counter) — but that counter is ALSO the one
+// graduation gates on a stage's tempo floor, so a pass that doesn't clear
+// the floor doesn't advance it either. The practical consequence: a chunk
+// sitting below Settling/Holding's tempo floor can rack up many real
+// passes without ever recovering a halved k, because none of them count
+// as "clean" for recovery purposes any more than they count toward
+// graduation. Self-correcting once practiceBPM actually clears the floor
+// (confirmed below) — not a permanent stall — and Stabilizing has no
+// floor, so this can't happen there. Documented rather than "fixed":
+// decoupling recovery from the floor would need a second persisted
+// counter, which contradicts this pass's own instruction to reuse the
+// existing one.
+describe("Pass 59: tempo ratchet — k recovery is gated by the same stage floor graduation uses", () => {
+  test("a soft-miss below Settling's tempo floor keeps k halved through many subsequent passes, since none of them clear the floor either", () => {
+    const smallCapConfig = { ...LADDER_CONFIG, tempoRatchet: { k: 0.3, kCapBpm: 1 } }; // tiny cap so the climb is slow enough to observe
+    let state = { ...computeLadderAdvance(
+      { stage: "settling", consecutivePasses: 0, practiceBPM: 30, targetBPM: 100, tier1Done: true },
+      { result: "soft-miss", asOfDate: "2026-01-01" },
+      smallCapConfig
+    ), targetBPM: 100 };
+    assert.equal(state.tempoRatchetK, 0.15, "sanity: the soft-miss halved k");
+
+    for (let i = 0; i < 5; i++) {
+      state = { ...computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, smallCapConfig), targetBPM: 100 };
+    }
+    assert.ok(state.practiceBPM < 70, "sanity: still well below Settling's 70% floor after 5 passes at the tiny cap");
+    assert.equal(state.consecutivePasses, 0, "none of these passes cleared the floor, so none counted — not reset, just never incremented");
+    assert.equal(state.tempoRatchetK, 0.15, "k is still halved — five real passes were not enough to recover it, because none were floor-clearing");
+  });
+
+  test("recovery still fires eventually once practiceBPM actually clears the floor — not a permanent stall", () => {
+    const smallCapConfig = { ...LADDER_CONFIG, tempoRatchet: { k: 0.3, kCapBpm: 1 } };
+    let state = { ...computeLadderAdvance(
+      { stage: "settling", consecutivePasses: 0, practiceBPM: 30, targetBPM: 100, tier1Done: true },
+      { result: "soft-miss", asOfDate: "2026-01-01" },
+      smallCapConfig
+    ), targetBPM: 100 };
+    assert.equal(state.tempoRatchetK, 0.15);
+
+    // A generous bound (well more than the ~40 passes it actually takes to
+    // climb from 31 to past 70 one BPM at a time) — this test cares that
+    // recovery happens at all, not the exact pass count, which also
+    // depends on the separate, already-documented "the floor check itself
+    // runs against the pre-session practiceBPM" quirk
+    // (docs/Decisions.md#open-questions).
+    let recovered = false;
+    for (let i = 0; i < 100 && !recovered; i++) {
+      state = { ...computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, smallCapConfig), targetBPM: 100 };
+      recovered = state.tempoRatchetK === 0.3;
+    }
+    assert.equal(recovered, true, "k does eventually recover once practiceBPM climbs past the floor — this is a slowdown, not a permanent stall");
+  });
+});
+
+describe("Pass 59: the overlearning bonus", () => {
+  test("does not apply when logged bpm merely meets the asked practiceBPM (not beats it) — the plain gap-proportional step applies", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 60, targetBPM: 100 }),
+      { result: "pass", cleanReps: 1, bpm: 60, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.practiceBPM, 68, "no bonus — bpm merely met the ask, didn't beat it");
+  });
+
+  test("applies and widens the step when logged bpm clearly beats the asked practiceBPM", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 60, targetBPM: 100 }),
+      { result: "pass", cleanReps: 1, bpm: 100, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    // the plain ratchet step alone would be 8 (60 -> 68); the bonus
+    // (round(0.5*(100-60))=20) is bigger, so max(8, 20) wins: 60+20=80.
+    assert.equal(r.practiceBPM, 80);
+  });
+
+  test("caps the RESULTING practiceBPM at 1.15x targetBPM, not the bonus amount itself", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 95, targetBPM: 100 }),
+      { result: "pass", cleanReps: 1, bpm: 150, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    // Uncapped candidate would be 95 + max(2, round(0.5*55)=28) = 123, but
+    // 1.15*100 = 115 caps the RESULT.
+    assert.equal(r.practiceBPM, 115);
+  });
+
+  test("never overrides computeDemonstratedTempoBaseline — that mechanism still wins outright and keeps its OWN cap-at-target, not the overlearning 1.15x allowance", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 60, targetBPM: 100 }),
+      { result: "pass", cleanReps: 4, bpm: 150, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    // 3+ clean reps at a bpm above baseline triggers the demonstrated-tempo
+    // override, capped at targetBPM (100) — not the overlearning bonus's
+    // 1.15x allowance (115), which is what a misrouted implementation
+    // would produce instead.
+    assert.equal(r.practiceBPM, 100, "demonstrated-tempo priority wins, capped at targetBPM, not 1.15x it");
+  });
+});
+
+describe("Pass 59: targetBPM null falls back to the pre-existing flat bpmSteps step, unchanged", () => {
+  test("a pass with no targetBPM uses the flat +2 step, not a gap-based one", () => {
+    const r = computeLadderAdvance(baseState({ practiceBPM: 60, targetBPM: null }), { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(r.practiceBPM, 62);
+  });
+
+  test("a soft-miss with no targetBPM uses the flat -2 step (the old backward-stepping behavior), not the ratchet", () => {
+    const r = computeLadderAdvance(baseState({ practiceBPM: 60, targetBPM: null }), { result: "soft-miss", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    assert.equal(r.practiceBPM, 58);
+    assert.equal(r.tempoRatchetK, 0.15, "k still halves even though the flat step (not a ratchet one) was what actually got used");
+  });
+
+  test("the overlearning bonus never applies with no targetBPM (nothing to cap 1.15x against)", () => {
+    const r = computeLadderAdvance(
+      baseState({ practiceBPM: 60, targetBPM: null }),
+      { result: "pass", cleanReps: 1, bpm: 150, asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.practiceBPM, 62, "falls straight to the flat +2 step — bpm beating the ask is irrelevant without a target");
+  });
+});
+
+// Pass 60 — "tempo maintenance mode": once practiceBPM is close enough to
+// targetBPM, tempo-ratchet step-size calculations substitute a small,
+// pinned maintenanceK for the chunk's own tracked tempoRatchetK. Computed
+// live off practiceBPM/targetBPM (isInTempoMaintenance), never persisted —
+// these tests don't use LADDER_CONFIG's bare tempoRatchet (no
+// tempoAchievedThreshold/maintenanceK on it) specifically so every
+// pre-existing Pass 59 test above stays provably unaffected: without those
+// two fields, isInTempoMaintenance always reads false there (targetBPM *
+// undefined is NaN, and every comparison against NaN is false), so this
+// pass's substitution never engages for any test that doesn't opt in via
+// its own local config below.
+describe("Pass 60: tempo maintenance mode", () => {
+  const maintenanceConfig = {
+    ...LADDER_CONFIG,
+    tempoRatchet: { ...LADDER_CONFIG.tempoRatchet, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 },
+  };
+
+  describe("isInTempoMaintenance reads true/false live off practiceBPM vs. threshold * targetBPM", () => {
+    test("false below the threshold, true at and above it", () => {
+      assert.equal(isInTempoMaintenance(84, 100, maintenanceConfig), false, "84 < 85 (0.85 * 100)");
+      assert.equal(isInTempoMaintenance(85, 100, maintenanceConfig), true, "exactly at the threshold counts");
+      assert.equal(isInTempoMaintenance(95, 100, maintenanceConfig), true);
+    });
+
+    test("false without a practiceBPM or targetBPM to compare — nothing to be 'close enough' to yet", () => {
+      assert.equal(isInTempoMaintenance(null, 100, maintenanceConfig), false);
+      assert.equal(isInTempoMaintenance(95, null, maintenanceConfig), false);
+      assert.equal(isInTempoMaintenance(null, null, maintenanceConfig), false);
+    });
+
+    test("[regression] flips back to false after a fail resets practiceBPM below the threshold — no special-cased exit path, just re-reading the same live formula", () => {
+      // Holding, no holdingEntryBPM recorded, so a fail demotes to Settling
+      // and resets practiceBPM to the low tempo this chunk had the last
+      // time it entered Settling — well below the maintenance threshold.
+      const state = baseState({
+        stage: "holding",
+        practiceBPM: 95,
+        targetBPM: 100,
+        tempoRatchetK: 0.3,
+        settlingEntryBPM: 60,
+      });
+      assert.equal(isInTempoMaintenance(state.practiceBPM, state.targetBPM, maintenanceConfig), true, "sanity: starts in maintenance mode (95 >= 85)");
+
+      const failed = computeLadderAdvance(state, { result: "fail", asOfDate: "2026-01-01" }, maintenanceConfig);
+      assert.equal(failed.stage, "settling", "demoted one stage");
+      assert.equal(failed.practiceBPM, 60, "practiceBPM reset to Settling's recorded entry tempo");
+      assert.equal(
+        isInTempoMaintenance(failed.practiceBPM, state.targetBPM, maintenanceConfig),
+        false,
+        "the same live formula, re-read against the post-fail state, is enough to exit maintenance mode — nothing else involved"
+      );
+    });
+  });
+
+  describe("step size uses maintenanceK while in maintenance mode, and the chunk's own tempoRatchetK exactly where Pass 59 left it once out of it", () => {
+    // Same starting chunk in both scenarios below — the only thing that
+    // differs is tempoAchievedThreshold (1.0 vs 0.85), isolating the
+    // maintenanceK substitution as the one variable under test. gap = 10
+    // (targetBPM 100 - practiceBPM 90).
+    const chunk = () => baseState({ stage: "holding", practiceBPM: 90, targetBPM: 100, tempoRatchetK: 0.3, consecutivePasses: 0 });
+    const nonMaintenanceConfig = {
+      ...LADDER_CONFIG,
+      tempoRatchet: { ...LADDER_CONFIG.tempoRatchet, tempoAchievedThreshold: 1.0, maintenanceK: 0.05 },
+    };
+
+    test("out of maintenance mode (90 < 100 * 1.0): step size comes from the chunk's own tempoRatchetK (0.3), exactly as Pass 59 already computes it", () => {
+      assert.equal(isInTempoMaintenance(90, 100, nonMaintenanceConfig), false);
+      const r = computeLadderAdvance(chunk(), { result: "pass", asOfDate: "2026-01-01" }, nonMaintenanceConfig);
+      // clamp(round(0.3 * 10), 1, 8) = 3
+      assert.equal(r.practiceBPM, 93, "3-BPM step from the tracked k (0.3) — unaffected by the maintenance-mode machinery existing at all");
+    });
+
+    test("in maintenance mode (90 >= 100 * 0.85): step size comes from the pinned maintenanceK (0.05) instead", () => {
+      assert.equal(isInTempoMaintenance(90, 100, maintenanceConfig), true);
+      const r = computeLadderAdvance(chunk(), { result: "pass", asOfDate: "2026-01-01" }, maintenanceConfig);
+      // clamp(round(0.05 * 10), 1, 8) = clamp(round(0.5), 1, 8) = 1
+      assert.equal(r.practiceBPM, 91, "1-BPM step from maintenanceK (0.05), not the chunk's own 0.3 — a visibly smaller step than the non-maintenance case above");
+    });
+
+    test("the persisted tempoRatchetK is untouched by maintenance mode — confirms nothing was lost by not persisting a maintenance flag", () => {
+      const r = computeLadderAdvance(chunk(), { result: "pass", asOfDate: "2026-01-01" }, maintenanceConfig);
+      // Only 1 clean pass so far (passesIfCounted < 2), so k-recovery
+      // hasn't fired — Pass 59's own bookkeeping says the persisted k stays
+      // exactly what it started at (0.3), regardless of which k the step
+      // size itself was computed from.
+      assert.equal(r.tempoRatchetK, 0.3, "persisted k reflects Pass 59's own bookkeeping exactly — the maintenance substitution only ever touched the step-size calculation");
+    });
+
+    test("a soft-miss in maintenance mode: step size also uses maintenanceK, but the real k still halves and persists exactly as Pass 59 already does it", () => {
+      const r = computeLadderAdvance(chunk(), { result: "soft-miss", asOfDate: "2026-01-01" }, maintenanceConfig);
+      // halvedTempoRatchetK = 0.3 / 2 = 0.15 — that's what persists...
+      assert.equal(r.tempoRatchetK, 0.15, "the tracked k still halves on a soft-miss, unaffected by maintenance mode");
+      // ...but the step itself was computed from maintenanceK (0.05), not
+      // the halved 0.15: clamp(round(0.05 * 10), 1, 8) = 1, not the 2 a
+      // halved-0.15 step would have produced (clamp(round(0.15*10),1,8)=2).
+      assert.equal(r.practiceBPM, 91, "1-BPM step from maintenanceK, not the 2-BPM step halvedTempoRatchetK (0.15) would have produced");
+    });
   });
 });

@@ -84,7 +84,13 @@ export function InterleavePanel({
   const conf = computeConfidence(chunk, piece, day);
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   const practiceBPM = entry.practiceBPM ?? null;
-  const requiredReps = resolveRequiredReps(chunk);
+  // Pass 61 follow-up — same fix as ChecklistItem.jsx: without stage/
+  // holdingReviewCount, a chunk's 4th/8th/12th Holding review would be
+  // judged against the easier baseline here while the same review logged
+  // through the normal Day-view checklist correctly required one more
+  // rep — a real, reachable inconsistency, not just a display gap, since
+  // this value feeds straight into classifySessionOutcome below.
+  const requiredReps = resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount);
   const suggestedStartingBPM = getSuggestedStartingBPM(piece, chunk);
   const ladderStatus = formatLadderStatus(entry, ladderConfig, todayISODate());
   const canLog = reps !== "" && bpm !== "";

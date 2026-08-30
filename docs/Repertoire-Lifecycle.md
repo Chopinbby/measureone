@@ -270,7 +270,22 @@ changed.
 |---|---|---|---|
 | Stabilizing | every 4 days | 4 consecutive full passes | none |
 | Settling | every 7 days | 4 consecutive full passes | ~70–75% of target |
-| Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | starts ~85%, +5 points per successful pass, caps 100% |
+| Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | **retired (Pass 61)** — meeting the rep requirement is sufficient on its own; see the periodic harder check below |
+
+**Since Pass 61**, Holding no longer has a tempo floor at all — the
+escalating ~85%-to-100%-of-target gate in the table's original design (and
+built, before this pass, as `tempoFloorStartFraction`/
+`tempoFloorStepFraction`/`tempoFloorCapFraction`) is gone from
+`clearsStageFloor`'s Holding branch, which now always returns true. In its
+place: every 4th logged Holding review (the 4th, 8th, 12th... since the
+chunk's most recent fresh entry into Holding) needs one more clean rep than
+usual, tracked by a new `progress[id].holdingReviewCount` and resolved by
+`resolveRequiredReps` (`lib/confidence.js`) at the point `ChecklistItem`
+displays and judges the requirement — see
+[Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder) for
+the full mechanics. This is a rep-only mechanism; `classifySessionOutcome`'s
+separate tempo check (`bpm >= practiceBPM`, deciding whether a session
+counts as a pass at all) is completely untouched.
 
 **Implemented and wired into logging**: `computeLadderAdvance` in
 `src/lib/ladder.js` is called from `handleLogSession` (`App.jsx`) on every
@@ -457,6 +472,36 @@ evidence.
   stage yet. Reopened at the user's explicit request; see
   [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
   three options presented and why this one needed new persisted state.
+  **Superseded again (Pass 59) for the pass/soft-miss steps specifically —
+  the flat `bpmSteps.pass`/`bpmSteps.softMiss` deltas above are now only a
+  fallback for a chunk with no `targetBPM` to measure against.** The normal
+  case ratchets `practiceBPM` by a step *proportional to the remaining gap*
+  to `targetBPM` (a new per-chunk adaptive rate, `progress[id].tempoRatchetK`,
+  defaulting to 0.3, capped at `ladderConfig.tempoRatchet.kCapBpm`, default
+  8 BPM) — and, as part of the same pass, **a soft miss no longer steps
+  `practiceBPM` down at all**; it halves the chunk's own ratchet rate and
+  still steps forward, just more slowly. See
+  [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59) for the full
+  mechanics (including the overlearning bonus for a session that clearly
+  beats what was asked) and
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for why.
+  **Extended (Pass 60) with "tempo maintenance mode":** once `practiceBPM`
+  is already at or above `ladderConfig.tempoRatchet.tempoAchievedThreshold`
+  (default 85%) of `targetBPM`, the pass/soft-miss step-size calculation
+  substitutes a small, pinned rate (`ladderConfig.tempoRatchet.maintenanceK`,
+  default 0.05) for the chunk's own tracked `tempoRatchetK` at the moment
+  the step is computed — **not persisted anywhere**; it's a live check
+  (`isInTempoMaintenance`, `lib/ladder.js`) recomputed off `practiceBPM`/
+  `targetBPM` every time it's needed, so it exits on its own the instant a
+  fail's `practiceBPM` reset drops back below the threshold, no separate
+  exit logic required. The chunk's own `tempoRatchetK` keeps
+  stepping/halving/recovering underneath exactly as described just above,
+  completely unaffected — maintenance mode only ever substitutes at the
+  point a step size is actually computed, never overwrites what's tracked.
+  **Deliberately not connected to anything else yet**: not `isPieceLearned`,
+  not `isPlanActuallyComplete`, not Pass 30's "tempo climbing" nudge —
+  see [Decisions.md](Decisions.md#spaced-repetition--maintenance) for what's
+  still an open question here and why it's staying open on purpose.
 - **What actually shipped, different from the original sketch above:**
   `ChecklistItem.jsx` kept free-text "clean reps" and "BPM achieved"
   `NumberInput` fields rather than replacing them with a fixed "attempt at
@@ -489,10 +534,14 @@ called from `ChecklistItem.jsx` on every log and passed to
    check runs before the jump — see
    [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 2. **Soft miss** — some clean reps, not enough in a row at that tempo.
-   `practiceBPM` steps down, consecutive-pass count resets, **stage does
-   not change**. New tier — the fix for "plateau via frustration": no
-   honest way existed to log "close, but not quite" without it reading as
-   failure against a fixed distant number.
+   Consecutive-pass count resets, **stage does not change**. New tier — the
+   fix for "plateau via frustration": no honest way existed to log "close,
+   but not quite" without it reading as failure against a fixed distant
+   number. **As of Pass 59, `practiceBPM` no longer steps down here** — it
+   still moves, just forward, at half the chunk's normal ratchet rate (see
+   [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59)); the tier's own
+   meaning ("close, but not quite — not a fail") is unchanged, only which
+   direction the tempo consequence moves.
 3. **Real fail** — self-report override ("needs more work"), zero clean
    reps, or repeated soft-misses — but **only when both the current and the
    previous shortfall were reps-driven** (fewer than the required clean

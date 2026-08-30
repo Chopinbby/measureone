@@ -66,6 +66,18 @@ export function defaultPiece() {
         tempoFloorCapFraction: 1,
       },
       bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+      // Pass 59 — the gap-proportional tempo-ratchet rate/cap. Must stay
+      // mirrored here alongside bpmSteps above: this object is used as-is
+      // (handleComplete, App.jsx, doesn't run new pieces through
+      // validateAndMigratePiece/mergeLadderConfig), so a missing
+      // tempoRatchet here would crash the very first logged session on any
+      // brand-new piece.
+      // Pass 60 — tempoAchievedThreshold/maintenanceK extend the same
+      // object; missed here once already (found in review, fixed same
+      // session) for exactly the reason the comment above already warns
+      // about — a brand-new piece silently couldn't enter tempo maintenance
+      // mode until its next reload, since this literal is used as-is.
+      tempoRatchet: { k: 0.3, kCapBpm: 8, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 },
     },
     revival: {
       active: false,

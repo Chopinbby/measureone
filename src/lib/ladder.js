@@ -50,7 +50,17 @@
 /*  clean rep than usual (resolveRequiredReps, lib/confidence.js). Resets */
 /*  to 0 the moment a chunk freshly enters Holding, same convention the   */
 /*  entryBPM fields above use. See Decisions.md#spaced-repetition--maintenance. */
+/*                                                                     */
+/*  simulateTempoConvergence (Pass 62) is the one function in this file   */
+/*  that doesn't advance real state — it forward-projects a chunk's own   */
+/*  current ladder card through computeLadderAdvance under an all-"pass"  */
+/*  assumption, to estimate how many calendar days away its tempo goal    */
+/*  actually is. A pure, live-recomputed derivation (no persisted "warned"*/
+/*  flag), surfaced in PieceMapTab's chunk-detail modal. See              */
+/*  Decisions.md#spaced-repetition--maintenance.                          */
 /* ------------------------------------------------------------------ */
+
+import { daysBetweenInclusive } from "./utils";
 
 export const STAGES = ["stabilizing", "settling", "holding"];
 
@@ -578,4 +588,102 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
     // would. Any other pass just carries the flag through unchanged.
     needsRelearning: stage === "stabilizing" && shouldGraduate ? false : wasFlagged,
   };
+}
+
+// Pass 62 — forward-simulates a chunk's ladder card from its CURRENT
+// persisted state, under a neutral, best-case assumption: every future
+// review between now and the tempo goal is a clean full pass, logged at
+// "good" effectiveness (not "high" — that would stack a second optimistic
+// assumption on top of "always passes"). Reuses computeLadderAdvance
+// itself for every simulated step rather than re-deriving its math
+// separately, so this can never independently drift from the real ladder
+// engine it's projecting.
+//
+// The "tempo goal" this aims for is tempoAchievedThreshold's fraction of
+// targetBPM (Pass 60's "tempo maintenance mode" bar — Decisions.md#spaced-
+// repetition--maintenance), not targetBPM outright: practiceBPM crossing
+// that threshold is what actually flips the chunk's own step size down to
+// the tiny, pinned maintenanceK rate (isInTempoMaintenance above), so
+// demanding a literal 100%-of-target finish line here would be simulating
+// past the point this module's own math already treats the chunk as
+// "there."
+//
+// Applies to every piece regardless of scheduleMode — this only ever reads
+// the chunk's ladder state and ladderConfig, never piece.targetDate or
+// piece.daysToLearn, so there's no days-mode/minutes-mode branch anywhere
+// in here.
+//
+// MAX_SIMULATION_STEPS guarantees termination regardless of chunk/config
+// shape. Under the current tempo-ratchet math a pass's step size floors at
+// 1 BPM whenever there's a real gap to close (tempoRatchetStepSize's own
+// `Math.max(1, ...)`), so in practice this loop already terminates well
+// under the cap for realistic BPM ranges — but the cap isn't decorative:
+// ladderConfig.tempoRatchet.kCapBpm is user-editable (Settings'
+// LadderConfigEditor, Pass 17), and a kCapBpm of exactly 0 collapses that
+// floor's outer `Math.min` to 0, forcing every step to 0 forever with no
+// way for practiceBPM to ever close the gap. A chunk in that state
+// genuinely cannot converge — the cap is what stops the loop from hanging
+// rather than reporting that honestly.
+export const MAX_SIMULATION_STEPS = 500;
+
+// The fixed warning bar a simulation's projected duration is compared
+// against — a flat 3 calendar months, not derived from piece.targetDate or
+// any other piece-specific value. Deliberately the same for every piece
+// regardless of scheduleMode.
+export const TEMPO_CONVERGENCE_WARNING_DAYS = 90;
+
+// chunkLadderState — same shape computeLadderAdvance documents above
+// (targetBPM/practiceBPM are the two fields this function itself reads
+// directly; the rest just ride along into computeLadderAdvance unchanged
+// on the first simulated step). startDate — 'YYYY-MM-DD', the calendar
+// date the simulation starts counting forward from (the caller's "now").
+//
+// Returns:
+//   applicable — false when there's no targetBPM (nothing to aim for) or
+//     no practiceBPM yet (no baseline to project forward from, e.g. a
+//     chunk that's never been practiced) — the caller's cue that there's
+//     nothing to show, not a warning.
+//   converged — true once the simulated practiceBPM reaches the tempo
+//     goal within MAX_SIMULATION_STEPS.
+//   days — total calendar days simulated forward until convergence (0 if
+//     the chunk is already at/past the goal right now); null when not
+//     applicable or when the cap was hit without converging.
+//   iterations — how many simulated passes it took (0 for "already there"
+//     or "not applicable").
+export function simulateTempoConvergence(chunkLadderState, ladderConfig, startDate) {
+  const { targetBPM, practiceBPM } = chunkLadderState;
+  if (targetBPM == null || practiceBPM == null) {
+    return { applicable: false, converged: false, days: null, iterations: 0 };
+  }
+  const goalBPM = targetBPM * ladderConfig.tempoRatchet.tempoAchievedThreshold;
+  if (practiceBPM >= goalBPM) {
+    return { applicable: true, converged: true, days: 0, iterations: 0 };
+  }
+
+  let state = chunkLadderState;
+  let asOfDate = startDate;
+  let totalDays = 0;
+
+  for (let i = 1; i <= MAX_SIMULATION_STEPS; i++) {
+    const advance = computeLadderAdvance(state, { result: "pass", effectiveness: "good", asOfDate }, ladderConfig);
+    totalDays += daysBetweenInclusive(asOfDate, advance.nextDueDate) - 1;
+    asOfDate = advance.nextDueDate;
+    state = { ...state, ...advance };
+
+    if (state.practiceBPM != null && state.practiceBPM >= goalBPM) {
+      return { applicable: true, converged: true, days: totalDays, iterations: i };
+    }
+  }
+
+  return { applicable: true, converged: false, days: null, iterations: MAX_SIMULATION_STEPS };
+}
+
+// Whether a simulateTempoConvergence result should actually surface as a
+// warning: not applicable never warns; hitting the iteration cap without
+// converging always warns (strictly worse than any finite projection); a
+// finite projection warns only past TEMPO_CONVERGENCE_WARNING_DAYS.
+export function tempoConvergenceExceedsWarning(simulation) {
+  if (!simulation || !simulation.applicable) return false;
+  if (!simulation.converged) return true;
+  return simulation.days > TEMPO_CONVERGENCE_WARNING_DAYS;
 }

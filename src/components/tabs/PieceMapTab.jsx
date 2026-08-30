@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome } from "lucide-react";
+import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome, AlertTriangle } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
 import { clamp, formatRange, todayISODate, findRelatedChunks } from "../../lib/utils";
@@ -12,6 +12,7 @@ import {
   formatLadderStatus,
   hasClimbingTempo,
 } from "../../lib/confidence";
+import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../lib/ladder";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
 // logging"): undefined ("untouched") -> 'rough' -> 'lost' -> undefined.
@@ -57,6 +58,32 @@ export function PieceMapTab({
   // Same fallback chain used in three places below (the field itself, and
   // the bpm-track gate/width) — computed once so they can't drift.
   const resolvedTargetBPM = selectedChunk ? selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk) || null : null;
+  // Pass 62 — forward-projects the chunk's own current ladder state
+  // (same fields App.jsx's handleLogSession builds for computeLadderAdvance)
+  // to estimate how many calendar days away its tempo goal is, live off
+  // whatever's currently persisted — recomputed on every render, no
+  // persisted "warned" flag, same pattern selectedClimbing above uses.
+  const tempoSimulation = selectedChunk
+    ? simulateTempoConvergence(
+        {
+          stage: selectedEntry.stage,
+          consecutivePasses: selectedEntry.consecutivePasses,
+          consecutiveStabilizingFails: selectedEntry.consecutiveStabilizingFails,
+          practiceBPM: selectedEntry.practiceBPM,
+          targetBPM: resolvedTargetBPM,
+          tier1Done: selectedEntry.tier1Done,
+          needsRelearning: selectedEntry.needsRelearning,
+          stabilizingEntryBPM: selectedEntry.stabilizingEntryBPM,
+          settlingEntryBPM: selectedEntry.settlingEntryBPM,
+          holdingEntryBPM: selectedEntry.holdingEntryBPM,
+          tempoRatchetK: selectedEntry.tempoRatchetK,
+          holdingReviewCount: selectedEntry.holdingReviewCount,
+        },
+        piece.ladderConfig,
+        todayISODate()
+      )
+    : null;
+  const tempoWarning = tempoConvergenceExceedsWarning(tempoSimulation);
   // Pass 37 (sequentialMode/revival reassessment only — see
   // docs/Decisions.md#ux): Target BPM defaults to a read-only display of
   // resolvedTargetBPM rather than an always-open input, since most chunks
@@ -104,6 +131,17 @@ export function PieceMapTab({
       </div>
       {ladderStatus && ladderStatus.dueLabel && (
         <div><span className="lbl">Next review</span><span className="val">{ladderStatus.dueLabel}</span></div>
+      )}
+      {tempoWarning && (
+        <div>
+          <span className="lbl">Tempo goal</span>
+          <span className="val warn">
+            <AlertTriangle size={12} />{" "}
+            {tempoSimulation.converged
+              ? `${tempoSimulation.days}+ days away — over ${TEMPO_CONVERGENCE_WARNING_DAYS / 30} months at this pace`
+              : "may never reach at this pace — check tempo ratchet settings"}
+          </span>
+        </div>
       )}
       {selectedChunk.recurringNote && <div><span className="lbl">Repeats</span><span className="val">{selectedChunk.recurringNote}</span></div>}
     </div>

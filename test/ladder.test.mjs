@@ -3,9 +3,20 @@
 // App.jsx's handleLogSession on every logged session.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible, isPieceLearned, isInTempoMaintenance } from "../src/lib/ladder.js";
+import {
+  computeLadderAdvance,
+  computeDemonstratedTempoBaseline,
+  isInterleaveEligible,
+  isPieceLearned,
+  isInTempoMaintenance,
+  simulateTempoConvergence,
+  tempoConvergenceExceedsWarning,
+  MAX_SIMULATION_STEPS,
+  TEMPO_CONVERGENCE_WARNING_DAYS,
+} from "../src/lib/ladder.js";
 import { mergeLadderConfig } from "../src/lib/storage.js";
 import { resolveRequiredReps } from "../src/lib/confidence.js";
+import { daysBetweenInclusive } from "../src/lib/utils.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
 const LADDER_CONFIG = {
@@ -1061,6 +1072,136 @@ describe("Pass 60: tempo maintenance mode", () => {
       // the halved 0.15: clamp(round(0.05 * 10), 1, 8) = 1, not the 2 a
       // halved-0.15 step would have produced (clamp(round(0.15*10),1,8)=2).
       assert.equal(r.practiceBPM, 91, "1-BPM step from maintenanceK, not the 2-BPM step halvedTempoRatchetK (0.15) would have produced");
+    });
+  });
+});
+
+describe("Pass 62: simulateTempoConvergence — forward-projects the tempo goal", () => {
+  // Same maintenanceConfig-shape convention as the Pass 60 block above:
+  // the shared LADDER_CONFIG fixture deliberately has no
+  // tempoAchievedThreshold/maintenanceK, so every pre-existing test above
+  // (including every Pass 59 one) is provably unaffected by this pass —
+  // this suite uses its own local override instead.
+  const simConfig = {
+    ...LADDER_CONFIG,
+    tempoRatchet: { ...LADDER_CONFIG.tempoRatchet, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 },
+  };
+
+  test("reuses the real computeLadderAdvance function, not a duplicate reimplementation — cross-checked against a direct call", () => {
+    // gap=16 from a 100 target -> step round(0.3*16)=5, so 84+5=89 clears
+    // the 85 goal (0.85*100) in exactly one simulated pass. Cross-checking
+    // the simulation's single step against an independent, direct
+    // computeLadderAdvance call on the same input proves the simulation is
+    // actually driving that function's own math, not separate arithmetic
+    // that merely happens to agree by coincidence.
+    const state = baseState({ practiceBPM: 84, targetBPM: 100 });
+    const direct = computeLadderAdvance(state, { result: "pass", effectiveness: "good", asOfDate: "2026-01-01" }, simConfig);
+    assert.equal(direct.practiceBPM, 89, "sanity on the underlying math this test cross-checks against");
+
+    const sim = simulateTempoConvergence(state, simConfig, "2026-01-01");
+    assert.equal(sim.applicable, true);
+    assert.equal(sim.converged, true);
+    assert.equal(sim.iterations, 1);
+    const expectedDays = daysBetweenInclusive("2026-01-01", direct.nextDueDate) - 1;
+    assert.equal(
+      sim.days,
+      expectedDays,
+      "the simulation's projected days for its one step is exactly computeLadderAdvance's own nextDueDate, not an independently-derived number"
+    );
+  });
+
+  describe("termination — both the convergent and non-convergent case stay within MAX_SIMULATION_STEPS", () => {
+    test("a genuinely convergent case terminates well under the cap", () => {
+      const state = baseState({ stage: "holding", practiceBPM: 20, targetBPM: 200, consecutivePasses: 0 });
+      const sim = simulateTempoConvergence(state, simConfig, "2026-01-01");
+      assert.equal(sim.applicable, true);
+      assert.equal(sim.converged, true);
+      assert.ok(sim.iterations > 0 && sim.iterations < MAX_SIMULATION_STEPS, `expected 0 < iterations < cap, got ${sim.iterations}`);
+    });
+
+    test("a chunk whose tempo ratchet cannot step at all (kCapBpm: 0) hits MAX_SIMULATION_STEPS instead of hanging", () => {
+      // kCapBpm collapses tempoRatchetStepSize's outer clamp to exactly 0,
+      // so practiceBPM never moves — the case the pass description calls
+      // out as needing the cap to "guarantee termination," not just a
+      // defensive nicety for cases that were always going to converge on
+      // their own.
+      const brokenConfig = { ...simConfig, tempoRatchet: { ...simConfig.tempoRatchet, kCapBpm: 0 } };
+      const state = baseState({ practiceBPM: 10, targetBPM: 100 });
+      const startedAt = Date.now();
+      const sim = simulateTempoConvergence(state, brokenConfig, "2026-01-01");
+      assert.ok(Date.now() - startedAt < 5000, "returned promptly rather than looping indefinitely");
+      assert.equal(sim.applicable, true);
+      assert.equal(sim.converged, false);
+      assert.equal(sim.days, null);
+      assert.equal(sim.iterations, MAX_SIMULATION_STEPS, "ran the full cap and stopped there, rather than never returning");
+    });
+  });
+
+  describe("the 90-day warning bar", () => {
+    test("a chunk projecting under 3 months shows no warning", () => {
+      const state = baseState({ practiceBPM: 60, targetBPM: 100 });
+      const sim = simulateTempoConvergence(state, simConfig, "2026-01-01");
+      assert.equal(sim.converged, true);
+      assert.equal(sim.days, 19, "sanity: this fixture's projection (19 days) is well under the 90-day bar");
+      assert.equal(tempoConvergenceExceedsWarning(sim), false);
+    });
+
+    test("a chunk projecting over 3 months shows a warning", () => {
+      const state = baseState({ stage: "holding", practiceBPM: 20, targetBPM: 200, consecutivePasses: 0 });
+      const sim = simulateTempoConvergence(state, simConfig, "2026-01-01");
+      assert.equal(sim.converged, true);
+      assert.ok(sim.days > TEMPO_CONVERGENCE_WARNING_DAYS, `expected > ${TEMPO_CONVERGENCE_WARNING_DAYS} days, got ${sim.days}`);
+      assert.equal(tempoConvergenceExceedsWarning(sim), true);
+    });
+
+    test("hitting the iteration cap without converging always counts as exceeding the warning bar", () => {
+      const brokenConfig = { ...simConfig, tempoRatchet: { ...simConfig.tempoRatchet, kCapBpm: 0 } };
+      const sim = simulateTempoConvergence(baseState({ practiceBPM: 10, targetBPM: 100 }), brokenConfig, "2026-01-01");
+      assert.equal(sim.converged, false);
+      assert.equal(tempoConvergenceExceedsWarning(sim), true);
+    });
+  });
+
+  describe("scheduleMode genuinely doesn't affect the result — the function never reads piece.targetDate/daysToLearn/scheduleMode at all", () => {
+    test("identical ladder state + ladderConfig produces a byte-identical projection whether the surrounding piece is days-mode or minutes-mode", () => {
+      // Two pieces with deliberately incompatible scheduling data — one
+      // has a target date and no minutesPerDay, the other has
+      // daysToLearn/minutesPerDay and no target date — standing in for a
+      // real days-mode vs. minutes-mode piece. simulateTempoConvergence
+      // takes no `piece` argument at all, so there is nothing here for it
+      // to have branched on even in principle.
+      const daysModePiece = { scheduleMode: "days", targetDate: "2026-06-01", ladderConfig: simConfig };
+      const minutesModePiece = { scheduleMode: "minutes", daysToLearn: 400, minutesPerDay: 5, ladderConfig: simConfig };
+      const state = baseState({ stage: "holding", practiceBPM: 20, targetBPM: 200, consecutivePasses: 0 });
+
+      const simDays = simulateTempoConvergence(state, daysModePiece.ladderConfig, "2026-01-01");
+      const simMinutes = simulateTempoConvergence(state, minutesModePiece.ladderConfig, "2026-01-01");
+
+      assert.deepEqual(simDays, simMinutes, "scheduleMode/targetDate/daysToLearn differ completely between the two fixtures; the projection does not");
+      assert.equal(tempoConvergenceExceedsWarning(simDays), true, "sanity: this fixture is the same over-90-day one used above");
+    });
+  });
+
+  describe("not applicable — nothing to project from", () => {
+    test("no targetBPM set", () => {
+      const sim = simulateTempoConvergence(baseState({ targetBPM: null }), simConfig, "2026-01-01");
+      assert.equal(sim.applicable, false);
+      assert.equal(tempoConvergenceExceedsWarning(sim), false);
+    });
+
+    test("no practiceBPM yet — chunk never practiced", () => {
+      const sim = simulateTempoConvergence(baseState({ practiceBPM: null }), simConfig, "2026-01-01");
+      assert.equal(sim.applicable, false);
+      assert.equal(tempoConvergenceExceedsWarning(sim), false);
+    });
+
+    test("already at or above the tempo goal — converged with zero days, zero iterations", () => {
+      const sim = simulateTempoConvergence(baseState({ practiceBPM: 90, targetBPM: 100 }), simConfig, "2026-01-01");
+      assert.equal(sim.applicable, true);
+      assert.equal(sim.converged, true);
+      assert.equal(sim.days, 0);
+      assert.equal(sim.iterations, 0);
+      assert.equal(tempoConvergenceExceedsWarning(sim), false);
     });
   });
 });

@@ -996,6 +996,77 @@ saved before this field existed doesn't crash on the next logged session.
 No editing UI yet (same as `bpmSteps` before Pass 17's `LadderConfigEditor`
 existed) — see [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
+### Tempo convergence simulation (Pass 62)
+
+`simulateTempoConvergence(chunkLadderState, ladderConfig, startDate)`
+(`lib/ladder.js`) answers a question nothing before this pass could: "at
+the current pace, roughly how far away is this chunk's tempo goal?" It
+forward-projects a chunk's own current ladder card by calling
+`computeLadderAdvance` — the real function, not a re-derivation of its
+math — repeatedly, feeding it a synthetic `{ result: "pass", effectiveness:
+"good" }` outcome each time (a neutral, best-case assumption: "always
+passes," but not the extra-optimistic "high" effectiveness on top of that),
+summing the calendar days each simulated `nextDueDate` consumes, until
+either the chunk's practiceBPM crosses its tempo goal or a fixed iteration
+cap is hit.
+
+**The tempo goal is `tempoAchievedThreshold` × `targetBPM`** (Pass 60's
+"tempo maintenance mode" bar — see above), not `targetBPM` outright.
+Crossing that threshold is what already flips a chunk's own step size down
+to the tiny, pinned `maintenanceK` rate (`isInTempoMaintenance`), so
+demanding a literal 100%-of-target finish line here would mean simulating
+past the point this module's own math already treats the chunk as "there."
+
+**`MAX_SIMULATION_STEPS` (500) guarantees termination.** Under the current
+tempo-ratchet math a pass's step size floors at 1 BPM whenever there's a
+real gap left to close (`tempoRatchetStepSize`'s own `Math.max(1, ...)`),
+so in practice this loop already terminates well under the cap for
+realistic BPM ranges. But the cap isn't decorative: `ladderConfig.
+tempoRatchet.kCapBpm` is user-editable (Settings' `LadderConfigEditor`,
+Pass 17), and a `kCapBpm` of exactly `0` collapses that floor's outer
+`Math.min` to `0` — every simulated step then moves `practiceBPM` by
+exactly zero, forever, with nothing left in the formula to break the tie.
+A chunk in that state genuinely cannot converge; the cap is what stops the
+loop from hanging rather than reporting that honestly. Hitting the cap
+without converging (`converged: false`) is treated as automatically
+exceeding the warning bar — strictly worse than any finite projection, not
+a separate case the caller has to reason about.
+
+**The warning bar itself is a fixed 90 days (`TEMPO_CONVERGENCE_WARNING_
+DAYS`)** — three calendar months, hand-picked the same way every other
+tunable constant in this file is (see `docs/Research.md`). Deliberately
+**not** compared against `piece.targetDate`, `daysToLearn`, or
+`scheduleMode` at all — `simulateTempoConvergence` doesn't take a `piece`
+argument and never reads any piece-level scheduling field, so the same
+chunk ladder state produces byte-identical output whether the surrounding
+piece is `scheduleMode: "days"` or `"minutes"` (verified directly in
+`test/ladder.test.mjs`). This is a statement about the chunk's own pace in
+isolation, not about whether it fits inside any particular plan.
+
+**Live-derived, not persisted** — same pattern `hasClimbingTempo`
+(Pass 30) and `isPieceLearned` (Pass 39) already use: no "warned" flag is
+ever written to `progress[id]`. `PieceMapTab`'s chunk-detail modal
+(`tempoWarning`) recomputes it fresh on every render from whatever's
+currently in `piece.progress[id]`/`piece.ladderConfig`, using
+`todayISODate()` as the simulation's start date — so logging a real
+session that meaningfully changes the chunk's trajectory updates or clears
+the warning on the very next render, no reload needed (confirmed live:
+a chunk starting at practiceBPM 20/target 200 in Holding read "266+ days
+away"; logging one more real full-pass session dropped it to "252+ days
+away" immediately, with no page reload in between).
+
+`tempoConvergenceExceedsWarning(simulation)` is the small helper the
+caller actually branches display on — `false` when `!simulation.
+applicable` (no `targetBPM` to aim for, or no `practiceBPM` yet because the
+chunk has never been practiced — nothing to project forward from either
+way), `true` unconditionally when the cap was hit without converging, and
+otherwise `simulation.days > TEMPO_CONVERGENCE_WARNING_DAYS`.
+
+Surfaced in `PieceMapTab`'s chunk-detail modal, alongside Stage/Next review
+(the same `detail-stats` block Pass 15 introduced) — a "Tempo goal" row
+that only renders at all when the warning condition is true, styled with
+the same `--brick` warning color `needsRelearning`'s hint already uses.
+
 ### Starting, suggested, and demonstrated tempo
 
 There are three distinct tempo concepts feeding `practiceBPM`, not one —

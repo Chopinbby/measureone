@@ -2129,6 +2129,7 @@ const CSS = `
 .detail-stats > div { display: flex; justify-content: space-between; font-size: 13.5px; border-bottom: 1px solid var(--line); padding-bottom: 7px; }
 .detail-stats .lbl { color: var(--ink-soft); }
 .detail-stats .val { font-weight: 600; }
+.detail-stats .val.warn { color: var(--brick); display: inline-flex; align-items: center; gap: 4px; text-align: right; }
 .chunk-info { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .chunk-info summary { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); list-style: none; }
 .chunk-info summary::-webkit-details-marker { display: none; }

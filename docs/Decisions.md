@@ -3043,6 +3043,94 @@ rep-only harder check every 4th review, tracked by a new
 - See [Algorithms.md](Algorithms.md#holdings-periodic-harder-check-pass-61)
   and [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages).
 
+**Decision (built — Pass 62): a live-derived "tempo goal projected N+ days
+away" warning, forward-simulating the real ladder math under a neutral
+best-case assumption, with a fixed 90-day bar — not compared against
+`piece.targetDate` at all.**
+
+- **Why:** requested directly by the user — nothing before this pass could
+  answer "at the current pace, is this chunk's tempo goal even realistic
+  on any reasonable timeline?" `formatLadderStatus` (Pass 15) shows the
+  *next* review date, one step ahead; nothing projected further than that.
+- **The simulation reuses `computeLadderAdvance` itself, not a
+  reimplementation** — `simulateTempoConvergence` (`lib/ladder.js`) calls
+  it in a loop, feeding a synthetic `{ result: "pass", effectiveness:
+  "good" }` outcome each time. "Good," not "high": "always passes" is
+  already one optimistic assumption; effectiveness "high" would stack a
+  second one on top of it for no product reason. Confirmed by a direct
+  cross-check test (`test/ladder.test.mjs`): a fixture engineered to
+  converge in exactly one simulated step produces a `days` value that
+  matches an independent, direct `computeLadderAdvance` call's own
+  `nextDueDate` exactly — proof the simulation is driving the real
+  function's math, not separate arithmetic that happens to agree.
+- **The tempo goal is `tempoAchievedThreshold` × `targetBPM` (Pass 60's
+  maintenance-mode bar), not `targetBPM` outright** — confirmed with the
+  user rather than assumed. Once `practiceBPM` crosses that threshold, the
+  chunk's own step size already drops to the pinned `maintenanceK` rate
+  (`isInTempoMaintenance`); demanding a literal 100%-of-target finish line
+  in the simulation would mean projecting past the point this module's own
+  math already treats the chunk as "there."
+- **`MAX_SIMULATION_STEPS` (500) is a real guarantee, not a defensive
+  nicety for cases that were always going to converge anyway.** Under the
+  current tempo-ratchet math a pass's step size floors at 1 BPM whenever
+  there's a real gap left to close, so ordinary chunks converge in well
+  under the cap. But `ladderConfig.tempoRatchet.kCapBpm` is user-editable
+  (Settings' `LadderConfigEditor`, Pass 17) — set to exactly `0`, it
+  collapses the step-size formula's outer clamp to `0` for every step,
+  forever, and `practiceBPM` can never move again. Reproduced directly in
+  `test/ladder.test.mjs` (a `kCapBpm: 0` fixture runs the full cap and
+  returns `converged: false` promptly, not a hang) — this is the scenario
+  the cap exists for, not a hypothetical.
+- **The 90-day warning bar (`TEMPO_CONVERGENCE_WARNING_DAYS`) is fixed,
+  the same for every piece regardless of `scheduleMode`** — explicitly
+  requested this way, not derived from `piece.targetDate`,
+  `piece.daysToLearn`, or any other piece-specific value.
+  `simulateTempoConvergence` doesn't take a `piece` argument at all and
+  never reads a scheduling field, so there's no days-mode/minutes-mode
+  branch anywhere in it — verified directly with a test that runs the same
+  chunk ladder state through two fixtures standing in for a days-mode piece
+  (`targetDate` set, no `minutesPerDay`) and a minutes-mode piece
+  (`daysToLearn`/`minutesPerDay` set, no `targetDate`) and asserts
+  byte-identical (`deepEqual`) output.
+- **Live-derived, not persisted — no "warned" flag.** Same pattern
+  `hasClimbingTempo` (Pass 30) and `isPieceLearned` (Pass 39) already use:
+  `PieceMapTab`'s chunk-detail modal recomputes the simulation fresh on
+  every render from whatever's currently in `piece.progress[id]` /
+  `piece.ladderConfig`, starting from `todayISODate()`. Verified live in
+  the browser, not just by reasoning about the code: a chunk seeded at
+  practiceBPM 20 / target 200 in Holding read "266+ days away — over 3
+  months at this pace" in the modal; logging one more real full-pass
+  session on that same chunk (no page reload) updated it to "252+ days
+  away" on the very next render.
+- **Placement: `PieceMapTab`'s chunk-detail modal**, in the same
+  `detail-stats` block Pass 15 already surfaces Stage/Next review in — the
+  pass description's own suggested location, confirmed rather than
+  second-guessed since nothing about the investigation surfaced a reason
+  to prefer somewhere else. Renders as a "Tempo goal" row using the same
+  `--brick` warning color `needsRelearning`'s hint already uses, but only
+  when `tempoConvergenceExceedsWarning` is true — unlike Stage/Next review,
+  which always show, this row is a warning, not a permanent stat, so it
+  disappears entirely once the projection is a non-issue (not applicable,
+  or under the bar).
+- **Explicitly deferred, not decided:** any comparison against
+  `piece.targetDate` (a days-mode-relative version of this warning) —
+  the pass description was explicit that the fixed 90-day bar is the whole
+  mechanism, not a placeholder for a deadline-aware one. Whether a
+  deadline-relative version would also be useful (e.g. "this chunk's
+  tempo goal is projected past your target date," distinct from "this
+  chunk's tempo goal is projected to take a long time regardless") is an
+  open product question, not ruled out — just genuinely out of scope for
+  this pass.
+- Verified with `test/ladder.test.mjs` (`Pass 62: simulateTempoConvergence`):
+  the direct cross-check against `computeLadderAdvance` described above;
+  both the convergent and non-convergent (`kCapBpm: 0`) cases terminate
+  within `MAX_SIMULATION_STEPS`; a fixture under 90 days shows no warning
+  and one over 90 days does; hitting the cap always counts as exceeding
+  the warning bar; the days-mode/minutes-mode `deepEqual` cross-check; and
+  the three "not applicable" cases (no `targetBPM`, no `practiceBPM` yet,
+  already at/above goal). `npm test`: 507/507.
+- See [Algorithms.md](Algorithms.md#tempo-convergence-simulation-pass-62).
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below

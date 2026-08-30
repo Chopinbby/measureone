@@ -89,6 +89,14 @@ export function getSuggestedStartingBPM(piece, chunk) {
 const RUN_THROUGH_KINDS = ["section-runthrough", "section-transition"];
 const RUN_THROUGH_REQUIRED_REPS = 2;
 
+// Pass 61 — replaces Holding's old escalating tempo floor with a periodic
+// rep-only harder check: every HOLDING_HARDER_CHECK_INTERVAL-th logged
+// Holding review (the 4th, 8th, 12th...) needs
+// HOLDING_HARDER_CHECK_BONUS more clean rep than the baseline, reverting
+// to baseline on every other review. See resolveRequiredReps below.
+const HOLDING_HARDER_CHECK_INTERVAL = 4;
+const HOLDING_HARDER_CHECK_BONUS = 1;
+
 // How many clean reps `chunk` actually needs to count as a full pass —
 // single source of truth for ChecklistItem's requirement display, its
 // input field's label, AND its classifySessionOutcome call (Pass 15's
@@ -112,8 +120,26 @@ const RUN_THROUGH_REQUIRED_REPS = 2;
 // cleanReps, and never calls classifySessionOutcome — confirmed by reading
 // the code, not assumed, since there's no requiredReps to resolve there in
 // the first place, and no chunk object either (it isn't a real chunk).
-export function resolveRequiredReps(chunk) {
-  return RUN_THROUGH_KINDS.includes(chunk.kind) ? RUN_THROUGH_REQUIRED_REPS : REQUIRED_REPS[chunk.difficultyLabel] || 4;
+//
+// `stage`/`holdingReviewCount` (Pass 61) are optional, and both default to
+// "no bump" when omitted — this call site can't classify a session with
+// stale/wrong requirements just because a caller doesn't have them handy
+// yet. Only `computeAutoConfidence` below (which scores every past session
+// retrospectively, off the chunk's *current* holdingReviewCount) and
+// `resolveRequiredReps`'s other existing callers still call it with just
+// `chunk` — deliberately unchanged, since applying today's review-count
+// bump backwards onto sessions logged before the chunk was even in
+// Holding isn't what this pass asked for.
+//
+// The bump only ever applies at `stage === "holding"`: it's evaluated
+// against the review about to be logged (`holdingReviewCount` is the count
+// of *prior* Holding reviews, so `+1` is this one), landing on the 4th,
+// 8th, 12th... since the chunk's most recent fresh entry into Holding.
+export function resolveRequiredReps(chunk, stage, holdingReviewCount) {
+  const baseline = RUN_THROUGH_KINDS.includes(chunk.kind) ? RUN_THROUGH_REQUIRED_REPS : REQUIRED_REPS[chunk.difficultyLabel] || 4;
+  if (stage !== "holding") return baseline;
+  const upcomingReviewCount = (holdingReviewCount || 0) + 1;
+  return upcomingReviewCount % HOLDING_HARDER_CHECK_INTERVAL === 0 ? baseline + HOLDING_HARDER_CHECK_BONUS : baseline;
 }
 
 // Classifies one logged attempt into the three-tier outcome model

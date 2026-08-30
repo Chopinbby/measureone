@@ -84,3 +84,52 @@ export function computeDueReviews(piece, chunkSet, asOfDate) {
 export function totalDueMinutes(dueItems) {
   return dueItems.reduce((sum, item) => sum + item.minutes, 0);
 }
+
+// Pass 66: before this, computeDueReviews only ever ran once a piece had
+// exhausted its whole bounded plan (see DueReviewPanel in TodayTab.jsx and
+// the past-plan branch in MasterAgendaTab.jsx) — a review whose
+// nextDueDate had already passed while the piece was still comfortably
+// inside its active plan had no live surface at all. Its placement day
+// (computeTimeline's own once-per-piece scheduling) had already gone by,
+// so it would only reappear if you paged day-nav back to that exact past
+// day. This merges computeDueReviews' now-unconditional result into a
+// plan day's own reviewChunkIds for display/logging.
+//
+// De-duplicates against day.reviewChunkIds: a review due *exactly* today
+// is already placed there by computeTimeline, and would otherwise be
+// counted (and rendered) twice — once from the day's own placement, once
+// from the live due-query.
+//
+// Folds each extra item's own `minutes` into day.minutes too — safe to add
+// directly (not double-priced) because computeTimeline's minutesFor and
+// computeDueReviews both cost a review at chunk.effort * EFFORT_TO_MIN, the
+// same rate as introducing the chunk fresh. (Before the difficulty-based
+// review pricing follow-up, minutesFor priced a review at a flat 3 minutes
+// regardless of the chunk — merging minutes then would have mixed two
+// disagreeing estimates, so only the id list merged. Now that both sides
+// agree, the displayed total can fold in cleanly.)
+//
+// Skips consolidation ("full run-through") days entirely — found in
+// self-review, not part of the original fix. computeTimeline already
+// blankets a consolidation day's reviewChunkIds with every practice chunk
+// regardless of ladder state, and neither TodayTab's ConsolidationPanel nor
+// MasterAgendaTab's card renders reviewChunkIds or minutes for one at all
+// (it's just "play through the whole piece"). Merging a transition/combo's
+// overdue live-due review in on that day type would have inflated
+// day.minutes — and therefore Master Agenda's total-planned figure — with
+// no corresponding line item anywhere on screen: a number the user can't
+// account for, not a display gap worth routing around. That item still
+// surfaces normally on any other day, or once the piece is past its plan
+// (the unrelated pastPlan/DueReviewPanel path, which never reads `day` at
+// all) — this only stops it from being silently double-counted into a day
+// that was never going to itemize it.
+export function mergeLiveDueReviews(day, dueItems) {
+  if (day.type === "consolidation") return day;
+  const extra = dueItems.filter((item) => !day.reviewChunkIds.includes(item.chunkId));
+  if (extra.length === 0) return day;
+  return {
+    ...day,
+    reviewChunkIds: [...day.reviewChunkIds, ...extra.map((item) => item.chunkId)],
+    minutes: day.minutes + extra.reduce((sum, item) => sum + item.minutes, 0),
+  };
+}

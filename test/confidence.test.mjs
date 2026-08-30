@@ -440,6 +440,87 @@ describe("resolveRequiredReps — Pass 27's flat run-through rep count", () => {
   });
 });
 
+describe("resolveRequiredReps — Pass 61's Holding periodic harder check", () => {
+  const chunk = { kind: "section", difficultyLabel: "medium" }; // baseline 4
+
+  test("stage/holdingReviewCount omitted entirely — behaves exactly as before this pass (backward compatible with every existing call site)", () => {
+    assert.equal(resolveRequiredReps(chunk), 4);
+  });
+
+  test("not in Holding — never bumped, regardless of holdingReviewCount", () => {
+    for (const stage of ["stabilizing", "settling", undefined, null]) {
+      for (const holdingReviewCount of [0, 3, 7, 100]) {
+        assert.equal(resolveRequiredReps(chunk, stage, holdingReviewCount), 4, `stage=${stage}, holdingReviewCount=${holdingReviewCount}`);
+      }
+    }
+  });
+
+  test("in Holding, the review about to be logged is the 4th/8th/12th (holdingReviewCount 3/7/11 going in) — baseline + 1", () => {
+    for (const holdingReviewCount of [3, 7, 11]) {
+      assert.equal(
+        resolveRequiredReps(chunk, "holding", holdingReviewCount),
+        5,
+        `holdingReviewCount=${holdingReviewCount} going in means this is review #${holdingReviewCount + 1}`
+      );
+    }
+  });
+
+  test("in Holding, every other review — baseline, unchanged", () => {
+    for (const holdingReviewCount of [0, 1, 2, 4, 5, 6, 8, 9, 10, 12]) {
+      assert.equal(resolveRequiredReps(chunk, "holding", holdingReviewCount), 4, `holdingReviewCount=${holdingReviewCount}`);
+    }
+  });
+
+  test("holdingReviewCount omitted (null/undefined) while in Holding is treated as 0 — the upcoming review is #1, not bumped", () => {
+    assert.equal(resolveRequiredReps(chunk, "holding", undefined), 4);
+    assert.equal(resolveRequiredReps(chunk, "holding", null), 4);
+  });
+
+  test("the bump applies on top of the run-through flat 2-rep baseline too, not just the difficulty-based table", () => {
+    const runThrough = { kind: "section-runthrough", difficultyLabel: "hard" };
+    assert.equal(resolveRequiredReps(runThrough, "holding", 0), 2, "ordinary review — still the flat run-through baseline");
+    assert.equal(resolveRequiredReps(runThrough, "holding", 3), 3, "4th review — baseline 2 + 1");
+  });
+});
+
+describe("classifySessionOutcome — base tempo check is unaffected by Pass 61 (clearsStageFloor is retired for Holding, clearsTempo is a completely separate mechanism)", () => {
+  // clearsStageFloor decides whether an already-classified pass counts
+  // toward Holding's interval growth — a concern of computeLadderAdvance
+  // (lib/ladder.js), not of classifySessionOutcome, which decides whether
+  // a session is a pass/soft-miss/fail at all in the first place via its
+  // own, separate `clearsTempo` check (bpm >= practiceBPM). Pass 61 only
+  // retired the former; this file's classifySessionOutcome import is
+  // untouched by that pass, and this test proves it stays that way —
+  // requiredReps met but bpm under practiceBPM still reads as a soft-miss,
+  // exactly as it always has, with no stage/holdingReviewCount concept
+  // anywhere in this function's signature.
+  test("required reps hit but bpm under practiceBPM is still a soft-miss, not a pass — same as always, nothing Holding-specific here", () => {
+    const outcome = classifySessionOutcome({
+      cleanReps: 4,
+      bpm: 95,
+      requiredReps: 4,
+      practiceBPM: 100,
+      manualFail: false,
+      previousOutcome: null,
+      previousCleanReps: null,
+    });
+    assert.equal(outcome, "soft-miss", "reps met, tempo not cleared — the base clearsTempo check, untouched by Pass 61");
+  });
+
+  test("required reps hit AND bpm at/above practiceBPM is a full pass — same formula regardless of stage, since this function never took a stage argument", () => {
+    const outcome = classifySessionOutcome({
+      cleanReps: 4,
+      bpm: 100,
+      requiredReps: 4,
+      practiceBPM: 100,
+      manualFail: false,
+      previousOutcome: null,
+      previousCleanReps: null,
+    });
+    assert.equal(outcome, "pass");
+  });
+});
+
 describe("computeAutoConfidence uses resolveRequiredReps too, not its own separate REQUIRED_REPS lookup (Pass 27 follow-up)", () => {
   test("a hard run-through logged at its own full requirement (2 reps) scores confidence the same as an ordinary chunk completed at ITS full requirement", () => {
     const runThrough = { id: "sr_s1", kind: "section-runthrough", difficultyLabel: "hard", start: 1, end: 8, recurring: false };

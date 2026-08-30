@@ -42,6 +42,23 @@ const DEFAULT_LADDER_CONFIG = {
     tempoFloorCapFraction: 1,
   },
   bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+  // Pass 59 — the tempo-ratchet's default adaptive rate and its per-session
+  // BPM cap. Replaces the flat bpmSteps.pass/softMiss deltas above with a
+  // step proportional to the remaining gap to targetBPM (lib/ladder.js);
+  // bpmSteps itself is untouched and stays the fallback for a chunk with no
+  // targetBPM to be proportional against.
+  //
+  // Pass 60 — tempoAchievedThreshold and maintenanceK extend this same
+  // object rather than a separate namespace. tempoAchievedThreshold (0.85,
+  // adjustable up to 1.0) is the fraction of targetBPM at/above which a
+  // chunk is considered to be in "tempo maintenance mode"
+  // (isInTempoMaintenance, lib/ladder.js) — computed live off
+  // practiceBPM/targetBPM, never persisted per chunk. maintenanceK (0.05)
+  // is the small, pinned step-size rate substituted for the chunk's own
+  // tracked tempoRatchetK while in that mode; the tracked rate itself keeps
+  // updating underneath exactly as Pass 59 already has it
+  // stepping/halving/recovering, unaffected by this substitution.
+  tempoRatchet: { k: 0.3, kCapBpm: 8, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 },
 };
 
 // Merges DEFAULT_LADDER_CONFIG into whatever a piece already has, field by
@@ -61,6 +78,15 @@ export function mergeLadderConfig(existing) {
     settling: { ...DEFAULT_LADDER_CONFIG.settling, ...existing.settling },
     holding: { ...DEFAULT_LADDER_CONFIG.holding, ...existing.holding },
     bpmSteps: { ...DEFAULT_LADDER_CONFIG.bpmSteps, ...existing.bpmSteps },
+    // Pass 59 — same field-by-field reasoning as bpmSteps above: a piece
+    // migrated once before tempoRatchet existed would otherwise keep an
+    // incomplete ladderConfig forever, and computeLadderAdvance reads
+    // ladderConfig.tempoRatchet.k/kCapBpm unconditionally. Pass 60's
+    // tempoAchievedThreshold/maintenanceK ride along on this same
+    // field-by-field spread automatically — no separate merge line needed
+    // for them, same as bpmSteps needed none when Pass 59 added
+    // tempoRatchet itself alongside it.
+    tempoRatchet: { ...DEFAULT_LADDER_CONFIG.tempoRatchet, ...existing.tempoRatchet },
   };
 }
 
@@ -169,6 +195,44 @@ function backfillProgressLadderState(progress, startDate) {
           : entry.stage === "holding"
           ? entry.practiceBPM ?? null
           : null,
+      // Tempo-ratchet adaptive rate (Pass 59, lib/ladder.js). Backfills to
+      // null, same as the entry-BPM fields above — NOT to
+      // DEFAULT_LADDER_CONFIG.tempoRatchet.k, even though that's the
+      // numerically correct rate for an untouched chunk. computeLadderAdvance
+      // already resolves null to that same default at read time
+      // (`chunkLadderState.tempoRatchetK ?? ladderConfig.tempoRatchet.k`),
+      // so persisting the literal number here bought nothing — and it cost
+      // real correctness elsewhere: diffImportedPiece/ladderStateDiffers
+      // compares this field by `!==` against a raw (unmigrated) imported
+      // piece, where an old export predating this field is `undefined`. A
+      // migrated `0.3` vs. an import's missing field read as "these two
+      // genuinely disagree" and forced the import-conflict picker on an
+      // otherwise byte-identical re-import — reproduced directly, not
+      // theoretical. `null` on both sides (`?? null` in the comparison)
+      // avoids that false conflict, exactly like the entry-BPM fields
+      // already do for the same reason.
+      tempoRatchetK: entry.tempoRatchetK !== undefined ? entry.tempoRatchetK : null,
+      // Count of logged Holding reviews since this chunk's most recent
+      // fresh entry into Holding (Pass 61, lib/ladder.js) — drives the
+      // periodic harder-check (every 4th review). Same "no real history to
+      // reconstruct" spirit as the entry-BPM/tempoRatchetK fields above: a
+      // chunk already sitting in Holding when migrated is backfilled as if
+      // it just freshly arrived there, so the harder-check cadence simply
+      // starts counting from now rather than trying to reconstruct how many
+      // Holding reviews actually happened before this field existed.
+      //
+      // Backfills to `null`, NOT the literal `0` an untouched chunk would
+      // otherwise read as — same false-conflict bug `tempoRatchetK` already
+      // had once (see that field's comment above): `0` and "field absent
+      // entirely" are NOT the same value under `!==`, so a piece migrated
+      // once (backfilled to `0`) compared against a re-imported backup that
+      // predates this field (`undefined`) would read as a genuine
+      // disagreement — reproduced directly, not theoretical (found in
+      // self-review, same session). `computeLadderAdvance` already treats
+      // `null` the same as `0` at the one point that actually needs a real
+      // number (`chunkLadderState.holdingReviewCount || 0`), so this changes
+      // nothing about the actual ladder math — only the backfilled shape.
+      holdingReviewCount: entry.holdingReviewCount !== undefined ? entry.holdingReviewCount : null,
     };
   });
   return result;
@@ -581,6 +645,11 @@ const LADDER_STATE_FIELDS = [
   "stabilizingEntryBPM",
   "settlingEntryBPM",
   "holdingEntryBPM",
+  // Pass 59 (lib/ladder.js) — same flat-scalar treatment as the three
+  // entryBPM fields above.
+  "tempoRatchetK",
+  // Pass 61 (lib/ladder.js) — same flat-scalar treatment.
+  "holdingReviewCount",
 ];
 
 // True when the existing piece and a freshly-imported candidate actually
@@ -675,6 +744,8 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
       stabilizingEntryBPM: ladderSource.stabilizingEntryBPM,
       settlingEntryBPM: ladderSource.settlingEntryBPM,
       holdingEntryBPM: ladderSource.holdingEntryBPM,
+      tempoRatchetK: ladderSource.tempoRatchetK,
+      holdingReviewCount: ladderSource.holdingReviewCount,
       // Undo-scratch data for "revert this chunk's schedule if the flag gets
       // cleared" (see App.jsx's handleSetFlag) — always the existing side,
       // not something an exported file should be trusted to set, and not

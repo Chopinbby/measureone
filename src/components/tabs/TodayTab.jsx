@@ -10,7 +10,7 @@ import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
 import { WeekView } from "./today/WeekView";
 import { InterleavePanel } from "./today/InterleavePanel";
-import { computeDueReviews, totalDueMinutes } from "../../lib/maintenance";
+import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival } from "../../lib/revival";
 import { isPlanActuallyComplete, computeScheduleStatus } from "../../lib/scheduling";
@@ -155,10 +155,22 @@ export function TodayTab({
   // computeDueReviews only reads chunkSet.all; TodayTab already receives
   // exactly that list as `chunks`, so it's wrapped rather than threading a
   // second prop through App.jsx.
+  //
+  // Unconditional as of Pass 66 — this used to run only once pastPlan was
+  // true (DueReviewPanel below is what originally motivated it). Always
+  // computing it here closes the gap for a piece still inside its plan:
+  // the merge just below folds the result into today's own checklist
+  // instead of leaving it usable only in the past-plan panel.
   const dueItems = useMemo(
-    () => (pastPlan ? computeDueReviews(piece, { all: chunks }, todayISODate()) : []),
-    [pastPlan, piece, chunks]
+    () => computeDueReviews(piece, { all: chunks }, todayISODate()),
+    [piece, chunks]
   );
+
+  // Only for real "today", still inside the plan: a past/future day paged
+  // to via day nav is a specific scheduled day, not "as of today" status,
+  // so live due-as-of-today reviews don't belong merged into it — see
+  // mergeLiveDueReviews (lib/maintenance.js) for the de-dup rule.
+  const dayForChecklist = !pastPlan && isRealToday ? mergeLiveDueReviews(day, dueItems) : day;
 
   // Past the plan, "today's work" is the due list rather than a plan day,
   // and sessions there are keyed to elapsedDay — so Reassess offers the
@@ -359,7 +371,7 @@ export function TodayTab({
           <DayChecklist
             piece={piece}
             chunks={chunks}
-            day={day}
+            day={dayForChecklist}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
             onConfirmProvisionalSession={onConfirmProvisionalSession}

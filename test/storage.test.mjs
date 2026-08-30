@@ -91,6 +91,8 @@ function assertLadderConfigShape(cfg) {
   assert.equal(typeof cfg.bpmSteps.pass, "number");
   assert.equal(typeof cfg.bpmSteps.softMiss, "number");
   assert.equal(typeof cfg.bpmSteps.fail, "number");
+  assert.equal(typeof cfg.tempoRatchet.k, "number");
+  assert.equal(typeof cfg.tempoRatchet.kCapBpm, "number");
 }
 
 function assertChunkBackfilled(entry) {
@@ -101,6 +103,15 @@ function assertChunkBackfilled(entry) {
   assert.equal(entry.practiceBPM, null);
   assert.equal(entry.nextDueDate, null);
   assert.equal(entry.tier1Done, false);
+  // Pass 59 (corrected after review) — backfills to null, same as the
+  // entry-BPM fields, not the numeric default. computeLadderAdvance
+  // resolves null to that default at read time; persisting the literal
+  // number here caused a real false-positive divergence on re-importing a
+  // backup exported before this field existed (an untouched migrated
+  // chunk read as "0.3" while the old export's chunk had no such key at
+  // all, so !== flagged a conflict that wasn't real). See
+  // docs/Decisions.md#spaced-repetition--maintenance.
+  assert.equal(entry.tempoRatchetK, null);
 }
 
 describe("validateAndMigratePiece — representative old piece shapes", () => {
@@ -393,6 +404,47 @@ describe("mergeLadderConfig — the P1 crash fix (field-by-field merge, not all-
     const m = validateAndMigratePiece(custom);
     assert.equal(m.ladderConfig.bpmSteps.pass, 3);
     assert.equal(m.ladderConfig.bpmSteps.fail, -10);
+  });
+
+  // Pass 59 — same P1-style crash risk as bpmSteps above: a piece saved
+  // between this ladderConfig existing and tempoRatchet being added to it
+  // would have a ladderConfig with bpmSteps but no tempoRatchet, and
+  // computeLadderAdvance reads ladderConfig.tempoRatchet.k/kCapBpm
+  // unconditionally on every pass/soft-miss.
+  test("a piece with an existing but INCOMPLETE ladderConfig (missing tempoRatchet) gets it merged in", () => {
+    const partiallyMigrated = {
+      ...fresh,
+      id: "p_partial_ratchet",
+      ladderConfig: {
+        stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
+        settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
+        holding: { startIntervalDays: 14, maxIntervalDays: 70, tempoFloorStartFraction: 0.85, tempoFloorStepFraction: 0.05, tempoFloorCapFraction: 1 },
+        bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+        // tempoRatchet deliberately absent.
+      },
+    };
+    const m = validateAndMigratePiece(partiallyMigrated);
+    assert.ok(m.ladderConfig.tempoRatchet, "tempoRatchet should be backfilled, not left undefined");
+    assert.equal(m.ladderConfig.tempoRatchet.k, 0.3);
+    assert.equal(m.ladderConfig.tempoRatchet.kCapBpm, 8);
+    assert.equal(m.ladderConfig.bpmSteps.pass, 2, "untouched sibling field survives the merge unchanged");
+  });
+
+  test("a customized tempoRatchet sub-field is preserved, not overwritten by the default", () => {
+    const custom = {
+      ...fresh,
+      id: "p_custom_ratchet",
+      ladderConfig: {
+        stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
+        settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
+        holding: { startIntervalDays: 14, maxIntervalDays: 70, tempoFloorStartFraction: 0.85, tempoFloorStepFraction: 0.05, tempoFloorCapFraction: 1 },
+        bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+        tempoRatchet: { k: 0.5, kCapBpm: 12 }, // hand-edited by the user
+      },
+    };
+    const m = validateAndMigratePiece(custom);
+    assert.equal(m.ladderConfig.tempoRatchet.k, 0.5);
+    assert.equal(m.ladderConfig.tempoRatchet.kCapBpm, 12);
   });
 });
 
@@ -732,6 +784,61 @@ describe("diffImportedPiece — Pass 13 import divergence detection", () => {
       progress: { c1: ladderChunk(), __cold_start__: { sessions: [{ day: 1, avgBpm: 90 }, { day: 5, avgBpm: 100 }] } },
     };
     assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  // [Regression] Pass 59, found and fixed on review: tempoRatchetK's
+  // migration backfill originally defaulted to the numeric
+  // ladderConfig.tempoRatchet.k (0.3) instead of null, unlike every other
+  // ladder-state field above. A piece migrated through validateAndMigratePiece
+  // (as every already-loaded piece is) would carry a real 0.3 on an
+  // untouched chunk, while a raw backup exported before this field existed
+  // has no tempoRatchetK key at all — `0.3 !== null` (undefined reads as
+  // null here) registered as real divergence, forcing the import-conflict
+  // picker on an otherwise byte-identical re-import. Reproduced directly
+  // before the fix (this exact scenario returned hasDivergence: true).
+  test("re-importing a pre-existing-field backup is NOT a false conflict: tempoRatchetK absent on one side reads the same as null on the other", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ tempoRatchetK: null }) } }; // an untouched, migrated chunk
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({}) } }; // old export, field doesn't exist at all
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("a GENUINE tempoRatchetK disagreement (both sides have a real, different value) is still caught as real divergence", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ tempoRatchetK: 0.15 }) } };
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({ tempoRatchetK: 0.3 }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: true, resolution: null });
+  });
+
+  // [Regression] Pass 61, found and fixed on self-review, same exact bug
+  // class as tempoRatchetK immediately above: the migration backfill for
+  // the new holdingReviewCount field originally defaulted an untouched
+  // chunk to the literal 0 instead of null. A piece migrated through
+  // validateAndMigratePiece (as every already-loaded piece is) would then
+  // carry a real 0, while a raw backup exported before this field existed
+  // has no holdingReviewCount key at all — `0 !== null` (undefined reads
+  // as null here) registered as real divergence, forcing the
+  // import-conflict picker on an otherwise byte-identical re-import.
+  // Reproduced directly before the fix (this exact scenario returned
+  // hasDivergence: true).
+  test("re-importing a pre-existing-field backup is NOT a false conflict: holdingReviewCount absent on one side reads the same as null on the other", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: null }) } }; // an untouched, migrated chunk
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({}) } }; // old export, field doesn't exist at all
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("a GENUINE holdingReviewCount disagreement (both sides have a real, different value) is still caught as real divergence", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: 2 }) } };
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: 3 }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: true, resolution: null });
+  });
+
+  test("holdingReviewCount 0 (a chunk that just entered Holding — a real, meaningful zero, not 'no data') vs. absent on the other side is still a genuine divergence, not swallowed by the null-equivalence fix", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: 0 }) } }; // just promoted into Holding
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({}) } }; // never entered Holding at all on this side
+    assert.deepEqual(
+      diffImportedPiece(existing, imported),
+      { hasDivergence: true, resolution: null },
+      "0 (has entered Holding) and null/absent (never has) are genuinely different states, unlike 0 vs. itself"
+    );
   });
 });
 

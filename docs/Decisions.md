@@ -1888,6 +1888,143 @@ unclamped elapsed-day derivation in each surface, not by `getCurrentDay`
   regression, and arguably wrong next to a completed plan given the
   "a late review is slack, never a failure" rule — but out of scope.
 
+**Decision (built — Pass 66): `computeDueReviews` runs unconditionally at
+both call sites, not just once a piece is past its whole bounded plan —
+closing the gap where a review overdue *inside* an active plan had no live
+surface until the plan ran out.**
+
+- **Why:** a chunk's `nextDueDate` is a real calendar date (the Pass 8
+  decision above), and `computeTimeline` places each review on exactly one
+  plan day at generation time. If that placement day passed without the review being
+  logged, the review was stuck: `computeDueReviews` — the function built
+  specifically to answer "what's due" independent of the bounded plan —
+  only ever *ran* once the whole plan had run out (`TodayTab`'s `pastPlan`
+  gate, `MasterAgendaTab`'s equivalent `dayNumber > timeline.days.length`
+  branch). A piece with 50 days left in a 60-day plan and one review 9 days
+  overdue had no way to see or log it from "today" at all — only by paging
+  day-nav back to the exact day it was originally placed on.
+- **Two ways to close it, resolved before starting:** (a) drop the
+  `pastPlan`/past-plan gate on the existing call and merge its result into
+  the current day's own `reviewChunkIds`; or (b) teach `computeTimeline`
+  itself to roll a past-due review forward onto today. (b) was rejected:
+  it would give `computeTimeline` a `currentDay`/"now" input it has never
+  needed, complicating its signature and meaning `chunkSet`/`timeline`'s
+  existing memoization (a pure derivation off `piece` alone — see
+  `CLAUDE.md`) would need to key on the current day too. It also wouldn't
+  cover the already-past-plan case on its own — `computeDueReviews` would
+  still be needed there regardless — so (b) likely builds two mechanisms
+  for one problem. (a) reuses a function that's already correct and
+  already tested, and touches nothing about `computeTimeline`'s contract.
+- **Consequence:** `mergeLiveDueReviews(day, dueItems)`
+  (`lib/maintenance.js`) folds `computeDueReviews`'s result into a plan
+  day's own `reviewChunkIds`, filtering out any id already present so a
+  review due *exactly* today (already placed there by `computeTimeline`)
+  doesn't render twice. Both `TodayTab`'s day-view checklist and
+  `MasterAgendaTab`'s per-piece review chip row call it, scoped to real
+  "today" only — day-nav browsing a different day, or Master Agenda's date
+  picker on a non-today date, still shows that day's plan as originally
+  scheduled, since due-ness is "as of today" only (the Pass 8 decision
+  above's "scoped out" note is unchanged by this pass). `minutes`/`totalTime`
+  deliberately isn't merged: a plan day costs a review at a flat 3 minutes
+  (`computeTimeline`'s `minutesFor`) while `computeDueReviews` costs one at
+  `chunk.effort * EFFORT_TO_MIN` — genuinely two different estimates, and
+  folding them together would mix rather than reconcile them. Flagged, not
+  resolved: which of the two should govern if this is ever reconciled is
+  an open question.
+- **Untouched by this pass:** the review's original, now-past placement
+  day still reads "behind" via `classifyDayCompletion` exactly as before —
+  that's accurate history, not the bug this pass fixes. `computeScheduleStatus`'s
+  "never counts a review as missed" policy (no-penalty design, see the
+  Pass 5 decision above) is also untouched — this pass is about
+  visibility, not about making a late review count against the schedule.
+  Interleaved mode's eligible-item list (`TodayTab`'s `interleaveItems`)
+  and the Reassess panel's `todaysRanges` still read the plan day's
+  *original*, unmerged `reviewChunkIds` — a newly-surfaced live-due item
+  is loggable from the day checklist but doesn't yet appear in either of
+  those; flagged as a possible follow-up, not decided.
+- See [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
+
+**Same-session follow-up, per direct request: a review is now priced by
+difficulty everywhere, not just in `computeDueReviews` — closing the exact
+`minutes`/`totalTime` disagreement flagged above, and correcting a
+day-count risk in `scheduleMode: "minutes"` planning that the disagreement
+had been masking.**
+
+- **Why:** underestimating how long a hard chunk's review actually takes
+  isn't just a cosmetic display gap — for a `scheduleMode: "minutes"`
+  piece, the day-count estimator (`computeDaysNeededForMinutesPerDay`) folds
+  an assumed review cost into how many days it decides the plan needs. If
+  that assumption runs low specifically for the hardest chunks, the
+  estimator can under-provision days for exactly the material most likely
+  to need real review time — a plan that looks like it fits the stated
+  daily budget on paper but doesn't once review load actually lands.
+- **Consequence:** `computeTimeline`'s `minutesFor` (`lib/scheduling.js`)
+  now prices `reviewChunkIds` with the identical formula it already used
+  for `newChunkIds`/`specialChunkIds` — `chunk.effort * EFFORT_TO_MIN` —
+  replacing a flat 3-minutes-per-touch figure that ignored the chunk's own
+  difficulty. `computeDaysNeededForMinutesPerDay` gets the matching fix:
+  each chunk's review-padding term changes from a flat, difficulty-blind
+  constant (`(2 * 3) / EFFORT_TO_MIN`, added once per item) to
+  `c.effort * REVIEW_TOUCHES_PER_ITEM` (`REVIEW_TOUCHES_PER_ITEM = 2`,
+  unchanged — only what each touch costs changed, not how many touches are
+  assumed). `mergeLiveDueReviews` (the Pass 66 decision immediately above)
+  now folds a merged item's `minutes` into `day.minutes` too, since the two
+  sides no longer disagree.
+- **Consequence for existing tests, verified as expected rather than a
+  regression:** two pre-existing tests in `test/scheduling.test.mjs` had
+  their expected numeric outputs change. A Tier 2 same-day-review-pileup
+  smoothing test previously left exactly one of three same-day reviews
+  behind (three flat-3-minute reviews, 9 minutes total, wasn't enough of an
+  overload to relocate all of them); with accurate per-chunk pricing the
+  same pileup is 30 minutes, clearing the smoothing pass's relocation
+  threshold for all three. A `computeDaysNeededForMinutesPerDay` padding
+  test's expected day count rose from 14 back to 28 for its fixture — the
+  14 was itself computed on top of the same under-costed assumption being
+  fixed here, so once review cost is corrected, the true padding this
+  fixture needs is legitimately higher; both tests' comments were rewritten
+  with the exact math rather than just the new numbers, and both were
+  confirmed to fail back to their old values when the fix was temporarily
+  reverted.
+- **Untouched:** `REVIEW_TOUCHES_PER_ITEM`'s value (2, a deliberately rough
+  stand-in for "the first couple of ladder touches a chunk will likely
+  pick up") — this fix changed what each touch costs, not how many touches
+  are assumed. The `+6`-minute move-worth-it threshold in Tier 2's
+  smoothing pass (`lib/scheduling.js`) is also untouched — a general
+  anti-churn margin, not itself derived from the per-review cost figure,
+  so it wasn't in scope for this fix even though its practical effect
+  shifted as a result of reviews now costing more on heavy-pileup days.
+
+**Same-session follow-up, found in a critical self-review before
+committing (not part of the original request): `mergeLiveDueReviews`
+skips consolidation days entirely, closing a silent minutes-inflation gap
+the merge itself introduced.**
+
+- **Why:** neither `TodayTab`'s `ConsolidationPanel` nor
+  `MasterAgendaTab`'s card renders `reviewChunkIds` or `minutes` for a
+  consolidation ("full run-through") day — it's just "play through the
+  whole piece," by design, unrelated to this pass. Before this guard, a
+  transition or combo with an overdue live-due review landing on a piece's
+  consolidation day would still get merged in, silently adding its minutes
+  to `day.minutes` — and therefore Master Agenda's total-planned figure —
+  with no line item anywhere on screen accounting for the extra time. Not
+  a hypothetical: reproduced live (a 60-day piece whose consolidation day
+  landed on "today," with an overdue transition review) — the total read
+  higher than `minutesPerDay` with nothing on the card explaining why,
+  before the fix; confirmed reading back to exactly `minutesPerDay` after
+  it.
+- **Consequence:** `mergeLiveDueReviews(day, dueItems)` now returns `day`
+  unchanged, untouched, when `day.type === "consolidation"` — before doing
+  anything else. The overdue item isn't lost: it still surfaces normally
+  on any other day, or once the piece is past its whole plan (the
+  unrelated `pastPlan`/`DueReviewPanel` path, which never reads a `day`
+  object at all). This only stops it from being double-counted into a day
+  that was never going to itemize it either way.
+- **Consequence for tests:** one new regression test in
+  `test/maintenance.test.mjs` asserts `mergeLiveDueReviews` returns the
+  *exact same object* (not just an equal one) for a consolidation day fed
+  a genuinely overdue item — confirming no merge is attempted at all,
+  not just that the visible result happens to look unchanged.
+
 **Decision: day counting goes through `daysBetweenInclusive` everywhere —
 fixing a DST undercount that made due reviews permanently invisible for
 pieces started before the spring transition.**
@@ -2401,6 +2538,598 @@ immediately like a normal logged session (Pass 29 follow-up).**
 - **A third gap, found on critical review after the above shipped, not during the original build: two more sidebar controls changed `activeTab`/`activePieceId` without going through the guard at all.** The "Edit piece" button (`startEditing`) and finishing the "+ Add new piece" wizard (`handleComplete`) both live in the persistent sidebar, visible from Interleaved mode same as the nav list and piece switcher, and both were missed in the original implementation because the review-then-build pass only exercised the three routes it had explicitly set out to test, not an exhaustive audit of every place `setActiveTab`/`setActivePieceId` is called in `App.jsx`. Not a data-loss bug — neither path discarded anything on its own, they just silently skipped the warning — but squarely inside what "a different app tab, or a different piece" was already understood to mean. Fixed the same way as the other three: one `if (!guardLeavingInterleaved()) return;` line at the top of each handler. For `handleComplete` specifically, gating at the very top means a cancelled leave attempt also skips creating the new piece — verified deliberately, not incidentally: the wizard modal stays open (`wizardOpen` is only set to `false` further down in the same function, which a `return` above it never reaches) with the learner's already-entered fields intact, so cancelling costs nothing beyond having to click "Generate my plan" again once the pending log is dealt with.
 - **Verification note:** the persistence bug specifically is not something a pure-function unit test would have caught or would meaningfully validate — it lived entirely in *React's state-batching order relative to an effect's dependency array*, not in any computable input/output logic. This repo has no React render harness (`CLAUDE.md`), so the real verification for all three bugs was live browser testing: reproducing the infinite loop via the console warning, then confirming it was gone; reproducing the lost discard via an actual reload, then confirming the reload preserved it after the fix; and for the two missed routes, confirming both the cancel path (nothing created/discarded, wizard data preserved) and the confirm path (discards, proceeds, survives a reload) same as the original three.
 - Verified with `test/utils.test.mjs` (`hasPendingProvisionalSession` — the day-scoped pending check) and `test/interleave-leave-warning.test.mjs` (mirrors of `confirmAndDiscardProvisional`/`guardLeavingInterleaved`, since both are closures inside `App.jsx`: prompts with the exact wording, discards every pending chunk id on confirm, discards *nothing* on cancel, no-ops with nothing pending). Both confirmed to actually fail when the corresponding behavior was reverted — this coverage is at the shared-function level, so it already covered the two routes found in review without needing new tests once they were wired to the same function. Manually verified in-browser, end to end, for all **five** leave routes (Today's Practice's own Day view/Week/View all buttons, the sidebar nav list, the piece switcher, the "Edit piece" button, and finishing the "Add new piece" wizard) — for each: the cancel path blocks the action and preserves the provisional; the confirm path shows the exact requested wording, discards, proceeds, and survives a real reload; and normal navigation with nothing pending proceeds with zero `confirm()` calls at all, confirmed via an instrumented call counter. `npm test`: 352/352.
+
+**Decision: `practiceBPM`'s pass/soft-miss step becomes gap-proportional (a "tempo ratchet"), replacing the flat `ladderConfig.bpmSteps` deltas that had driven it since Pass 1 — and a soft-miss now steps `practiceBPM` forward instead of backward.**
+
+- **Why:** the flat `+2`/`−2` step moved a chunk 40 BPM below target at
+  exactly the same pace as one only 2 BPM away — the ladder's stage/interval
+  math already scales with how solid a chunk is, but the actual tempo climb
+  never did. Requested directly by the user as Pass 59.
+- **Formula:** `gap = targetBPM - practiceBPM`; `step = clamp(round(k *
+  gap), 1, kCapBpm)`, with `k` defaulting to 0.3 and `kCapBpm` to 8
+  (`ladderConfig.tempoRatchet`, merged field-by-field in
+  `mergeLadderConfig` the same way `bpmSteps` already is). The 1-BPM floor
+  means a pass/soft-miss always moves `practiceBPM` at least 1 BPM forward,
+  even for a chunk already at or past `targetBPM` — though `stepBPM`'s
+  pre-existing cap-at-`targetBPM` can still flatten the *net result* back
+  down regardless (see the overlearning bonus below for the one path
+  allowed past that cap). No `targetBPM` to be proportional against falls
+  straight back to the old flat `bpmSteps.pass`/`bpmSteps.softMiss` step,
+  unchanged — this pass doesn't invent a gap-based number from nothing.
+- **A soft-miss no longer costs tempo.** Once the step became
+  gap-proportional, a flat backward step on soft-miss fought against the
+  ratchet's own logic (a chunk struggling on reps but still near target
+  would get yanked disproportionately far back). Instead, a soft-miss
+  **halves the chunk's own adaptive rate** (a new persisted per-chunk flat
+  scalar, `progress[id].tempoRatchetK`, alongside — not nested inside —
+  `practiceBPM`/the `...EntryBPM` fields, following that exact precedent so
+  `storage.js`'s ladder-state diffing/merge keeps comparing every field by
+  `!==`) and applies the step at that halved rate: still forward, just
+  slower. Two consecutive qualifying passes afterward restore `k` to the
+  configured default — reusing `consecutivePasses` rather than a new
+  counter, since that counter already resets to 0 on every soft-miss and
+  demote, so reaching 2 within the same stage already means "two clean
+  passes back to back" with no new bookkeeping needed. A real fail resets
+  `k` to default outright too, regardless of which of the three existing
+  `practiceBPM`-reset paths fired — new state, since none of those paths
+  had any adaptive rate to reset before this pass.
+- **Overlearning bonus, and why its cap is deliberately looser than
+  everything else:** when a logged `bpm` clearly beats what was actually
+  asked (`outcome.bpm > practiceBPM`, not merely equals it), the step
+  widens to `max(normalStep, round(0.5 * (bpm - practiceBPM)))` — rewarding
+  a learner who's clearly capable of more than the ladder was asking for
+  that session, rather than making them wait out several more
+  ratchet-sized steps to get there. The **result** is capped at `1.15 ×
+  targetBPM`, computed and capped separately from `stepBPM`'s normal
+  `Math.min(stepped, targetBPM)`, since this is the one path deliberately
+  allowed to push `practiceBPM` *above* target — a small headroom margin so
+  a chunk that's already demonstrably solid isn't immediately re-capped
+  down to exactly `targetBPM` the moment it's clearly exceeded it. Never
+  applies on top of `computeDemonstratedTempoBaseline` (which still takes
+  priority exactly as before this pass, including its own cap-at-`target`,
+  never `1.15×`) and never applies with no `targetBPM` (nothing to cap
+  against). `ChecklistItem` surfaces an "Overlearning" note whenever the
+  chunk's persisted `practiceBPM` currently sits above `targetBPM` — every
+  other path (the flat step, the ratchet step, the demonstrated-tempo
+  override) caps at `targetBPM` and never exceeds it, so that condition
+  alone is an exact proxy for "the bonus fired and is still in effect,"
+  with no new flag needed from `computeLadderAdvance` itself. **A known,
+  accepted consequence, not a bug to chase:** once `practiceBPM` sits above
+  `targetBPM` from a bonus, the very next *ordinary* (non-bonus) pass —
+  gap now negative, ratchet step floors at 1, `stepBPM`'s own cap-at-target
+  applies — snaps `practiceBPM` straight back down to exactly `targetBPM`,
+  and the note disappears. This is the direct, intended consequence of
+  only the bonus path being allowed past `stepBPM`'s cap; making the
+  overlearning state "sticky" across an ordinary pass wasn't part of what
+  was asked for, and wasn't built.
+- **Deliberately untouched:** the fail branch's flat `bpmSteps.fail` step
+  itself (already effectively dead in practice — `stabilizingEntryBPM` gets
+  seeded the moment a chunk first enters Stabilizing, and a fail's
+  `demote()` always lands back on Stabilizing as the floor, so the
+  entry-tempo reset almost always wins over the flat step long before this
+  pass, and nothing about that priority order changed here);
+  `computeDemonstratedTempoBaseline` itself; and exposing `k`/`kCapBpm` in
+  Pass 17's `LadderConfigEditor` (`SettingsTab`) — a natural follow-up, not
+  required for the mechanism to function with sane defaults.
+- Verified with `test/ladder.test.mjs` (the gap-proportional formula across
+  a range of gaps, respecting both the 1-BPM floor and the `kCapBpm`
+  ceiling; a soft-miss halving `k` and still stepping forward at the halved
+  rate; two consecutive clean passes fully restoring `k`; a fail resetting
+  `k` via all three `practiceBPM`-reset paths; the overlearning bonus
+  applying only when `bpm` beats `practiceBPM`, capping the result at
+  `1.15×targetBPM` — including a float-precision guard, since
+  `1.15 * 100 === 114.99999999999999` in raw JS — and never overriding
+  `computeDemonstratedTempoBaseline`; a `null` `targetBPM` falling back to
+  the untouched flat step). Every pre-existing `ladder.js`/`session-undo`/
+  `storage.js` test that hardcoded a flat `+2`/`−2` step's exact resulting
+  `practiceBPM` was individually re-derived under the new formula and
+  updated (not just re-run for a green suite) — the step magnitude
+  genuinely changed for any chunk with a `targetBPM` set, which is most of
+  them, so a large fraction of pre-existing ladder tests needed their
+  expected numbers recomputed, not just re-confirmed. `npm test`:
+  458/458.
+- **Two real bugs found on review after the above shipped, both fixed the
+  same session, not deferred:**
+  1. **`Wizard.jsx`'s `defaultPiece()` would crash a brand-new piece's
+     first logged session.** It hardcodes a literal `ladderConfig` (not
+     run through `mergeLadderConfig` — `App.jsx`'s `handleComplete`
+     deliberately doesn't put a freshly-created piece through
+     `validateAndMigratePiece`) that had been updated with `bpmSteps` long
+     ago but was missed for `tempoRatchet` when this pass first shipped —
+     so `ladderConfig.tempoRatchet.k` was `undefined` for any piece
+     created via the Wizard until its next reload. Fixed by mirroring
+     `tempoRatchet` into that literal, same as `bpmSteps` already is.
+  2. **`App.jsx` never actually threaded `tempoRatchetK` through
+     `handleLogSession`/`handleUnlogSession`/`handleConfirmProvisionalSession`
+     when this pass first shipped** — the pure `computeLadderAdvance`
+     function and its persistence contract were correct and fully tested,
+     but the three closures that call it (mirrored in
+     `test/session-undo.test.mjs`/`test/interleave-provisional.test.mjs`
+     for exactly this reason — no React render harness exists) never read
+     `prevEntry.tempoRatchetK` in, never wrote `advance.tempoRatchetK`
+     back out, and never captured it in `ladderSnapshot`. In the real app
+     this meant `k` silently reset to the default on every single call
+     instead of persisting — no crash, but the entire halve/recover/reset
+     lifecycle never actually took effect. Fixed by adding `tempoRatchetK`
+     to the same seven spots `stabilizingEntryBPM` already occupies across
+     those three handlers (in, out, and the optional/not-`isValidSnapshot`
+     snapshot-restore treatment), plus updating `session-undo.test.mjs`'s
+     mirror (the one file whose own mirror is exhaustive across every
+     ladder field, unlike `interleave-skip.test.mjs`/
+     `interleave-provisional.test.mjs`'s narrower, already-partial
+     mirrors) and adding three new undo-reversal tests for it. Verified
+     live in-browser end to end, not just via the mirrored tests: created
+     a real piece through the Wizard (confirming fix 1), seeded a
+     non-default `tempoRatchetK`, logged a real pass through the actual
+     UI and confirmed via `localStorage` that the resulting step size used
+     the seeded rate (not silently the default), logged a second
+     consecutive pass and confirmed `k` recovered to default, then clicked
+     Undo and confirmed `k` reverted to the pre-recovery value — the exact
+     mechanism `session-undo.test.mjs`'s new tests check, reproduced for
+     real. `npm test`: 461/461.
+- **A skeptical second-engineer review (user-requested, same session) of
+  every file this pass touched found three more real issues.** One fixed
+  outright, one left alone on the user's explicit call (a standing
+  decision this pass shouldn't override unilaterally), one left as
+  documented, tested behavior rather than given new persisted state it
+  didn't need:
+  1. **Fixed: the migration backfill for `tempoRatchetK` caused a real
+     false-positive import conflict, described above under "Corrected
+     after review, same session" — see
+     [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59) for the
+     mechanics and `test/storage.test.mjs`'s two new
+     `diffImportedPiece` regression tests (one proving the false conflict
+     is gone, one proving a genuine `tempoRatchetK` disagreement is still
+     caught).
+  2. **Left alone, on the user's explicit choice:** the overlearning bonus
+     can trigger the already-known, already-reviewed-twice "a same-session
+     tempo jump doesn't get graduation credit until the next session"
+     quirk (see the `clearsStageFloor`-ordering item in
+     [Open questions](#open-questions) below) through a second path —
+     confirmed by direct reproduction (a bonus-driven jump from 50 to 73
+     against a 70 floor: `practiceBPM` correctly lands at 73, but
+     `graduated: false` and the pass isn't counted, exactly the
+     pre-existing symptom). Presented to the user as a real choice, not
+     assumed: the actual fix means reordering `computeLadderAdvance`'s
+     floor-check timing, which is exactly the change the standing
+     decision already declined twice, on the grounds that a one-session,
+     self-correcting delay doesn't justify the risk of reordering an
+     already-dense function. **The user chose to leave it.** The open
+     item below is updated to note the bonus as a second trigger path,
+     not treated as a new, separate issue.
+  3. **Left as documented/tested behavior, not given new state:** `k`
+     recovery (`passesIfCounted >= 2`) is gated by the same stage-floor
+     check graduation counting already uses — reusing
+     `consecutivePasses` (as this pass was explicitly asked to do, rather
+     than adding a new counter) means a chunk sitting below its stage's
+     tempo floor doesn't advance that counter at all, floor-clearing or
+     not. Consequence, confirmed by direct simulation: a chunk that
+     soft-misses while well below Settling/Holding's tempo floor keeps
+     ratcheting at the halved rate for as long as it takes `practiceBPM`
+     to *climb* to that floor — which, being at the halved rate, takes
+     longer than it otherwise would. Self-correcting (it does recover,
+     once floor-clearing), not data-destructive, and Stabilizing has no
+     floor so this can't happen there. A real, independent fix (decoupling
+     recovery from the floor) would need a second persisted counter,
+     which directly contradicts this pass's own "reuse the existing
+     counter, don't add a new one" instruction — judged disproportionate
+     for a cosmetic recovery-speed delay, not put to the user as a
+     from-scratch choice the way item 2 was, since there's no standing
+     decision here to override, just this session's own engineering
+     judgment. Documented here and covered by a new regression test in
+     `test/ladder.test.mjs` (`Pass 59: tempo ratchet — k recovery is
+     gated by the same stage floor graduation uses`) so the exact
+     contour is asserted, not just narrated.
+  - `npm test`: 465/465 (462 before this round: 2 new `diffImportedPiece`
+    tests, 1 new k-recovery-floor-gating test).
+
+**Decision (built — Pass 60): "tempo maintenance mode" is computed live off
+`practiceBPM`/`targetBPM`, never persisted per chunk — confirmed exitable
+by construction, not something needing explicit exit or flapping-prevention
+logic.**
+
+- **Why:** once a chunk's `practiceBPM` is already close to `targetBPM`,
+  the tempo ratchet's gap-proportional step (Pass 59, above) doesn't need
+  to keep chasing the gap at the chunk's own adaptive rate — a small,
+  pinned rate is enough to keep nudging forward near the top without risk
+  of an oversized single-session step. `ladderConfig.tempoRatchet` gains
+  two new fields for this, extending the same object Pass 59 introduced
+  rather than a separate namespace: `tempoAchievedThreshold` (default 0.85,
+  adjustable up to 1.0 — the fraction of `targetBPM` at/above which a chunk
+  is "in maintenance") and `maintenanceK` (default 0.05 — the pinned rate
+  substituted at that point).
+- **Resolved before building anything, not assumed: no new persisted
+  per-chunk field.** `inTempoMaintenance = targetBPM != null && practiceBPM
+  != null && practiceBPM >= targetBPM * tempoAchievedThreshold`
+  (`isInTempoMaintenance`, `lib/ladder.js`) is recomputed every time it's
+  needed, matching this codebase's existing preference for computed-live
+  over persisted-and-tracked wherever the inputs are already available
+  (the same spirit as `chunkSet`/`timeline` being pure derivations, never
+  persisted — `CLAUDE.md`). This makes exit free: a fail's existing
+  entry-BPM reset (Pass 26 follow-up) dropping `practiceBPM` back below the
+  threshold means the very next check simply reads `false` again — no
+  explicit "exit maintenance mode" code path, and nothing that can go stale
+  or flap, since it's never state to begin with.
+- **The substitution happens only at the point a step size is computed,
+  never overwrites what's tracked.** `progress[id].tempoRatchetK` — the
+  chunk's own adaptive rate — keeps stepping/halving/recovering exactly as
+  Pass 59 already has it, on every branch, regardless of whether
+  maintenance mode is active for that particular session. Only the `k`
+  value fed into `tempoRatchetStepSize` at the two call sites (the
+  soft-miss and pass branches) is swapped for `maintenanceK` while
+  `inTempoMaintenance` is true. Concretely: a soft-miss in maintenance mode
+  still halves the *tracked* rate and persists the halved value, same as
+  always — but the *step actually taken* that session uses `maintenanceK`,
+  not the halved rate. There's nothing to "restore" once maintenance mode
+  exits, since the tracked rate was never touched by it in the first place.
+- **Explicitly not connected to ladder `stage`.** Raised directly by the
+  user during scoping and stated here for the record: this has nothing to
+  do with Stabilizing/Settling/Holding or `demote()`'s fail-driven
+  demotion, which already happens today independent of anything in this
+  decision. `inTempoMaintenance` is a tempo-*stepping-rate* concept only —
+  a chunk can be in maintenance mode at any stage, and demotion on fail is
+  completely unaffected by it.
+- **Explicitly not connected to `isPieceLearned`/`isPlanActuallyComplete`,
+  on purpose, not an oversight.** The pass description that scoped this
+  work mentions a chunk in maintenance mode should eventually "stop
+  counting toward the plan being not done yet" — genuinely unresolved, and
+  the user has said explicitly they'll define what that means once they
+  reach it; this pass does not guess, and does not wire `inTempoMaintenance`
+  into either function regardless of what it turns out to mean. Likely
+  candidate when it is resolved, per the user: Pass 30's "tempo climbing"
+  nudge (`hasClimbingTempo`, `lib/confidence.js`) — a chunk in maintenance
+  mode has, by definition, already climbed as far as it currently needs to.
+  Tracked as an explicit open item below, not silently decided.
+- **"Keeps its normal review frequency" and "still has to earn its way
+  through remaining stage-graduation requirements at the usual pace" are
+  satisfied by non-interference, not new code.** `nextDueDate`/interval
+  math (`intervalForStage`) and `consecutivePasses`/`clearsStageFloor`
+  read/write exactly the same fields this pass doesn't touch — stated here
+  explicitly, per the pass description's own instruction, rather than
+  adding code that would just duplicate something already true by
+  construction. **Flagged for Pass 61, if that pass reworks Holding's
+  floor mechanism**: this claim is only verified against *today's*
+  escalating-tempo-floor design; Pass 61 will need to re-check it once
+  what Holding's floor means actually changes, rather than assuming it
+  still holds.
+  **Re-checked (Pass 61): still holds, and is now simpler, not weaker.**
+  Pass 61 retired Holding's tempo floor entirely (`clearsStageFloor`'s
+  Holding branch always returns `true`), so there's no floor left for
+  `isInTempoMaintenance` to interact with at all — the two mechanisms
+  (which `k` a step uses, vs. whether a Holding pass counts toward
+  interval growth) were already fully independent before this pass and
+  remain so after it, with one fewer moving part on the Holding side.
+  `intervalForStage` itself is untouched by Pass 61, so review frequency
+  is unaffected either way. See the Pass 61 decision immediately below.
+- **`Wizard.jsx` follow-up, found in review and fixed the same session, per
+  direct request — originally flagged rather than fixed outright, since it
+  fell outside this pass's stated Touches list.** `Wizard.jsx`'s
+  `defaultPiece()` hardcodes a literal `ladderConfig` (used as-is for a
+  brand-new piece — `App.jsx`'s `handleComplete` doesn't run a
+  freshly-created piece through `mergeLadderConfig`, exactly the mechanism
+  Pass 59 itself already found and fixed once for its own fields, same
+  section above). Its `tempoRatchet: { k: 0.3, kCapBpm: 8 }` literal hadn't
+  been updated with this pass's two new fields. Traced through rather than
+  assumed before fixing: this was **not a crash** the way the Pass 59
+  version of this bug was — `targetBPM * undefined` is `NaN`, and any
+  comparison against `NaN` is `false`, so `isInTempoMaintenance` simply
+  read `false` unconditionally for a brand-new piece, and `maintenanceK`
+  (only read inside the `inTempoMaintenance ? ... : ...` branch) was never
+  actually dereferenced. The real consequence was narrower: a piece created
+  via the Wizard silently couldn't enter tempo maintenance mode for its
+  first session, until the app was reloaded once
+  (`loadPiecesFromStorage`'s `mergeLadderConfig` backfills the two fields
+  into the in-memory piece on every load, whether or not the persisted JSON
+  itself was ever re-saved with them). **Fixed**: `tempoRatchet` now reads
+  `{ k: 0.3, kCapBpm: 8, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 }`
+  in `Wizard.jsx`, the exact same one-line mirror Pass 59 already made once
+  for its own fields.
+- Verified with `test/ladder.test.mjs` (`Pass 60: tempo maintenance mode`):
+  `isInTempoMaintenance`'s true/false boundary at the threshold and with
+  missing inputs; flipping back to `false` after a fail, off the same live
+  formula with no special-cased exit branch; a pass's step size using
+  `maintenanceK` in maintenance mode vs. the chunk's own tracked `k`
+  outside it (same starting chunk, only the threshold config differs,
+  isolating the substitution as the one variable); the persisted
+  `tempoRatchetK` staying exactly what Pass 59's own bookkeeping would
+  produce regardless of which `k` the step itself used; and a soft-miss in
+  maintenance mode still halving and persisting the real tracked rate while
+  the step taken uses `maintenanceK`. Deliberately did **not** add
+  `tempoAchievedThreshold`/`maintenanceK` to this test file's shared
+  `LADDER_CONFIG` fixture used by every pre-existing test (including every
+  Pass 59 test above) — without those two fields the live check
+  deterministically reads `false` there (same `NaN`-comparison reasoning as
+  the `Wizard.jsx` finding above), so every pre-existing test's behavior is
+  provably unaffected; this pass's own tests use a local config override
+  instead, the same pattern the file already used for one-off
+  `tempoRatchet` overrides (e.g. `smallCapConfig`). `npm test`: 476/476.
+- See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two).
+
+**Decision (built — Pass 61): Holding's escalating tempo floor is retired
+outright — meeting the rep requirement is sufficient on its own for a
+Holding pass to count toward interval growth — replaced by a periodic
+rep-only harder check every 4th review, tracked by a new
+`progress[id].holdingReviewCount`.**
+
+- **Why:** requested directly by the user — Holding no longer needs its
+  own tempo gate on top of the rep requirement; the harder-to-satisfy
+  check moves to reps instead, on a fixed cadence rather than an
+  escalating tempo threshold.
+- **Precisely what retired, and what didn't:** `clearsStageFloor`'s
+  Holding branch (`lib/ladder.js`) now always returns `true` —
+  Stabilizing (already no floor) and Settling (flat fraction of
+  `targetBPM`) are completely unchanged, both in code and in every
+  existing test. This is **not** the same thing as
+  `classifySessionOutcome`'s `clearsTempo` check (`bpm >= practiceBPM`,
+  deciding whether a session is a pass/soft-miss/fail at all) — that
+  function is untouched, confirmed by a new pair of regression tests
+  (`test/confidence.test.mjs`) rather than left to be assumed from the
+  fact that the file wasn't edited there.
+- **The new mechanism:** `progress[id].holdingReviewCount` counts every
+  logged Holding review (pass, soft-miss, *or* fail — confirmed explicitly,
+  not passes only), via one shared rule,
+  `nextHoldingReviewCount(stage, newStage, holdingReviewCount)`
+  (`lib/ladder.js`), used identically by all three `computeLadderAdvance`
+  outcome branches: `0` on a fresh promotion into Holding, `+1` on any
+  review logged while already in Holding, unchanged otherwise. On the
+  review where the count-about-to-be-logged is a multiple of 4 (the 4th,
+  8th, 12th... since the chunk's most recent fresh entry into Holding),
+  `resolveRequiredReps` (`lib/confidence.js`) resolves one more clean rep
+  than the baseline; every other review resolves to baseline. Applies on
+  top of the existing flat 2-rep run-through override (Pass 27) too, not
+  just the difficulty-based table.
+- **A real architectural touch-point, not a one-function change — matched
+  what the pass description warned it might be.** `resolveRequiredReps`
+  gained two new, optional parameters (`stage`, `holdingReviewCount`),
+  defaulting to "no bump" when omitted. `ChecklistItem.jsx`'s call site
+  needed updating to actually pass them — but turned out to need **no new
+  prop threaded in**: `entry` (`piece.progress[chunk.id]`) was already in
+  scope there for unrelated reasons, and both new fields live on it. This
+  is a discovery worth flagging on its own — the pass description
+  hedged "ChecklistItem.jsx, if resolveRequiredReps' call site needs new
+  data passed in that it doesn't already have," and it turned out it
+  already had everything needed.
+- **`computeAutoConfidence`'s own `resolveRequiredReps(chunk)` call
+  (`lib/confidence.js`) is deliberately left unchanged, not extended to
+  pass `stage`/`holdingReviewCount`.** That function scores *every past
+  session* retrospectively for a chunk's confidence percentage; applying
+  today's live `holdingReviewCount` backward onto sessions logged before
+  the chunk was ever in Holding (or before this pass existed at all) isn't
+  what "the required-clean-reps threshold for *that one session*" (the
+  pass description's own framing) asked for, and doing so wasn't part of
+  this pass's Builds. The optional-parameter design makes this the default
+  behavior for any call site that doesn't opt in, rather than something
+  that needed a separate carve-out.
+- **Migration/storage, following the exact pattern `tempoRatchetK`
+  (Pass 59) already established** — three spots in `lib/storage.js`, not
+  one, all in scope since the file itself was already in this pass's
+  Touches list: `backfillProgressLadderState` (defaults to `0`, same
+  "no real history to reconstruct, treat an already-in-Holding chunk as if
+  it just arrived" spirit as the entry-BPM fields), `LADDER_STATE_FIELDS`
+  (so import-conflict detection considers it), and `mergeProgress`'s
+  explicit per-field list (so a re-import actually carries it through per
+  `ladderChoice`, rather than silently taking whichever side's raw value
+  the `{...e, ...i}` spread happened to land on regardless of the user's
+  choice — the exact class of bug `tempoRatchetK` was added there to
+  avoid).
+- **The three now-unread `ladderConfig.holding.tempoFloorStartFraction`/
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields are left in the
+  schema, not removed, and `LadderConfigEditor` still exposes them,
+  correctly labeled, under its "Holding" heading — found in review, not
+  fixed, since neither `storage.js`'s config defaults nor
+  `LadderConfigEditor.jsx` were in this pass's Touches list for removal.**
+  A user can now "tune" a setting that has zero effect, with nothing in
+  that UI indicating it's gone inert. Left as a flagged gap rather than
+  silently cleaned up or silently left undocumented. See
+  [Open questions](#open-questions) below.
+- **Two more real gaps found in review, initially left unfixed (outside
+  this pass's Touches list), then fixed the same session per direct
+  request as an explicit same-session follow-up:**
+  1. **`App.jsx` wasn't updated at first, and the feature didn't actually
+     work end to end without it.** `handleLogSession`, `handleUnlogSession`
+     (restoring from `ladderSnapshot`), and `handleConfirmProvisionalSession`
+     all read/write ladder fields through **explicit, hand-maintained
+     field lists**, not a wholesale object spread — confirmed by reading
+     the code, not assumed, and confirmed to be exactly the same pattern
+     that caused Pass 59's own real bug ("`App.jsx` never actually
+     threaded `tempoRatchetK` through," found and fixed the same session
+     Pass 59 shipped — see above). `holdingReviewCount` was a brand-new
+     field on `computeLadderAdvance`'s input/output shape, and none of
+     those three lists included it at first: `prevEntry.holdingReviewCount`
+     was never read into `computeLadderAdvance`'s input, and
+     `advance.holdingReviewCount` was never written back into
+     `progress[chunkId]`. **Fixed**: all seven of the same spots
+     `tempoRatchetK` already needed (three in `handleLogSession` —
+     `ladderSnapshot`, the `computeLadderAdvance` input, the persisted
+     output; one optional-restore line in `handleUnlogSession`; the same
+     three in `handleConfirmProvisionalSession`) now carry
+     `holdingReviewCount` the same way. `test/session-undo.test.mjs` —
+     described elsewhere in this doc as the one App.jsx mirror file that's
+     "exhaustive across every ladder field," since there's no React render
+     harness to test the real closures directly — was updated to match at
+     all four of its own mirrored spots, plus three new regression tests
+     (logging increments and undo restores the pre-session count; undoing
+     a fresh promotion into Holding restores a *leftover* count from an
+     earlier Holding stint, not `0`; an older snapshot missing the field
+     restores everything else normally, same optional-field convention as
+     `tempoRatchetK`). `test/interleave-provisional.test.mjs` and
+     `test/interleave-skip.test.mjs` were deliberately **not** extended to
+     mirror this field — both were already narrower, partial mirrors
+     before this pass (missing the entry-BPM fields and `tempoRatchetK`
+     too, not just this new one), and their own tests don't exercise it;
+     matching their pre-existing scope rather than making them
+     inconsistently more complete than their siblings. Verified live, not
+     just via the mirrored tests: seeded a Holding chunk at
+     `holdingReviewCount: 3` (so review #4 needs the bump), confirmed the
+     UI correctly asked for 5 reps, logged a real session through the
+     actual app, and confirmed via `localStorage` that the persisted count
+     advanced to `4` — before this fix, the identical steps left it frozen
+     at `3` forever, reproduced directly.
+  2. **`InterleavePanel.jsx`'s own `resolveRequiredReps(chunk)` call
+     (line ~87) also wasn't updated at first, and it performs real
+     classification** (feeds `requiredReps` straight into
+     `classifySessionOutcome`, same as `ChecklistItem`), not just display.
+     `isInterleaveEligible` explicitly includes chunks at
+     `stage === "holding"`, so a chunk on its 4th/8th/12th Holding review
+     reachable through Interleaved mode was judged against the plain
+     baseline there, while the exact same review logged through the
+     normal Day-view checklist correctly required one more rep — a real,
+     reachable inconsistency between two logging paths for the identical
+     review, not a hypothetical. **Fixed**: the call now reads
+     `resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount)`,
+     the identical one-line fix `ChecklistItem.jsx` already had — `entry`
+     was already in scope there too, so this needed no new prop either.
+     Not separately unit-tested (a `.jsx` component, same "no render
+     harness" constraint as the rest of this codebase's UI layer) — the
+     underlying `resolveRequiredReps` logic this now correctly feeds is
+     already exhaustively tested in `test/confidence.test.mjs`.
+- **A third real bug, found in a user-requested skeptical second-engineer
+  review of this session's diff, and fixed the same session: the migration
+  backfill for `holdingReviewCount` defaulted an untouched chunk to the
+  literal `0` instead of `null` — the exact same false-positive
+  import-conflict bug `tempoRatchetK` already had once (see the Pass 59
+  decision above), reintroduced here for a new field by not following that
+  precedent.** A piece migrated through `validateAndMigratePiece` (as every
+  already-loaded piece is) would carry a real `0` on a chunk that had never
+  touched Holding, while a raw backup exported before this field existed
+  has no `holdingReviewCount` key at all — `0 !== null` (`undefined` reads
+  as `null` in the comparison) registered as genuine ladder-state
+  divergence, forcing the import-conflict picker on an otherwise
+  byte-identical re-import. **Reproduced directly before fixing**, not
+  just inferred from reading the code — a standalone script called the
+  real `diffImportedPiece` with exactly this shape and confirmed
+  `hasDivergence: true` where it should have been `false`, then confirmed
+  the real `validateAndMigratePiece` itself now backfills to `null`.
+  **Fixed** at every spot that materializes this field with a fallback:
+  `storage.js`'s backfill (`null`, not `0`), and both of `App.jsx`'s
+  `ladderSnapshot` capture sites (`handleLogSession`,
+  `handleConfirmProvisionalSession`, plus their `test/session-undo.test.mjs`
+  mirror) — the same "chunk that's never touched Holding has no count to
+  be `0` of" fix, since a materialized `0` written into a session's own
+  undo-snapshot would resurface the identical bug via undo instead of via
+  migration. **Deliberately unchanged**: `computeLadderAdvance`'s own
+  `chunkLadderState.holdingReviewCount || 0` (and `resolveRequiredReps`'s
+  matching `(holdingReviewCount || 0) + 1`) — both already treat `null`
+  and `0` identically at the one point that actually needs a real number,
+  so this fix changes nothing about the real ladder math, only the
+  backfilled/snapshotted shape. Covered by three new regression tests in
+  `test/storage.test.mjs`, mirroring the exact `tempoRatchetK` pair this
+  bug reproduced: the false-conflict case now resolves cleanly, a genuine
+  disagreement between two real numbers is still caught, and — the one
+  case the fix could plausibly have overcorrected — `0` (a chunk that has
+  genuinely entered Holding, zero reviews in) vs. absent (never entered at
+  all) is confirmed to still register as real divergence, not swallowed by
+  treating every falsy value as equivalent.
+- Verified with `test/ladder.test.mjs` (Holding no longer gates on tempo
+  regardless of how far `practiceBPM` is from `targetBPM`; a fresh
+  promotion into Holding resets `holdingReviewCount` to `0`; all three
+  outcomes increment it while already in Holding; an integration test
+  chaining five real `computeLadderAdvance` calls and checking
+  `resolveRequiredReps` at each step lines up exactly [4, 4, 4, 5, 4]),
+  `test/confidence.test.mjs` (`resolveRequiredReps`'s boundary at every
+  multiple of 4, backward-compatible omission, the run-through-baseline
+  interaction, and `classifySessionOutcome`'s tempo check proven
+  unaffected), `test/session-undo.test.mjs` (the three App.jsx-mirror undo
+  tests described above), and `test/storage.test.mjs` (the three
+  null-vs-zero regression tests described just above). Re-ran the full
+  pre-existing test suite rather than assuming — **found, while doing so,
+  that no pre-existing automated test actually exercised Holding's old
+  escalating floor at all** (the "Tempo floor gating" describe block in
+  `test/ladder.test.mjs` covered Settling, Stabilizing, and the
+  no-`targetBPM` case, but never Holding specifically) — so this pass's
+  own new tests are genuinely new coverage for that mechanism's
+  replacement, not a modification of an existing, passing test. `npm
+  test`: 497/497.
+- See [Algorithms.md](Algorithms.md#holdings-periodic-harder-check-pass-61)
+  and [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages).
+
+**Decision (built — Pass 62): a live-derived "tempo goal projected N+ days
+away" warning, forward-simulating the real ladder math under a neutral
+best-case assumption, with a fixed 90-day bar — not compared against
+`piece.targetDate` at all.**
+
+- **Why:** requested directly by the user — nothing before this pass could
+  answer "at the current pace, is this chunk's tempo goal even realistic
+  on any reasonable timeline?" `formatLadderStatus` (Pass 15) shows the
+  *next* review date, one step ahead; nothing projected further than that.
+- **The simulation reuses `computeLadderAdvance` itself, not a
+  reimplementation** — `simulateTempoConvergence` (`lib/ladder.js`) calls
+  it in a loop, feeding a synthetic `{ result: "pass", effectiveness:
+  "good" }` outcome each time. "Good," not "high": "always passes" is
+  already one optimistic assumption; effectiveness "high" would stack a
+  second one on top of it for no product reason. Confirmed by a direct
+  cross-check test (`test/ladder.test.mjs`): a fixture engineered to
+  converge in exactly one simulated step produces a `days` value that
+  matches an independent, direct `computeLadderAdvance` call's own
+  `nextDueDate` exactly — proof the simulation is driving the real
+  function's math, not separate arithmetic that happens to agree.
+- **The tempo goal is `tempoAchievedThreshold` × `targetBPM` (Pass 60's
+  maintenance-mode bar), not `targetBPM` outright** — confirmed with the
+  user rather than assumed. Once `practiceBPM` crosses that threshold, the
+  chunk's own step size already drops to the pinned `maintenanceK` rate
+  (`isInTempoMaintenance`); demanding a literal 100%-of-target finish line
+  in the simulation would mean projecting past the point this module's own
+  math already treats the chunk as "there."
+- **`MAX_SIMULATION_STEPS` (500) is a real guarantee, not a defensive
+  nicety for cases that were always going to converge anyway.** Under the
+  current tempo-ratchet math a pass's step size floors at 1 BPM whenever
+  there's a real gap left to close, so ordinary chunks converge in well
+  under the cap. But `ladderConfig.tempoRatchet.kCapBpm` is user-editable
+  (Settings' `LadderConfigEditor`, Pass 17) — set to exactly `0`, it
+  collapses the step-size formula's outer clamp to `0` for every step,
+  forever, and `practiceBPM` can never move again. Reproduced directly in
+  `test/ladder.test.mjs` (a `kCapBpm: 0` fixture runs the full cap and
+  returns `converged: false` promptly, not a hang) — this is the scenario
+  the cap exists for, not a hypothetical.
+- **The 90-day warning bar (`TEMPO_CONVERGENCE_WARNING_DAYS`) is fixed,
+  the same for every piece regardless of `scheduleMode`** — explicitly
+  requested this way, not derived from `piece.targetDate`,
+  `piece.daysToLearn`, or any other piece-specific value.
+  `simulateTempoConvergence` doesn't take a `piece` argument at all and
+  never reads a scheduling field, so there's no days-mode/minutes-mode
+  branch anywhere in it — verified directly with a test that runs the same
+  chunk ladder state through two fixtures standing in for a days-mode piece
+  (`targetDate` set, no `minutesPerDay`) and a minutes-mode piece
+  (`daysToLearn`/`minutesPerDay` set, no `targetDate`) and asserts
+  byte-identical (`deepEqual`) output.
+- **Live-derived, not persisted — no "warned" flag.** Same pattern
+  `hasClimbingTempo` (Pass 30) and `isPieceLearned` (Pass 39) already use:
+  `PieceMapTab`'s chunk-detail modal recomputes the simulation fresh on
+  every render from whatever's currently in `piece.progress[id]` /
+  `piece.ladderConfig`, starting from `todayISODate()`. Verified live in
+  the browser, not just by reasoning about the code: a chunk seeded at
+  practiceBPM 20 / target 200 in Holding read "266+ days away — over 3
+  months at this pace" in the modal; logging one more real full-pass
+  session on that same chunk (no page reload) updated it to "252+ days
+  away" on the very next render.
+- **Placement: `PieceMapTab`'s chunk-detail modal**, in the same
+  `detail-stats` block Pass 15 already surfaces Stage/Next review in — the
+  pass description's own suggested location, confirmed rather than
+  second-guessed since nothing about the investigation surfaced a reason
+  to prefer somewhere else. Renders as a "Tempo goal" row using the same
+  `--brick` warning color `needsRelearning`'s hint already uses, but only
+  when `tempoConvergenceExceedsWarning` is true — unlike Stage/Next review,
+  which always show, this row is a warning, not a permanent stat, so it
+  disappears entirely once the projection is a non-issue (not applicable,
+  or under the bar).
+- **Explicitly deferred, not decided:** any comparison against
+  `piece.targetDate` (a days-mode-relative version of this warning) —
+  the pass description was explicit that the fixed 90-day bar is the whole
+  mechanism, not a placeholder for a deadline-aware one. Whether a
+  deadline-relative version would also be useful (e.g. "this chunk's
+  tempo goal is projected past your target date," distinct from "this
+  chunk's tempo goal is projected to take a long time regardless") is an
+  open product question, not ruled out — just genuinely out of scope for
+  this pass.
+- Verified with `test/ladder.test.mjs` (`Pass 62: simulateTempoConvergence`):
+  the direct cross-check against `computeLadderAdvance` described above;
+  both the convergent and non-convergent (`kCapBpm: 0`) cases terminate
+  within `MAX_SIMULATION_STEPS`; a fixture under 90 days shows no warning
+  and one over 90 days does; hitting the cap always counts as exceeding
+  the warning bar; the days-mode/minutes-mode `deepEqual` cross-check; and
+  the three "not applicable" cases (no `targetBPM`, no `practiceBPM` yet,
+  already at/above goal). `npm test`: 507/507.
+- See [Algorithms.md](Algorithms.md#tempo-convergence-simulation-pass-62).
 
 ## UX
 
@@ -3279,15 +4008,58 @@ changes").**
   that already wins over the computed score unconditionally. Rather than
   inventing a new persisted scale to match a brief that assumed one, revival
   reassessment exposes the existing override through `CONFIDENCE_PRESETS`
-  (Shaky/Rough/OK/Solid/Rock solid → 0/25/50/75/100), which is exactly what
-  the brief's "sets a new current confidence baseline, separate from the
-  historical log" requirement already describes. See
+  (originally Shaky/Rough/OK/Solid/Rock solid → 0/25/50/75/100; relabeled
+  Lost/Rough/OK/Comfortable/Solid in Pass 54, same five values — see
+  below), which is exactly what the brief's "sets a new current confidence
+  baseline, separate from the historical log" requirement already
+  describes. See
   [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems).
 - **Alternative considered:** a new `progress[id].revivalConfidence` field
   on a literal 0-4 scale. Rejected — would have created a third "how good is
   this chunk" score alongside `computeConfidence` and `computeProgressTier`,
   which [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them)
   already flags as an unresolved problem, not a pattern to repeat.
+
+**Decision (Pass 54): revival's sequential reassessment no longer sets
+`progress[id].flag` — the flag toggle is removed from `PieceMapTab`'s
+chunk-detail modal specifically when `sequentialMode` is true, and
+`CONFIDENCE_PRESETS` is relabeled to match.**
+
+- **What actually changed:** the "Run-through flag" field (`PieceMapTab.jsx`)
+  is now wrapped in `!sequentialMode`, following the exact scoping
+  precedent Pass 37 already established for this same shared component
+  (see the Pass 37 decision below) — ordinary (non-revival) Piece Map
+  keeps the flag toggle exactly as it was, cycling
+  untouched→rough→lost→untouched. Separately (same values, labels only),
+  `CONFIDENCE_PRESETS` (`lib/constants.js`) is now
+  Lost/Rough/OK/Comfortable/Solid — safe as one shared constant rather
+  than a revival-specific copy, since the "Quick rate" row that renders it
+  has always been gated to `sequentialMode`, never shared with non-revival
+  UI.
+- **What this does *not* touch:** `progress[id].flag` itself, its
+  demote-and-pin ladder effect (`applyRunThroughFlag`, see
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)'s
+  "Flag mode on the Piece Map"), its confidence cap, and both of its
+  consumers — `computeRevivalPlan`'s flagged-first sort and `RevivalTab`'s
+  "Flagged chunks" summary panel — are all unchanged. This pass removes
+  one of the two ways `flag` could be set (revival's own sequential
+  reassessment, added alongside Piece Map's own toggle in Pass 6), not the
+  field, the sort, or the panel.
+- **Real, visible consequence, not an oversight:** since revival's
+  reassessment can no longer set `flag` directly, `RevivalTab`'s "Flagged
+  chunks" panel will typically stay empty going forward unless a chunk
+  gets flagged separately through ordinary Piece Map outside of revival.
+  A chunk rated "Lost" via Quick Rate still gets prioritized to the front
+  of the generated plan on its own — `computeRevivalPlan` sorts flagged
+  chunks first, then lowest confidence first, and a "Lost" rating
+  (`manualConfidence: 0`) wins that second tiebreaker unassisted, with no
+  flag involved. Verified live: rating a chunk "Lost" and generating a
+  plan puts it first, with the "Flagged chunks" panel correctly absent
+  (nothing flagged).
+- **Intro copy simplified to match:** "Reassess where things stand" no
+  longer mentions flagging chunks "rough" or "lost" (removed along with
+  the control it described), and gained a new opening instruction — "Play
+  through the piece from beginning to end" — that wasn't there before.
 
 **Decision: `computeRevivalPlan` is a new, separate function — not a reuse
 or parameterization of `computeTimeline`.**
@@ -3975,17 +4747,20 @@ oversight to silently fix; surface it instead.
   - See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
     for `computeScheduleStatus`, and the three decisions immediately above
     this section for the fixes that did ship this session.
-- **Should Revival's "performance tempo override" field move into Settings
+- ~~Should Revival's "performance tempo override" field move into Settings
   (reusing the piece's existing target tempo) instead of living at the top
   of the Revival tab, and should "tempo ladder starting point" move to
   revival setup time (Wizard/`RevivalEntryModal`) instead of only being
-  editable from Revival settings after the fact?** Raised by the user
-  during Pass 24's copy audit, explicitly deferred as out of scope for that
-  pass (it touches `SettingsTab.jsx` and the wizard's revival-adjacent
-  flow, not just Revival-tab copy/layout — see
-  [CLAUDE.md](../CLAUDE.md) Pass 38 note and
-  [Algorithms.md](Algorithms.md#revival) for how both fields are currently
-  read). Not started; a candidate for a future pass, not decided against.
+  editable from Revival settings after the fact?~~ **Resolved by Pass 35 —
+  never cross-referenced back to close this entry until now.** Raised by
+  the user during Pass 24's copy audit, deferred as out of scope for that
+  pass. The first half is moot: `performanceTempo` was removed outright by
+  Pass 35 (see the decision above), not relocated — there's no field left
+  to move into Settings. The second half is exactly what Pass 35 did:
+  `tempoLadderStartFraction` is collected at `RevivalEntryModal` (revival
+  setup time) and stays editable afterward from `RevivalTab`'s "Revival
+  settings" panel — see the Pass 35 decision above for the mechanics, and
+  [Algorithms.md](Algorithms.md#revival) for how the field is read.
 - **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
   `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
   resolution, so two rows added in the same millisecond would share an id.**
@@ -4126,6 +4901,19 @@ oversight to silently fix; surface it instead.
   next logged session, and reordering that function preemptively carries
   more risk than the symptom warrants. Revisit if it actually shows up in
   real use.
+  - **Re-reviewed a third time after Pass 59 (the tempo ratchet), same
+    conclusion.** Pass 59's overlearning bonus (see
+    [Spaced repetition & maintenance](#spaced-repetition--maintenance)
+    above) can trigger this exact same symptom through a second path — a
+    bonus-driven same-session jump that crosses a stage's tempo floor
+    doesn't get graduation credit either, confirmed by direct
+    reproduction (50→73 against Settling's 70 floor: `practiceBPM` is
+    correctly 73, but `graduated: false`, the pass uncounted). Presented
+    to the user directly as a choice (fix the ordering now vs. leave it)
+    rather than assumed either way; **the user chose to leave it**, same
+    reasoning as the first two reviews. Two trigger paths now
+    (`computeDemonstratedTempoBaseline` and the overlearning bonus), one
+    fix, still not applied.
 - ~~**A full session undo doesn't revert `currentBPM`.**~~ **Resolved
   (Pass 14)** — see the dedicated decision in
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) above.
@@ -4270,3 +5058,48 @@ oversight to silently fix; surface it instead.
   expect the same from combined ones. Not started. See
   [Algorithms.md](Algorithms.md#section-run-throughs) and
   [Scheduling](#scheduling) (Pass 49 decision).
+- **`ChecklistItem`'s tab order still isn't literally reps → BPM → Log,
+  even after Pass 53's fix.** Pass 53 fixed the severe symptom — a
+  disabled Log button gets skipped entirely in the browser's tab
+  computation, so tabbing from BPM could overshoot straight into the next
+  card's controls — by gating the button on draft state instead of
+  committed state, so it's enabled well before any tabbing happens.
+  Confirmed live that this closes the "escapes to the next card" failure.
+  What it doesn't close: the "+ Add a note" button and the "Needs more
+  work" checkbox, both unconditionally enabled, still sit between the BPM
+  field and Log in DOM order, so two extra tab stops remain — the actual
+  order is BPM → note button → checkbox → Log, not BPM → Log directly.
+  Three fixes were considered and rejected, each for a real cost: manual
+  `tabIndex` values break globally across every other `ChecklistItem` on
+  the page (positive tab indices are visited page-wide before any default
+  one); reordering the DOM to put Log first would also move it visually,
+  changing the card's layout, which wasn't asked for; giving those two
+  controls `tabIndex={-1}` would fix the sequence but make them permanently
+  unreachable by keyboard, an accessibility regression nothing asked for
+  either. Not started — a product call on whether strict adjacency is
+  worth one of those costs, not a technical gap.
+- **What "a chunk in tempo maintenance mode stops counting toward the plan
+  being not done yet" actually means is genuinely undefined (Pass 60).**
+  The user has said explicitly they'll define this once they reach it —
+  not guessed at here. `isInTempoMaintenance` (`lib/ladder.js`) is
+  deliberately not wired into `isPieceLearned` or `isPlanActuallyComplete`
+  regardless of what this turns out to mean. The most likely candidate
+  when it is resolved, per the user: Pass 30's "tempo climbing" nudge
+  (`hasClimbingTempo`, `lib/confidence.js`) — a chunk in maintenance mode
+  has, by definition, already climbed as far as it currently needs to, so
+  that nudge no longer applies to it. See
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
+  60 decision).
+- **(Pass 61) Holding's retired tempo-floor config fields are still live,
+  editable, and silently inert.** `ladderConfig.holding.tempoFloorStartFraction`/
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` are still part of the
+  saved schema and still exposed, correctly labeled, under
+  `LadderConfigEditor`'s "Holding" heading — but `clearsStageFloor` no
+  longer reads any of them for Holding. A user can "tune" a setting with
+  zero effect and get no indication it's inert. Not started — neither
+  `storage.js`'s config defaults nor `LadderConfigEditor.jsx` were in Pass
+  61's Touches list for removal, and removing a saved/editable config
+  field is a bigger, more deliberate call than this pass was scoped to
+  make unilaterally. See
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
+  61 decision).

@@ -178,6 +178,15 @@ chunking, scheduling, and confidence are actually computed, see
   for exactly this reason). When you add a regression test, verify it can
   actually *fail* by re-introducing the bug — see
   [`docs/Decisions.md`](docs/Decisions.md#ux).
+- **A new field on `chunkLadderState`/`computeLadderAdvance`'s return
+  shape is not done once `lib/ladder.js` is correct.** It also needs
+  threading through all three of `App.jsx`'s session handlers (hand-
+  maintained field lists, not a spread) and a `null` — not a materialized
+  value — backfill default in `storage.js`, or the feature silently never
+  persists / a clean re-import falsely reads as a conflict. Confirmed to
+  bite twice, independently, in the same broader session
+  (`tempoRatchetK`, then `holdingReviewCount`) — see
+  [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) for the checklist.
 
 ## Revival
 
@@ -292,9 +301,12 @@ recap in favor of a plain "Returning '{piece}' to its former glory," the
 Overview stat cards and first-week list relabel during an active revival
 ("revived" instead of "learned," "Revive"/"reconsolidate" instead of
 "Learn new"/"review"), and Master Agenda's revival cards no longer show
-the purpose blurb. The revival-mode UI still does not display why this
-revival was started (`revival.purpose`) or when the piece was last played
-anywhere — flagged as a possible follow-up, not treated as settled.
+the purpose blurb. The revival-mode UI still does not display when the
+piece was last played anywhere — flagged as a possible follow-up, not
+treated as settled. (This paragraph originally also flagged that
+`revival.purpose` — why the revival was started — had no display surface
+either; moot as of Pass 55, which removed the field from collection
+entirely rather than just from display. See that entry below.)
 
 **Since Pass 32a**, every piece carries a persisted `sortOrder` (number) that
 the sidebar piece switcher and other piece-listing surfaces sort by instead
@@ -540,6 +552,100 @@ of section start/end (`weightedDifficultyFromArray`, `chunksBySectionId`,
 section run-through gating, Piece Map) assumes `start <= end` and doesn't
 re-check it.
 
+**Since Pass 52**, `DIFFICULTY_META`'s display labels are Workable /
+Challenging / Difficult, not Easy / Medium / Hard — display only. The
+internal `difficultyLabel` enum values (`'easy' | 'medium' | 'hard'`) are
+unchanged and still drive scheduling/confidence/ladder logic
+(`REQUIRED_REPS`, tempo-floor lookups, etc.) — don't confuse the two, and
+don't rename the enum values to match the new labels.
+
+**Since Pass 53**, `NumberInput` has two new optional props, both
+additive — the commit-on-blur/Enter behavior this component exists for is
+untouched for every consumer that doesn't opt in. `onDraftChange(text)`
+fires on every keystroke with the raw, uncommitted text, for a
+gating-only signal (e.g. "has the user typed *something*") that shouldn't
+wait for blur. `acceptPlaceholderOnTab` (boolean prop) makes tabbing out
+of an empty field commit the shown placeholder as if it had been typed —
+only fires when the placeholder is actually a parseable number, so a
+format hint like "e.g. 10" is never affected. `ChecklistItem`'s reps/BPM
+fields use both: the Log button now gates on `hasRepsDraft && hasBpmDraft`
+(set via `onDraftChange`) instead of the committed `reps`/`bpm` values, so
+it enables the instant you start typing rather than waiting for blur —
+what actually gets logged still reads from the committed state,
+unaffected. This also fixes a real tab-order bug: a disabled button is
+removed from the browser's tab sequence entirely, so the old commit-gated
+Log button being disabled at the moment tab-order was computed could
+overshoot straight into the next card. **Residual, deliberately not
+chased further:** tab order still isn't literally reps→BPM→Log adjacent —
+the "+ Add a note" button and the "Needs more work" checkbox, both always
+enabled, still sit between BPM and Log in DOM order, so two extra stops
+remain even though the "escapes to the next card" failure is gone. Every
+fix considered for full adjacency (manual `tabIndex`, reordering the DOM,
+hiding those two controls from keyboard tab order) costs something not
+authorized by that pass — a visual layout change, or making two currently
+keyboard-reachable controls mouse-only — so it was left as a known,
+reported gap rather than resolved unilaterally. `acceptPlaceholderOnTab`
+is also wired into `InterleavePanel`'s twin reps/BPM fields (same pattern,
+requested separately) — but that panel never got the draft-gating change
+above; its Log button still gates on the committed `reps`/`bpm` values
+directly, which is fine since `NumberInput`'s Tab handler calls `commit()`
+either way.
+
+**Since Pass 54**, `PieceMapTab`'s "Run-through flag" field is hidden
+specifically when `sequentialMode` is true (revival's reassessment pass) —
+`{!sequentialMode && (...)}`, the same scoping precedent Pass 37 already
+established for this shared component. Ordinary (non-revival) Piece Map's
+flag toggle is completely untouched, still cycling
+untouched→rough→lost→untouched. `CONFIDENCE_PRESETS` (`lib/constants.js`)
+is relabeled Shaky/Rough/OK/Solid/Rock solid → Lost/Rough/OK/Comfortable/
+Solid, same five 0/25/50/75/100 values. `RevivalTab`'s reassessment intro
+copy dropped the flagging instructions (nothing left to describe) and
+gained a new opening sentence, "Play through the piece from beginning to
+end." **`computeRevivalPlan`'s flagged-first-then-confidence sort is
+completely unchanged** — it still reads `progress[id].flag` exactly as
+before; this pass only removed one of the two ways that field could get
+set (revival's own reassessment), not the field, the sort, or `RevivalTab`'s
+"Flagged chunks" summary panel below it. **Real, visible consequence, not
+a bug:** since revival's reassessment can no longer set `flag` directly,
+that panel will typically stay empty going forward unless a chunk gets
+flagged separately through ordinary Piece Map outside of revival. A chunk
+rated "Lost" via Quick Rate (`manualConfidence: 0`) still sorts to the
+front of the plan on its own — confidence is the second tiebreaker, and
+0 wins it unassisted. Same-session follow-up: the now-dead `onSetFlag`
+prop threading (`App.jsx` → `RevivalTab` → `PieceMapTab`'s embedded,
+`sequentialMode` instance) was removed, since nothing in that render path
+can call it anymore; `handleSetFlag` itself and ordinary Piece Map's own
+`onSetFlag` wiring are untouched.
+
+**Since Pass 55**, `RevivalEntryModal` no longer asks "What's this
+revival for?" — the `purpose` state, `REVIVAL_PURPOSE_OPTIONS`
+(`lib/constants.js`), and the `disabled={!purpose}` gate on "Begin
+revival" are all gone, so that button is now always clickable, gated on
+nothing. `piece.revival.purpose` itself stays defined-but-always-`null`
+on the schema (`storage.js`'s fallback, `Wizard.jsx`'s `defaultPiece()`)
+rather than being stripped — dormant, not removed, matching this
+codebase's usual migration philosophy for a field nothing reads. **If you
+touch `handleStartRevival` (`App.jsx`):** it hardcodes `purpose: null`
+directly rather than reading it from the modal's payload — it used to
+destructure `purpose` straight through, and once the modal stopped
+sending that key, this would have started writing brand-new revival
+objects with *no* `purpose` key at all (`undefined` doesn't survive
+`JSON.stringify`) rather than an explicit `null`, a real shape
+inconsistency between a freshly-migrated piece and a freshly-started
+revival that was caught and fixed the same session. Same-session
+follow-up, per direct request: both places that collect
+`tempoLadderStartFraction` — `RevivalEntryModal` at revival entry, and
+`RevivalTab`'s "Revival settings" panel mid-revival — now take a straight
+BPM value ("Tempo ladder starting point (BPM)") instead of a percentage
+of target. The fraction is derived from `BPM / targetBPM` on commit; the
+field's own `min`/`max` mirror the old 10%–95%-of-target bounds
+(expressed in BPM) so the result can't land outside that range no matter
+what's typed. Falls back to a flat 60% default with an explanatory
+tip-line when a piece has no `targetBPM` to be a fraction of — typing
+into the field in that state doesn't do anything, by design, not a bug.
+`computeTempoLadder` itself and everything downstream of the stored
+fraction are completely unchanged; only the input widget changed.
+
 **Since Pass 56**, a piece that's had every section's own single-section
 run-through logged at least once (`coldStartGateMet`, `lib/coldStart.js` —
 this one check already implies the whole piece has been covered, no
@@ -600,3 +706,114 @@ control without a handler that calls `updatePiece`, and every piece
 mutation in this app funnels through one owned by `App.jsx`. See
 [`docs/Decisions.md`](docs/Decisions.md#overall-piece-confidence) for the
 full reasoning on both of those calls.
+
+**Since Pass 59**, `practiceBPM`'s pass/soft-miss step is gap-proportional
+(a "tempo ratchet," `ladderConfig.tempoRatchet`) instead of the old flat
+`bpmSteps` delta, which is now only the fallback for a chunk with no
+`targetBPM` — see
+[`docs/Algorithms.md#tempo-ratchet-pass-59`](docs/Algorithms.md#tempo-ratchet-pass-59).
+A soft-miss now steps tempo *forward*, at half the chunk's own adaptive
+rate (`progress[id].tempoRatchetK`), rather than backward. **Since Pass
+60**, once `practiceBPM` is close enough to `targetBPM`
+(`tempoAchievedThreshold`, default 85%), the step-size calculation
+substitutes a small pinned rate (`maintenanceK`) for that tracked rate at
+the point of use only — the tracked rate itself is never overwritten, so
+there's nothing to restore when a chunk drops back out ("tempo maintenance
+mode," `isInTempoMaintenance`, `lib/ladder.js`). **If you add a new field
+to `chunkLadderState`/`computeLadderAdvance`'s return shape, it is not
+enough to change `lib/ladder.js` alone** — this bit twice in the same
+broader session (`tempoRatchetK` here, `holdingReviewCount` below): the
+field also needs threading through all three of `App.jsx`'s session
+handlers (`handleLogSession`, `handleUnlogSession`,
+`handleConfirmProvisionalSession` — each hand-maintains its own field
+list, not a wholesale spread) and needs a `null`, not a materialized-value,
+backfill default in `storage.js` (`backfillProgressLadderState`,
+`LADDER_STATE_FIELDS`, `mergeProgress`) or a byte-identical re-import
+falsely reads as a conflict. See
+[`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) for the full checklist and
+[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance) for
+both incidents.
+
+**Since Pass 61**, Holding's escalating tempo floor is retired outright —
+`clearsStageFloor`'s Holding branch (`lib/ladder.js`) always returns
+`true` now; meeting the rep requirement is sufficient on its own for a
+Holding pass to count toward interval growth. Stabilizing/Settling are
+unchanged. In its place, a new `progress[id].holdingReviewCount` counts
+every logged Holding review (pass, soft-miss, *or* fail all count),
+resetting on fresh entry into Holding; `resolveRequiredReps`
+(`lib/confidence.js`) now requires one extra clean rep on every 4th review
+since that entry, reverting to baseline otherwise.
+`classifySessionOutcome`'s separate tempo check (`bpm >= practiceBPM`,
+deciding whether a session is a pass at all) is completely untouched — a
+different mechanism from the retired floor. The three old
+`ladderConfig.holding.tempoFloor*` config fields are left in the schema
+and stay directly editable in Settings, doing nothing — a deliberately
+flagged loose end, not cleaned up. `InterleavePanel.jsx`'s own
+`resolveRequiredReps` call needed the identical fix `ChecklistItem.jsx`
+got, or a chunk's 4th/8th/12th Holding review would be judged by a
+different, easier requirement depending on which screen logged it. See
+[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance)
+for the full trace, including the found-and-fixed `App.jsx`/null-default
+bugs.
+
+**Since Pass 66**, `computeDueReviews` (`lib/maintenance.js`) runs
+unconditionally at both call sites (`TodayTab`, `MasterAgendaTab`) instead
+of only once a piece has run out its whole bounded plan — a review overdue
+*inside* an active plan now has a live surface immediately, not just once
+the plan is exhausted. `mergeLiveDueReviews(day, dueItems)`
+(`lib/maintenance.js`) folds the result into a plan day's own
+`reviewChunkIds`, de-duplicated against a review already placed there
+because it's due exactly today. Scoped to real "today" only in both tabs —
+day-nav/date-picker browsing a different day is unaffected. The review's
+original, now-past placement day still reads "behind" via
+`classifyDayCompletion` exactly as before; only the "can I see and act on
+this today" gap closed.
+
+**Same-session follow-up, per direct request:** reviews are now priced by
+difficulty everywhere, not just in `computeDueReviews`. Implementing the
+merge above surfaced a genuine pre-existing inconsistency: `computeTimeline`
+priced a review at a flat 3 minutes regardless of the chunk's own
+difficulty, while `computeDueReviews` already priced one at
+`chunk.effort * EFFORT_TO_MIN` (the same rate new-chunk introduction uses).
+**If you touch review-cost estimation, both of these now agree and must
+keep agreeing:**
+- `computeTimeline`'s `minutesFor` (`lib/scheduling.js`) prices
+  `reviewChunkIds` the same way as `newChunkIds`/`specialChunkIds` —
+  `chunk.effort * EFFORT_TO_MIN` — not a flat per-touch minute figure.
+- `computeDaysNeededForMinutesPerDay` (`lib/scheduling.js`, the
+  `scheduleMode: "minutes"` day-count estimator) prices each chunk's
+  review padding the same way: `c.effort * REVIEW_TOUCHES_PER_ITEM`
+  (`REVIEW_TOUCHES_PER_ITEM = 2`, unchanged from before — only what each
+  touch costs changed), not a flat-minutes constant converted into
+  effort-points. Underestimating a hard chunk's review cost here directly
+  risks a `scheduleMode: "minutes"` plan not actually fitting its own
+  stated daily budget once review load lands on top of introduction — the
+  reason this was worth fixing alongside the display-only case, not
+  deferred.
+- `mergeLiveDueReviews` now folds a merged item's `minutes` into
+  `day.minutes` too (previously left deliberately unmerged, back when the
+  two sides disagreed) — safe now that both sides price a review
+  identically.
+- Two pre-existing regression tests in `test/scheduling.test.mjs` had
+  their expected numbers change as a direct, verified consequence (not a
+  sign either fix was undone) — see their updated comments for the exact
+  before/after math: the Tier 2 same-day-pileup smoothing test (heavier
+  real review cost means the smoothing pass now relocates the full pileup,
+  not just some of it) and the `computeDaysNeededForMinutesPerDay` padding
+  test (the correct day-count padding for that fixture is legitimately
+  larger once review cost stops being under-counted).
+
+**Same-session follow-up, found in a self-review before committing:**
+`mergeLiveDueReviews` (`lib/maintenance.js`) skips consolidation ("full
+run-through") days entirely — `if (day.type === "consolidation") return
+day;`. Neither `TodayTab`'s `ConsolidationPanel` nor `MasterAgendaTab`'s
+card renders `reviewChunkIds` or `minutes` for a consolidation day at all,
+so merging a transition/combo's overdue live-due review in on that day
+type was silently inflating `day.minutes` (and therefore Master Agenda's
+total-planned figure) with no line item anywhere on screen to explain the
+extra time — a real number-doesn't-match-what's-shown bug, not a
+theoretical one, confirmed live in the browser both before and after the
+fix. **If you touch `mergeLiveDueReviews` or either consolidation-day
+render branch:** the guard belongs in `mergeLiveDueReviews` itself, not
+duplicated at each call site, since both callers rely on it unconditionally
+to decide what's safe to merge.

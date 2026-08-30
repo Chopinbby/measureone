@@ -11,8 +11,8 @@ export function DifficultyEditor({ draft, set }) {
   return (
     <div>
       <p className="wizard-hint">
-        Below is a grid of all the measures in your piece. Click a measure to cycle Easy → Medium
-        → Hard, so the plan knows where to schedule extra practice.
+        Below is a grid of all the measures in your piece. Click a measure to cycle Workable →
+        Challenging → Difficult, so the plan knows where to schedule extra practice.
       </p>
       <div className="diff-grid-wrap">
         <div className="diff-grid">

@@ -268,6 +268,38 @@ whether a listener fires), not by reading an attribute off the element and
 assuming the browser will honor it the way the element's other properties
 suggest.
 
+## A dispatched synthetic event that doesn't bubble the way you assume will silently no-op
+
+When verifying UI in-browser via script (`dispatchEvent` rather than a real
+click/keypress), some event types don't behave the way `{ bubbles: true }`
+implies. `blur`/`focus` don't bubble natively — React's synthetic
+`onBlur`/`onFocus` handling depends on the browser's own focus-change
+machinery, not just event delegation — so a scripted
+`el.dispatchEvent(new Event('blur', { bubbles: true }))` can silently fail
+to trigger a commit-on-blur handler while returning no error at all. The
+element just keeps showing the uncommitted value, which looks identical to
+"the fix doesn't work" until you check with a real interaction instead.
+
+Worked example (session covering Pass 53 and Pass 55's follow-up BPM-field
+conversion): testing whether a `NumberInput` correctly clamped an
+out-of-range value on blur, a script set the field's value and dispatched
+a synthetic `input` then `blur` event. The field kept showing the
+unclamped number afterward — looked like a real clamping bug. It wasn't:
+driving the exact same interaction through the `computer` tool (a real
+click to focus, real keystrokes, a real Tab key to blur) clamped correctly
+on the first try. The `input` event worked as scripted; only `blur` was
+the unreliable half, because dispatching it doesn't reproduce the actual
+focus-change the browser performs on a real Tab press or click-away.
+
+The generalizable habit: prefer real `computer`-tool interactions (click,
+type, Tab, real mouse-driven focus changes) over `dispatchEvent` for
+anything that depends on `blur`/`focus`/`change` firing correctly.
+`dispatchEvent` is fine for read-only inspection or events you've already
+confirmed round-trip correctly (plain `input` events generally do); when a
+scripted interaction produces a surprising "it didn't work" result for
+anything touching commit-on-blur, changing the *input method* is worth
+trying before concluding the code is broken.
+
 ## A guard added for one navigation path needs auditing everywhere that path exists
 
 When you add a confirmation/guard before a state transition (leaving a
@@ -424,6 +456,57 @@ something unrelated. The fix is procedural, not a code fix: after removing
 manually-injected test data, reload the page before trusting the cleanup,
 the same way [verifying any write requires an actual reload](#an-immediate-post-action-check-is-not-the-same-as-verifying-persistence) —
 this is that same lesson applied to deletions instead of writes.
+
+## Adding a new per-chunk ladder field is a checklist, not a single edit — this codebase has already proven that twice
+
+When `computeLadderAdvance` (or any pure function whose result gets
+persisted through a stateful React component with no test harness) gains a
+new field, the pure function being correct is not the same as the feature
+working. Two more things are load-bearing, and both are easy to skip
+because nothing errors when you do:
+
+1. **The stateful caller has to actually thread the field through.**
+   `App.jsx`'s session handlers (`handleLogSession`, `handleUnlogSession`,
+   `handleConfirmProvisionalSession`) read/write every ladder field through
+   explicit, hand-maintained lists, not a wholesale object spread — a new
+   field added to the pure function's input/output shape does not
+   automatically reach these lists. Skip it and the pure function computes
+   and returns the correct value every time (fully provable by unit tests,
+   since those call the pure function directly), while the real app
+   persists nothing — `prevEntry.newField` is never read in,
+   `advance.newField` is never written back out.
+2. **A "no data yet" backfill must default to `null`, not a materialized
+   value** (`0`, `false`, whatever the field's "empty" state looks like).
+   `storage.js`'s migration backfill, and anywhere a snapshot captures the
+   field for undo, gets compared against a raw, unmigrated import via
+   `!==` (`ladderStateDiffers`/`LADDER_STATE_FIELDS`). A migrated piece
+   carrying a real `0` where an old export has no key at all reads as
+   genuine disagreement, forcing the import-conflict picker on an
+   otherwise byte-identical re-import.
+
+Worked example, twice over: `tempoRatchetK` (Pass 59) hit **both** of these
+— found and fixed in the same session it was added, once each.
+`holdingReviewCount` (Pass 61), a completely different field added two
+passes later in the same broader session, hit **the exact same two bugs**,
+independently rediscovered rather than avoided by the first one already
+having been fixed. Both were caught only because the user explicitly
+requested a skeptical second-engineer review of the diff before
+committing — nothing in either original implementation, or either pure
+function's own thorough unit tests, surfaced either bug on its own.
+
+The checklist, going forward, for any new field on
+`chunkLadderState`/`computeLadderAdvance`'s return shape: (a) all three
+`App.jsx` session handlers — the snapshot capture, the function's own
+input, and the persisted output, in each of the three handlers that touch
+ladder state; (b) `storage.js`'s `backfillProgressLadderState`,
+`LADDER_STATE_FIELDS`, and `mergeProgress`'s explicit field list; (c) the
+backfill/snapshot default is `null`, never a materialized value, unless
+the pure function's own resolution point already treats the two
+identically (confirm this, don't assume it — it happens to be true for
+both fields above, which is exactly why the wrong default never crashed
+anything and stayed hidden). See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for both
+incidents' full detail.
 
 ## Avoid duplicate documentation
 

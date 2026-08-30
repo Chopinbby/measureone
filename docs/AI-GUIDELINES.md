@@ -401,6 +401,57 @@ verified" as a to-do, not a finished answer — go check it before the
 confidence rating is final, the same instinct as checking a doc's claim
 against the actual code rather than trusting the prose.
 
+## Adding a new per-chunk ladder field is a checklist, not a single edit — this codebase has already proven that twice
+
+When `computeLadderAdvance` (or any pure function whose result gets
+persisted through a stateful React component with no test harness) gains a
+new field, the pure function being correct is not the same as the feature
+working. Two more things are load-bearing, and both are easy to skip
+because nothing errors when you do:
+
+1. **The stateful caller has to actually thread the field through.**
+   `App.jsx`'s session handlers (`handleLogSession`, `handleUnlogSession`,
+   `handleConfirmProvisionalSession`) read/write every ladder field through
+   explicit, hand-maintained lists, not a wholesale object spread — a new
+   field added to the pure function's input/output shape does not
+   automatically reach these lists. Skip it and the pure function computes
+   and returns the correct value every time (fully provable by unit tests,
+   since those call the pure function directly), while the real app
+   persists nothing — `prevEntry.newField` is never read in,
+   `advance.newField` is never written back out.
+2. **A "no data yet" backfill must default to `null`, not a materialized
+   value** (`0`, `false`, whatever the field's "empty" state looks like).
+   `storage.js`'s migration backfill, and anywhere a snapshot captures the
+   field for undo, gets compared against a raw, unmigrated import via
+   `!==` (`ladderStateDiffers`/`LADDER_STATE_FIELDS`). A migrated piece
+   carrying a real `0` where an old export has no key at all reads as
+   genuine disagreement, forcing the import-conflict picker on an
+   otherwise byte-identical re-import.
+
+Worked example, twice over: `tempoRatchetK` (Pass 59) hit **both** of these
+— found and fixed in the same session it was added, once each.
+`holdingReviewCount` (Pass 61), a completely different field added two
+passes later in the same broader session, hit **the exact same two bugs**,
+independently rediscovered rather than avoided by the first one already
+having been fixed. Both were caught only because the user explicitly
+requested a skeptical second-engineer review of the diff before
+committing — nothing in either original implementation, or either pure
+function's own thorough unit tests, surfaced either bug on its own.
+
+The checklist, going forward, for any new field on
+`chunkLadderState`/`computeLadderAdvance`'s return shape: (a) all three
+`App.jsx` session handlers — the snapshot capture, the function's own
+input, and the persisted output, in each of the three handlers that touch
+ladder state; (b) `storage.js`'s `backfillProgressLadderState`,
+`LADDER_STATE_FIELDS`, and `mergeProgress`'s explicit field list; (c) the
+backfill/snapshot default is `null`, never a materialized value, unless
+the pure function's own resolution point already treats the two
+identically (confirm this, don't assume it — it happens to be true for
+both fields above, which is exactly why the wrong default never crashed
+anything and stayed hidden). See
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) for both
+incidents' full detail.
+
 ## Avoid duplicate documentation
 
 Each concept has exactly one canonical home in this `docs/` set (see

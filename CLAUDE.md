@@ -178,6 +178,15 @@ chunking, scheduling, and confidence are actually computed, see
   for exactly this reason). When you add a regression test, verify it can
   actually *fail* by re-introducing the bug — see
   [`docs/Decisions.md`](docs/Decisions.md#ux).
+- **A new field on `chunkLadderState`/`computeLadderAdvance`'s return
+  shape is not done once `lib/ladder.js` is correct.** It also needs
+  threading through all three of `App.jsx`'s session handlers (hand-
+  maintained field lists, not a spread) and a `null` — not a materialized
+  value — backfill default in `storage.js`, or the feature silently never
+  persists / a clean re-import falsely reads as a conflict. Confirmed to
+  bite twice, independently, in the same broader session
+  (`tempoRatchetK`, then `holdingReviewCount`) — see
+  [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) for the checklist.
 
 ## Revival
 
@@ -631,6 +640,55 @@ tip-line when a piece has no `targetBPM` to be a fraction of — typing
 into the field in that state doesn't do anything, by design, not a bug.
 `computeTempoLadder` itself and everything downstream of the stored
 fraction are completely unchanged; only the input widget changed.
+
+**Since Pass 59**, `practiceBPM`'s pass/soft-miss step is gap-proportional
+(a "tempo ratchet," `ladderConfig.tempoRatchet`) instead of the old flat
+`bpmSteps` delta, which is now only the fallback for a chunk with no
+`targetBPM` — see
+[`docs/Algorithms.md#tempo-ratchet-pass-59`](docs/Algorithms.md#tempo-ratchet-pass-59).
+A soft-miss now steps tempo *forward*, at half the chunk's own adaptive
+rate (`progress[id].tempoRatchetK`), rather than backward. **Since Pass
+60**, once `practiceBPM` is close enough to `targetBPM`
+(`tempoAchievedThreshold`, default 85%), the step-size calculation
+substitutes a small pinned rate (`maintenanceK`) for that tracked rate at
+the point of use only — the tracked rate itself is never overwritten, so
+there's nothing to restore when a chunk drops back out ("tempo maintenance
+mode," `isInTempoMaintenance`, `lib/ladder.js`). **If you add a new field
+to `chunkLadderState`/`computeLadderAdvance`'s return shape, it is not
+enough to change `lib/ladder.js` alone** — this bit twice in the same
+broader session (`tempoRatchetK` here, `holdingReviewCount` below): the
+field also needs threading through all three of `App.jsx`'s session
+handlers (`handleLogSession`, `handleUnlogSession`,
+`handleConfirmProvisionalSession` — each hand-maintains its own field
+list, not a wholesale spread) and needs a `null`, not a materialized-value,
+backfill default in `storage.js` (`backfillProgressLadderState`,
+`LADDER_STATE_FIELDS`, `mergeProgress`) or a byte-identical re-import
+falsely reads as a conflict. See
+[`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) for the full checklist and
+[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance) for
+both incidents.
+
+**Since Pass 61**, Holding's escalating tempo floor is retired outright —
+`clearsStageFloor`'s Holding branch (`lib/ladder.js`) always returns
+`true` now; meeting the rep requirement is sufficient on its own for a
+Holding pass to count toward interval growth. Stabilizing/Settling are
+unchanged. In its place, a new `progress[id].holdingReviewCount` counts
+every logged Holding review (pass, soft-miss, *or* fail all count),
+resetting on fresh entry into Holding; `resolveRequiredReps`
+(`lib/confidence.js`) now requires one extra clean rep on every 4th review
+since that entry, reverting to baseline otherwise.
+`classifySessionOutcome`'s separate tempo check (`bpm >= practiceBPM`,
+deciding whether a session is a pass at all) is completely untouched — a
+different mechanism from the retired floor. The three old
+`ladderConfig.holding.tempoFloor*` config fields are left in the schema
+and stay directly editable in Settings, doing nothing — a deliberately
+flagged loose end, not cleaned up. `InterleavePanel.jsx`'s own
+`resolveRequiredReps` call needed the identical fix `ChecklistItem.jsx`
+got, or a chunk's 4th/8th/12th Holding review would be judged by a
+different, easier requirement depending on which screen logged it. See
+[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance)
+for the full trace, including the found-and-fixed `App.jsx`/null-default
+bugs.
 
 **Since Pass 66**, `computeDueReviews` (`lib/maintenance.js`) runs
 unconditionally at both call sites (`TodayTab`, `MasterAgendaTab`) instead

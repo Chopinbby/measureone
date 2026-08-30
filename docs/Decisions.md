@@ -3770,13 +3770,14 @@ yet.**
   `"__consolidation__"`'s dedicated "Times stopped" `NumberInput` — a
   cold-start check is meant to be one uninterrupted play-through, with
   reflection afterward, not a live tally during it.
-- **Deferred, not decided against:** Pass 58 (not yet built) is expected
-  to add a manual "overall piece confidence" override, and a completed
-  Cold-Start result is a natural moment to prompt updating it — noted as a
-  soft, optional connection in the originating pass description, not a
-  hard dependency either direction, and nothing here was built toward it.
+- **Since built (Pass 58, same session):** the manual "overall piece
+  confidence" override this bullet originally deferred now exists
+  (`piece.manualOverallConfidence`), and the connection it anticipated —
+  a completed Cold-Start result prompting an update to it — was built as
+  a same-session follow-up once explicitly requested. See
+  [Overall piece confidence](#overall-piece-confidence) below for both.
   Comparing `avgBpm` against `targetBPM`/`practiceBPM` and surfacing a
-  derived delta was also explicitly left for a future pass, not built.
+  derived delta remains explicitly deferred, not built.
 
 **Decision (same session, found via an independent critical review pass):
 `ProgressTab`'s "Outcome breakdown" panel silently diluted its own

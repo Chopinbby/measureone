@@ -470,6 +470,23 @@ evidence.
   mechanics (including the overlearning bonus for a session that clearly
   beats what was asked) and
   [Decisions.md](Decisions.md#spaced-repetition--maintenance) for why.
+  **Extended (Pass 60) with "tempo maintenance mode":** once `practiceBPM`
+  is already at or above `ladderConfig.tempoRatchet.tempoAchievedThreshold`
+  (default 85%) of `targetBPM`, the pass/soft-miss step-size calculation
+  substitutes a small, pinned rate (`ladderConfig.tempoRatchet.maintenanceK`,
+  default 0.05) for the chunk's own tracked `tempoRatchetK` at the moment
+  the step is computed — **not persisted anywhere**; it's a live check
+  (`isInTempoMaintenance`, `lib/ladder.js`) recomputed off `practiceBPM`/
+  `targetBPM` every time it's needed, so it exits on its own the instant a
+  fail's `practiceBPM` reset drops back below the threshold, no separate
+  exit logic required. The chunk's own `tempoRatchetK` keeps
+  stepping/halving/recovering underneath exactly as described just above,
+  completely unaffected — maintenance mode only ever substitutes at the
+  point a step size is actually computed, never overwrites what's tracked.
+  **Deliberately not connected to anything else yet**: not `isPieceLearned`,
+  not `isPlanActuallyComplete`, not Pass 30's "tempo climbing" nudge —
+  see [Decisions.md](Decisions.md#spaced-repetition--maintenance) for what's
+  still an open question here and why it's staying open on purpose.
 - **What actually shipped, different from the original sketch above:**
   `ChecklistItem.jsx` kept free-text "clean reps" and "BPM achieved"
   `NumberInput` fields rather than replacing them with a fixed "attempt at

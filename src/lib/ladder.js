@@ -124,6 +124,22 @@ function tempoRatchetStepSize(practiceBPM, targetBPM, k, kCapBpm) {
   return Math.min(kCapBpm, Math.max(1, Math.round(k * gap)));
 }
 
+// Pass 60 — "tempo maintenance mode": once practiceBPM is already close
+// enough to targetBPM, the tempo ratchet doesn't need to keep chasing the
+// remaining gap at the chunk's own (possibly still-large) adaptive rate —
+// a small, pinned rate (ladderConfig.tempoRatchet.maintenanceK) is enough
+// to keep nudging forward without the risk of an oversized step near the
+// top. Computed live wherever needed, never persisted: naturally exits the
+// moment practiceBPM drops back below the threshold (e.g. a fail's
+// entry-BPM reset), so there's no explicit "exit maintenance mode" code
+// path and nothing that can flap or go stale. Unrelated to ladder `stage`
+// (Stabilizing/Settling/Holding) or its demotion-on-fail — demote() below
+// is untouched; this is a tempo-stepping-rate concept only, and a chunk
+// can be in maintenance mode at any stage.
+export function isInTempoMaintenance(practiceBPM, targetBPM, ladderConfig) {
+  return practiceBPM != null && targetBPM != null && practiceBPM >= targetBPM * ladderConfig.tempoRatchet.tempoAchievedThreshold;
+}
+
 // Absolute BPM a chunk's practiceBPM must be at/above for a full pass to
 // count toward stage graduation ("the floor gates practiceBPM, not the
 // per-session pass/fail itself" — doc). Stabilizing has no floor. Settling
@@ -298,6 +314,13 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   // function (a fresh chunk, or one migrated in before this field existed,
   // has nothing recorded yet).
   const currentTempoRatchetK = chunkLadderState.tempoRatchetK ?? ladderConfig.tempoRatchet.k;
+  // Pass 60 — evaluated once off the pre-session practiceBPM/targetBPM
+  // (the same inputs already in scope), then substituted for the tracked
+  // rate at each point a step size actually gets computed below. The
+  // tracked rate itself (currentTempoRatchetK, and its halved/recovered/
+  // reset descendants) is never overwritten by this — only what feeds
+  // tempoRatchetStepSize changes.
+  const inTempoMaintenance = isInTempoMaintenance(practiceBPM, targetBPM, ladderConfig);
 
   // Pass 26 follow-up (see header note): a local lookup grouping the three
   // flat entry-BPM fields by stage name, purely for convenience inside
@@ -393,7 +416,13 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
     // gap-proportional against) — just at half the usual pace. Two clean
     // passes afterward (see the pass branch below) restore the default.
     const halvedTempoRatchetK = currentTempoRatchetK / 2;
-    const ratchetStep = tempoRatchetStepSize(practiceBPM, targetBPM, halvedTempoRatchetK, ladderConfig.tempoRatchet.kCapBpm);
+    // Pass 60 — the step-size calculation reads through maintenanceK while
+    // in maintenance mode; halvedTempoRatchetK is still what persists to
+    // progress[id].tempoRatchetK below, completely unaffected — Pass 59's
+    // halve-on-soft-miss bookkeeping keeps running exactly as it already
+    // does, whether or not this particular step used it.
+    const stepK = inTempoMaintenance ? ladderConfig.tempoRatchet.maintenanceK : halvedTempoRatchetK;
+    const ratchetStep = tempoRatchetStepSize(practiceBPM, targetBPM, stepK, ladderConfig.tempoRatchet.kCapBpm);
     return {
       stage,
       consecutivePasses: 0,
@@ -446,7 +475,14 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   // of these run when computeDemonstratedTempoBaseline already produced a
   // value below — that mechanism keeps taking priority exactly as it did
   // before this pass.
-  const ratchetStep = tempoRatchetStepSize(practiceBPM, targetBPM, currentTempoRatchetK, ladderConfig.tempoRatchet.kCapBpm);
+  // Pass 60 — same substitution as the soft-miss branch above: the step
+  // calculation (and, through ratchetStep, the overlearning bonus below,
+  // which is built on top of it) reads through maintenanceK while in
+  // maintenance mode. currentTempoRatchetK / its k-recovery bookkeeping
+  // just below is untouched by this — nothing to restore, since the real
+  // rate was never overwritten.
+  const stepK = inTempoMaintenance ? ladderConfig.tempoRatchet.maintenanceK : currentTempoRatchetK;
+  const ratchetStep = tempoRatchetStepSize(practiceBPM, targetBPM, stepK, ladderConfig.tempoRatchet.kCapBpm);
   const beatTheAsk = ratchetStep != null && outcome.bpm != null && outcome.bpm > practiceBPM;
   const newPracticeBPM =
     demonstratedOnPass != null

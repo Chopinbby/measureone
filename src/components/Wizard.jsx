@@ -72,7 +72,12 @@ export function defaultPiece() {
       // validateAndMigratePiece/mergeLadderConfig), so a missing
       // tempoRatchet here would crash the very first logged session on any
       // brand-new piece.
-      tempoRatchet: { k: 0.3, kCapBpm: 8 },
+      // Pass 60 — tempoAchievedThreshold/maintenanceK extend the same
+      // object; missed here once already (found in review, fixed same
+      // session) for exactly the reason the comment above already warns
+      // about — a brand-new piece silently couldn't enter tempo maintenance
+      // mode until its next reload, since this literal is used as-is.
+      tempoRatchet: { k: 0.3, kCapBpm: 8, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 },
     },
     revival: {
       active: false,

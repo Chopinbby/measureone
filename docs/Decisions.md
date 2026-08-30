@@ -2723,6 +2723,119 @@ immediately like a normal logged session (Pass 29 follow-up).**
   - `npm test`: 465/465 (462 before this round: 2 new `diffImportedPiece`
     tests, 1 new k-recovery-floor-gating test).
 
+**Decision (built — Pass 60): "tempo maintenance mode" is computed live off
+`practiceBPM`/`targetBPM`, never persisted per chunk — confirmed exitable
+by construction, not something needing explicit exit or flapping-prevention
+logic.**
+
+- **Why:** once a chunk's `practiceBPM` is already close to `targetBPM`,
+  the tempo ratchet's gap-proportional step (Pass 59, above) doesn't need
+  to keep chasing the gap at the chunk's own adaptive rate — a small,
+  pinned rate is enough to keep nudging forward near the top without risk
+  of an oversized single-session step. `ladderConfig.tempoRatchet` gains
+  two new fields for this, extending the same object Pass 59 introduced
+  rather than a separate namespace: `tempoAchievedThreshold` (default 0.85,
+  adjustable up to 1.0 — the fraction of `targetBPM` at/above which a chunk
+  is "in maintenance") and `maintenanceK` (default 0.05 — the pinned rate
+  substituted at that point).
+- **Resolved before building anything, not assumed: no new persisted
+  per-chunk field.** `inTempoMaintenance = targetBPM != null && practiceBPM
+  != null && practiceBPM >= targetBPM * tempoAchievedThreshold`
+  (`isInTempoMaintenance`, `lib/ladder.js`) is recomputed every time it's
+  needed, matching this codebase's existing preference for computed-live
+  over persisted-and-tracked wherever the inputs are already available
+  (the same spirit as `chunkSet`/`timeline` being pure derivations, never
+  persisted — `CLAUDE.md`). This makes exit free: a fail's existing
+  entry-BPM reset (Pass 26 follow-up) dropping `practiceBPM` back below the
+  threshold means the very next check simply reads `false` again — no
+  explicit "exit maintenance mode" code path, and nothing that can go stale
+  or flap, since it's never state to begin with.
+- **The substitution happens only at the point a step size is computed,
+  never overwrites what's tracked.** `progress[id].tempoRatchetK` — the
+  chunk's own adaptive rate — keeps stepping/halving/recovering exactly as
+  Pass 59 already has it, on every branch, regardless of whether
+  maintenance mode is active for that particular session. Only the `k`
+  value fed into `tempoRatchetStepSize` at the two call sites (the
+  soft-miss and pass branches) is swapped for `maintenanceK` while
+  `inTempoMaintenance` is true. Concretely: a soft-miss in maintenance mode
+  still halves the *tracked* rate and persists the halved value, same as
+  always — but the *step actually taken* that session uses `maintenanceK`,
+  not the halved rate. There's nothing to "restore" once maintenance mode
+  exits, since the tracked rate was never touched by it in the first place.
+- **Explicitly not connected to ladder `stage`.** Raised directly by the
+  user during scoping and stated here for the record: this has nothing to
+  do with Stabilizing/Settling/Holding or `demote()`'s fail-driven
+  demotion, which already happens today independent of anything in this
+  decision. `inTempoMaintenance` is a tempo-*stepping-rate* concept only —
+  a chunk can be in maintenance mode at any stage, and demotion on fail is
+  completely unaffected by it.
+- **Explicitly not connected to `isPieceLearned`/`isPlanActuallyComplete`,
+  on purpose, not an oversight.** The pass description that scoped this
+  work mentions a chunk in maintenance mode should eventually "stop
+  counting toward the plan being not done yet" — genuinely unresolved, and
+  the user has said explicitly they'll define what that means once they
+  reach it; this pass does not guess, and does not wire `inTempoMaintenance`
+  into either function regardless of what it turns out to mean. Likely
+  candidate when it is resolved, per the user: Pass 30's "tempo climbing"
+  nudge (`hasClimbingTempo`, `lib/confidence.js`) — a chunk in maintenance
+  mode has, by definition, already climbed as far as it currently needs to.
+  Tracked as an explicit open item below, not silently decided.
+- **"Keeps its normal review frequency" and "still has to earn its way
+  through remaining stage-graduation requirements at the usual pace" are
+  satisfied by non-interference, not new code.** `nextDueDate`/interval
+  math (`intervalForStage`) and `consecutivePasses`/`clearsStageFloor`
+  read/write exactly the same fields this pass doesn't touch — stated here
+  explicitly, per the pass description's own instruction, rather than
+  adding code that would just duplicate something already true by
+  construction. **Flagged for Pass 61, if that pass reworks Holding's
+  floor mechanism**: this claim is only verified against *today's*
+  escalating-tempo-floor design; Pass 61 will need to re-check it once
+  what Holding's floor means actually changes, rather than assuming it
+  still holds.
+- **`Wizard.jsx` follow-up, found in review and fixed the same session, per
+  direct request — originally flagged rather than fixed outright, since it
+  fell outside this pass's stated Touches list.** `Wizard.jsx`'s
+  `defaultPiece()` hardcodes a literal `ladderConfig` (used as-is for a
+  brand-new piece — `App.jsx`'s `handleComplete` doesn't run a
+  freshly-created piece through `mergeLadderConfig`, exactly the mechanism
+  Pass 59 itself already found and fixed once for its own fields, same
+  section above). Its `tempoRatchet: { k: 0.3, kCapBpm: 8 }` literal hadn't
+  been updated with this pass's two new fields. Traced through rather than
+  assumed before fixing: this was **not a crash** the way the Pass 59
+  version of this bug was — `targetBPM * undefined` is `NaN`, and any
+  comparison against `NaN` is `false`, so `isInTempoMaintenance` simply
+  read `false` unconditionally for a brand-new piece, and `maintenanceK`
+  (only read inside the `inTempoMaintenance ? ... : ...` branch) was never
+  actually dereferenced. The real consequence was narrower: a piece created
+  via the Wizard silently couldn't enter tempo maintenance mode for its
+  first session, until the app was reloaded once
+  (`loadPiecesFromStorage`'s `mergeLadderConfig` backfills the two fields
+  into the in-memory piece on every load, whether or not the persisted JSON
+  itself was ever re-saved with them). **Fixed**: `tempoRatchet` now reads
+  `{ k: 0.3, kCapBpm: 8, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 }`
+  in `Wizard.jsx`, the exact same one-line mirror Pass 59 already made once
+  for its own fields.
+- Verified with `test/ladder.test.mjs` (`Pass 60: tempo maintenance mode`):
+  `isInTempoMaintenance`'s true/false boundary at the threshold and with
+  missing inputs; flipping back to `false` after a fail, off the same live
+  formula with no special-cased exit branch; a pass's step size using
+  `maintenanceK` in maintenance mode vs. the chunk's own tracked `k`
+  outside it (same starting chunk, only the threshold config differs,
+  isolating the substitution as the one variable); the persisted
+  `tempoRatchetK` staying exactly what Pass 59's own bookkeeping would
+  produce regardless of which `k` the step itself used; and a soft-miss in
+  maintenance mode still halving and persisting the real tracked rate while
+  the step taken uses `maintenanceK`. Deliberately did **not** add
+  `tempoAchievedThreshold`/`maintenanceK` to this test file's shared
+  `LADDER_CONFIG` fixture used by every pre-existing test (including every
+  Pass 59 test above) — without those two fields the live check
+  deterministically reads `false` there (same `NaN`-comparison reasoning as
+  the `Wizard.jsx` finding above), so every pre-existing test's behavior is
+  provably unaffected; this pass's own tests use a local config override
+  instead, the same pattern the file already used for one-off
+  `tempoRatchet` overrides (e.g. `smallCapConfig`). `npm test`: 476/476.
+- See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two).
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -4411,3 +4524,15 @@ oversight to silently fix; surface it instead.
   unreachable by keyboard, an accessibility regression nothing asked for
   either. Not started — a product call on whether strict adjacency is
   worth one of those costs, not a technical gap.
+- **What "a chunk in tempo maintenance mode stops counting toward the plan
+  being not done yet" actually means is genuinely undefined (Pass 60).**
+  The user has said explicitly they'll define this once they reach it —
+  not guessed at here. `isInTempoMaintenance` (`lib/ladder.js`) is
+  deliberately not wired into `isPieceLearned` or `isPlanActuallyComplete`
+  regardless of what this turns out to mean. The most likely candidate
+  when it is resolved, per the user: Pass 30's "tempo climbing" nudge
+  (`hasClimbingTempo`, `lib/confidence.js`) — a chunk in maintenance mode
+  has, by definition, already climbed as far as it currently needs to, so
+  that nudge no longer applies to it. See
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
+  60 decision).

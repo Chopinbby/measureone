@@ -3,7 +3,7 @@
 // App.jsx's handleLogSession on every logged session.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible, isPieceLearned } from "../src/lib/ladder.js";
+import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible, isPieceLearned, isInTempoMaintenance } from "../src/lib/ladder.js";
 import { mergeLadderConfig } from "../src/lib/storage.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
@@ -858,5 +858,105 @@ describe("Pass 59: targetBPM null falls back to the pre-existing flat bpmSteps s
       LADDER_CONFIG
     );
     assert.equal(r.practiceBPM, 62, "falls straight to the flat +2 step — bpm beating the ask is irrelevant without a target");
+  });
+});
+
+// Pass 60 — "tempo maintenance mode": once practiceBPM is close enough to
+// targetBPM, tempo-ratchet step-size calculations substitute a small,
+// pinned maintenanceK for the chunk's own tracked tempoRatchetK. Computed
+// live off practiceBPM/targetBPM (isInTempoMaintenance), never persisted —
+// these tests don't use LADDER_CONFIG's bare tempoRatchet (no
+// tempoAchievedThreshold/maintenanceK on it) specifically so every
+// pre-existing Pass 59 test above stays provably unaffected: without those
+// two fields, isInTempoMaintenance always reads false there (targetBPM *
+// undefined is NaN, and every comparison against NaN is false), so this
+// pass's substitution never engages for any test that doesn't opt in via
+// its own local config below.
+describe("Pass 60: tempo maintenance mode", () => {
+  const maintenanceConfig = {
+    ...LADDER_CONFIG,
+    tempoRatchet: { ...LADDER_CONFIG.tempoRatchet, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 },
+  };
+
+  describe("isInTempoMaintenance reads true/false live off practiceBPM vs. threshold * targetBPM", () => {
+    test("false below the threshold, true at and above it", () => {
+      assert.equal(isInTempoMaintenance(84, 100, maintenanceConfig), false, "84 < 85 (0.85 * 100)");
+      assert.equal(isInTempoMaintenance(85, 100, maintenanceConfig), true, "exactly at the threshold counts");
+      assert.equal(isInTempoMaintenance(95, 100, maintenanceConfig), true);
+    });
+
+    test("false without a practiceBPM or targetBPM to compare — nothing to be 'close enough' to yet", () => {
+      assert.equal(isInTempoMaintenance(null, 100, maintenanceConfig), false);
+      assert.equal(isInTempoMaintenance(95, null, maintenanceConfig), false);
+      assert.equal(isInTempoMaintenance(null, null, maintenanceConfig), false);
+    });
+
+    test("[regression] flips back to false after a fail resets practiceBPM below the threshold — no special-cased exit path, just re-reading the same live formula", () => {
+      // Holding, no holdingEntryBPM recorded, so a fail demotes to Settling
+      // and resets practiceBPM to the low tempo this chunk had the last
+      // time it entered Settling — well below the maintenance threshold.
+      const state = baseState({
+        stage: "holding",
+        practiceBPM: 95,
+        targetBPM: 100,
+        tempoRatchetK: 0.3,
+        settlingEntryBPM: 60,
+      });
+      assert.equal(isInTempoMaintenance(state.practiceBPM, state.targetBPM, maintenanceConfig), true, "sanity: starts in maintenance mode (95 >= 85)");
+
+      const failed = computeLadderAdvance(state, { result: "fail", asOfDate: "2026-01-01" }, maintenanceConfig);
+      assert.equal(failed.stage, "settling", "demoted one stage");
+      assert.equal(failed.practiceBPM, 60, "practiceBPM reset to Settling's recorded entry tempo");
+      assert.equal(
+        isInTempoMaintenance(failed.practiceBPM, state.targetBPM, maintenanceConfig),
+        false,
+        "the same live formula, re-read against the post-fail state, is enough to exit maintenance mode — nothing else involved"
+      );
+    });
+  });
+
+  describe("step size uses maintenanceK while in maintenance mode, and the chunk's own tempoRatchetK exactly where Pass 59 left it once out of it", () => {
+    // Same starting chunk in both scenarios below — the only thing that
+    // differs is tempoAchievedThreshold (1.0 vs 0.85), isolating the
+    // maintenanceK substitution as the one variable under test. gap = 10
+    // (targetBPM 100 - practiceBPM 90).
+    const chunk = () => baseState({ stage: "holding", practiceBPM: 90, targetBPM: 100, tempoRatchetK: 0.3, consecutivePasses: 0 });
+    const nonMaintenanceConfig = {
+      ...LADDER_CONFIG,
+      tempoRatchet: { ...LADDER_CONFIG.tempoRatchet, tempoAchievedThreshold: 1.0, maintenanceK: 0.05 },
+    };
+
+    test("out of maintenance mode (90 < 100 * 1.0): step size comes from the chunk's own tempoRatchetK (0.3), exactly as Pass 59 already computes it", () => {
+      assert.equal(isInTempoMaintenance(90, 100, nonMaintenanceConfig), false);
+      const r = computeLadderAdvance(chunk(), { result: "pass", asOfDate: "2026-01-01" }, nonMaintenanceConfig);
+      // clamp(round(0.3 * 10), 1, 8) = 3
+      assert.equal(r.practiceBPM, 93, "3-BPM step from the tracked k (0.3) — unaffected by the maintenance-mode machinery existing at all");
+    });
+
+    test("in maintenance mode (90 >= 100 * 0.85): step size comes from the pinned maintenanceK (0.05) instead", () => {
+      assert.equal(isInTempoMaintenance(90, 100, maintenanceConfig), true);
+      const r = computeLadderAdvance(chunk(), { result: "pass", asOfDate: "2026-01-01" }, maintenanceConfig);
+      // clamp(round(0.05 * 10), 1, 8) = clamp(round(0.5), 1, 8) = 1
+      assert.equal(r.practiceBPM, 91, "1-BPM step from maintenanceK (0.05), not the chunk's own 0.3 — a visibly smaller step than the non-maintenance case above");
+    });
+
+    test("the persisted tempoRatchetK is untouched by maintenance mode — confirms nothing was lost by not persisting a maintenance flag", () => {
+      const r = computeLadderAdvance(chunk(), { result: "pass", asOfDate: "2026-01-01" }, maintenanceConfig);
+      // Only 1 clean pass so far (passesIfCounted < 2), so k-recovery
+      // hasn't fired — Pass 59's own bookkeeping says the persisted k stays
+      // exactly what it started at (0.3), regardless of which k the step
+      // size itself was computed from.
+      assert.equal(r.tempoRatchetK, 0.3, "persisted k reflects Pass 59's own bookkeeping exactly — the maintenance substitution only ever touched the step-size calculation");
+    });
+
+    test("a soft-miss in maintenance mode: step size also uses maintenanceK, but the real k still halves and persists exactly as Pass 59 already does it", () => {
+      const r = computeLadderAdvance(chunk(), { result: "soft-miss", asOfDate: "2026-01-01" }, maintenanceConfig);
+      // halvedTempoRatchetK = 0.3 / 2 = 0.15 — that's what persists...
+      assert.equal(r.tempoRatchetK, 0.15, "the tracked k still halves on a soft-miss, unaffected by maintenance mode");
+      // ...but the step itself was computed from maintenanceK (0.05), not
+      // the halved 0.15: clamp(round(0.05 * 10), 1, 8) = 1, not the 2 a
+      // halved-0.15 step would have produced (clamp(round(0.15*10),1,8)=2).
+      assert.equal(r.practiceBPM, 91, "1-BPM step from maintenanceK, not the 2-BPM step halvedTempoRatchetK (0.15) would have produced");
+    });
   });
 });

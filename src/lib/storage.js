@@ -47,7 +47,18 @@ const DEFAULT_LADDER_CONFIG = {
   // step proportional to the remaining gap to targetBPM (lib/ladder.js);
   // bpmSteps itself is untouched and stays the fallback for a chunk with no
   // targetBPM to be proportional against.
-  tempoRatchet: { k: 0.3, kCapBpm: 8 },
+  //
+  // Pass 60 — tempoAchievedThreshold and maintenanceK extend this same
+  // object rather than a separate namespace. tempoAchievedThreshold (0.85,
+  // adjustable up to 1.0) is the fraction of targetBPM at/above which a
+  // chunk is considered to be in "tempo maintenance mode"
+  // (isInTempoMaintenance, lib/ladder.js) — computed live off
+  // practiceBPM/targetBPM, never persisted per chunk. maintenanceK (0.05)
+  // is the small, pinned step-size rate substituted for the chunk's own
+  // tracked tempoRatchetK while in that mode; the tracked rate itself keeps
+  // updating underneath exactly as Pass 59 already has it
+  // stepping/halving/recovering, unaffected by this substitution.
+  tempoRatchet: { k: 0.3, kCapBpm: 8, tempoAchievedThreshold: 0.85, maintenanceK: 0.05 },
 };
 
 // Merges DEFAULT_LADDER_CONFIG into whatever a piece already has, field by
@@ -70,7 +81,11 @@ export function mergeLadderConfig(existing) {
     // Pass 59 — same field-by-field reasoning as bpmSteps above: a piece
     // migrated once before tempoRatchet existed would otherwise keep an
     // incomplete ladderConfig forever, and computeLadderAdvance reads
-    // ladderConfig.tempoRatchet.k/kCapBpm unconditionally.
+    // ladderConfig.tempoRatchet.k/kCapBpm unconditionally. Pass 60's
+    // tempoAchievedThreshold/maintenanceK ride along on this same
+    // field-by-field spread automatically — no separate merge line needed
+    // for them, same as bpmSteps needed none when Pass 59 added
+    // tempoRatchet itself alongside it.
     tempoRatchet: { ...DEFAULT_LADDER_CONFIG.tempoRatchet, ...existing.tempoRatchet },
   };
 }

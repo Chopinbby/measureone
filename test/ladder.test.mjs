@@ -5,6 +5,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { computeLadderAdvance, computeDemonstratedTempoBaseline, isInterleaveEligible, isPieceLearned, isInTempoMaintenance } from "../src/lib/ladder.js";
 import { mergeLadderConfig } from "../src/lib/storage.js";
+import { resolveRequiredReps } from "../src/lib/confidence.js";
 
 // Mirrors storage.js's DEFAULT_LADDER_CONFIG.
 const LADDER_CONFIG = {
@@ -110,6 +111,109 @@ describe("Tempo floor gating", () => {
       LADDER_CONFIG
     );
     assert.equal(r.consecutivePasses, 1);
+  });
+
+  test("[Pass 61] Holding's old escalating tempo floor is retired — a pass counts toward interval growth regardless of practiceBPM's fraction of target", () => {
+    // Old mechanism (before this pass) would have required practiceBPM at
+    // or above ~85%+ of targetBPM here (tempoFloorStartFraction), growing
+    // with consecutivePasses. 10 BPM against a 100 BPM target is nowhere
+    // close, and the pass still counts — meeting the rep requirement
+    // (already implied by outcome.result === "pass" being classified as a
+    // full pass in the first place) is sufficient on its own now.
+    const r = computeLadderAdvance(
+      baseState({ stage: "holding", consecutivePasses: 0, practiceBPM: 10, targetBPM: 100 }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "holding");
+    assert.equal(r.consecutivePasses, 1, "the old floor no longer gates this — it counts toward interval growth unconditionally");
+    // startIntervalDays (14) at a neutral (undefined-effectiveness, 1x)
+    // multiplier stays 14 regardless of consecutivePasses — same 14-day
+    // result the "graduates to Holding" test above gets from Jan 1.
+    assert.equal(r.nextDueDate, "2026-01-15", "the counted pass drives Holding's interval math normally, unaffected by the low practiceBPM");
+  });
+
+  test("[Pass 61] still gates on the rep requirement itself — a Holding session that doesn't even classify as a full pass never reaches this at all (unaffected, since clearsStageFloor only ever runs on the pass branch)", () => {
+    // Not a clearsStageFloor case per se — a sanity check that retiring the
+    // tempo floor didn't accidentally also loosen what counts as "pass" in
+    // the first place. classifySessionOutcome (confidence.js) is what
+    // decides that, untouched by this pass — see the dedicated
+    // classifySessionOutcome regression tests in confidence.test.mjs.
+    const r = computeLadderAdvance(
+      baseState({ stage: "holding", consecutivePasses: 3, practiceBPM: 90, targetBPM: 100 }),
+      { result: "soft-miss", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.consecutivePasses, 0, "a soft-miss still resets the counter — clearsStageFloor never runs for a non-pass outcome");
+  });
+});
+
+describe("[Pass 61] holdingReviewCount — increments in Holding, resets on fresh entry", () => {
+  test("fresh promotion into Holding (Settling's 4th pass graduating) resets holdingReviewCount to 0", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "settling", consecutivePasses: 3, practiceBPM: 70, targetBPM: 100, holdingReviewCount: 7 }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "holding");
+    assert.equal(r.holdingReviewCount, 0, "a fresh entry into Holding always starts the count over, regardless of what it was during an earlier stint");
+  });
+
+  test("a chunk with no holdingReviewCount recorded yet (undefined) defaults to 0 going in", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "holding", consecutivePasses: 0, practiceBPM: 100, targetBPM: 100 }), // no holdingReviewCount key at all
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.holdingReviewCount, 1, "defaulted to 0, then incremented by this one logged review");
+  });
+
+  test("increments by exactly 1 per logged review while already in Holding, across all three outcomes (pass, soft-miss, fail all count)", () => {
+    const pass = computeLadderAdvance(
+      baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 2 }),
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(pass.holdingReviewCount, 3);
+
+    const softMiss = computeLadderAdvance(
+      baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 2 }),
+      { result: "soft-miss", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(softMiss.holdingReviewCount, 3, "a soft-miss counts too, not just a full pass");
+
+    const fail = computeLadderAdvance(
+      baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 2 }),
+      { result: "fail", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(fail.holdingReviewCount, 3, "a fail counts too — it demotes the chunk out of Holding, but the review that just happened was still logged while in Holding");
+    assert.equal(fail.stage, "settling", "sanity: the fail did demote out of Holding, as expected");
+  });
+
+  test("unrelated to Holding entirely (Stabilizing/Settling, no promotion into Holding this call) — carries the value through unchanged", () => {
+    const r = computeLadderAdvance(
+      baseState({ stage: "stabilizing", consecutivePasses: 0, holdingReviewCount: 5 }), // stray value, shouldn't be read or touched here
+      { result: "pass", asOfDate: "2026-01-01" },
+      LADDER_CONFIG
+    );
+    assert.equal(r.stage, "stabilizing");
+    assert.equal(r.holdingReviewCount, 5, "not read or reset outside Holding — carried through as-is");
+  });
+
+  test("[integration] chained Holding reviews line up with resolveRequiredReps' 4th-review bump end to end", () => {
+    let state = baseState({ stage: "holding", practiceBPM: 100, targetBPM: 100, holdingReviewCount: 0 });
+    const seenRequiredReps = [];
+    for (let i = 0; i < 5; i++) {
+      // Mirrors ChecklistItem.jsx's call: resolve BEFORE logging, off the
+      // count as it stands going into this review.
+      seenRequiredReps.push(resolveRequiredReps({ kind: "section", difficultyLabel: "medium" }, state.stage, state.holdingReviewCount));
+      state = computeLadderAdvance(state, { result: "pass", asOfDate: "2026-01-01" }, LADDER_CONFIG);
+    }
+    // Reviews 1,2,3: baseline (4). Review 4: bumped (5). Review 5: back to baseline (4).
+    assert.deepEqual(seenRequiredReps, [4, 4, 4, 5, 4]);
+    assert.equal(state.holdingReviewCount, 5, "5 reviews logged, count reflects all of them");
   });
 });
 

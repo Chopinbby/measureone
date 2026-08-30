@@ -42,6 +42,14 @@
 /*  object. Reused by the caller the same way targetBPM/suggestedStartingBPM */
 /*  are — chunkLadderState in, and the (possibly updated) value back out. */
 /*  See Decisions.md#spaced-repetition--maintenance.                      */
+/*                                                                     */
+/*  holdingReviewCount (Pass 61) replaces Holding's old escalating tempo  */
+/*  floor (ladderConfig.holding.tempoFloor*, now unread — Holding's       */
+/*  clearsStageFloor branch always returns true) with a periodic rep-only */
+/*  harder check instead: every 4th logged Holding review needs one more  */
+/*  clean rep than usual (resolveRequiredReps, lib/confidence.js). Resets */
+/*  to 0 the moment a chunk freshly enters Holding, same convention the   */
+/*  entryBPM fields above use. See Decisions.md#spaced-repetition--maintenance. */
 /* ------------------------------------------------------------------ */
 
 export const STAGES = ["stabilizing", "settling", "holding"];
@@ -143,26 +151,49 @@ export function isInTempoMaintenance(practiceBPM, targetBPM, ladderConfig) {
 // Absolute BPM a chunk's practiceBPM must be at/above for a full pass to
 // count toward stage graduation ("the floor gates practiceBPM, not the
 // per-session pass/fail itself" — doc). Stabilizing has no floor. Settling
-// uses a flat fraction of targetBPM. Holding's floor escalates with
-// `consecutivePasses` (+tempoFloorStepFraction per qualifying pass, capped
-// at tempoFloorCapFraction) — reusing the same counter that also drives
-// Holding's interval growth below, since the doc doesn't specify a
-// separate persisted counter for it and Pass 1's schema doesn't have one.
-// Without a targetBPM to measure against, there's nothing to gate against,
-// so the floor is treated as already cleared.
-function clearsStageFloor(stage, practiceBPM, targetBPM, ladderConfig, consecutivePasses) {
+// uses a flat fraction of targetBPM.
+//
+// Pass 61 — Holding's escalating tempo floor (which used to gate here on
+// `tempoFloorStartFraction`/`tempoFloorStepFraction`/`tempoFloorCapFraction`,
+// growing with `consecutivePasses`) is retired: a Holding pass now counts
+// toward interval growth as soon as it meets the rep requirement, full
+// stop — the rep side alone (including the new periodic harder check,
+// resolveRequiredReps in lib/confidence.js) is sufficient on its own.
+// Stabilizing/Settling below are completely unchanged. The three
+// now-unread `ladderConfig.holding.tempoFloor*` fields themselves are left
+// in place, not removed — see this pass's summary for why that's flagged,
+// not silently cleaned up.
+function clearsStageFloor(stage, practiceBPM, targetBPM, ladderConfig) {
+  if (stage === "holding") return true;
   if (targetBPM == null) return true;
-  let floorFraction;
-  if (stage === "stabilizing") {
-    floorFraction = ladderConfig.stabilizing.tempoFloorFraction;
-  } else if (stage === "settling") {
-    floorFraction = ladderConfig.settling.tempoFloorFraction;
-  } else {
-    const { tempoFloorStartFraction, tempoFloorStepFraction, tempoFloorCapFraction } = ladderConfig.holding;
-    floorFraction = Math.min(tempoFloorCapFraction, tempoFloorStartFraction + tempoFloorStepFraction * consecutivePasses);
-  }
+  const floorFraction = stage === "stabilizing" ? ladderConfig.stabilizing.tempoFloorFraction : ladderConfig.settling.tempoFloorFraction;
   if (floorFraction == null) return true;
   return practiceBPM != null && practiceBPM >= targetBPM * floorFraction;
+}
+
+// Pass 61 — progress[id].holdingReviewCount's next value, given this
+// session's incoming/outgoing stage. One shared rule for all three
+// computeLadderAdvance outcome branches below (fail passes demote(stage)
+// as newStage; soft-miss passes stage for both, since it never changes
+// stage; pass passes whatever it actually computed newStage as):
+//   - Freshly promoted into Holding this session (newStage is "holding",
+//     stage wasn't) → 0. Only reachable from the pass branch (Holding has
+//     no ceiling to promote out of and no floor to fail out of without
+//     also leaving Holding), but stated generally rather than assuming
+//     which branch calls it.
+//   - Already in Holding when this session was logged (incoming
+//     `stage === "holding"`) → increments, regardless of outcome
+//     (pass/soft-miss/fail all count — confirmed explicitly, not passes
+//     only) and regardless of where the chunk ends up (a fail out of
+//     Holding still increments the count for the review that just
+//     happened; the field simply stops being read the moment stage
+//     isn't "holding" and resets to 0 on the next re-promotion anyway,
+//     so this has no practical consequence either way).
+//   - Otherwise (never touched Holding this call) → unchanged.
+function nextHoldingReviewCount(stage, newStage, holdingReviewCount) {
+  if (newStage === "holding" && stage !== "holding") return 0;
+  if (stage === "holding") return holdingReviewCount + 1;
+  return holdingReviewCount;
 }
 
 // Days until the next due review for `stage`, given how many qualifying
@@ -291,6 +322,10 @@ export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
 //                                 // entryBPM fields above. Defensively defaulted to
 //                                 // ladderConfig.tempoRatchet.k when absent/null (a fresh chunk,
 //                                 // or one migrated in before this field existed).
+//   holdingReviewCount,           // number — count of logged Holding reviews since this chunk
+//                                 // most recently, freshly entered Holding (Pass 61). Defensively
+//                                 // defaulted to 0 when absent (never been in Holding, or migrated
+//                                 // in before this field existed). See nextHoldingReviewCount above.
 // }
 // outcome = {
 //   result,        // 'pass' | 'soft-miss' | 'fail' — already classified by the caller
@@ -314,6 +349,9 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   // function (a fresh chunk, or one migrated in before this field existed,
   // has nothing recorded yet).
   const currentTempoRatchetK = chunkLadderState.tempoRatchetK ?? ladderConfig.tempoRatchet.k;
+  // Pass 61 — count of logged Holding reviews so far; see
+  // nextHoldingReviewCount above for how each branch below advances it.
+  const holdingReviewCount = chunkLadderState.holdingReviewCount || 0;
   // Pass 60 — evaluated once off the pre-session practiceBPM/targetBPM
   // (the same inputs already in scope), then substituted for the tracked
   // rate at each point a step size actually gets computed below. The
@@ -377,6 +415,11 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
       consecutivePasses: 0,
       consecutiveStabilizingFails: newFailStreak,
       practiceBPM: newPracticeBPM,
+      // Pass 61 — a fail out of Holding still counts as a logged Holding
+      // review for the count (see nextHoldingReviewCount above); demote()
+      // never leaves a chunk in Holding on a fail, so this can never also
+      // need the fresh-entry reset.
+      holdingReviewCount: nextHoldingReviewCount(stage, newStage, holdingReviewCount),
       // Pass 59 — a real fail resets the tempo ratchet's adaptive rate
       // back to default, alongside whatever practiceBPM reset just
       // happened above. Nothing to preserve here: no adaptive-rate state
@@ -434,6 +477,9 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
           ? stepBPM(practiceBPM, targetBPM, ratchetStep)
           : stepBPM(practiceBPM, targetBPM, ladderConfig.bpmSteps.softMiss),
       tempoRatchetK: halvedTempoRatchetK,
+      // Pass 61 — stage never changes on a soft-miss, so this only ever
+      // increments (if already in Holding) or stays put.
+      holdingReviewCount: nextHoldingReviewCount(stage, stage, holdingReviewCount),
       nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(stage, ladderConfig, consecutivePasses, outcome.effectiveness)),
       tier1Done,
       stabilizingEntryBPM: entryBPM.stabilizing,
@@ -449,7 +495,7 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
   }
 
   // outcome.result === "pass"
-  const clearsFloor = clearsStageFloor(stage, practiceBPM, targetBPM, ladderConfig, consecutivePasses);
+  const clearsFloor = clearsStageFloor(stage, practiceBPM, targetBPM, ladderConfig);
   const passesIfCounted = clearsFloor ? consecutivePasses + 1 : consecutivePasses;
   const graduationPasses = ladderConfig[stage].graduationPasses;
   const shouldGraduate = clearsFloor && graduationPasses != null && passesIfCounted >= graduationPasses;
@@ -515,6 +561,11 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
     consecutiveStabilizingFails: 0,
     practiceBPM: newPracticeBPM,
     tempoRatchetK: recoversTempoRatchetK ? ladderConfig.tempoRatchet.k : currentTempoRatchetK,
+    // Pass 61 — 0 on the pass that freshly promotes into Holding
+    // (Settling → Holding is the only way in, since Holding has no
+    // ceiling to graduate out of), incremented on every other pass logged
+    // while already in Holding, unchanged for a pass anywhere else.
+    holdingReviewCount: nextHoldingReviewCount(stage, newStage, holdingReviewCount),
     nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, passesAfter, outcome.effectiveness)),
     tier1Done,
     stabilizingEntryBPM: newEntryBPM.stabilizing,

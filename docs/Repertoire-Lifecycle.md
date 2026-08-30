@@ -270,7 +270,22 @@ changed.
 |---|---|---|---|
 | Stabilizing | every 4 days | 4 consecutive full passes | none |
 | Settling | every 7 days | 4 consecutive full passes | ~70–75% of target |
-| Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | starts ~85%, +5 points per successful pass, caps 100% |
+| Holding | starts 14 days, expands ~1.5–2× per pass, capped ~8–12 weeks | no ceiling — the resting state | **retired (Pass 61)** — meeting the rep requirement is sufficient on its own; see the periodic harder check below |
+
+**Since Pass 61**, Holding no longer has a tempo floor at all — the
+escalating ~85%-to-100%-of-target gate in the table's original design (and
+built, before this pass, as `tempoFloorStartFraction`/
+`tempoFloorStepFraction`/`tempoFloorCapFraction`) is gone from
+`clearsStageFloor`'s Holding branch, which now always returns true. In its
+place: every 4th logged Holding review (the 4th, 8th, 12th... since the
+chunk's most recent fresh entry into Holding) needs one more clean rep than
+usual, tracked by a new `progress[id].holdingReviewCount` and resolved by
+`resolveRequiredReps` (`lib/confidence.js`) at the point `ChecklistItem`
+displays and judges the requirement — see
+[Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder) for
+the full mechanics. This is a rep-only mechanism; `classifySessionOutcome`'s
+separate tempo check (`bpm >= practiceBPM`, deciding whether a session
+counts as a pass at all) is completely untouched.
 
 **Implemented and wired into logging**: `computeLadderAdvance` in
 `src/lib/ladder.js` is called from `handleLogSession` (`App.jsx`) on every

@@ -750,6 +750,39 @@ describe("diffImportedPiece — Pass 13 import divergence detection", () => {
     const imported = { updatedAt: 3000, progress: { c1: ladderChunk({ tempoRatchetK: 0.3 }) } };
     assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: true, resolution: null });
   });
+
+  // [Regression] Pass 61, found and fixed on self-review, same exact bug
+  // class as tempoRatchetK immediately above: the migration backfill for
+  // the new holdingReviewCount field originally defaulted an untouched
+  // chunk to the literal 0 instead of null. A piece migrated through
+  // validateAndMigratePiece (as every already-loaded piece is) would then
+  // carry a real 0, while a raw backup exported before this field existed
+  // has no holdingReviewCount key at all — `0 !== null` (undefined reads
+  // as null here) registered as real divergence, forcing the
+  // import-conflict picker on an otherwise byte-identical re-import.
+  // Reproduced directly before the fix (this exact scenario returned
+  // hasDivergence: true).
+  test("re-importing a pre-existing-field backup is NOT a false conflict: holdingReviewCount absent on one side reads the same as null on the other", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: null }) } }; // an untouched, migrated chunk
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({}) } }; // old export, field doesn't exist at all
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("a GENUINE holdingReviewCount disagreement (both sides have a real, different value) is still caught as real divergence", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: 2 }) } };
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: 3 }) } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: true, resolution: null });
+  });
+
+  test("holdingReviewCount 0 (a chunk that just entered Holding — a real, meaningful zero, not 'no data') vs. absent on the other side is still a genuine divergence, not swallowed by the null-equivalence fix", () => {
+    const existing = { updatedAt: 3000, progress: { c1: ladderChunk({ holdingReviewCount: 0 }) } }; // just promoted into Holding
+    const imported = { updatedAt: 3000, progress: { c1: ladderChunk({}) } }; // never entered Holding at all on this side
+    assert.deepEqual(
+      diffImportedPiece(existing, imported),
+      { hasDivergence: true, resolution: null },
+      "0 (has entered Holding) and null/absent (never has) are genuinely different states, unlike 0 vs. itself"
+    );
+  });
 });
 
 describe("mergeImportedPiece — Pass 13 ladderChoice wiring", () => {

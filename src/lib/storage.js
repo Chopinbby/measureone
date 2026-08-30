@@ -202,6 +202,27 @@ function backfillProgressLadderState(progress, startDate) {
       // avoids that false conflict, exactly like the entry-BPM fields
       // already do for the same reason.
       tempoRatchetK: entry.tempoRatchetK !== undefined ? entry.tempoRatchetK : null,
+      // Count of logged Holding reviews since this chunk's most recent
+      // fresh entry into Holding (Pass 61, lib/ladder.js) — drives the
+      // periodic harder-check (every 4th review). Same "no real history to
+      // reconstruct" spirit as the entry-BPM/tempoRatchetK fields above: a
+      // chunk already sitting in Holding when migrated is backfilled as if
+      // it just freshly arrived there, so the harder-check cadence simply
+      // starts counting from now rather than trying to reconstruct how many
+      // Holding reviews actually happened before this field existed.
+      //
+      // Backfills to `null`, NOT the literal `0` an untouched chunk would
+      // otherwise read as — same false-conflict bug `tempoRatchetK` already
+      // had once (see that field's comment above): `0` and "field absent
+      // entirely" are NOT the same value under `!==`, so a piece migrated
+      // once (backfilled to `0`) compared against a re-imported backup that
+      // predates this field (`undefined`) would read as a genuine
+      // disagreement — reproduced directly, not theoretical (found in
+      // self-review, same session). `computeLadderAdvance` already treats
+      // `null` the same as `0` at the one point that actually needs a real
+      // number (`chunkLadderState.holdingReviewCount || 0`), so this changes
+      // nothing about the actual ladder math — only the backfilled shape.
+      holdingReviewCount: entry.holdingReviewCount !== undefined ? entry.holdingReviewCount : null,
     };
   });
   return result;
@@ -604,6 +625,8 @@ const LADDER_STATE_FIELDS = [
   // Pass 59 (lib/ladder.js) — same flat-scalar treatment as the three
   // entryBPM fields above.
   "tempoRatchetK",
+  // Pass 61 (lib/ladder.js) — same flat-scalar treatment.
+  "holdingReviewCount",
 ];
 
 // True when the existing piece and a freshly-imported candidate actually
@@ -699,6 +722,7 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
       settlingEntryBPM: ladderSource.settlingEntryBPM,
       holdingEntryBPM: ladderSource.holdingEntryBPM,
       tempoRatchetK: ladderSource.tempoRatchetK,
+      holdingReviewCount: ladderSource.holdingReviewCount,
       // Undo-scratch data for "revert this chunk's schedule if the flag gets
       // cleared" (see App.jsx's handleSetFlag) — always the existing side,
       // not something an exported file should be trusted to set, and not

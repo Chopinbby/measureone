@@ -645,8 +645,11 @@ itself (it needs the full chunk's `difficultyLabel` and the piece's
 `bpmZones` to resolve `requiredReps`/the effective target, neither of
 which the handler has from just a chunk id):
 
-`requiredReps` itself is resolved by `resolveRequiredReps(chunk)`
-(`lib/confidence.js`, Pass 27) — normally `REQUIRED_REPS[chunk.difficultyLabel]`
+`requiredReps` itself is resolved by `resolveRequiredReps(chunk, stage,
+holdingReviewCount)` (`lib/confidence.js`, Pass 27; `stage`/
+`holdingReviewCount` added Pass 61, both optional — see
+[Holding's periodic harder check](#holdings-periodic-harder-check-pass-61)
+below) — normally `REQUIRED_REPS[chunk.difficultyLabel]`
 (3/4/5), but a flat **2** for `chunk.kind === "section-runthrough"` or
 `"section-transition"` (a whole section, or two combined sections, played
 straight through), regardless of difficulty label. A run-through's
@@ -696,12 +699,16 @@ Settling → Holding stages:
   clears the demonstrated-tempo override below, in which case `practiceBPM`
   jumps straight to the achieved bpm instead. Counts toward graduation only
   once `practiceBPM` clears the current stage's tempo floor (Stabilizing
-  has none; Settling/Holding gate on a fraction of `targetBPM`) — the
-  floor gates progress, not the pass/fail judgment itself, and is
-  evaluated against `practiceBPM` *before* this session's step/override.
+  has none; Settling gates on a flat fraction of `targetBPM`; **Holding's
+  own floor is retired as of Pass 61** — a Holding pass counts
+  unconditionally, meeting the rep requirement already being enough on its
+  own — see [Holding's periodic harder check](#holdings-periodic-harder-check-pass-61)
+  below) — the floor gates progress, not the pass/fail judgment itself, and
+  for Stabilizing/Settling is evaluated against `practiceBPM` *before* this
+  session's step/override.
   Graduating resets the pass counter and moves to the next stage (Holding
-  has no ceiling — it just keeps accruing passes, which drives its own
-  escalating tempo floor and interval growth, below).
+  has no ceiling — it just keeps accruing passes, which drives its interval
+  growth, below; **not** a tempo floor any more, as of Pass 61).
   **Known gap, re-reviewed in Pass 14 and deliberately left open (the
   user's explicit call):** because the floor check runs against the
   *pre-session* `practiceBPM`, a session whose demonstrated-tempo jump
@@ -795,6 +802,78 @@ lands on. A live "what's due" query that works *outside* the current plan's
 bounded `daysToLearn` window is built as of Pass 8 — see
 [What's due — the live maintenance query](#whats-due--the-live-maintenance-query)
 below.
+
+### Holding's periodic harder check (Pass 61)
+
+Replaces Holding's old escalating tempo floor (`clearsStageFloor`'s Holding
+branch now always returns `true` — Stabilizing/Settling below are
+unchanged) with a rep-only mechanism: every 4th logged Holding review since
+the chunk's most recent fresh entry into Holding needs one more clean rep
+than the baseline requirement, reverting to baseline on every other review.
+
+- **`progress[id].holdingReviewCount`** (`lib/ladder.js`) is the new
+  persisted counter this reads. `nextHoldingReviewCount(stage, newStage,
+  holdingReviewCount)` is the one rule all three `computeLadderAdvance`
+  outcome branches (fail/soft-miss/pass) route through: resets to `0` the
+  moment `newStage === "holding"` while the incoming `stage` wasn't (a
+  fresh promotion — only reachable from Settling, since Holding has no
+  ceiling to promote out of and no floor to fail out of without also
+  leaving Holding); increments by 1 whenever the incoming `stage` already
+  was `"holding"`, **regardless of outcome** — a fail counts too, even
+  though it demotes the chunk out of Holding in the same call (the review
+  that just happened was still logged while in Holding; the field simply
+  stops being read once `stage` isn't `"holding"` and resets again on the
+  next re-promotion, so this has no practical consequence either way);
+  otherwise carried through unchanged (a chunk never touching Holding this
+  call). Note this `0` is `computeLadderAdvance`'s own *point-of-use*
+  resolution once a chunk is actually active in Holding — the *persisted*
+  default for a chunk that's never touched Holding at all is `null`, not
+  `0` (`storage.js`'s migration backfill, and both of `App.jsx`'s
+  `ladderSnapshot` capture sites); a real fix, found and applied the same
+  session — see [Decisions.md](Decisions.md#spaced-repetition--maintenance)
+  for the false-import-conflict bug this avoids, the exact same class
+  `tempoRatchetK` already had once.
+- **`resolveRequiredReps(chunk, stage, holdingReviewCount)`**
+  (`lib/confidence.js`) is where the count actually turns into a harder
+  requirement for one specific session. Both new parameters are optional
+  and default to "no bump" when omitted (`stage !== "holding"` short-circuits
+  to the plain baseline) — this matters for backward compatibility:
+  `computeAutoConfidence`'s own call site (below) is deliberately
+  **unchanged**, still calling `resolveRequiredReps(chunk)` with no stage
+  awareness at all, since that function scores *every past session*
+  retrospectively and applying today's `holdingReviewCount` backward onto
+  sessions logged before the chunk was ever in Holding would be wrong, not
+  requested by this pass. `ChecklistItem`'s call site
+  (`resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount)`)
+  needed no new prop threaded in — `entry` (`piece.progress[chunk.id]`) was
+  already in scope there, with both fields already on it.
+- **The math:** `holdingReviewCount` as stored is the count of *prior*
+  Holding reviews (0 before the chunk has ever had one), so the review
+  about to be logged — the one `resolveRequiredReps` is being asked about,
+  before it's actually logged — is `holdingReviewCount + 1`. When that
+  number is a multiple of 4 (4, 8, 12, ...), the resolved requirement is
+  `baseline + 1`; every other review resolves to plain `baseline`. Applies
+  on top of whatever `resolveRequiredReps` already resolves as the
+  baseline, including the flat 2-rep run-through override (Pass 27) — a
+  run-through chunk's 4th Holding review needs 3, not 2.
+- **Deliberately rep-only, not tempo-related at all.**
+  `classifySessionOutcome`'s separate `clearsTempo` check (`bpm >=
+  practiceBPM`, deciding whether a session counts as a pass in the first
+  place) is completely untouched by this pass — the two mechanisms answer
+  different questions (whether a session clears the tempo bar at all, vs.
+  whether an already-classified pass counts toward Holding's interval
+  growth), and only the latter changed here.
+- **The old `ladderConfig.holding.tempoFloorStartFraction`/
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields are left in
+  place, not removed** — `clearsStageFloor` simply no longer reads them for
+  Holding. Flagged, not silently cleaned up: they're still part of the
+  saved schema, and still directly exposed and editable — correctly
+  labeled "Tempo floor, starting fraction" / "step per pass" / "cap
+  fraction" — under `LadderConfigEditor`'s "Holding" heading. A user can
+  find and "tune" a setting that now does nothing, with no indication
+  anywhere in that UI that it's gone inert. See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the full
+  discovery.
 
 ### Tempo ratchet (Pass 59)
 

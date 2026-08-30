@@ -2792,6 +2792,15 @@ logic.**
   escalating-tempo-floor design; Pass 61 will need to re-check it once
   what Holding's floor means actually changes, rather than assuming it
   still holds.
+  **Re-checked (Pass 61): still holds, and is now simpler, not weaker.**
+  Pass 61 retired Holding's tempo floor entirely (`clearsStageFloor`'s
+  Holding branch always returns `true`), so there's no floor left for
+  `isInTempoMaintenance` to interact with at all — the two mechanisms
+  (which `k` a step uses, vs. whether a Holding pass counts toward
+  interval growth) were already fully independent before this pass and
+  remain so after it, with one fewer moving part on the Holding side.
+  `intervalForStage` itself is untouched by Pass 61, so review frequency
+  is unaffected either way. See the Pass 61 decision immediately below.
 - **`Wizard.jsx` follow-up, found in review and fixed the same session, per
   direct request — originally flagged rather than fixed outright, since it
   fell outside this pass's stated Touches list.** `Wizard.jsx`'s
@@ -2835,6 +2844,204 @@ logic.**
   instead, the same pattern the file already used for one-off
   `tempoRatchet` overrides (e.g. `smallCapConfig`). `npm test`: 476/476.
 - See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#session-outcomes-three-tiers-not-two).
+
+**Decision (built — Pass 61): Holding's escalating tempo floor is retired
+outright — meeting the rep requirement is sufficient on its own for a
+Holding pass to count toward interval growth — replaced by a periodic
+rep-only harder check every 4th review, tracked by a new
+`progress[id].holdingReviewCount`.**
+
+- **Why:** requested directly by the user — Holding no longer needs its
+  own tempo gate on top of the rep requirement; the harder-to-satisfy
+  check moves to reps instead, on a fixed cadence rather than an
+  escalating tempo threshold.
+- **Precisely what retired, and what didn't:** `clearsStageFloor`'s
+  Holding branch (`lib/ladder.js`) now always returns `true` —
+  Stabilizing (already no floor) and Settling (flat fraction of
+  `targetBPM`) are completely unchanged, both in code and in every
+  existing test. This is **not** the same thing as
+  `classifySessionOutcome`'s `clearsTempo` check (`bpm >= practiceBPM`,
+  deciding whether a session is a pass/soft-miss/fail at all) — that
+  function is untouched, confirmed by a new pair of regression tests
+  (`test/confidence.test.mjs`) rather than left to be assumed from the
+  fact that the file wasn't edited there.
+- **The new mechanism:** `progress[id].holdingReviewCount` counts every
+  logged Holding review (pass, soft-miss, *or* fail — confirmed explicitly,
+  not passes only), via one shared rule,
+  `nextHoldingReviewCount(stage, newStage, holdingReviewCount)`
+  (`lib/ladder.js`), used identically by all three `computeLadderAdvance`
+  outcome branches: `0` on a fresh promotion into Holding, `+1` on any
+  review logged while already in Holding, unchanged otherwise. On the
+  review where the count-about-to-be-logged is a multiple of 4 (the 4th,
+  8th, 12th... since the chunk's most recent fresh entry into Holding),
+  `resolveRequiredReps` (`lib/confidence.js`) resolves one more clean rep
+  than the baseline; every other review resolves to baseline. Applies on
+  top of the existing flat 2-rep run-through override (Pass 27) too, not
+  just the difficulty-based table.
+- **A real architectural touch-point, not a one-function change — matched
+  what the pass description warned it might be.** `resolveRequiredReps`
+  gained two new, optional parameters (`stage`, `holdingReviewCount`),
+  defaulting to "no bump" when omitted. `ChecklistItem.jsx`'s call site
+  needed updating to actually pass them — but turned out to need **no new
+  prop threaded in**: `entry` (`piece.progress[chunk.id]`) was already in
+  scope there for unrelated reasons, and both new fields live on it. This
+  is a discovery worth flagging on its own — the pass description
+  hedged "ChecklistItem.jsx, if resolveRequiredReps' call site needs new
+  data passed in that it doesn't already have," and it turned out it
+  already had everything needed.
+- **`computeAutoConfidence`'s own `resolveRequiredReps(chunk)` call
+  (`lib/confidence.js`) is deliberately left unchanged, not extended to
+  pass `stage`/`holdingReviewCount`.** That function scores *every past
+  session* retrospectively for a chunk's confidence percentage; applying
+  today's live `holdingReviewCount` backward onto sessions logged before
+  the chunk was ever in Holding (or before this pass existed at all) isn't
+  what "the required-clean-reps threshold for *that one session*" (the
+  pass description's own framing) asked for, and doing so wasn't part of
+  this pass's Builds. The optional-parameter design makes this the default
+  behavior for any call site that doesn't opt in, rather than something
+  that needed a separate carve-out.
+- **Migration/storage, following the exact pattern `tempoRatchetK`
+  (Pass 59) already established** — three spots in `lib/storage.js`, not
+  one, all in scope since the file itself was already in this pass's
+  Touches list: `backfillProgressLadderState` (defaults to `0`, same
+  "no real history to reconstruct, treat an already-in-Holding chunk as if
+  it just arrived" spirit as the entry-BPM fields), `LADDER_STATE_FIELDS`
+  (so import-conflict detection considers it), and `mergeProgress`'s
+  explicit per-field list (so a re-import actually carries it through per
+  `ladderChoice`, rather than silently taking whichever side's raw value
+  the `{...e, ...i}` spread happened to land on regardless of the user's
+  choice — the exact class of bug `tempoRatchetK` was added there to
+  avoid).
+- **The three now-unread `ladderConfig.holding.tempoFloorStartFraction`/
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields are left in the
+  schema, not removed, and `LadderConfigEditor` still exposes them,
+  correctly labeled, under its "Holding" heading — found in review, not
+  fixed, since neither `storage.js`'s config defaults nor
+  `LadderConfigEditor.jsx` were in this pass's Touches list for removal.**
+  A user can now "tune" a setting that has zero effect, with nothing in
+  that UI indicating it's gone inert. Left as a flagged gap rather than
+  silently cleaned up or silently left undocumented. See
+  [Open questions](#open-questions) below.
+- **Two more real gaps found in review, initially left unfixed (outside
+  this pass's Touches list), then fixed the same session per direct
+  request as an explicit same-session follow-up:**
+  1. **`App.jsx` wasn't updated at first, and the feature didn't actually
+     work end to end without it.** `handleLogSession`, `handleUnlogSession`
+     (restoring from `ladderSnapshot`), and `handleConfirmProvisionalSession`
+     all read/write ladder fields through **explicit, hand-maintained
+     field lists**, not a wholesale object spread — confirmed by reading
+     the code, not assumed, and confirmed to be exactly the same pattern
+     that caused Pass 59's own real bug ("`App.jsx` never actually
+     threaded `tempoRatchetK` through," found and fixed the same session
+     Pass 59 shipped — see above). `holdingReviewCount` was a brand-new
+     field on `computeLadderAdvance`'s input/output shape, and none of
+     those three lists included it at first: `prevEntry.holdingReviewCount`
+     was never read into `computeLadderAdvance`'s input, and
+     `advance.holdingReviewCount` was never written back into
+     `progress[chunkId]`. **Fixed**: all seven of the same spots
+     `tempoRatchetK` already needed (three in `handleLogSession` —
+     `ladderSnapshot`, the `computeLadderAdvance` input, the persisted
+     output; one optional-restore line in `handleUnlogSession`; the same
+     three in `handleConfirmProvisionalSession`) now carry
+     `holdingReviewCount` the same way. `test/session-undo.test.mjs` —
+     described elsewhere in this doc as the one App.jsx mirror file that's
+     "exhaustive across every ladder field," since there's no React render
+     harness to test the real closures directly — was updated to match at
+     all four of its own mirrored spots, plus three new regression tests
+     (logging increments and undo restores the pre-session count; undoing
+     a fresh promotion into Holding restores a *leftover* count from an
+     earlier Holding stint, not `0`; an older snapshot missing the field
+     restores everything else normally, same optional-field convention as
+     `tempoRatchetK`). `test/interleave-provisional.test.mjs` and
+     `test/interleave-skip.test.mjs` were deliberately **not** extended to
+     mirror this field — both were already narrower, partial mirrors
+     before this pass (missing the entry-BPM fields and `tempoRatchetK`
+     too, not just this new one), and their own tests don't exercise it;
+     matching their pre-existing scope rather than making them
+     inconsistently more complete than their siblings. Verified live, not
+     just via the mirrored tests: seeded a Holding chunk at
+     `holdingReviewCount: 3` (so review #4 needs the bump), confirmed the
+     UI correctly asked for 5 reps, logged a real session through the
+     actual app, and confirmed via `localStorage` that the persisted count
+     advanced to `4` — before this fix, the identical steps left it frozen
+     at `3` forever, reproduced directly.
+  2. **`InterleavePanel.jsx`'s own `resolveRequiredReps(chunk)` call
+     (line ~87) also wasn't updated at first, and it performs real
+     classification** (feeds `requiredReps` straight into
+     `classifySessionOutcome`, same as `ChecklistItem`), not just display.
+     `isInterleaveEligible` explicitly includes chunks at
+     `stage === "holding"`, so a chunk on its 4th/8th/12th Holding review
+     reachable through Interleaved mode was judged against the plain
+     baseline there, while the exact same review logged through the
+     normal Day-view checklist correctly required one more rep — a real,
+     reachable inconsistency between two logging paths for the identical
+     review, not a hypothetical. **Fixed**: the call now reads
+     `resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount)`,
+     the identical one-line fix `ChecklistItem.jsx` already had — `entry`
+     was already in scope there too, so this needed no new prop either.
+     Not separately unit-tested (a `.jsx` component, same "no render
+     harness" constraint as the rest of this codebase's UI layer) — the
+     underlying `resolveRequiredReps` logic this now correctly feeds is
+     already exhaustively tested in `test/confidence.test.mjs`.
+- **A third real bug, found in a user-requested skeptical second-engineer
+  review of this session's diff, and fixed the same session: the migration
+  backfill for `holdingReviewCount` defaulted an untouched chunk to the
+  literal `0` instead of `null` — the exact same false-positive
+  import-conflict bug `tempoRatchetK` already had once (see the Pass 59
+  decision above), reintroduced here for a new field by not following that
+  precedent.** A piece migrated through `validateAndMigratePiece` (as every
+  already-loaded piece is) would carry a real `0` on a chunk that had never
+  touched Holding, while a raw backup exported before this field existed
+  has no `holdingReviewCount` key at all — `0 !== null` (`undefined` reads
+  as `null` in the comparison) registered as genuine ladder-state
+  divergence, forcing the import-conflict picker on an otherwise
+  byte-identical re-import. **Reproduced directly before fixing**, not
+  just inferred from reading the code — a standalone script called the
+  real `diffImportedPiece` with exactly this shape and confirmed
+  `hasDivergence: true` where it should have been `false`, then confirmed
+  the real `validateAndMigratePiece` itself now backfills to `null`.
+  **Fixed** at every spot that materializes this field with a fallback:
+  `storage.js`'s backfill (`null`, not `0`), and both of `App.jsx`'s
+  `ladderSnapshot` capture sites (`handleLogSession`,
+  `handleConfirmProvisionalSession`, plus their `test/session-undo.test.mjs`
+  mirror) — the same "chunk that's never touched Holding has no count to
+  be `0` of" fix, since a materialized `0` written into a session's own
+  undo-snapshot would resurface the identical bug via undo instead of via
+  migration. **Deliberately unchanged**: `computeLadderAdvance`'s own
+  `chunkLadderState.holdingReviewCount || 0` (and `resolveRequiredReps`'s
+  matching `(holdingReviewCount || 0) + 1`) — both already treat `null`
+  and `0` identically at the one point that actually needs a real number,
+  so this fix changes nothing about the real ladder math, only the
+  backfilled/snapshotted shape. Covered by three new regression tests in
+  `test/storage.test.mjs`, mirroring the exact `tempoRatchetK` pair this
+  bug reproduced: the false-conflict case now resolves cleanly, a genuine
+  disagreement between two real numbers is still caught, and — the one
+  case the fix could plausibly have overcorrected — `0` (a chunk that has
+  genuinely entered Holding, zero reviews in) vs. absent (never entered at
+  all) is confirmed to still register as real divergence, not swallowed by
+  treating every falsy value as equivalent.
+- Verified with `test/ladder.test.mjs` (Holding no longer gates on tempo
+  regardless of how far `practiceBPM` is from `targetBPM`; a fresh
+  promotion into Holding resets `holdingReviewCount` to `0`; all three
+  outcomes increment it while already in Holding; an integration test
+  chaining five real `computeLadderAdvance` calls and checking
+  `resolveRequiredReps` at each step lines up exactly [4, 4, 4, 5, 4]),
+  `test/confidence.test.mjs` (`resolveRequiredReps`'s boundary at every
+  multiple of 4, backward-compatible omission, the run-through-baseline
+  interaction, and `classifySessionOutcome`'s tempo check proven
+  unaffected), `test/session-undo.test.mjs` (the three App.jsx-mirror undo
+  tests described above), and `test/storage.test.mjs` (the three
+  null-vs-zero regression tests described just above). Re-ran the full
+  pre-existing test suite rather than assuming — **found, while doing so,
+  that no pre-existing automated test actually exercised Holding's old
+  escalating floor at all** (the "Tempo floor gating" describe block in
+  `test/ladder.test.mjs` covered Settling, Stabilizing, and the
+  no-`targetBPM` case, but never Holding specifically) — so this pass's
+  own new tests are genuinely new coverage for that mechanism's
+  replacement, not a modification of an existing, passing test. `npm
+  test`: 497/497.
+- See [Algorithms.md](Algorithms.md#holdings-periodic-harder-check-pass-61)
+  and [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages).
 
 ## UX
 
@@ -4536,3 +4743,16 @@ oversight to silently fix; surface it instead.
   that nudge no longer applies to it. See
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
   60 decision).
+- **(Pass 61) Holding's retired tempo-floor config fields are still live,
+  editable, and silently inert.** `ladderConfig.holding.tempoFloorStartFraction`/
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` are still part of the
+  saved schema and still exposed, correctly labeled, under
+  `LadderConfigEditor`'s "Holding" heading — but `clearsStageFloor` no
+  longer reads any of them for Holding. A user can "tune" a setting with
+  zero effect and get no indication it's inert. Not started — neither
+  `storage.js`'s config defaults nor `LadderConfigEditor.jsx` were in Pass
+  61's Touches list for removal, and removing a saved/editable config
+  field is a bigger, more deliberate call than this pass was scoped to
+  make unilaterally. See
+  [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
+  61 decision).

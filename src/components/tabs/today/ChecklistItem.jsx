@@ -117,8 +117,11 @@ export function ChecklistItem({
   // the actual resolution (including the run-through flat-rep override)
   // into resolveRequiredReps (lib/confidence.js) — this component has no
   // JSX-free test path of its own, and that logic needs to be unit
-  // testable on its own.
-  const requiredReps = resolveRequiredReps(chunk);
+  // testable on its own. Pass 61 — entry.stage/entry.holdingReviewCount
+  // were already in scope (the same `entry` this component reads
+  // everywhere else), so no new prop needed here for Holding's periodic
+  // harder-check bump to apply.
+  const requiredReps = resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount);
   const outcomeMeta = session && SESSION_OUTCOME_META[sessionOutcome(session)];
   // First encounter = nothing has ever been logged for this chunk yet, i.e.
   // there's no user-selected starting tempo (practiceBPM) or session history

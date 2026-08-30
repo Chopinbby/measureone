@@ -47,6 +47,7 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
     settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
     holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
     tempoRatchetK: prevEntry.tempoRatchetK ?? null,
+    holdingReviewCount: prevEntry.holdingReviewCount ?? null,
   };
   const sessions = [
     ...(prevEntry.sessions || []),
@@ -68,6 +69,7 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
       settlingEntryBPM: prevEntry.settlingEntryBPM,
       holdingEntryBPM: prevEntry.holdingEntryBPM,
       tempoRatchetK: prevEntry.tempoRatchetK,
+      holdingReviewCount: prevEntry.holdingReviewCount,
     },
     { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
     LADDER_CONFIG
@@ -90,6 +92,7 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
       settlingEntryBPM: advance.settlingEntryBPM,
       holdingEntryBPM: advance.holdingEntryBPM,
       tempoRatchetK: advance.tempoRatchetK,
+      holdingReviewCount: advance.holdingReviewCount,
       flagSnapshot: undefined,
     },
   };
@@ -135,6 +138,7 @@ function unlogSession(progress, chunkId, day) {
         ...("settlingEntryBPM" in snapshot ? { settlingEntryBPM: snapshot.settlingEntryBPM } : {}),
         ...("holdingEntryBPM" in snapshot ? { holdingEntryBPM: snapshot.holdingEntryBPM } : {}),
         ...("tempoRatchetK" in snapshot ? { tempoRatchetK: snapshot.tempoRatchetK } : {}),
+        ...("holdingReviewCount" in snapshot ? { holdingReviewCount: snapshot.holdingReviewCount } : {}),
       };
       // A flag whose flagSnapshot is still present can only have been
       // applied after this session (handleLogSession always clears
@@ -526,6 +530,76 @@ describe("Undo reverses tempoRatchetK too", () => {
     assert.equal(progress.c1.practiceBPM, 82);
     // Left untouched rather than guessed at — the old snapshot never recorded it.
     assert.equal(progress.c1.tempoRatchetK, 0.15);
+  });
+});
+
+// Pass 61 (lib/ladder.js) — holdingReviewCount joins ladderSnapshot the
+// same way tempoRatchetK/the entry-BPM fields did above: it changes on
+// every logged Holding review, so undoing one must roll that change back
+// too, or a later review's harder-check cadence (resolveRequiredReps,
+// lib/confidence.js) would be computed off a count that includes a review
+// that no longer actually happened.
+describe("Undo reverses holdingReviewCount too", () => {
+  test("undoing a Holding review restores the pre-session count, not the incremented one", () => {
+    let progress = { c1: { doneDays: [], sessions: [], tier1Done: true, stage: "holding", practiceBPM: 100, holdingReviewCount: 2 } };
+    progress = logSession(progress, "c1", 1, { cleanReps: 4, bpm: 100, outcome: "pass", durationSeconds: 0, targetBPM: 100 }, 1000);
+    assert.equal(progress.c1.holdingReviewCount, 3, "sanity: the review incremented the count");
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.holdingReviewCount, 2, "restores the pre-session count");
+  });
+
+  test("undoing the pass that freshly promoted a chunk into Holding restores whatever holdingReviewCount was before — a leftover from an earlier Holding stint, not 0", () => {
+    // A chunk that was demoted out of Holding once before still has its old
+    // holdingReviewCount sitting on the entry (nothing reads or resets it
+    // until the chunk re-enters Holding) — the snapshot must capture that
+    // leftover value, not assume it was already 0 going in.
+    let progress = {
+      c1: { doneDays: [], sessions: [], tier1Done: true, stage: "settling", consecutivePasses: 3, practiceBPM: 70, holdingReviewCount: 5 },
+    };
+    progress = logSession(progress, "c1", 1, { cleanReps: 4, bpm: 70, outcome: "pass", durationSeconds: 0, targetBPM: 100 }, 1000);
+    assert.equal(progress.c1.stage, "holding", "sanity: this pass graduated into Holding");
+    assert.equal(progress.c1.holdingReviewCount, 0, "sanity: fresh entry into Holding resets the count");
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.stage, "settling", "back to Settling");
+    assert.equal(progress.c1.holdingReviewCount, 5, "restores the leftover count from before this call — not 0, and not the reset value");
+  });
+
+  test("[regression] an older snapshot missing holdingReviewCount still restores the other fields normally, not a validation failure", () => {
+    let progress = {
+      c1: {
+        doneDays: [1],
+        sessions: [
+          {
+            day: 1,
+            loggedAt: 1000,
+            cleanReps: 4,
+            bpm: 100,
+            outcome: "pass",
+            ladderSnapshot: {
+              stage: "holding",
+              consecutivePasses: 3,
+              consecutiveStabilizingFails: 0,
+              practiceBPM: 98,
+              nextDueDate: "2026-01-15",
+              tier1Done: true,
+              // no holdingReviewCount — logged before this pass existed
+            },
+          },
+        ],
+        stage: "holding",
+        consecutivePasses: 4,
+        practiceBPM: 100,
+        holdingReviewCount: 4,
+      },
+    };
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.stage, "holding", "the original fields still restore normally");
+    assert.equal(progress.c1.practiceBPM, 98);
+    // Left untouched rather than guessed at — the old snapshot never recorded it.
+    assert.equal(progress.c1.holdingReviewCount, 4);
   });
 });
 

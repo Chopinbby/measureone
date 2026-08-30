@@ -25,6 +25,7 @@ const LADDER_CONFIG = {
     tempoFloorCapFraction: 1,
   },
   bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+  tempoRatchet: { k: 0.3, kCapBpm: 8 },
 };
 
 // Mirrors App.jsx's handleLogSession.
@@ -45,6 +46,7 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
     stabilizingEntryBPM: prevEntry.stabilizingEntryBPM ?? null,
     settlingEntryBPM: prevEntry.settlingEntryBPM ?? null,
     holdingEntryBPM: prevEntry.holdingEntryBPM ?? null,
+    tempoRatchetK: prevEntry.tempoRatchetK ?? null,
   };
   const sessions = [
     ...(prevEntry.sessions || []),
@@ -65,6 +67,7 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
       stabilizingEntryBPM: prevEntry.stabilizingEntryBPM,
       settlingEntryBPM: prevEntry.settlingEntryBPM,
       holdingEntryBPM: prevEntry.holdingEntryBPM,
+      tempoRatchetK: prevEntry.tempoRatchetK,
     },
     { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
     LADDER_CONFIG
@@ -86,6 +89,7 @@ function logSession(progress, chunkId, day, sessionInput, loggedAt) {
       stabilizingEntryBPM: advance.stabilizingEntryBPM,
       settlingEntryBPM: advance.settlingEntryBPM,
       holdingEntryBPM: advance.holdingEntryBPM,
+      tempoRatchetK: advance.tempoRatchetK,
       flagSnapshot: undefined,
     },
   };
@@ -130,6 +134,7 @@ function unlogSession(progress, chunkId, day) {
         ...("stabilizingEntryBPM" in snapshot ? { stabilizingEntryBPM: snapshot.stabilizingEntryBPM } : {}),
         ...("settlingEntryBPM" in snapshot ? { settlingEntryBPM: snapshot.settlingEntryBPM } : {}),
         ...("holdingEntryBPM" in snapshot ? { holdingEntryBPM: snapshot.holdingEntryBPM } : {}),
+        ...("tempoRatchetK" in snapshot ? { tempoRatchetK: snapshot.tempoRatchetK } : {}),
       };
       // A flag whose flagSnapshot is still present can only have been
       // applied after this session (handleLogSession always clears
@@ -183,7 +188,9 @@ describe("Full-ladder-reversal undo — the pre-session state is restored exactl
     const before = { ...progress };
     // Confirm the pass actually moved the ladder, so the undo is a real test.
     assert.equal(before.c1.consecutivePasses, 1);
-    assert.equal(before.c1.practiceBPM, 82);
+    // Pass 59: gap-proportional step (gap=120-80=40, k=0.3 -> 12, capped
+    // at kCapBpm 8) — not the old flat +2.
+    assert.equal(before.c1.practiceBPM, 88);
 
     progress = unlogSession(progress, "c1", 1);
     assert.equal(progress.c1.stage, null);
@@ -398,7 +405,9 @@ describe("Undo reverses the per-stage entry-BPM fields too", () => {
     let progress = { c1: { doneDays: [], sessions: [], tier1Done: true, consecutivePasses: 3, stage: "stabilizing", practiceBPM: 40 } };
     progress = logSession(progress, "c1", 1, { cleanReps: 4, bpm: 40, outcome: "pass", durationSeconds: 0, targetBPM: 100 }, 1000);
     assert.equal(progress.c1.stage, "settling", "sanity: the 4th consecutive pass graduated it");
-    assert.equal(progress.c1.settlingEntryBPM, 42, "sanity: Settling's entry tempo was just recorded as the graduating tempo");
+    // Pass 59: gap-proportional step (gap=100-40=60, k=0.3 -> 18, capped
+    // at kCapBpm 8) — not the old flat +2.
+    assert.equal(progress.c1.settlingEntryBPM, 48, "sanity: Settling's entry tempo was just recorded as the graduating tempo");
 
     progress = unlogSession(progress, "c1", 1);
     assert.equal(progress.c1.stage, "stabilizing");
@@ -453,6 +462,70 @@ describe("Undo reverses the per-stage entry-BPM fields too", () => {
     // Left untouched rather than guessed at — the old snapshot never recorded them.
     assert.equal(progress.c1.stabilizingEntryBPM, 40);
     assert.equal(progress.c1.settlingEntryBPM, 92);
+  });
+});
+
+// Pass 59 (lib/ladder.js) — tempoRatchetK joins ladderSnapshot the same way
+// the per-stage entry-BPM fields did above: a soft-miss halves it, so
+// undoing that soft-miss must roll the halving back too, or a later
+// soft-miss would halve an already-halved rate that was only ever real
+// because of the session that got undone.
+describe("Undo reverses tempoRatchetK too", () => {
+  test("undoing a soft-miss that halved tempoRatchetK restores the PRE-session rate, not the halved value", () => {
+    let progress = { c1: { doneDays: [], sessions: [], tier1Done: true, stage: "settling", practiceBPM: 80 } };
+    progress = logSession(progress, "c1", 1, { cleanReps: 1, bpm: 78, outcome: "soft-miss", durationSeconds: 0, targetBPM: 100 }, 1000);
+    assert.equal(progress.c1.tempoRatchetK, 0.15, "sanity: the soft-miss halved k from the default 0.3");
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.tempoRatchetK, null, "restores the pre-session value (unset, since this was the chunk's first session)");
+  });
+
+  test("undoing the 2nd of two consecutive passes restores tempoRatchetK to what it was after the 1st, not the fully-recovered default", () => {
+    let progress = { c1: { doneDays: [], sessions: [], tier1Done: true, stage: "settling", practiceBPM: 80, tempoRatchetK: 0.15 } };
+    progress = logSession(progress, "c1", 1, { cleanReps: 4, bpm: 80, outcome: "pass", durationSeconds: 0, targetBPM: 100 }, 1000);
+    assert.equal(progress.c1.tempoRatchetK, 0.15, "one clean pass alone doesn't recover k yet");
+
+    progress = logSession(progress, "c1", 2, { cleanReps: 4, bpm: 82, outcome: "pass", durationSeconds: 0, targetBPM: 100 }, 2000);
+    assert.equal(progress.c1.tempoRatchetK, 0.3, "sanity: the 2nd consecutive pass recovered k to the default");
+
+    progress = unlogSession(progress, "c1", 2);
+    assert.equal(progress.c1.tempoRatchetK, 0.15, "restores the rate as it stood after the 1st pass, before recovery");
+  });
+
+  test("[regression] an older snapshot missing tempoRatchetK still restores the other fields normally, not a validation failure", () => {
+    let progress = {
+      c1: {
+        doneDays: [1],
+        sessions: [
+          {
+            day: 1,
+            loggedAt: 1000,
+            cleanReps: 4,
+            bpm: 90,
+            outcome: "pass",
+            ladderSnapshot: {
+              stage: "stabilizing",
+              consecutivePasses: 1,
+              consecutiveStabilizingFails: 0,
+              practiceBPM: 82,
+              nextDueDate: "2026-01-05",
+              tier1Done: false,
+              // no tempoRatchetK — logged before this pass existed
+            },
+          },
+        ],
+        stage: "settling",
+        consecutivePasses: 2,
+        practiceBPM: 92,
+        tempoRatchetK: 0.15,
+      },
+    };
+
+    progress = unlogSession(progress, "c1", 1);
+    assert.equal(progress.c1.stage, "stabilizing", "the original fields still restore normally");
+    assert.equal(progress.c1.practiceBPM, 82);
+    // Left untouched rather than guessed at — the old snapshot never recorded it.
+    assert.equal(progress.c1.tempoRatchetK, 0.15);
   });
 });
 

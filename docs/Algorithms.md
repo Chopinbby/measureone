@@ -689,10 +689,12 @@ signal instead of reading as neutral.
 (`lib/ladder.js`) — a pure function, called from `handleLogSession`
 (`App.jsx`) on every logged session, implementing the Stabilizing →
 Settling → Holding stages:
-- **Full pass:** `practiceBPM` steps up (`ladderConfig.bpmSteps.pass`,
-  default +2) — *unless* this session also clears the demonstrated-tempo
-  override below, in which case `practiceBPM` jumps straight to the
-  achieved bpm instead of stepping by +2. Counts toward graduation only
+- **Full pass:** `practiceBPM` steps up by the gap-proportional tempo
+  ratchet ([Tempo ratchet](#tempo-ratchet-pass-59) below; falls back to the
+  flat `ladderConfig.bpmSteps.pass`, default +2, only when there's no
+  `targetBPM` to be proportional against) — *unless* this session also
+  clears the demonstrated-tempo override below, in which case `practiceBPM`
+  jumps straight to the achieved bpm instead. Counts toward graduation only
   once `practiceBPM` clears the current stage's tempo floor (Stabilizing
   has none; Settling/Holding gate on a fraction of `targetBPM`) — the
   floor gates progress, not the pass/fail judgment itself, and is
@@ -713,10 +715,14 @@ Settling → Holding stages:
   graduation." Reordering `computeLadderAdvance` to fix it was judged not
   worth the risk relative to the symptom; revisit if it actually shows up
   in real use. See [Decisions.md](Decisions.md#spaced-repetition--maintenance).
-- **Soft miss:** `practiceBPM` steps down (default −2), the pass counter
-  resets, stage does not change — unless this session also clears the
-  demonstrated-tempo override below, in which case `practiceBPM` still
-  jumps up despite the overall miss (see rationale below).
+- **Soft miss:** as of Pass 59, `practiceBPM` steps **forward** (never
+  backward, unlike the old flat `ladderConfig.bpmSteps.softMiss` default of
+  −2, which only remains reachable with no `targetBPM` to ratchet against)
+  at half the chunk's current tempo-ratchet rate ([Tempo
+  ratchet](#tempo-ratchet-pass-59) below) — the pass counter still resets,
+  and stage still does not change — unless this session also clears the
+  demonstrated-tempo override below, in which case `practiceBPM` jumps up
+  to the achieved bpm despite the overall miss (see rationale below).
 - **Real fail:** `practiceBPM` resets to the recorded entry tempo for the
   stage this fail demotes INTO —
   `stabilizingEntryBPM`/`settlingEntryBPM`/`holdingEntryBPM`, whichever the
@@ -757,8 +763,11 @@ Settling → Holding stages:
   than "go back to where this stage last was." A piece with no target BPM
   configured has nothing to suggest, so `computeLadderAdvance` falls back
   to the entry-tempo reset (or its own −2 fallback) in that case rather
-  than resetting to nothing. While flagged, `computeTimeline` and
-  `computeDueReviews` both
+  than resetting to nothing. As of Pass 59, a real fail also resets the
+  chunk's `tempoRatchetK` back to `ladderConfig.tempoRatchet.k`, regardless
+  of which of the three `practiceBPM`-reset paths above actually fired —
+  see [Tempo ratchet](#tempo-ratchet-pass-59) below. While flagged,
+  `computeTimeline` and `computeDueReviews` both
   skip the chunk outright — see
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-short-structured-re-learning-pass-built)
   for the full four-rule design and
@@ -786,6 +795,127 @@ lands on. A live "what's due" query that works *outside* the current plan's
 bounded `daysToLearn` window is built as of Pass 8 — see
 [What's due — the live maintenance query](#whats-due--the-live-maintenance-query)
 below.
+
+### Tempo ratchet (Pass 59)
+
+Before this pass, a full pass or soft-miss stepped `practiceBPM` by a flat
+`ladderConfig.bpmSteps` delta (+2 / −2) regardless of how far `practiceBPM`
+actually was from `targetBPM` — a chunk 40 BPM below target crept up at the
+same 2-BPM-per-session pace as one already 2 BPM away. `tempoRatchetStepSize`
+(`lib/ladder.js`, not exported — internal to `computeLadderAdvance`) replaces
+that flat delta on the **pass** and **soft-miss** branches only; the **fail**
+branch's flat `bpmSteps.fail` step is untouched (see below for why).
+
+```
+gap  = targetBPM - practiceBPM
+step = clamp(round(k * gap), 1, ladderConfig.tempoRatchet.kCapBpm)
+```
+
+- `k` is `progress[id].tempoRatchetK` — a new persisted per-chunk flat
+  scalar field, alongside (not nested inside) `stage`/`practiceBPM`/the
+  three `...EntryBPM` fields, so `storage.js`'s ladder-state diffing/merge
+  (`ladderStateDiffers`/`mergeProgress`'s `LADDER_STATE_FIELDS`) compares it
+  by `!==` the same way as every other flat ladder field. Defaults to
+  `ladderConfig.tempoRatchet.k` (0.3) when absent — `computeLadderAdvance`
+  itself resolves that at read time (`chunkLadderState.tempoRatchetK ??
+  ladderConfig.tempoRatchet.k`), and `storage.js`'s
+  `backfillProgressLadderState` backfills a chunk with none recorded to
+  `null`, same as the entry-BPM fields, **not** to the literal default
+  number. **Corrected after review, same session:** the first version of
+  this backfill wrote the literal `0.3` instead, reasoning "there's no
+  sane non-null default the way entry-BPM has" — true numerically, but it
+  meant an untouched, migrated chunk carried a real `0.3` while a backup
+  exported before this field existed had no `tempoRatchetK` key at all;
+  `ladderStateDiffers`' `!==` comparison read that as a genuine
+  disagreement and forced the import-conflict picker on an otherwise
+  byte-identical re-import (reproduced directly, not theoretical — see
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance)). `null` on
+  both sides avoids the false conflict the same way it already does for
+  the entry-BPM fields.
+- The 1-BPM floor (`max(..., 1)`) keeps a pass/soft-miss always moving
+  `practiceBPM` forward by at least 1, even when `gap` is at or below zero
+  (a chunk already at or past `targetBPM`) — it never *stalls* a session's
+  worth of progress to zero, though `stepBPM`'s own existing
+  cap-at-`targetBPM` can still flatten the net *result* back down to
+  `targetBPM` regardless (see the overlearning bonus below for the one path
+  that's allowed to exceed that cap).
+- `ladderConfig.tempoRatchet.kCapBpm` (default 8) is the ceiling — without
+  it, a chunk very far from target (e.g. `targetBPM` set well above a
+  freshly-lowered `practiceBPM`) could take an implausibly large single-session
+  jump.
+- **No `targetBPM`** (a piece with nothing to be proportional against)
+  falls back to the pre-existing flat `bpmSteps.pass`/`bpmSteps.softMiss`
+  step exactly as before this pass — `tempoRatchetStepSize` returns `null`
+  in that case rather than inventing a gap-based number from nothing, and
+  the caller branches on that.
+
+**Soft-miss now moves `practiceBPM` forward, not backward** — a genuine
+behavior change from the flat `bpmSteps.softMiss` (default −2) it replaces.
+Confirmed with the user: a soft-miss still isn't a full pass and shouldn't
+progress the chunk at the normal rate, but penalizing tempo on a
+soft-miss (as the old flat step did) fought against the ratchet's own logic
+once the step became gap-proportional, so a soft-miss instead **halves
+`tempoRatchetK`** before computing the step, applying the step at that
+newly-halved rate — forward, just slower. The halved value is what
+persists to `progress[id].tempoRatchetK`, so a *second* consecutive
+soft-miss halves again (0.3 → 0.15 → 0.075 → …), asymptotically approaching
+(but never reaching) the 1-BPM floor rather than ever reversing direction.
+
+**k-recovery** reuses `consecutivePasses` rather than introducing a new
+counter — `computeLadderAdvance` already resets that counter to 0 on every
+soft-miss and demote, so two qualifying passes in a row (the same
+floor-clearing count graduation itself uses, read as `passesIfCounted`
+before graduation potentially zeroes it) is already directly observable as
+that counter reaching 2 within the same stage. When it does,
+`tempoRatchetK` is restored to `ladderConfig.tempoRatchet.k` outright — a
+no-op if it was already at the default, a real recovery if a recent
+soft-miss had halved it.
+
+**A real fail resets `tempoRatchetK` to the default**, unconditionally,
+alongside whichever of the three existing `practiceBPM`-reset paths fired
+(the per-stage entry-tempo reset, rule 4's `suggestedStartingBPM` reset, or
+the flat `bpmSteps.fail` fallback) — the fail branch's `practiceBPM` logic
+itself is untouched by this pass; only `tempoRatchetK` is new state added
+alongside it. There was no adaptive-rate state for a fail to touch before
+this pass existed.
+
+#### Overlearning bonus
+
+When a full pass's logged `bpm` clearly beats what was actually asked for
+that session (`outcome.bpm > practiceBPM` — not just meets it), the step
+widens: `max(normalStep, round(0.5 * (outcome.bpm - practiceBPM)))`. The
+**result** (`practiceBPM` after applying that widened step), not the bonus
+amount itself, is capped at `1.15 * targetBPM` — computed and capped
+separately from `stepBPM`'s own `Math.min(stepped, targetBPM)`, since this
+bonus is deliberately the one path allowed to push `practiceBPM` *above*
+`targetBPM` (rounded to a clean integer — `1.15 * targetBPM` is not always
+a whole number, and raw JS float arithmetic can land a hair under the
+intended cap, e.g. `1.15 * 100 === 114.99999999999999`). This bonus only
+applies when there's a `targetBPM` to cap against, and only in the branch
+where `computeDemonstratedTempoBaseline` (below) does **not** already
+apply — that mechanism keeps taking priority exactly as it did before this
+pass, including its own cap-at-`targetBPM` (never `1.15×`), so a
+demonstrated-tempo override can never itself read as "overlearning."
+
+`ChecklistItem` (`src/components/tabs/today/ChecklistItem.jsx`) surfaces an
+"Overlearning" note whenever the chunk's current `practiceBPM` sits above
+`targetBPM` — reading the persisted values directly rather than a flag
+returned by `computeLadderAdvance`, since the bonus is the *only* path that
+can produce that state (every other path — the flat step, the ratchet step,
+and `computeDemonstratedTempoBaseline` — caps at `targetBPM`, never above
+it), so the condition alone is an exact proxy for "the bonus fired and is
+still in effect." It stops showing again the moment an ordinary
+(non-overlearning) pass steps `practiceBPM` back down to `targetBPM` — see
+the note in [Decisions.md](Decisions.md#spaced-repetition--maintenance) about that being an
+accepted, deliberate consequence of the formula rather than something this
+pass tries to prevent.
+
+`ladderConfig.tempoRatchet = { k, kCapBpm }` joins `DEFAULT_LADDER_CONFIG`
+and is merged field-by-field in `mergeLadderConfig` (`storage.js`), the
+same way `bpmSteps` already is — so a piece with an existing `ladderConfig`
+saved before this field existed doesn't crash on the next logged session.
+No editing UI yet (same as `bpmSteps` before Pass 17's `LadderConfigEditor`
+existed) — see [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 ### Starting, suggested, and demonstrated tempo
 
@@ -877,7 +1007,9 @@ to avoid:
    session with **3 or more clean reps at a bpm above the chunk's current
    `practiceBPM`** replaces the baseline outright with the achieved bpm
    (capped at `targetBPM`, same cap the normal step uses), instead of the
-   usual incremental `ladderConfig.bpmSteps.pass` (+2) nudge. Applies on
+   usual gap-proportional tempo-ratchet step ([Tempo
+   ratchet](#tempo-ratchet-pass-59) above; the old flat `+2` before Pass 59).
+   Applies on
    both `pass` and `soft-miss` outcomes (both log a real `cleanReps` count
    — a `soft-miss` can still genuinely demonstrate a higher tempo, e.g. a
    hard chunk needing 5 reps for a full pass but already showing 3 clean

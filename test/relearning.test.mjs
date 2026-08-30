@@ -30,6 +30,7 @@ const LADDER_CONFIG = {
     tempoFloorCapFraction: 1,
   },
   bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+  tempoRatchet: { k: 0.3, kCapBpm: 8 },
 };
 
 function basePiece(overrides) {

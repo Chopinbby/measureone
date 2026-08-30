@@ -457,6 +457,19 @@ evidence.
   stage yet. Reopened at the user's explicit request; see
   [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
   three options presented and why this one needed new persisted state.
+  **Superseded again (Pass 59) for the pass/soft-miss steps specifically —
+  the flat `bpmSteps.pass`/`bpmSteps.softMiss` deltas above are now only a
+  fallback for a chunk with no `targetBPM` to measure against.** The normal
+  case ratchets `practiceBPM` by a step *proportional to the remaining gap*
+  to `targetBPM` (a new per-chunk adaptive rate, `progress[id].tempoRatchetK`,
+  defaulting to 0.3, capped at `ladderConfig.tempoRatchet.kCapBpm`, default
+  8 BPM) — and, as part of the same pass, **a soft miss no longer steps
+  `practiceBPM` down at all**; it halves the chunk's own ratchet rate and
+  still steps forward, just more slowly. See
+  [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59) for the full
+  mechanics (including the overlearning bonus for a session that clearly
+  beats what was asked) and
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for why.
 - **What actually shipped, different from the original sketch above:**
   `ChecklistItem.jsx` kept free-text "clean reps" and "BPM achieved"
   `NumberInput` fields rather than replacing them with a fixed "attempt at
@@ -489,10 +502,14 @@ called from `ChecklistItem.jsx` on every log and passed to
    check runs before the jump — see
    [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 2. **Soft miss** — some clean reps, not enough in a row at that tempo.
-   `practiceBPM` steps down, consecutive-pass count resets, **stage does
-   not change**. New tier — the fix for "plateau via frustration": no
-   honest way existed to log "close, but not quite" without it reading as
-   failure against a fixed distant number.
+   Consecutive-pass count resets, **stage does not change**. New tier — the
+   fix for "plateau via frustration": no honest way existed to log "close,
+   but not quite" without it reading as failure against a fixed distant
+   number. **As of Pass 59, `practiceBPM` no longer steps down here** — it
+   still moves, just forward, at half the chunk's normal ratchet rate (see
+   [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59)); the tier's own
+   meaning ("close, but not quite — not a fail") is unchanged, only which
+   direction the tempo consequence moves.
 3. **Real fail** — self-report override ("needs more work"), zero clean
    reps, or repeated soft-misses — but **only when both the current and the
    previous shortfall were reps-driven** (fewer than the required clean

@@ -293,6 +293,15 @@ export function ChecklistItem({
             {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
           </p>
         ) : null}
+        {/* Pass 59 — the tempo-ratchet overlearning bonus is the only path
+            that can push practiceBPM above targetBPM (the normal step and
+            computeDemonstratedTempoBaseline both cap at targetBPM), so this
+            condition is exactly "the overlearning bonus fired". */}
+        {practiceBPM != null && targetBPM && practiceBPM > targetBPM ? (
+          <p className="tip-line">
+            Overlearning: practice tempo ({practiceBPM} BPM) is now above target ({targetBPM} BPM).
+          </p>
+        ) : null}
         <p className="tip-line"><strong>{requirementText}</strong></p>
         <p className="tip-line">
           Spaced Repetition:{" "}

@@ -2539,6 +2539,190 @@ immediately like a normal logged session (Pass 29 follow-up).**
 - **Verification note:** the persistence bug specifically is not something a pure-function unit test would have caught or would meaningfully validate — it lived entirely in *React's state-batching order relative to an effect's dependency array*, not in any computable input/output logic. This repo has no React render harness (`CLAUDE.md`), so the real verification for all three bugs was live browser testing: reproducing the infinite loop via the console warning, then confirming it was gone; reproducing the lost discard via an actual reload, then confirming the reload preserved it after the fix; and for the two missed routes, confirming both the cancel path (nothing created/discarded, wizard data preserved) and the confirm path (discards, proceeds, survives a reload) same as the original three.
 - Verified with `test/utils.test.mjs` (`hasPendingProvisionalSession` — the day-scoped pending check) and `test/interleave-leave-warning.test.mjs` (mirrors of `confirmAndDiscardProvisional`/`guardLeavingInterleaved`, since both are closures inside `App.jsx`: prompts with the exact wording, discards every pending chunk id on confirm, discards *nothing* on cancel, no-ops with nothing pending). Both confirmed to actually fail when the corresponding behavior was reverted — this coverage is at the shared-function level, so it already covered the two routes found in review without needing new tests once they were wired to the same function. Manually verified in-browser, end to end, for all **five** leave routes (Today's Practice's own Day view/Week/View all buttons, the sidebar nav list, the piece switcher, the "Edit piece" button, and finishing the "Add new piece" wizard) — for each: the cancel path blocks the action and preserves the provisional; the confirm path shows the exact requested wording, discards, proceeds, and survives a real reload; and normal navigation with nothing pending proceeds with zero `confirm()` calls at all, confirmed via an instrumented call counter. `npm test`: 352/352.
 
+**Decision: `practiceBPM`'s pass/soft-miss step becomes gap-proportional (a "tempo ratchet"), replacing the flat `ladderConfig.bpmSteps` deltas that had driven it since Pass 1 — and a soft-miss now steps `practiceBPM` forward instead of backward.**
+
+- **Why:** the flat `+2`/`−2` step moved a chunk 40 BPM below target at
+  exactly the same pace as one only 2 BPM away — the ladder's stage/interval
+  math already scales with how solid a chunk is, but the actual tempo climb
+  never did. Requested directly by the user as Pass 59.
+- **Formula:** `gap = targetBPM - practiceBPM`; `step = clamp(round(k *
+  gap), 1, kCapBpm)`, with `k` defaulting to 0.3 and `kCapBpm` to 8
+  (`ladderConfig.tempoRatchet`, merged field-by-field in
+  `mergeLadderConfig` the same way `bpmSteps` already is). The 1-BPM floor
+  means a pass/soft-miss always moves `practiceBPM` at least 1 BPM forward,
+  even for a chunk already at or past `targetBPM` — though `stepBPM`'s
+  pre-existing cap-at-`targetBPM` can still flatten the *net result* back
+  down regardless (see the overlearning bonus below for the one path
+  allowed past that cap). No `targetBPM` to be proportional against falls
+  straight back to the old flat `bpmSteps.pass`/`bpmSteps.softMiss` step,
+  unchanged — this pass doesn't invent a gap-based number from nothing.
+- **A soft-miss no longer costs tempo.** Once the step became
+  gap-proportional, a flat backward step on soft-miss fought against the
+  ratchet's own logic (a chunk struggling on reps but still near target
+  would get yanked disproportionately far back). Instead, a soft-miss
+  **halves the chunk's own adaptive rate** (a new persisted per-chunk flat
+  scalar, `progress[id].tempoRatchetK`, alongside — not nested inside —
+  `practiceBPM`/the `...EntryBPM` fields, following that exact precedent so
+  `storage.js`'s ladder-state diffing/merge keeps comparing every field by
+  `!==`) and applies the step at that halved rate: still forward, just
+  slower. Two consecutive qualifying passes afterward restore `k` to the
+  configured default — reusing `consecutivePasses` rather than a new
+  counter, since that counter already resets to 0 on every soft-miss and
+  demote, so reaching 2 within the same stage already means "two clean
+  passes back to back" with no new bookkeeping needed. A real fail resets
+  `k` to default outright too, regardless of which of the three existing
+  `practiceBPM`-reset paths fired — new state, since none of those paths
+  had any adaptive rate to reset before this pass.
+- **Overlearning bonus, and why its cap is deliberately looser than
+  everything else:** when a logged `bpm` clearly beats what was actually
+  asked (`outcome.bpm > practiceBPM`, not merely equals it), the step
+  widens to `max(normalStep, round(0.5 * (bpm - practiceBPM)))` — rewarding
+  a learner who's clearly capable of more than the ladder was asking for
+  that session, rather than making them wait out several more
+  ratchet-sized steps to get there. The **result** is capped at `1.15 ×
+  targetBPM`, computed and capped separately from `stepBPM`'s normal
+  `Math.min(stepped, targetBPM)`, since this is the one path deliberately
+  allowed to push `practiceBPM` *above* target — a small headroom margin so
+  a chunk that's already demonstrably solid isn't immediately re-capped
+  down to exactly `targetBPM` the moment it's clearly exceeded it. Never
+  applies on top of `computeDemonstratedTempoBaseline` (which still takes
+  priority exactly as before this pass, including its own cap-at-`target`,
+  never `1.15×`) and never applies with no `targetBPM` (nothing to cap
+  against). `ChecklistItem` surfaces an "Overlearning" note whenever the
+  chunk's persisted `practiceBPM` currently sits above `targetBPM` — every
+  other path (the flat step, the ratchet step, the demonstrated-tempo
+  override) caps at `targetBPM` and never exceeds it, so that condition
+  alone is an exact proxy for "the bonus fired and is still in effect,"
+  with no new flag needed from `computeLadderAdvance` itself. **A known,
+  accepted consequence, not a bug to chase:** once `practiceBPM` sits above
+  `targetBPM` from a bonus, the very next *ordinary* (non-bonus) pass —
+  gap now negative, ratchet step floors at 1, `stepBPM`'s own cap-at-target
+  applies — snaps `practiceBPM` straight back down to exactly `targetBPM`,
+  and the note disappears. This is the direct, intended consequence of
+  only the bonus path being allowed past `stepBPM`'s cap; making the
+  overlearning state "sticky" across an ordinary pass wasn't part of what
+  was asked for, and wasn't built.
+- **Deliberately untouched:** the fail branch's flat `bpmSteps.fail` step
+  itself (already effectively dead in practice — `stabilizingEntryBPM` gets
+  seeded the moment a chunk first enters Stabilizing, and a fail's
+  `demote()` always lands back on Stabilizing as the floor, so the
+  entry-tempo reset almost always wins over the flat step long before this
+  pass, and nothing about that priority order changed here);
+  `computeDemonstratedTempoBaseline` itself; and exposing `k`/`kCapBpm` in
+  Pass 17's `LadderConfigEditor` (`SettingsTab`) — a natural follow-up, not
+  required for the mechanism to function with sane defaults.
+- Verified with `test/ladder.test.mjs` (the gap-proportional formula across
+  a range of gaps, respecting both the 1-BPM floor and the `kCapBpm`
+  ceiling; a soft-miss halving `k` and still stepping forward at the halved
+  rate; two consecutive clean passes fully restoring `k`; a fail resetting
+  `k` via all three `practiceBPM`-reset paths; the overlearning bonus
+  applying only when `bpm` beats `practiceBPM`, capping the result at
+  `1.15×targetBPM` — including a float-precision guard, since
+  `1.15 * 100 === 114.99999999999999` in raw JS — and never overriding
+  `computeDemonstratedTempoBaseline`; a `null` `targetBPM` falling back to
+  the untouched flat step). Every pre-existing `ladder.js`/`session-undo`/
+  `storage.js` test that hardcoded a flat `+2`/`−2` step's exact resulting
+  `practiceBPM` was individually re-derived under the new formula and
+  updated (not just re-run for a green suite) — the step magnitude
+  genuinely changed for any chunk with a `targetBPM` set, which is most of
+  them, so a large fraction of pre-existing ladder tests needed their
+  expected numbers recomputed, not just re-confirmed. `npm test`:
+  458/458.
+- **Two real bugs found on review after the above shipped, both fixed the
+  same session, not deferred:**
+  1. **`Wizard.jsx`'s `defaultPiece()` would crash a brand-new piece's
+     first logged session.** It hardcodes a literal `ladderConfig` (not
+     run through `mergeLadderConfig` — `App.jsx`'s `handleComplete`
+     deliberately doesn't put a freshly-created piece through
+     `validateAndMigratePiece`) that had been updated with `bpmSteps` long
+     ago but was missed for `tempoRatchet` when this pass first shipped —
+     so `ladderConfig.tempoRatchet.k` was `undefined` for any piece
+     created via the Wizard until its next reload. Fixed by mirroring
+     `tempoRatchet` into that literal, same as `bpmSteps` already is.
+  2. **`App.jsx` never actually threaded `tempoRatchetK` through
+     `handleLogSession`/`handleUnlogSession`/`handleConfirmProvisionalSession`
+     when this pass first shipped** — the pure `computeLadderAdvance`
+     function and its persistence contract were correct and fully tested,
+     but the three closures that call it (mirrored in
+     `test/session-undo.test.mjs`/`test/interleave-provisional.test.mjs`
+     for exactly this reason — no React render harness exists) never read
+     `prevEntry.tempoRatchetK` in, never wrote `advance.tempoRatchetK`
+     back out, and never captured it in `ladderSnapshot`. In the real app
+     this meant `k` silently reset to the default on every single call
+     instead of persisting — no crash, but the entire halve/recover/reset
+     lifecycle never actually took effect. Fixed by adding `tempoRatchetK`
+     to the same seven spots `stabilizingEntryBPM` already occupies across
+     those three handlers (in, out, and the optional/not-`isValidSnapshot`
+     snapshot-restore treatment), plus updating `session-undo.test.mjs`'s
+     mirror (the one file whose own mirror is exhaustive across every
+     ladder field, unlike `interleave-skip.test.mjs`/
+     `interleave-provisional.test.mjs`'s narrower, already-partial
+     mirrors) and adding three new undo-reversal tests for it. Verified
+     live in-browser end to end, not just via the mirrored tests: created
+     a real piece through the Wizard (confirming fix 1), seeded a
+     non-default `tempoRatchetK`, logged a real pass through the actual
+     UI and confirmed via `localStorage` that the resulting step size used
+     the seeded rate (not silently the default), logged a second
+     consecutive pass and confirmed `k` recovered to default, then clicked
+     Undo and confirmed `k` reverted to the pre-recovery value — the exact
+     mechanism `session-undo.test.mjs`'s new tests check, reproduced for
+     real. `npm test`: 461/461.
+- **A skeptical second-engineer review (user-requested, same session) of
+  every file this pass touched found three more real issues.** One fixed
+  outright, one left alone on the user's explicit call (a standing
+  decision this pass shouldn't override unilaterally), one left as
+  documented, tested behavior rather than given new persisted state it
+  didn't need:
+  1. **Fixed: the migration backfill for `tempoRatchetK` caused a real
+     false-positive import conflict, described above under "Corrected
+     after review, same session" — see
+     [Algorithms.md](Algorithms.md#tempo-ratchet-pass-59) for the
+     mechanics and `test/storage.test.mjs`'s two new
+     `diffImportedPiece` regression tests (one proving the false conflict
+     is gone, one proving a genuine `tempoRatchetK` disagreement is still
+     caught).
+  2. **Left alone, on the user's explicit choice:** the overlearning bonus
+     can trigger the already-known, already-reviewed-twice "a same-session
+     tempo jump doesn't get graduation credit until the next session"
+     quirk (see the `clearsStageFloor`-ordering item in
+     [Open questions](#open-questions) below) through a second path —
+     confirmed by direct reproduction (a bonus-driven jump from 50 to 73
+     against a 70 floor: `practiceBPM` correctly lands at 73, but
+     `graduated: false` and the pass isn't counted, exactly the
+     pre-existing symptom). Presented to the user as a real choice, not
+     assumed: the actual fix means reordering `computeLadderAdvance`'s
+     floor-check timing, which is exactly the change the standing
+     decision already declined twice, on the grounds that a one-session,
+     self-correcting delay doesn't justify the risk of reordering an
+     already-dense function. **The user chose to leave it.** The open
+     item below is updated to note the bonus as a second trigger path,
+     not treated as a new, separate issue.
+  3. **Left as documented/tested behavior, not given new state:** `k`
+     recovery (`passesIfCounted >= 2`) is gated by the same stage-floor
+     check graduation counting already uses — reusing
+     `consecutivePasses` (as this pass was explicitly asked to do, rather
+     than adding a new counter) means a chunk sitting below its stage's
+     tempo floor doesn't advance that counter at all, floor-clearing or
+     not. Consequence, confirmed by direct simulation: a chunk that
+     soft-misses while well below Settling/Holding's tempo floor keeps
+     ratcheting at the halved rate for as long as it takes `practiceBPM`
+     to *climb* to that floor — which, being at the halved rate, takes
+     longer than it otherwise would. Self-correcting (it does recover,
+     once floor-clearing), not data-destructive, and Stabilizing has no
+     floor so this can't happen there. A real, independent fix (decoupling
+     recovery from the floor) would need a second persisted counter,
+     which directly contradicts this pass's own "reuse the existing
+     counter, don't add a new one" instruction — judged disproportionate
+     for a cosmetic recovery-speed delay, not put to the user as a
+     from-scratch choice the way item 2 was, since there's no standing
+     decision here to override, just this session's own engineering
+     judgment. Documented here and covered by a new regression test in
+     `test/ladder.test.mjs` (`Pass 59: tempo ratchet — k recovery is
+     gated by the same stage floor graduation uses`) so the exact
+     contour is asserted, not just narrated.
+  - `npm test`: 465/465 (462 before this round: 2 new `diffImportedPiece`
+    tests, 1 new k-recovery-floor-gating test).
+
 ## UX
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
@@ -4050,6 +4234,19 @@ oversight to silently fix; surface it instead.
   next logged session, and reordering that function preemptively carries
   more risk than the symptom warrants. Revisit if it actually shows up in
   real use.
+  - **Re-reviewed a third time after Pass 59 (the tempo ratchet), same
+    conclusion.** Pass 59's overlearning bonus (see
+    [Spaced repetition & maintenance](#spaced-repetition--maintenance)
+    above) can trigger this exact same symptom through a second path — a
+    bonus-driven same-session jump that crosses a stage's tempo floor
+    doesn't get graduation credit either, confirmed by direct
+    reproduction (50→73 against Settling's 70 floor: `practiceBPM` is
+    correctly 73, but `graduated: false`, the pass uncounted). Presented
+    to the user directly as a choice (fix the ordering now vs. leave it)
+    rather than assumed either way; **the user chose to leave it**, same
+    reasoning as the first two reviews. Two trigger paths now
+    (`computeDemonstratedTempoBaseline` and the overlearning bonus), one
+    fix, still not applied.
 - ~~**A full session undo doesn't revert `currentBPM`.**~~ **Resolved
   (Pass 14)** — see the dedicated decision in
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) above.

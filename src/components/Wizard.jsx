@@ -66,6 +66,13 @@ export function defaultPiece() {
         tempoFloorCapFraction: 1,
       },
       bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
+      // Pass 59 — the gap-proportional tempo-ratchet rate/cap. Must stay
+      // mirrored here alongside bpmSteps above: this object is used as-is
+      // (handleComplete, App.jsx, doesn't run new pieces through
+      // validateAndMigratePiece/mergeLadderConfig), so a missing
+      // tempoRatchet here would crash the very first logged session on any
+      // brand-new piece.
+      tempoRatchet: { k: 0.3, kCapBpm: 8 },
     },
     revival: {
       active: false,

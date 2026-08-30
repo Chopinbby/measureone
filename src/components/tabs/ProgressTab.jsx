@@ -1,11 +1,20 @@
 import { Sparkline } from "../Sparkline";
+import { NumberInput } from "../NumberInput";
 import { computePracticeHistory } from "../../lib/history";
 import { formatRange, loggedSessions } from "../../lib/utils";
 import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
-import { computeConfidence, computeConfidenceAsOf, getDefaultTargetBPM, sessionOutcome } from "../../lib/confidence";
+import {
+  computeConfidence,
+  computeConfidenceAsOf,
+  getDefaultTargetBPM,
+  sessionOutcome,
+  allJudgedSessions,
+  computeOverallConfidence,
+  isManualOverallConfidence,
+} from "../../lib/confidence";
 import { sectionLabel, weightedDifficultyFromArray } from "../../lib/chunking";
 
-export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPieces }) {
+export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPieces, onSetOverallConfidence }) {
   const practiceChunks = chunks.filter((c) => c.kind === "section");
 
   // #1 Rolling-window consistency — not a streak: a plain fraction of the
@@ -47,13 +56,13 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
     .filter((t) => t.sessions.length >= 2 && t.targetBPM);
 
   // #4 Outcome breakdown — % distribution of pass/soft-miss/fail across
-  // every logged session in the piece. Replaces the old free-standing
-  // "how did it feel" self-report, folded into this same judgment — see
+  // every logged, JUDGED session in the piece (allJudgedSessions,
+  // lib/confidence.js — see there for why loggedSessions() alone isn't
+  // enough). Replaces the old free-standing "how did it feel" self-report,
+  // folded into this same judgment — see
   // docs/Decisions.md#spaced-repetition--maintenance. sessionOutcome()
-  // also covers sessions logged before that change. Excludes skipped
-  // sessions entirely (Pass 29) — they weren't judged, so they shouldn't
-  // sit in the denominator pulling every real percentage down.
-  const allSessions = Object.values(piece.progress).flatMap((entry) => loggedSessions(entry.sessions));
+  // also covers sessions logged before that change.
+  const allSessions = allJudgedSessions(piece);
   const outcomeBreakdown = Object.entries(SESSION_OUTCOME_META).map(([value, meta]) => {
     const count = allSessions.filter((s) => sessionOutcome(s) === value).length;
     return { value, ...meta, count, pct: allSessions.length ? Math.round((count / allSessions.length) * 100) : 0 };
@@ -190,11 +199,46 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
   // case means.
   const history = computePracticeHistory(piece, chunks);
 
+  // Overall piece confidence (Pass 58) — see lib/confidence.js for the
+  // effort-weighted rollup and the manual-override precedence.
+  const overallConfidence = computeOverallConfidence(piece, practiceChunks, currentDay);
+  const isOverallManual = isManualOverallConfidence(piece);
+
   return (
     <div className="tab-pane">
       <div className="tab-header day-nav">
         <h1>Progress</h1>
         <button className="ghost-btn" onClick={onViewAllPieces}>View all pieces</button>
+      </div>
+
+      <div className="panel">
+        <h3>Overall confidence</h3>
+        <div className="field">
+          <span>Confidence override</span>
+          {isOverallManual ? (
+            <div className="manual-conf-row">
+              <NumberInput
+                value={piece.manualOverallConfidence}
+                min={0}
+                max={100}
+                onCommit={(n) => onSetOverallConfidence(n)}
+              />
+              <button className="ghost-btn" onClick={() => onSetOverallConfidence(null)}>
+                Reset to automatic
+              </button>
+            </div>
+          ) : (
+            <div className="manual-conf-row">
+              <p className="wizard-hint" style={{ margin: 0, flex: 1 }}>
+                Effort-weighted average across every practice chunk — auto-calculated at {overallConfidence}% right
+                now.
+              </p>
+              <button className="ghost-btn" onClick={() => onSetOverallConfidence(overallConfidence)}>
+                Set manually
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="stat-grid-2">

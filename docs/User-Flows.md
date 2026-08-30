@@ -97,7 +97,21 @@ than jumping to a specific day.
    not due, then due again as practice continues), plus a locked/grayed
    preview the day before the next threshold is crossed; see
    [Algorithms.md](Algorithms.md#section-run-throughs) for exactly when.
-5. `ReassessPanel` is available for re-rating difficulty on today's measure
+5. **Since Pass 57**, `RandomStartPanel` appears once 2+ chunks/transitions/
+   combos in the piece have 2+ logged sessions each — "Pick a starting
+   point" picks one at random, so a practice session doesn't always start
+   from the same place. Hidden entirely below that threshold.
+6. **Since Pass 56**, `ColdStartPanel` appears once every section's own
+   run-through has been logged at least once, at a widening gap (3, 7,
+   14, 28, ... days) since the piece was last touched at all — a
+   whole-piece cold play-through (no warm-up), logging average BPM and
+   free-text notes. Not a persistent checklist item: it only renders on
+   the day a new gap threshold is actually crossed, then goes quiet again
+   until the next one. **Since Pass 58**, logging one also offers a
+   short, optional "rate the piece overall right now?" prompt (five
+   quick-tap options, or Skip) that feeds Progress's new "Overall
+   confidence" stat — see flow 3 below.
+7. `ReassessPanel` is available for re-rating difficulty on today's measure
    ranges after practicing them — see flow 5.
 
 Today has four view modes, not just one: **Day view** (the numbered steps
@@ -131,12 +145,18 @@ see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are
   "first week" list grays out past days and strikes through only the ones
   actually completed, with today's row noting "(behind N chunks)" when
   applicable — see [Decisions.md](Decisions.md#ux).
-- **Progress**: "how is it actually going" — rolling-window consistency,
-  consistency heatmap, most-improved-this-week, actual-vs-planned chart,
-  **since Pass 51** an estimated-vs-actual practice time chart (every
-  recently-practiced chunk/transition/combo/section-run-through, estimate
-  vs. real logged minutes), projected finish date, tempo trend sparklines,
-  outcome breakdown, confidence-by-difficulty, and recent practice
+- **Progress**: "how is it actually going" — **since Pass 58, a piece-level
+  "Overall confidence" stat sits at the top of the tab**: an
+  effort-weighted average of every practice chunk's confidence, with an
+  inline manual-override control (set/clear, same pattern as the Piece
+  Map's per-chunk override) — see
+  [Algorithms.md](Algorithms.md#overall-piece-confidence-pass-58). Below
+  that: rolling-window consistency, consistency heatmap,
+  most-improved-this-week, actual-vs-planned chart, **since Pass 51** an
+  estimated-vs-actual practice time chart (every recently-practiced
+  chunk/transition/combo/section-run-through, estimate vs. real logged
+  minutes), projected finish date, tempo trend sparklines, outcome
+  breakdown, confidence-by-difficulty, and recent practice
   history.
 
 **There was a third tab, Analytics — it is gone as of Pass 20.** Its

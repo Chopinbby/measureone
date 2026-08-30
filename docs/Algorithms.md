@@ -141,6 +141,139 @@ product decision rather than guessed at — recorded in
 [Decisions.md](Decisions.md#open-questions), which whichever future pass
 resolves this should update alongside the actual change.
 
+## Cold-Start check
+
+`coldStartGateMet(piece)`, `coldStartDueThreshold(piece, today)`,
+`applyColdStartLog(piece, day, avgBpm, notes, today)`,
+`applyColdStartUnlog(piece)` — all in `src/lib/coldStart.js` (Pass 56). A
+whole-piece cold play-through, offered once every section has genuinely
+been covered, then re-offered at a widening gap since the piece was last
+touched at all. Distinct from both the section run-throughs above (which
+gate on *practice-chunk* coverage per section) and from
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)'s
+`isPieceLearned` (which requires every chunk at ladder Holding — a much
+stricter bar for a different purpose, whether the *learning plan* is
+done). A piece can clear this gate well before `isPieceLearned` is true;
+the two are deliberately never combined into one check.
+
+### The gate: every section's own run-through, at least once
+
+`coldStartGateMet(piece)` is exactly
+`piece.sections.every(s => ((piece.progress["sr_" + s.id] || {}).sessions
+|| []).length > 0)` — raw `sessions.length`, matching `isSectionLearned`'s
+convention (`lib/chunking.js`), **not** `loggedSessions()`-filtered the way
+`sectionRunThroughGate` is. `sectionRunThroughGate` and `isSectionLearned`
+already deliberately diverge on that exact question for their own reasons
+(see [Section run-throughs](#section-run-throughs) above); this gate sides
+with `isSectionLearned`'s simpler reading, per the pass's own reasoning: a
+section's single-section run-through can only ever become due once
+`isSectionLearned` holds for it (every assigned chunk touched at least
+once), so requiring one logged `sr_<sectionId>` session per section
+already implies the whole piece has been covered — no separate "every
+chunk in the piece has a session" check is needed alongside it. Section-**pair**
+run-throughs (`kind: "section-transition"`) are not part of this gate —
+single-section coverage only.
+
+`piece.sections` is never actually empty in normal use (`SectionsEditor`
+floors at 1 section, `defaultPiece()` seeds one) — but `Array.every()` on
+an empty array is vacuously `true`, so the function guards that case
+explicitly and returns `false`, the same way `countLearnedSections`
+already guards the identical edge case elsewhere in `chunking.js`. A
+hand-edited or malformed import with zero sections can't misread as
+"gate met" with nothing behind it.
+
+### The repeating, escalating prompt
+
+`coldStartDueThreshold(piece, today)` returns the threshold that should be
+surfaced right now — one of **3, 7, 14, then doubling forever (28, 56,
+112, ...)** — or `null` if the gate isn't met or nothing new is due. The
+first three rungs are fixed by the pass; doubling past 14 is this pass's
+own reasonable-default choice for the otherwise-unspecified tail (matching
+the spirit of the maintenance ladder's own Holding-stage interval growth —
+see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#the-ladder-three-stages) —
+not derived from any study, same hand-picked status as this app's other
+scheduling constants, [Research.md](Research.md)).
+
+**Deliberately a pure, uncached recomputation — including "was this
+already shown" — rather than a persisted shown/dismissed flag on `piece`.**
+The mechanism: compute the highest threshold `daysSinceLogged` (`=
+daysBetweenInclusive(piece.lastLoggedAt, today) - 1`, same formula
+`computeRevivalTriggers` already uses for its own staleness check) has
+crossed, then compute the same thing one day earlier
+(`daysSinceLogged - 1`) — "yesterday's" value. The threshold is due only
+when the two disagree, i.e. only on the exact day a new threshold is
+crossed; every day after that, until the next threshold, both
+computations agree and the function reads `null`. This satisfies the
+pass's "doesn't re-fire daily once crossed" requirement with no stored
+state to go stale across gap cycles, and — just as important — no risk of
+a write-driven effect hiding the panel the instant it renders. A more
+literal reading of the pass's "track a `lastPromptedThreshold` value,
+reset it on a new session" framing was tried first and rejected here: an
+automatic "mark as shown" write, applied the way Pass 39's
+`computeMinutesModeAutoExtend` effect applies its patch, would trigger a
+re-render whose *very next* computation reads its own just-written state
+and immediately un-shows the panel it had only just decided to show —
+functionally invisible to a real user despite technically having rendered
+for one frame. Because this is a live derivation off `piece.lastLoggedAt`
+alone, "reset whenever any new session gets logged" (the pass's framing)
+falls out for free: a new session moves `lastLoggedAt` forward (every
+existing logging handler already does this, unchanged by this feature),
+collapsing `daysSinceLogged` back near zero with nothing to explicitly
+reset. Same "computed fresh every call, never a persisted unlocked flag"
+spirit as `sectionRunThroughGate` above and this codebase's other
+schedule-derived state (`chunkSet`/`timeline`, `isPlanActuallyComplete`).
+
+`today` defaults to the real `todayISODate()` but is injectable, mirroring
+`isExportReminderDue`'s `now` parameter (`lib/storage.js`) — lets tests
+simulate the passage of days by varying `piece.lastLoggedAt` against a
+fixed "today," the same style `revival.test.mjs` already uses for
+`computeRevivalTriggers`'s staleness trigger, without needing to mock the
+system clock.
+
+### Logging: a separate synthetic key, not `"__consolidation__"`
+
+`applyColdStartLog`/`applyColdStartUnlog` write to a new synthetic
+`piece.progress["__cold_start__"]` entry — sessions shaped
+`{ day, avgBpm, notes, gapDays, loggedAt, loggedDate }` — deliberately
+**not** appended to `"__consolidation__"`'s existing sessions array, even
+though the two are superficially similar (both a whole-piece play-through
+logged outside the normal per-chunk flow). Two reasons: (1)
+`computeRevivalTriggers` already reads every `"__consolidation__"`
+session's `stopCount` indiscriminately for its ">5 stops" trigger — a
+Cold-Start session carries no `stopCount` at all, so blending the two
+would silently corrupt that trigger's meaning; (2) Progress's recent
+practice-history list would otherwise blend a deliberately-cold gap test
+in with routine scheduled consolidation days, losing a distinction worth
+keeping. `gapDays` is captured from the piece's *pre-log* `lastLoggedAt`
+(the gap that actually motivated this test), since the same call is about
+to overwrite `lastLoggedAt` with today's date — the live gap value would
+otherwise be lost the moment the session lands. `avgBpm` itself is
+log-and-display only: stored and shown (the panel's own "last logged"
+line) but nothing computes off it — no comparison against
+`targetBPM`/`practiceBPM`, no effect on `computeRevivalTriggers` or
+confidence math. **The manual-confidence connection this section
+originally deferred is now built** — see
+[Overall piece confidence](#overall-piece-confidence-pass-58) below and
+[Decisions.md](Decisions.md#overall-piece-confidence).
+
+**Surfaced on Progress's "Recent practice history" list.** Originally
+found missing while documenting this feature (`computePracticeHistory`,
+`lib/history.js`, indexed every progress entry purely by walking its
+`doneDays` array, and `"__cold_start__"` entries deliberately carry no
+`doneDays` at all — a Cold-Start check isn't tied to a specific scheduled
+plan day the way a consolidation day is, so they were structurally
+invisible to that indexing pass). Fixed the same session it was found:
+`computePracticeHistory` now also indexes `"__cold_start__"` sessions
+directly off each session's own `day` field, deduped per day the same way
+`doneDays` itself would be.
+
+`ColdStartPanel` (`src/components/tabs/today/ColdStartPanel.jsx`) is the
+only surface that reads `coldStartDueThreshold` and renders the offer —
+gated on the piece prop alone, no new App.jsx state or effect needed given
+the live-derivation design above; `App.jsx`'s `handleLogColdStart`/
+`handleUnlogColdStart` are thin wrappers around the two `apply*` functions,
+mirroring `handleLogRunThrough`/`handleUnlogRunThrough`'s shape.
+
 ## Timeline / scheduler
 
 `computeTimeline(piece, chunkSet)` is the scheduler. It runs on every
@@ -534,6 +667,89 @@ actually set.
 `getDefaultTargetBPM(piece, chunk)` resolves the effective tempo target for
 a chunk with no explicit per-chunk target: checks `piece.bpmZones` for a
 measure-range match first, then falls back to `piece.targetBPM`.
+
+### Overall piece confidence (Pass 58)
+
+`computeAutoOverallConfidence(piece, practiceChunks, currentDay)`
+(`lib/confidence.js`) rolls every practice chunk's `computeConfidence` up
+into one piece-level number — **effort-weighted**, not a plain mean:
+`sum(computeConfidence(chunk) * chunk.effort) / sum(chunk.effort)`. Chosen
+over an unweighted average (the pass's other candidate formula, confirmed
+with the user before building) for consistency with how this codebase
+already weights everything else time/effort-related — `chunk.effort` is
+the same unit `EFFORT_TO_MIN`-based scheduling, revival, and maintenance
+math already uses throughout (see [Timeline / scheduler](#timeline--scheduler)
+above). Practical effect: a long or difficult passage moves this number
+more than a short easy one — two chunks with equal `effort` reduce to a
+plain average, but a lopsided split (e.g. a 9:1 effort ratio) pulls the
+result sharply toward whichever chunk carries the larger share, even if
+the other chunk's confidence is high.
+
+Scoped to `practiceChunks` only — transitions and combos are excluded,
+matching both candidate formulas the pass proposed. Reads each chunk
+through `computeConfidence` (the manual-override-and-caps-resolved
+function), not `computeAutoConfidence` directly — a per-chunk
+`manualConfidence` override or a rough/lost/`needsRelearning` cap is
+already reflected in what feeds this rollup, not bypassed by it. An empty
+`practiceChunks` list (or zero total effort) returns `0` rather than
+`NaN`.
+
+`computeOverallConfidence(piece, practiceChunks, currentDay)` adds the
+piece-level manual-override precedence, mirroring `computeConfidence`'s
+own `progress[chunkId].manualConfidence` check exactly, just one level up:
+`piece.manualOverallConfidence` (`undefined`/`null` both mean "no
+override, use auto"; any other number — including `0` — wins outright,
+clamped to 0–100 and rounded). `isManualOverallConfidence(piece)` is the
+matching boolean, mirroring `isManualConfidence(chunk, progress)`. Unlike
+per-chunk confidence, there is no rough/lost/`needsRelearning`-style cap
+at this level — those are per-chunk demotions with no piece-wide
+equivalent, and applying them again here (on top of numbers where they're
+already baked into each chunk's own `computeConfidence`) would double-count
+them.
+
+Displayed on `ProgressTab` with an inline set/clear control mirroring
+`PieceMapTab`'s existing (non-`sequentialMode`) confidence-override
+`.field` block exactly — same `NumberInput` + "Reset to automatic" /
+"Set manually" `.manual-conf-row` shape, per the pass's own instruction to
+reuse that pattern rather than invent a new one. The write path
+(`handleSetManualOverallConfidence`, `App.jsx`) is a one-line
+`updatePiece` twin of `handleSetManualConfidence`, direct field write, no
+snapshot to restore — same shape, piece-level instead of per-chunk. See
+[Decisions.md](Decisions.md#overall-piece-confidence) for why this touched
+`App.jsx` even though it wasn't in this pass's originally-listed
+touched-file set.
+
+**Deliberately not wired to `isPieceLearned`** (`lib/ladder.js`, Pass 39)
+or the ladder-stage rollup in either direction — see
+[Data-Model.md](Data-Model.md#overall-piece-confidence-a-rollup-not-a-third-independent-score)
+for the full reasoning.
+
+**Wired to Pass 56's Cold-Start check, as a same-session follow-up**:
+`ColdStartPanel` (`src/components/tabs/today/ColdStartPanel.jsx`) shows a
+short, optional "How would you rate the piece overall right now?" prompt
+immediately after a successful Cold-Start log — five quick-tap presets
+(`CONFIDENCE_PRESETS`, `lib/constants.js`, the same ones `PieceMapTab`'s
+revival "Quick rate" control already uses) that call
+`onSetOverallConfidence` (App.jsx's `handleSetManualOverallConfidence`)
+immediately on tap, plus a "Skip" button that dismisses with no write at
+all. Genuinely optional, not just softly worded as such: nothing is
+required to make the prompt go away, and nothing persists if it's
+skipped or simply navigated away from. Threaded down through
+`TodayTab.jsx` → `ColdStartPanel.jsx`, the same prop-passing shape every
+other cross-tab handler in this app already uses. Held back from the
+original build (see [Decisions.md](Decisions.md#overall-piece-confidence)
+for why) and added once explicitly requested in the same session.
+
+One implementation subtlety worth knowing: logging a Cold-Start session
+immediately moves `piece.lastLoggedAt` to today, which makes
+`coldStartDueThreshold` read `null` again on the very next render (see
+[The repeating, escalating prompt](#the-repeating-escalating-prompt)
+above) — without a small `justLogged` flag held in `ColdStartPanel`'s own
+local state, the whole panel would vanish the instant you log, before the
+follow-up prompt could ever render. That flag is intentionally
+unpersisted (component state only, lost on navigating away) — the prompt
+is meant to be a one-shot, low-stakes nudge, not something the app tracks
+or nags about later.
 
 ### Tempo-climbing nudge (Pass 30)
 

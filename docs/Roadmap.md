@@ -134,6 +134,34 @@ it was built once actually requested, reusing each session's `loggedDate`
 rather than writing anything genuinely new to the confidence/scheduling
 engine.
 
+**Since Pass 56**, a Cold-Start check: once every section's own
+single-section run-through has been logged at least once, the app offers
+a periodic, escalating nudge (3, 7, 14, 28, ... days since anything was
+logged on the piece) to play the whole thing through cold — no warm-up —
+and log average BPM plus free-text notes. Log-and-display only; nothing
+computes off the result yet. See
+[Algorithms.md](Algorithms.md#cold-start-check) and
+[Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#cold-start-check-built-pass-56).
+
+**Since Pass 57**, Today's Practice has its own `RandomStartPanel` —
+`RandomStartPanel` (previously Revival/Master-Agenda-only) pooling every
+chunk/transition/combo in the current piece with 2+ logged sessions, so a
+practice session doesn't always start from the same place. Hidden below
+2 qualifying entries.
+
+**Since Pass 58**, Progress has a piece-level "Overall confidence" stat —
+an effort-weighted average of `computeConfidence` across every practice
+chunk, with its own manual override (same escape-hatch pattern as
+per-chunk `manualConfidence`). Connected to Pass 56's Cold-Start check as
+a same-session follow-up: completing a Cold-Start log now offers a short,
+optional "rate the piece overall" prompt. See
+[Algorithms.md](Algorithms.md#overall-piece-confidence-pass-58) and
+[Decisions.md](Decisions.md#overall-piece-confidence). This is a
+different question from item 2 below ("a genuinely *learned*... model") —
+that item is about *deriving* the scheduling constants from real data;
+this stat is a display rollup of the existing hand-tuned
+`computeConfidence`, not a new model.
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold

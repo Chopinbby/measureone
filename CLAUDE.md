@@ -218,6 +218,11 @@ first-class piece-level "learned" *state* to gate other features on (e.g.
 the still-unbuilt "gate revival entry behind maintenance" item — see
 [`docs/Decisions.md`](docs/Decisions.md#open-questions)). See
 [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
+**Don't confuse this with Pass 58's `computeOverallConfidence`** (see the
+Roadmap section below) — that's a continuous, always-moving 0–100 stat
+built from `computeConfidence`, deliberately not the same question as
+`isPieceLearned`'s strict "every chunk at Holding" boolean, and the two
+are never read from each other.
 
 ## Roadmap
 
@@ -640,6 +645,67 @@ tip-line when a piece has no `targetBPM` to be a fraction of — typing
 into the field in that state doesn't do anything, by design, not a bug.
 `computeTempoLadder` itself and everything downstream of the stored
 fraction are completely unchanged; only the input widget changed.
+
+**Since Pass 56**, a piece that's had every section's own single-section
+run-through logged at least once (`coldStartGateMet`, `lib/coldStart.js` —
+this one check already implies the whole piece has been covered, no
+separate check needed) gets a periodic, escalating nudge to test itself
+cold: a whole-piece play-through, no warm-up, logged as average BPM +
+free-text notes to a new synthetic `piece.progress["__cold_start__"]` key
+— deliberately **not** folded into `"__consolidation__"`'s sessions, since
+`computeRevivalTriggers` reads every `"__consolidation__"` session's
+`stopCount` indiscriminately and a Cold-Start session has none. The prompt
+escalates at 3, 7, 14, 28, ... days (doubling past 14) since anything was
+logged on the piece at all, computed as a **live derivation with no
+persisted "already shown" flag** (`coldStartDueThreshold`, comparing
+today's crossed threshold against the same computation one day earlier) —
+same "computed fresh every call, never a persisted unlocked flag" spirit
+as `sectionRunThroughGate` above. See
+[`docs/Algorithms.md`](docs/Algorithms.md#cold-start-check). **Two real
+gaps were found and fixed in the same session** — worth knowing if you
+touch synthetic progress keys again: `lib/storage.js`'s ladder-state
+backfill/diff functions now read from a shared `NON_CHUNK_PROGRESS_KEYS`
+list rather than checking `"__consolidation__"` by name in two separate
+places (the first cut missed `"__cold_start__"` from one of the two), and
+`lib/history.js`'s `computePracticeHistory` now also indexes
+`"__cold_start__"` sessions off their own `day` field — that key
+deliberately carries no `doneDays`, which is what the indexing used to
+rely on exclusively, so a logged check never showed up on Progress's
+history list at all until this was fixed.
+
+**Since Pass 57**, Today's Practice also renders a `RandomStartPanel` of
+its own (previously Revival- and Master-Agenda-only) — every practice
+chunk/transition/combo in the current piece with 2+ logged sessions,
+hidden entirely below 2 qualifying entries (matching Master Agenda's own
+threshold for the same component). No changes to `RandomStartPanel`
+itself were needed. **Known, low-severity gap, not fixed**: the pool
+filters on raw `sessions.length`, not `loggedSessions()`-filtered, so a
+chunk with one real session plus a stray Interleaved skip or unconfirmed
+provisional attempt can appear in the pool too, reading as more-practiced
+than it actually is.
+
+**Since Pass 58**, Progress has a piece-level "Overall confidence" stat —
+`computeOverallConfidence(piece, practiceChunks, currentDay)`
+(`lib/confidence.js`), an **effort-weighted** average of `computeConfidence`
+across every practice chunk (confirmed with the user before building, over
+a plain-average alternative — consistent with how this codebase already
+weights everything else time/effort-related via `chunk.effort`), with its
+own manual override field (`piece.manualOverallConfidence`, same
+undefined/null-means-auto escape-hatch precedence as per-chunk
+`manualConfidence`). **This is a continuous stat, not a replacement for
+`isPieceLearned`** (see "Known simplifications" below) — the two answer
+different questions and are deliberately not wired together either
+direction. Same-session follow-up, built once explicitly requested:
+`ColdStartPanel` now shows a short, genuinely optional "how would you rate
+the piece overall right now?" prompt right after a Cold-Start log — five
+quick-tap presets (reusing `PieceMapTab`'s existing revival "Quick rate"
+values) or Skip, which writes nothing at all. Wiring this touched
+`App.jsx` even though it wasn't in that pass's originally-listed
+touched-file set — there's no way to build a working manual-override
+control without a handler that calls `updatePiece`, and every piece
+mutation in this app funnels through one owned by `App.jsx`. See
+[`docs/Decisions.md`](docs/Decisions.md#overall-piece-confidence) for the
+full reasoning on both of those calls.
 
 **Since Pass 59**, `practiceBPM`'s pass/soft-miss step is gap-proportional
 (a "tempo ratchet," `ladderConfig.tempoRatchet`) instead of the old flat

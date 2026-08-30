@@ -122,11 +122,50 @@ describe("validateAndMigratePiece — representative old piece shapes", () => {
     assert.equal(m.lastLoggedAt, null, "no sessions logged yet");
   });
 
+  test("[Pass 58] a piece saved before manualOverallConfidence existed backfills to null, not undefined", () => {
+    const m = validateAndMigratePiece(fresh);
+    assert.equal(m.manualOverallConfidence, null);
+  });
+
+  test("[Pass 58] an existing manualOverallConfidence value survives migration unchanged", () => {
+    const m = validateAndMigratePiece({ ...fresh, manualOverallConfidence: 62 });
+    assert.equal(m.manualOverallConfidence, 62);
+  });
+
+  test("[Pass 58, regression] an existing manualOverallConfidence of exactly 0 survives migration — must not be coerced back to null by a `||` default", () => {
+    const m = validateAndMigratePiece({ ...fresh, manualOverallConfidence: 0 });
+    assert.equal(m.manualOverallConfidence, 0);
+  });
+
   test("mid-plan piece backfills ladder state on every real chunk, not the synthetic consolidation entry", () => {
     const m = validateAndMigratePiece(midPlan);
     assertChunkBackfilled(m.progress.c1);
     assertChunkBackfilled(m.progress.c2);
     assert.deepEqual(m.progress.__consolidation__, { doneDays: [3] });
+  });
+
+  test("[regression, Pass 56 follow-up] the synthetic __cold_start__ entry is left alone too, not just __consolidation__", () => {
+    // backfillProgressLadderState (lib/storage.js) originally special-cased
+    // only "__consolidation__" by name — "__cold_start__" (Pass 56) was
+    // added later and initially missed, so it silently fell through to the
+    // generic per-chunk branch and picked up unused stage/practiceBPM/etc.
+    // ladder fields on every reload. Fixed via a shared
+    // NON_CHUNK_PROGRESS_KEYS list both functions read from.
+    const withColdStart = {
+      id: "p_cold",
+      name: "Prelude",
+      totalMeasures: 40,
+      startDate: "2026-07-01",
+      progress: {
+        c1: { doneDays: [1], sessions: [{ day: 1, cleanReps: 3, bpm: 60, effectiveness: "good" }] },
+        __cold_start__: { sessions: [{ day: 5, avgBpm: 96, notes: "fine", gapDays: 3, loggedDate: "2026-07-05" }] },
+      },
+    };
+    const m = validateAndMigratePiece(withColdStart);
+    assertChunkBackfilled(m.progress.c1);
+    assert.deepEqual(m.progress.__cold_start__, {
+      sessions: [{ day: 5, avgBpm: 96, notes: "fine", gapDays: 3, loggedDate: "2026-07-05" }],
+    });
   });
 
   test("mid-plan piece backfills session loggedDate from day + startDate, preserving old fields", () => {
@@ -726,6 +765,24 @@ describe("diffImportedPiece — Pass 13 import divergence detection", () => {
   test("the synthetic __consolidation__ entry is never compared, even if it differs", () => {
     const existing = { updatedAt: 3000, progress: { c1: ladderChunk(), __consolidation__: { doneDays: [1] } } };
     const imported = { updatedAt: 3000, progress: { c1: ladderChunk(), __consolidation__: { doneDays: [1, 2] } } };
+    assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
+  });
+
+  test("[regression, Pass 56 follow-up] the synthetic __cold_start__ entry is never compared either", () => {
+    // ladderStateDiffers originally special-cased only "__consolidation__"
+    // by name — a piece with real ladder agreement on every actual chunk,
+    // but differing __cold_start__ sessions between the two sides, would
+    // have been wrongly flagged as a genuine divergence needing the
+    // ImportPiecesModal picker, even though __cold_start__ carries no
+    // ladder state to actually disagree on.
+    const existing = {
+      updatedAt: 3000,
+      progress: { c1: ladderChunk(), __cold_start__: { sessions: [{ day: 1, avgBpm: 90 }] } },
+    };
+    const imported = {
+      updatedAt: 3000,
+      progress: { c1: ladderChunk(), __cold_start__: { sessions: [{ day: 1, avgBpm: 90 }, { day: 5, avgBpm: 100 }] } },
+    };
     assert.deepEqual(diffImportedPiece(existing, imported), { hasDivergence: false, resolution: "existing" });
   });
 

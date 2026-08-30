@@ -104,18 +104,28 @@ function backfillSessionDate(session, startDate) {
   return { ...session, loggedDate };
 }
 
+// Synthetic per-piece progress keys that are never a real chunk — unlike
+// `sr_<sectionId>` (a section run-through, still backfilled/compared like
+// any other entry below), these are whole-piece logs with nothing to put
+// ladder state on. Shared by backfillProgressLadderState and
+// ladderStateDiffers below so a key only needs adding here once, not at
+// each call site separately — "__cold_start__" (Pass 56) was originally
+// missed from both, added to only one, and had to be found and fixed as a
+// follow-up (see Data-Model.md#pieceprogress-keys-are-not-guaranteed-to-exist-in-the-chunk-set).
+const NON_CHUNK_PROGRESS_KEYS = ["__consolidation__", "__cold_start__"];
+
 // Backfills per-chunk ladder state (stage/consecutivePasses/practiceBPM/
 // nextDueDate/tier1Done — Repertoire-Lifecycle.md's "The ladder: three
 // stages") onto every existing progress entry, and each entry's sessions
 // with a real calendar date. Every already-saved piece has no ladder state
 // to backfill from, so defaults are the ladder's "not on the ladder yet"
 // values, not derived from session history — same non-destructive spirit as
-// the rest of this migration. Skips the synthetic "__consolidation__" key
-// (Data-Model.md#the-piece-object) since it isn't a real chunk.
+// the rest of this migration. Skips NON_CHUNK_PROGRESS_KEYS
+// (Data-Model.md#the-piece-object) since none of them are a real chunk.
 function backfillProgressLadderState(progress, startDate) {
   const result = {};
   Object.entries(progress || {}).forEach(([key, entry]) => {
-    if (key === "__consolidation__") {
+    if (NON_CHUNK_PROGRESS_KEYS.includes(key)) {
       result[key] = entry;
       return;
     }
@@ -231,12 +241,17 @@ function backfillProgressLadderState(progress, startDate) {
 // Most recent session date across every chunk, or null if nothing's ever
 // been logged. Recomputed fresh on every load (like daysToLearn
 // reconciliation below), not backfilled-and-locked-in like startDate,
-// since new sessions keep changing what "most recent" means. Includes
-// "__consolidation__" (full run-through sessions, Pass 6) — a run-through
-// is a real touch on the piece, and Revival's 60+-days-untouched auto-
-// trigger (Pass 7, lib/revival.js) reads this value, so excluding
-// run-throughs here would make a piece practiced only via run-throughs
-// look falsely stale after every reload.
+// since new sessions keep changing what "most recent" means. Includes both
+// NON_CHUNK_PROGRESS_KEYS — "__consolidation__" (full run-through sessions,
+// Pass 6) and "__cold_start__" (Pass 56) — same as every real chunk,
+// unlike backfillProgressLadderState/ladderStateDiffers above: this
+// function never special-cases by key at all, it just walks every entry's
+// sessions generically, so nothing extra was needed here when
+// "__cold_start__" was added. A run-through or a cold-start check is a
+// real touch on the piece either way, and Revival's 60+-days-untouched
+// auto-trigger (Pass 7, lib/revival.js) reads this value, so excluding
+// either here would make a piece practiced only that way look falsely
+// stale after every reload.
 function computeLastLoggedAt(progress) {
   let latest = null;
   Object.values(progress).forEach((entry) => {
@@ -300,6 +315,14 @@ export function validateAndMigratePiece(piece) {
       plan: null,
     },
     memoryAnchors: piece.memoryAnchors || {},
+    // Overall-piece confidence manual override (Pass 58) — same
+    // undefined-and-null-both-mean-"auto" escape-hatch shape as each
+    // chunk's own progress[id].manualConfidence (isManualOverallConfidence/
+    // computeOverallConfidence, lib/confidence.js). Explicit `!== undefined`
+    // rather than `|| null` so an actual 0 override (a real, deliberately
+    // low rating) survives this backfill instead of being coerced back to
+    // null by `||`'s falsy check.
+    manualOverallConfidence: piece.manualOverallConfidence !== undefined ? piece.manualOverallConfidence : null,
     // Pieces saved before pause/archive existed default to active.
     status: piece.status || "active",
     // Plans saved before startDate existed (or backups that predate it)
@@ -608,8 +631,8 @@ function mergeSessionArrays(existingSessions, importedSessions) {
 // it the way it does most other fields — it's always taken wholesale from
 // one side or the other (see `ladderChoice` on mergeProgress/
 // mergeImportedPiece and `diffImportedPiece` below for how that side gets
-// picked). "__consolidation__" (Pass 6 run-through sessions) isn't a real
-// chunk and carries none of these, so callers skip it rather than compare it.
+// picked). NON_CHUNK_PROGRESS_KEYS (above) aren't real chunks and carry
+// none of these, so callers skip them rather than compare them.
 const LADDER_STATE_FIELDS = [
   "stage",
   "consecutivePasses",
@@ -641,7 +664,7 @@ function ladderStateDiffers(existingProgress, importedProgress) {
   const existing = existingProgress || {};
   const imported = importedProgress || {};
   return Object.keys(existing).some((chunkId) => {
-    if (chunkId === "__consolidation__") return false;
+    if (NON_CHUNK_PROGRESS_KEYS.includes(chunkId)) return false;
     const e = existing[chunkId];
     const i = imported[chunkId];
     if (!e || !i) return false;

@@ -401,6 +401,62 @@ verified" as a to-do, not a finished answer — go check it before the
 confidence rating is final, the same instinct as checking a doc's claim
 against the actual code rather than trusting the prose.
 
+## A conditionally-`null`-returning component still carries its state across every re-appearance
+
+When a component's own function body decides whether to render anything
+(`if (someCondition == null) return null;`), that's not the same as
+unmounting. Its parent usually still renders the same `<Component />` on
+every pass regardless of what it's about to return, so React keeps the
+same instance — and every `useState` in it — alive the whole time,
+including through however many renders it spent returning `null`. Any
+local state that should logically "start fresh" the next time the
+component has something to show needs an explicit reset tied to the
+condition that makes it reappear; it will not reset on its own just
+because nothing was on screen for a while.
+
+Worked example (Pass 56 review): `ColdStartPanel` shows a due/not-due
+panel driven by `coldStartDueThreshold(piece)`, returning `null` when
+nothing's due. A note typed into its free-text field but never
+submitted survived a "goes quiet, becomes due again days later" cycle
+untouched — since the component never actually unmounted between those
+two due windows, the stale draft would silently reappear pre-filled the
+next time the panel had something to show. Fixed with a `useEffect` keyed
+on the due-condition itself, clearing the field whenever the panel newly
+has something new to render. A related timing hazard came up designing
+the fix for a follow-up in the same area (Pass 58's post-log "rate the
+piece" prompt): an *automatic* write meant to record "the user has now
+seen this" would trigger a re-render whose very next computation reads
+its own just-written state and immediately hides what it had only just
+decided to show — invisible to a human tester despite technically
+rendering for one commit. Both are the same root cause (conditional
+`null` rendering keeps state alive across visibility toggles) surfacing
+in opposite directions — one where state should have reset and didn't,
+one where an automatic reset would have fired too eagerly — so when
+adding logic like this, trace both directions before considering it done.
+
+## Cleaning up manually-injected test data needs a reload, not just a storage write
+
+When verifying a fix by writing a scratch piece directly into
+`localStorage` (bypassing the UI), removing it the same way
+(`localStorage.removeItem(...)`) only clears the on-disk copy. If the app
+is still open in the same tab, its own state (`pieces`, held in React,
+loaded once from storage) still has the old data in memory — and this
+app's auto-save effect (see [Architecture.md](Architecture.md#state-management))
+writes every entry in that in-memory state back to `localStorage`
+whenever it changes, for any reason, including one that has nothing to do
+with the piece you just tried to delete. The next such write silently
+resurrects the "removed" test piece.
+
+Worked example (same session, Pass 57/58 browser verification): a test
+piece was removed via `removeItem` and confirmed gone via
+`Object.keys(localStorage)` immediately after. Several tool calls later —
+none of them touching that piece deliberately — `Object.keys(localStorage)`
+showed it back, restored by the app's own save effect reacting to
+something unrelated. The fix is procedural, not a code fix: after removing
+manually-injected test data, reload the page before trusting the cleanup,
+the same way [verifying any write requires an actual reload](#an-immediate-post-action-check-is-not-the-same-as-verifying-persistence) —
+this is that same lesson applied to deletions instead of writes.
+
 ## Adding a new per-chunk ladder field is a checklist, not a single edit — this codebase has already proven that twice
 
 When `computeLadderAdvance` (or any pure function whose result gets

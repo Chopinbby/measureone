@@ -3,6 +3,8 @@ import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { FocusPanel } from "./today/FocusPanel";
 import { SectionRunThroughPanel } from "./today/SectionRunThroughPanel";
+import { ColdStartPanel } from "./today/ColdStartPanel";
+import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
@@ -91,6 +93,9 @@ export function TodayTab({
   onDiscardProvisionalSession,
   onLogRunThrough,
   onUnlogRunThrough,
+  onLogColdStart,
+  onUnlogColdStart,
+  onSetOverallConfidence,
   onReschedule,
   onReassessRange,
   onSetMemoryAnchor,
@@ -262,6 +267,16 @@ export function TodayTab({
     .filter(Boolean)
     .map((c) => ({ start: c.start, end: c.end }));
 
+  // Random Start (Pass 57) — the same "don't let yourself always start
+  // from the top" pool RevivalTab/MasterAgendaTab already use (chunkEntry,
+  // components/tabs/revival/RandomStartPanel.jsx), scoped here to whatever
+  // in this piece already has 2+ logged sessions: practice chunks,
+  // transitions, and combos alike (chunkEntry already labels all three
+  // correctly, so no filtering to practice chunks only).
+  const randomStartPool = chunks
+    .filter((c) => ((piece.progress[c.id] || {}).sessions || []).length >= 2)
+    .map((c) => chunkEntry(c, piece.memoryAnchors && piece.memoryAnchors[c.id]));
+
   return (
     <div className="tab-pane">
       <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
@@ -416,6 +431,28 @@ export function TodayTab({
         currentDay={currentDay}
         onLogSession={onLogSession}
         onUnlogSession={onUnlogSession}
+      />
+
+      {/* Scoped to the regular (non-past-plan) view — past the plan,
+          Master Agenda's own maintenance-due random-start pool already
+          covers this idea across every piece's due work. Hidden entirely
+          (rather than shown disabled) below 2 entries, matching Master
+          Agenda's own threshold for the same component (there's no single
+          chunk-level state to point to an explanation the way Pass 29's
+          Interleaved-mode gate has, and a 1-entry pool has nothing to
+          actually randomize between). */}
+      {!pastPlan && randomStartPool.length > 1 && <RandomStartPanel entries={randomStartPool} />}
+
+      {/* Cold-Start is a periodic nudge, not a daily task — it renders
+          only on the day a new gap threshold is actually crossed (see
+          coldStartDueThreshold, lib/coldStart.js), so it sits below even
+          the section run-throughs. */}
+      <ColdStartPanel
+        piece={piece}
+        day={elapsedDay}
+        onLogColdStart={onLogColdStart}
+        onUnlogColdStart={onUnlogColdStart}
+        onSetOverallConfidence={onSetOverallConfidence}
       />
 
       <ReassessPanel piece={piece} todaysRanges={todaysRanges} onReassessRange={onReassessRange} />

@@ -24,6 +24,7 @@ import { generateAllChunks } from "./lib/chunking";
 import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
+import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
@@ -496,6 +497,29 @@ export default function App() {
       const doneDays = stillHasDay ? prevEntry.doneDays : (prevEntry.doneDays || []).filter((d) => d !== day);
       progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress };
+    });
+  };
+
+  // Cold-Start check (Pass 56) — a whole-piece cold play-through offered
+  // once every section's own single-section run-through has been logged
+  // at least once, then re-offered at a widening gap since anything was
+  // last logged on the piece. Both handlers are thin wrappers: the actual
+  // logic (why this writes a separate "__cold_start__" key rather than
+  // reusing "__consolidation__", the gapDays computation, the escalating
+  // due-threshold check) lives in lib/coldStart.js so it's unit-testable
+  // per CLAUDE.md's "logic that needs a regression test belongs in
+  // src/lib/" rule. See docs/Algorithms.md#cold-start-check.
+  const handleLogColdStart = (day, avgBpm, notes) => {
+    updatePiece((p) => {
+      const { progress, lastLoggedAt } = applyColdStartLog(p, day, avgBpm, notes);
+      return { ...p, progress, lastLoggedAt };
+    });
+  };
+
+  const handleUnlogColdStart = () => {
+    updatePiece((p) => {
+      const result = applyColdStartUnlog(p);
+      return result ? { ...p, ...result } : p;
     });
   };
 
@@ -986,6 +1010,17 @@ export default function App() {
       progress[chunkId] = entry;
       return { ...p, progress };
     });
+  };
+
+  // Piece-level twin of handleSetManualConfidence above (Pass 58) — a
+  // direct field write, same escape-hatch shape, just piece.manualOverallConfidence
+  // instead of a per-chunk progress entry. Not in ProgressTab.jsx's own
+  // touched-file scope for this pass, but there's no way to build "a way to
+  // set/clear the manual override inline" (the pass's own words) without a
+  // write path, and every piece mutation in this app funnels through an
+  // App.jsx-owned handler like this one — see CLAUDE.md's updatePiece rule.
+  const handleSetManualOverallConfidence = (value) => {
+    updatePiece((p) => ({ ...p, manualOverallConfidence: value }));
   };
 
   // Rule 2's manual half of needsRelearning's dual exit (the other half is
@@ -1703,6 +1738,9 @@ export default function App() {
                 onDiscardProvisionalSession={handleDiscardProvisionalSession}
                 onLogRunThrough={handleLogRunThrough}
                 onUnlogRunThrough={handleUnlogRunThrough}
+                onLogColdStart={handleLogColdStart}
+                onUnlogColdStart={handleUnlogColdStart}
+                onSetOverallConfidence={handleSetManualOverallConfidence}
                 onReschedule={handleReschedule}
                 onReassessRange={handleReassessRange}
                 onSetMemoryAnchor={handleSetMemoryAnchor}
@@ -1717,6 +1755,7 @@ export default function App() {
                 timeline={timeline}
                 currentDay={currentDay}
                 onViewAllPieces={() => setActiveTab("all-pieces")}
+                onSetOverallConfidence={handleSetManualOverallConfidence}
               />
             )}
             {/* Not in NAV_BASE — reached only via the button on Progress,

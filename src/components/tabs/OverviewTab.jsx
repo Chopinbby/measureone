@@ -36,6 +36,19 @@ export function OverviewTab({
   // For "The first week"'s today-row note below — reused rather than a
   // separate count, per Pass 45's build note.
   const { missedCount } = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
+  // Pass 64 — this panel used to always show days 1-7, forever, regardless
+  // of how far into the plan the piece actually was. Now it follows
+  // currentDay with the same week-grouping math TimelineTab already uses
+  // for its own week-by-week grid (`for (let i = 0; i < timeline.days.length;
+  // i += 7) weeks.push(timeline.days.slice(i, i + 7))`), just picking out
+  // the one week containing currentDay instead of rendering every week.
+  // currentDay is already the clamped value every other tab receives, so a
+  // piece past its own plan (Pass 39) naturally keeps showing the plan's
+  // final week rather than computing an out-of-bounds index, and a final
+  // week shorter than 7 days is handled for free by slice() truncating at
+  // the array's actual length — neither needs special-casing here.
+  const weekIndex = Math.floor((currentDay - 1) / 7);
+  const weekDays = timeline.days.slice(weekIndex * 7, weekIndex * 7 + 7);
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
@@ -161,9 +174,12 @@ export function OverviewTab({
       </div>
 
       <div className="panel">
-        <h3>The first week</h3>
+        {/* Week 1 keeps the friendlier onboarding wording; week 2+ reads
+            as a plain "Week N", matching TimelineTab's own heading
+            convention for every week after the first. */}
+        <h3>{weekIndex === 0 ? "The first week" : `Week ${weekIndex + 1}`}</h3>
         <div className="day-preview-list">
-          {timeline.days.slice(0, 7).map((d) => {
+          {weekDays.map((d) => {
             let desc = "Nothing scheduled";
             if (d.type === "consolidation") {
               desc = "Full run-through & consolidation";

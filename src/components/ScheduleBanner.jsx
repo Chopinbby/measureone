@@ -1,5 +1,5 @@
 import { ArrowLeft, RotateCcw } from "lucide-react";
-import { computeScheduleStatus, shouldShowScheduleBanner } from "../lib/scheduling";
+import { shouldShowScheduleBanner, countBehindDays } from "../lib/scheduling";
 
 /* ------------------------------------------------------------------ */
 /*  Schedule banner (shared by Overview, Today, and Timeline)         */
@@ -12,19 +12,31 @@ import { computeScheduleStatus, shouldShowScheduleBanner } from "../lib/scheduli
 // this same banner instead of Today rendering a second one right below it —
 // combined on request once both existed side by side.
 export function ScheduleBanner({ piece, chunkSet, timeline, currentDay, onReschedule, earliestBehindDay, onDayChange }) {
-  const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, currentDay);
+  const behindDays = countBehindDays(piece, timeline, currentDay);
   // Pass 16, redefined Pass 39 — shouldShowScheduleBanner needs the full
   // piece/chunkSet (not just a precomputed elapsedDay number) to tell
   // "still in the plan" from "plan's actually over" from "calendar ran out
   // with real work left" apart. See that function for why those three
   // aren't all the same thing.
-  if (!shouldShowScheduleBanner(piece, chunkSet, timeline, status.missedCount)) return null;
+  //
+  // Same-session follow-up to Pass 70: this used to pass
+  // computeScheduleStatus's missedCount here instead of behindDays —
+  // missedCount only ever looks at base practice chunks, so a piece with
+  // every one of those touched but a transition/combo/review still
+  // unlogged past its day read as fully caught up and suppressed the
+  // banner entirely, even on Today's Practice where `earliestBehindDay`
+  // (Pass 67's classifyDayCompletion-based scan, which never had this
+  // blind spot) had already found a real day to jump to — the button was
+  // computed correctly and then hidden behind this narrower gate. Passing
+  // behindDays instead fixes that dead end and makes this the same signal
+  // Master Agenda's per-piece badge already uses.
+  if (!shouldShowScheduleBanner(piece, chunkSet, timeline, behindDays)) return null;
   const hasCatchUp = earliestBehindDay != null && typeof onDayChange === "function";
   return (
     <div className="schedule-banner">
       <div>
         <p className="schedule-banner-title">
-          {status.missedCount} chunk{status.missedCount === 1 ? "" : "s"} behind schedule
+          {behindDays} day{behindDays === 1 ? "" : "s"} behind schedule
         </p>
         <p className="schedule-banner-sub">
           {hasCatchUp

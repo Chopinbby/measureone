@@ -963,6 +963,103 @@ fixed by normalizing on every edit, not just flagged.**
 - See [`CLAUDE.md`](../CLAUDE.md)'s "Rules that matter every session" for
   the standing invariant this establishes.
 
+**Decision (Pass 70 + same-session follow-ups): "N chunks behind" became
+"N days behind" everywhere it's shown, and the shared reschedule banner's
+own visibility widened to match.**
+
+- **What changed:** a new `countBehindDays(piece, timeline, currentDay)`
+  (`lib/scheduling.js`) counts distinct timeline days `classifyDayCompletion`
+  calls `"behind"`, as a day-count sibling to `computeScheduleStatus`'s
+  chunk-count `missedCount`. `ScheduleBanner`, Master Agenda's per-piece
+  badge/footer, and Overview's first-week note all display this instead of
+  `missedCount` now — several missed chunks piled on one day used to
+  inflate the shown number past the actual number of days a learner needs
+  to catch up on.
+- **Found in review, before commit, and fixed the same session:** switching
+  Master Agenda's badge/footer *text* to `behindDaysCount` without also
+  switching its footer *color* left the two disagreeing — a piece could
+  read "N days behind schedule" in plain ink instead of the alarming
+  brick color every other "behind" state uses. Fixed by driving all three
+  (badge, text, color) off `behindDaysCount` — `missedCount` is no longer
+  read anywhere inside `MasterAgendaTab`'s `renderPieceCard`.
+- **A deeper, deliberately-requested follow-up:** `missedCount` only ever
+  looks at base practice chunks (`computeScheduleStatus`'s `practiceChunks`
+  loop) — it has no visibility into transitions, combos, or reviews. That
+  meant a piece with every practice chunk touched at least once, but a
+  transition/combo/review still sitting unlogged past its scheduled day,
+  read as fully caught up to `shouldShowScheduleBanner` — the shared
+  banner (Overview, Today's Practice, Timeline) went completely silent,
+  even though Today's Practice's own "Go to Day N" catch-up button
+  (`findEarliestBehindDay`, Pass 67) had *already* found a real day to
+  jump to via the same `classifyDayCompletion` scan `countBehindDays` now
+  reuses — the button was computed correctly and then hidden behind this
+  narrower gate. `shouldShowScheduleBanner` now takes `countBehindDays`
+  instead of `missedCount`, closing that dead end.
+- **Initially left un-widened, then fixed the same session on direct
+  request: the bulk "Reschedule all" mechanism** (`behindItems` filter on
+  `MasterAgendaTab`, and `planRescheduleForPieces`/`handleRescheduleAll` in
+  `App.jsx`). The risk that stopped this the first time was real: a piece
+  whose only open item is a transition/combo/review genuinely has no
+  untouched practice-chunk material for a reschedule to move (same
+  reasoning the single-piece `handleReschedule` already encodes in its own
+  graceful-empty-state alert — "there's nothing left to reschedule... check
+  View all"). Widening `behindItems` to `behindDaysCount` without also
+  widening the click-time path would let a piece appear in the "N pieces
+  are behind schedule" panel yet contribute nothing to
+  `handleRescheduleAll`'s plan list — and if it were the *only* qualifying
+  piece, clicking "Reschedule all" would silently do nothing at all, with
+  no explanatory message the way the single-piece path has.
+  - **The actual fix, once asked for:** a new `findStuckBehindPieces(pieces)`
+    (`lib/scheduling.js`) finds exactly the pieces `planRescheduleForPieces`
+    will never include — same eligibility gate (active, not mid-revival,
+    real timeline, plan not actually complete), refactored into a shared
+    internal `eligiblePieceContext(piece)` helper so the two functions
+    can't drift apart on *that* question — but where
+    `remainingChunkIds.length === 0` and `countBehindDays(...) > 0`.
+    `planRescheduleForPieces` itself is otherwise unchanged (same public
+    contract, same return shape — its existing test suite passed unmodified
+    after the refactor). `MasterAgendaTab`'s `behindItems` now reads
+    `behindDaysCount`, matching its own per-card badges. `handleRescheduleAll`
+    calls both functions: if `planRescheduleForPieces` finds nothing at all
+    but `findStuckBehindPieces` does, an explanatory `window.alert` names
+    those pieces and points at "View all" on Today's Practice — the bulk
+    form of `handleReschedule`'s existing single-piece message. If
+    `planRescheduleForPieces` finds *some* pieces but not all of what the
+    panel counted, the confirmation dialog gets an extra paragraph naming
+    the excluded ones and why, so its count can never silently diverge from
+    what the panel promised.
+- **Verified:** `npm test` green — 572 tests, including five new
+  `findStuckBehindPieces` tests (a piece with every practice chunk touched
+  but a transition stuck is found here and *not* by
+  `planRescheduleForPieces`; a piece with real reschedulable material is
+  *not* double-counted here; paused/archived/mid-revival/genuinely-finished
+  pieces are excluded, matching `planRescheduleForPieces`' own exclusions)
+  and the `shouldShowScheduleBanner` regression test noted above.
+  Re-ran the full suite again after the `planRescheduleForPieces` refactor
+  specifically to confirm its existing ~15 tests still passed unmodified —
+  they did. Manually in the browser: the existing behind-schedule test
+  piece (real untouched chunks, not the stuck-only case) still shows "1
+  piece is behind schedule" and a "Reschedule all" confirmation dialog with
+  no stuck-note paragraph, confirming the ordinary case is unaffected by
+  this widening. The stuck-only scenario (every practice chunk touched,
+  only a transition/combo left) was verified via the regression tests
+  above rather than hand-built in the browser — reproducing it through the
+  UI would mean manually logging every chunk in a real multi-chunk piece
+  while deliberately never logging one specific transition, which the
+  fixture-based test proves more reliably and repeatably than a one-off
+  manual pass could.
+- **Verified (Pass 70's original day-count display change):** `npm test`
+  green (a regression test constructs a piece with every practice chunk
+  logged but its transitions never touched, and asserts
+  `shouldShowScheduleBanner` returns `false` with the old `missedCount`
+  signal and `true` with the new `countBehindDays` one — see
+  `test/scheduling.test.mjs`). Manually in the browser: the existing
+  behind-schedule test piece shows the identical "11 days behind" figure
+  across Overview, Today's Practice, Timeline, and Master Agenda's badge
+  and footer (color included) after this change, confirming no regression
+  in the common case.
+- See [Algorithms.md](Algorithms.md#behind-schedule-detection).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,

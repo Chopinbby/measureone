@@ -1847,6 +1847,74 @@ Pass 47**, Today's Practice's catch-up-button day search scans
 of `"done"` / `"behind"` / `"empty"`, strikes it through only when
 `"done"`) was the original, and only, consumer through Pass 45.
 
+**Since Pass 70**, `countBehindDays(piece, timeline, currentDay)` is a thin
+pure sibling in the same file: it filters `timeline.days` down to entries
+where `classifyDayCompletion(d, piece, currentDay) === "behind"` and
+returns the count, reusing that function's per-day logic rather than
+reimplementing it. This gives three display surfaces — `ScheduleBanner`,
+`MasterAgendaTab`'s per-piece badge/footer text, and `OverviewTab`'s
+first-week today-row note — a "N days behind" figure to show instead of
+`computeScheduleStatus`'s `missedCount` ("N chunks behind"), since several
+missed chunks can land on the same day and a day can also be incomplete
+because of a transition/combo/review rather than any missed chunk
+introduction at all. `countBehindDays` is a separate, independent
+computation from `missedCount`, not derived from it — the two can and do
+disagree (see the two same-session follow-ups below).
+
+**Same-session follow-up, found in code review before commit:** the
+Master Agenda card's footer text and its footer *color* briefly
+disagreed — the text had switched to `behindDaysCount` above, but the
+`var(--brick)`/`var(--ink-soft)` color conditional still checked the old
+`missedCount`, so a piece could show "N days behind schedule" in plain,
+non-alarming ink. Fixed by switching that color check to `behindDaysCount`
+too — `MasterAgendaTab`'s `renderPieceCard` (badge, footer text, footer
+color) is now driven by `behindDaysCount` alone; `missedCount` is no
+longer read anywhere inside that function.
+
+**Second same-session follow-up:** `shouldShowScheduleBanner` (below)
+also switched from `missedCount` to `countBehindDays` — see that
+function's own doc comment for why. The single-piece reschedule button
+this banner renders already had a graceful, pre-existing answer for
+"nothing to reschedule but real work is still open" (`handleReschedule`,
+`App.jsx` — an explanatory `window.alert` instead of a silent no-op), so
+this widening doesn't reach an unhandled state on that path.
+
+**Third same-session follow-up, on direct request:** the bulk "Reschedule
+all" mechanism was widened too, once the risk it was initially deferred
+over got a real fix rather than staying unaddressed. `MasterAgendaTab`'s
+`behindItems` filter (which pieces the "N pieces are behind schedule"
+panel counts, and whether it renders at all) now also reads
+`behindDaysCount` instead of `missedCount`. On its own that would have
+reopened the exact dead end `shouldShowScheduleBanner`'s widening had to
+route around: `planRescheduleForPieces` can only ever include a piece with
+real untouched practice-chunk material (`remainingChunkIds.length > 0`) —
+it has no way to "reschedule" a stuck transition/combo/review, since
+those aren't manually-placed items a marker can relocate. Counting such a
+piece in the panel without a matching fix at click-time would mean: the
+panel says "1 piece is behind schedule," the only button offered is
+"Reschedule all," and clicking it finds nothing reschedulable and quietly
+does nothing at all — worse than the piece just not appearing, since now
+it actively invites a click that goes nowhere.
+
+The fix: a new `findStuckBehindPieces(pieces)` (`lib/scheduling.js`,
+alongside `planRescheduleForPieces`) finds exactly the pieces
+`planRescheduleForPieces` will never include — same eligibility gate
+(active, not mid-revival, real timeline, plan not actually complete;
+factored into a shared internal `eligiblePieceContext` helper so the two
+functions can't drift apart on *that* question) — but where
+`remainingChunkIds.length === 0` and `countBehindDays(...) > 0`. App.jsx's
+`handleRescheduleAll` calls both: if `planRescheduleForPieces` finds
+nothing at all but `findStuckBehindPieces` does, it shows an explanatory
+`window.alert` naming those pieces and pointing at "View all" on Today's
+Practice — mirroring `handleReschedule`'s existing single-piece message
+for the identical situation. If `planRescheduleForPieces` finds some
+pieces but not all of the ones the panel counted, the confirmation
+dialog's message gets an extra paragraph naming the excluded pieces and
+why, so the dialog's count never silently diverges from what the panel
+promised. Either way, nothing that shows up in the panel can vanish from
+the click-time flow without an explanation.
+See [Decisions.md](Decisions.md#scheduling).
+
 The `"exact day"` check is deliberately stricter than `computeScheduleStatus`'s
 own "ever touched" test (`doneDays.length > 0`) — a chunk logged on some
 *other* day still leaves the day being classified incomplete. `"empty"` is

@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend } from "../../lib/scheduling";
+import { getEffectiveTimeline, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
@@ -128,13 +128,8 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               // mirroring TodayTab's own days-mode-only nudge.
               if (piece.scheduleMode === "minutes") return;
               if (selectedDate !== todayISODate()) return;
-              const { missedCount } = computeScheduleStatus(
-                piece,
-                chunkSet.practiceChunks,
-                timeline,
-                timeline.days.length + 1
-              );
-              items.push({ pieceId, piece, needsReschedule: true, missedCount, totalTime: 0 });
+              const behindDaysCount = countBehindDays(piece, timeline, timeline.days.length + 1);
+              items.push({ pieceId, piece, needsReschedule: true, behindDaysCount, totalTime: 0 });
               return;
             }
             if (selectedDate !== todayISODate()) return;
@@ -157,7 +152,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               dueCount: dueItems.length,
               dueOverdueCount: dueItems.filter((i) => i.daysOverdue > 0).length,
               totalTime: dueMinutes,
-              missedCount: 0,
+              behindDaysCount: 0,
             });
             return;
           }
@@ -188,10 +183,9 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
           const reviewRanges = mergedRangesFor(day.reviewChunkIds);
           const specialIsCombo = day.specialChunkIds.some((id) => chunkById[id]?.kind === "combo");
 
-          // How many chunks are behind schedule for this piece as of this day —
-          // same computation ScheduleBanner uses, called once per piece (not
-          // per chunk: computeScheduleStatus already walks all practiceChunks).
-          const { missedCount } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, dayNumber);
+          // How many days are behind schedule for this piece as of this day —
+          // same computation ScheduleBanner uses, called once per piece.
+          const behindDaysCount = countBehindDays(piece, timeline, dayNumber);
 
           items.push({
             pieceId,
@@ -203,7 +197,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             reviewRanges,
             specialIsCombo,
             totalTime: day.minutes,
-            missedCount,
+            behindDaysCount,
           });
         } catch (e) {
           console.error(`Error processing piece ${pieceId}:`, e);
@@ -311,10 +305,16 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
   // "practice this piece" for a day that isn't today is meaningless.
   const isToday = selectedDate === todayISODate();
 
-  // Pieces the agenda is already flagging as behind on the cards below.
-  // This only decides whether to *offer* the button — App.jsx recomputes
-  // the real set (planRescheduleForPieces) before touching anything.
-  const behindItems = learningItems.filter((item) => item.missedCount > 0);
+  // Pieces the agenda is already flagging as behind on the cards below —
+  // same wider, day-based signal (behindDaysCount) the cards' own badges
+  // use, not the narrower missedCount. This only decides whether to
+  // *offer* the button and what count its heading shows — App.jsx
+  // recomputes the real reschedulable set (planRescheduleForPieces)
+  // before touching anything, and separately names any piece counted here
+  // that turns out to have nothing reschedulable (findStuckBehindPieces),
+  // so a piece flagged here can never just silently vanish once the
+  // button is clicked. See docs/Decisions.md#scheduling.
+  const behindItems = learningItems.filter((item) => item.behindDaysCount > 0);
 
   // Anything with work attached today: a scheduled learning day or due
   // maintenance. Revival pieces are deliberately out, the same way they're
@@ -336,7 +336,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
     )
   );
 
-  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, missedCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
+  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
     <div key={pieceId} className="piece-card">
       <div className="piece-card-head">
         <div>
@@ -344,7 +344,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
           {piece.composer && <p style={{ fontSize: "12px", color: "var(--ink-faint)", margin: "4px 0 0" }}>{piece.composer}</p>}
         </div>
         <div className="piece-meta">
-          {missedCount > 0 && <span className="badge busy">{missedCount} behind</span>}
+          {behindDaysCount > 0 && <span className="badge busy">{behindDaysCount} day{behindDaysCount === 1 ? "" : "s"} behind</span>}
           <div className="piece-time">{formatMinutes(totalTime)}</div>
         </div>
       </div>
@@ -396,13 +396,13 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
         {/* A review arriving late is schedule slack, never a
             failure — the due card states the count plainly and is
             never styled as "behind". */}
-        <span style={{ fontSize: "12px", color: needsReschedule || (!isDueList && missedCount > 0) ? "var(--brick)" : "var(--ink-soft)" }}>
+        <span style={{ fontSize: "12px", color: needsReschedule || (!isDueList && behindDaysCount > 0) ? "var(--brick)" : "var(--ink-soft)" }}>
           {needsReschedule
-            ? `Past target date${missedCount > 0 ? ` — ${missedCount} chunk${missedCount === 1 ? "" : "s"} behind` : ""}`
+            ? `Past target date${behindDaysCount > 0 ? ` — ${behindDaysCount} day${behindDaysCount === 1 ? "" : "s"} behind` : ""}`
             : isDueList
               ? `Maintenance — ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
-              : missedCount > 0
-                ? `${missedCount} chunk${missedCount === 1 ? "" : "s"} behind schedule`
+              : behindDaysCount > 0
+                ? `${behindDaysCount} day${behindDaysCount === 1 ? "" : "s"} behind schedule`
                 : "On schedule"}
         </span>
         <button className="link-btn" onClick={() => onSelectPieceToday(pieceId)}>

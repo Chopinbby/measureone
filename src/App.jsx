@@ -21,7 +21,7 @@ import {
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -1422,7 +1422,33 @@ export default function App() {
   // them, and point at the per-piece button for the detail.
   const handleRescheduleAll = () => {
     const plans = planRescheduleForPieces(pieces);
-    if (!plans.length) return;
+    // Master Agenda's "N pieces are behind schedule" panel now uses the
+    // same wider, day-based "behind" signal its own per-piece badges use
+    // (countBehindDays, not just missedCount) — see docs/Decisions.md#scheduling.
+    // A piece can satisfy that wider signal purely from an unlogged
+    // transition, combo, or review, with every practice chunk already
+    // touched — planRescheduleForPieces can never include a piece like
+    // that (there's no untouched practice-chunk material for it to move),
+    // so without this, such a piece would just silently vanish from this
+    // point on: counted in the panel above, then dropped with no
+    // explanation once the button was actually clicked. findStuckBehindPieces
+    // finds exactly that set, so it can be named and explained instead.
+    const stuck = findStuckBehindPieces(pieces);
+    const stuckNameOf = (s) => s.piece.name || "Untitled piece";
+
+    if (!plans.length) {
+      // Nothing this action can actually move, but the panel that offered
+      // this button was showing for a reason — say what that reason is
+      // instead of the button silently doing nothing, mirroring
+      // handleReschedule's own single-piece alert for the identical
+      // situation.
+      if (stuck.length) {
+        window.alert(
+          `${stuck.length} piece${stuck.length === 1 ? " is" : "s are"} behind schedule (${stuck.map(stuckNameOf).join(", ")}), but ${stuck.length === 1 ? "it has" : "they have"} no unstarted material left to reschedule — what's stuck is a transition, focus block, or review waiting to be logged instead. Check "View all" on ${stuck.length === 1 ? "its" : "each"} Today's Practice to find it.`
+        );
+      }
+      return;
+    }
 
     const nameOf = (p) => p.piece.name || "Untitled piece";
     const names = plans.map(nameOf).join(", ");
@@ -1443,6 +1469,14 @@ export default function App() {
       ? `\n\nHeads up: at your current pace, ${tight.length === 1 ? "" : `${tight.length} of these — `}${tight.map(nameOf).join(", ")}${tight.length === 1 ? " probably won't" : " — probably won't"} fit in the days ${tight.length === 1 ? "its plan has" : "their plans have"} left. Rescheduling packs things in as tightly as possible either way; open ${tight.length === 1 ? "it" : "them"} individually for the details, or extend the timeline in Settings.`
       : "";
 
+    // A piece counted in Master Agenda's summary above but excluded here
+    // because it has nothing reschedulable — named explicitly so the
+    // count this dialog is about to act on never silently diverges from
+    // the count that panel just showed.
+    const stuckNote = stuck.length
+      ? `\n\n${stuck.length === 1 ? "" : `${stuck.length} more — `}${stuck.map(stuckNameOf).join(", ")}${stuck.length === 1 ? " is" : " are"} also behind schedule but ${stuck.length === 1 ? "isn't" : "aren't"} included here — ${stuck.length === 1 ? "it has" : "they have"} nothing unstarted left to reschedule. What's stuck ${stuck.length === 1 ? "there is" : "there are"} a transition, focus block, or review waiting to be logged instead — check "View all" on ${stuck.length === 1 ? "its" : "each of their"} Today's Practice.`
+      : "";
+
     const message =
       `${plans.length} piece${plans.length === 1 ? " is" : "s are"} behind schedule: ${names}.\n\n` +
       // "...and each piece keeps its own target date" only when that's
@@ -1450,7 +1484,7 @@ export default function App() {
       // falsely whenever extendingNote is about to say otherwise for some
       // of them.
       `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are${extending.length ? "" : ", and each piece keeps its own target date"}.` +
-      `${extendingNote}${warning}\n\nContinue?`;
+      `${extendingNote}${warning}${stuckNote}\n\nContinue?`;
 
     openRescheduleModal(
       plans.map(({ pieceId, marker, extend }) => ({ pieceId, marker, extend })),

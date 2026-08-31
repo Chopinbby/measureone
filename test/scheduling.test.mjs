@@ -18,6 +18,8 @@ import {
   computeMinutesModeAutoExtend,
   computeReschedulePastPlanExtension,
   classifyDayCompletion,
+  countBehindDays,
+  findStuckBehindPieces,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay } from "../src/lib/utils.js";
 
@@ -350,6 +352,70 @@ describe("Pass 45 — classifyDayCompletion (per-day completion, for Overview's 
   });
 });
 
+describe("Pass 70 — countBehindDays (day-count sibling to computeScheduleStatus's chunk-count missedCount)", () => {
+  test("counts exactly the days classifyDayCompletion reports as 'behind', ignoring done/empty/future days", () => {
+    const piece = basePiece({
+      progress: {
+        c1: { doneDays: [1] }, // day 1: done
+        // day 2: c2 never logged -> behind
+        c3: { doneDays: [3] }, // day 3: done
+        // day 4: nothing scheduled -> empty
+        // day 5: c5 never logged -> behind
+        // day 6: currentDay itself -> future
+      },
+    });
+    const timeline = {
+      days: [
+        { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] },
+        { dayNumber: 2, newChunkIds: ["c2"], specialChunkIds: [], reviewChunkIds: [] },
+        { dayNumber: 3, newChunkIds: ["c3"], specialChunkIds: [], reviewChunkIds: [] },
+        { dayNumber: 4, newChunkIds: [], specialChunkIds: [], reviewChunkIds: [] },
+        { dayNumber: 5, newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c5"] },
+        { dayNumber: 6, newChunkIds: ["c6"], specialChunkIds: [], reviewChunkIds: [] },
+      ],
+    };
+    // Sanity: matches classifyDayCompletion's own per-day verdicts.
+    assert.equal(classifyDayCompletion(timeline.days[0], piece, 6), "done");
+    assert.equal(classifyDayCompletion(timeline.days[1], piece, 6), "behind");
+    assert.equal(classifyDayCompletion(timeline.days[2], piece, 6), "done");
+    assert.equal(classifyDayCompletion(timeline.days[3], piece, 6), "empty");
+    assert.equal(classifyDayCompletion(timeline.days[4], piece, 6), "behind");
+    assert.equal(classifyDayCompletion(timeline.days[5], piece, 6), "future");
+    assert.equal(countBehindDays(piece, timeline, 6), 2);
+  });
+
+  test("multiple missed chunks piled onto the same day count as one behind day, not one per chunk", () => {
+    const piece = basePiece({ progress: {} });
+    const timeline = {
+      days: [
+        { dayNumber: 1, newChunkIds: ["c1", "c2", "c3"], specialChunkIds: [], reviewChunkIds: ["c4"] },
+      ],
+    };
+    assert.equal(countBehindDays(piece, timeline, 2), 1);
+  });
+
+  // computeScheduleStatus's missedCount > 0 implies a chunk was introduced
+  // on some day before currentDay with zero doneDays — that exact
+  // introduction day must itself classify as "behind", so countBehindDays
+  // must also be > 0 whenever missedCount is. Guarantees the banner never
+  // reads "0 days behind" while it's still showing at all.
+  test("whenever computeScheduleStatus reports missedCount > 0, countBehindDays is also > 0", () => {
+    const piece = basePiece({
+      totalMeasures: 16,
+      measureDifficulty: Array(16).fill(1),
+      customChunkSize: 4,
+      minutesPerDay: 5, // small budget forces the plan to spread across multiple days
+      progress: {},
+    });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    const currentDay = timeline.days.length + 10; // well past every introduction, nothing logged
+    const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, currentDay);
+    assert.ok(status.missedCount > 0, "fixture must actually have missed chunks for this check to mean anything");
+    assert.ok(countBehindDays(piece, timeline, currentDay) > 0);
+  });
+});
+
 describe("Pass 16 — shouldShowScheduleBanner, redefined in Pass 39 around isPlanActuallyComplete", () => {
   // timeline.days.length is the only field isPlanActuallyComplete reads off
   // timeline itself — a 10-entry array stands in for a 10-day plan.
@@ -397,6 +463,55 @@ describe("Pass 16 — shouldShowScheduleBanner, redefined in Pass 39 around isPl
     const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(9) }); // day 10 of 10
     const chunkSet = generateAllChunks(piece);
     assert.equal(shouldShowScheduleBanner(piece, chunkSet, timeline, 2), true, "day 10 of a 10-day plan is still in the plan, not past it");
+  });
+
+  // Same-session follow-up to Pass 70: ScheduleBanner.jsx now passes
+  // countBehindDays here instead of computeScheduleStatus's missedCount —
+  // this proves why. missedCount only ever looks at base practice chunks,
+  // so a piece that's touched every one of those but left a transition,
+  // combo, or review sitting unlogged past its day used to read as fully
+  // caught up and suppress the banner entirely.
+  test("[fix, same-session follow-up] a piece with every practice chunk touched but a transition/combo/review still stuck: the old missedCount signal stayed silent, the new day-count signal correctly still flags it", () => {
+    const piece0 = basePiece({
+      totalMeasures: 12,
+      measureDifficulty: Array(12).fill(1),
+      customChunkSize: 4, // 3 practice chunks -> 2 transitions between them
+      minutesPerDay: 5,
+      startDate: todayISODate(), // keeps isPlanActuallyComplete's own elapsedDay check trivially false
+      daysToLearn: 30,
+      progress: {},
+    });
+    const chunkSet = generateAllChunks(piece0);
+    const fullTimeline = computeTimeline(piece0, chunkSet);
+    const currentDay = fullTimeline.days.length + 5;
+
+    // Touch every practice chunk on the exact day it was introduced — but
+    // never touch a transition/combo, so nothing but those is left open.
+    const progress = {};
+    fullTimeline.days.forEach((day) => {
+      day.newChunkIds.forEach((id) => {
+        progress[id] = progress[id] || { doneDays: [] };
+        progress[id].doneDays.push(day.dayNumber);
+      });
+    });
+    const piece = { ...piece0, progress };
+
+    const status = computeScheduleStatus(piece, chunkSet.practiceChunks, fullTimeline, currentDay);
+    assert.equal(status.missedCount, 0, "fixture must have zero missed practice chunks for this check to mean anything");
+
+    const behindDays = countBehindDays(piece, fullTimeline, currentDay);
+    assert.ok(behindDays > 0, "an unlogged transition/combo left past its day should still register as a behind day");
+
+    assert.equal(
+      shouldShowScheduleBanner(piece, chunkSet, fullTimeline, status.missedCount),
+      false,
+      "the old, narrower signal wrongly went silent here"
+    );
+    assert.equal(
+      shouldShowScheduleBanner(piece, chunkSet, fullTimeline, behindDays),
+      true,
+      "the new, wider signal correctly still flags this piece as behind"
+    );
   });
 });
 
@@ -1055,6 +1170,79 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
 
     assert.ok(plans[0].missedCount >= plans[plans.length - 1].missedCount);
     assert.equal(plans[0].pieceId, "more");
+  });
+});
+
+describe("findStuckBehindPieces — same-session follow-up: which pieces Master Agenda's widened 'behind' panel counts but planRescheduleForPieces can never move", () => {
+  const startedDaysAgo = (n) => addDaysISO(todayISODate(), -n);
+
+  function pieceWithOnlyATransitionStuck(overrides) {
+    // 3 practice chunks (customChunkSize 4 over 12 measures) -> 2
+    // transitions between them, generated regardless of section layout.
+    // Touch every practice chunk on the day it was actually introduced but
+    // never touch a transition, so missedCount reads 0 (nothing a
+    // reschedule could move) while a real day is still behind.
+    const piece0 = basePiece({
+      totalMeasures: 12,
+      measureDifficulty: Array(12).fill(1),
+      customChunkSize: 4,
+      minutesPerDay: 5,
+      daysToLearn: 30,
+      startDate: startedDaysAgo(20),
+      progress: {},
+      ...overrides,
+    });
+    const chunkSet = generateAllChunks(piece0);
+    const timeline = getEffectiveTimeline(piece0, chunkSet);
+    const progress = {};
+    timeline.days.forEach((day) => {
+      day.newChunkIds.forEach((id) => {
+        progress[id] = progress[id] || { doneDays: [] };
+        progress[id].doneDays.push(day.dayNumber);
+      });
+    });
+    return { ...piece0, progress };
+  }
+
+  test("a piece with every practice chunk touched but a transition still stuck is returned here, not by planRescheduleForPieces", () => {
+    const piece = pieceWithOnlyATransitionStuck({ name: "StuckOnly" });
+
+    const plans = planRescheduleForPieces({ piece });
+    assert.deepEqual(plans, [], "nothing untouched for a reschedule to move — planRescheduleForPieces must not include it");
+
+    const stuck = findStuckBehindPieces({ piece });
+    assert.equal(stuck.length, 1, "the same piece must surface here instead, or it would silently disappear from the bulk flow");
+    assert.equal(stuck[0].pieceId, "piece");
+  });
+
+  test("a piece that's genuinely on schedule (nothing behind at all) appears in neither list", () => {
+    const piece = basePiece({ name: "OnTrack", daysToLearn: 10, startDate: todayISODate() });
+    assert.deepEqual(planRescheduleForPieces({ piece }), []);
+    assert.deepEqual(findStuckBehindPieces({ piece }), []);
+  });
+
+  test("a piece planRescheduleForPieces already handles (real untouched chunks) is not double-counted here", () => {
+    const piece = basePiece({ name: "Behind", daysToLearn: 10, startDate: startedDaysAgo(5) });
+    assert.ok(planRescheduleForPieces({ piece }).length > 0, "test setup sanity check");
+    assert.deepEqual(findStuckBehindPieces({ piece }), [], "already covered by the reschedulable list — must not also appear as stuck");
+  });
+
+  test("paused, archived, and mid-revival pieces are excluded here too — same eligibility as planRescheduleForPieces", () => {
+    const paused = pieceWithOnlyATransitionStuck({ name: "Paused", status: "paused" });
+    const archived = pieceWithOnlyATransitionStuck({ name: "Archived", status: "archived" });
+    const reviving = pieceWithOnlyATransitionStuck({
+      name: "Reviving",
+      revival: { active: true, startedAt: Date.now(), reassessmentComplete: false, plan: null },
+    });
+    assert.deepEqual(findStuckBehindPieces({ paused, archived, reviving }), []);
+  });
+
+  test("a genuinely finished plan (every item logged) is excluded here too", () => {
+    const piece0 = basePiece({ name: "Finished", daysToLearn: 10, startDate: startedDaysAgo(100) });
+    const chunkSet = generateAllChunks(piece0);
+    const progress = Object.fromEntries(chunkSet.all.map((c) => [c.id, { doneDays: [1] }]));
+    const piece = { ...piece0, progress };
+    assert.deepEqual(findStuckBehindPieces({ piece }), []);
   });
 });
 

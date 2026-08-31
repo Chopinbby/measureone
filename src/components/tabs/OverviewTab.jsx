@@ -8,7 +8,7 @@ import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
 import { computeRevivalTriggers, isInRevival } from "../../lib/revival";
-import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion } from "../../lib/scheduling";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, countBehindDays } from "../../lib/scheduling";
 import { PIECE_STATUS_LABEL } from "../../lib/constants";
 
 export function OverviewTab({
@@ -36,6 +36,7 @@ export function OverviewTab({
   // For "The first week"'s today-row note below — reused rather than a
   // separate count, per Pass 45's build note.
   const { missedCount } = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
+  const behindDays = countBehindDays(piece, timeline, currentDay);
   // Pass 64 — this panel used to always show days 1-7, forever, regardless
   // of how far into the plan the piece actually was. Now it follows
   // currentDay with the same week-grouping math TimelineTab already uses
@@ -199,7 +200,7 @@ export function OverviewTab({
             }
             const completion = classifyDayCompletion(d, piece, currentDay);
             if (d.dayNumber === currentDay && missedCount > 0) {
-              desc += ` (behind ${missedCount} chunk${missedCount === 1 ? "" : "s"})`;
+              desc += ` (behind ${behindDays} day${behindDays === 1 ? "" : "s"})`;
             }
             return (
               <button

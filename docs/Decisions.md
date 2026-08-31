@@ -3648,7 +3648,19 @@ the logic.**
   See [Algorithms.md](Algorithms.md#behind-schedule-detection). **Since
   Pass 46**, the Timeline tab reuses this same `classifyDayCompletion` call
   for its own past-day graying/check mark, so this gap now reads the same
-  way on a third surface, not just Overview's first-week list.
+  way on a third surface, not just Overview's first-week list. **Since
+  Pass 67, more likely to actually surface to a learner, not just a fourth
+  surface:** Today's Practice's catch-up-button scan (`findEarliestBehindDay`)
+  now runs unconditionally instead of behind a practice-chunk-only
+  pre-check (`hasBehindWork`, removed). That old pre-check accidentally
+  masked this exact gap whenever every practice chunk was otherwise done —
+  the button simply never showed. With the pre-check gone, a piece that's
+  fully caught up except for this consolidation-day quirk can now show
+  "Go to Day N" and send the learner to a day they already logged. Not
+  destructive (no data is touched, and the day's own content still shows
+  it was done) — just a more visible instance of a gap that was already
+  here, found during Pass 67's own review rather than newly introduced by
+  it.
 - **Known gap, not fixed: not revival-aware.** A piece that's both
   mid-revival and behind on its *original* (pre-revival) schedule still
   shows the "(behind N chunks)" note and first-week graying against that
@@ -3689,14 +3701,17 @@ same `ScheduleBanner`, not a second banner.**
   task, regardless of whether the learner wants to actually rebalance the
   plan or just go finish what's sitting there. Rescheduling changes the
   plan itself; this just moves the learner to old, still-valid work.
-- **Visibility:** shows whenever `computeScheduleStatus`'s
-  `remainingChunkIds` is non-empty and at least one of those chunks was
-  introduced on a day before today — **deliberately fires even when
-  today's own checklist also has incomplete items**, not only when
-  today's checklist is empty. Raised directly by the user after the first
-  version read a stricter, "only when today is otherwise done" condition
-  from the pass prose; corrected on the spot ("it should definitely show
-  up if there are incomplete tasks").
+- **Visibility (original gate, superseded by Pass 67 below):** shows
+  whenever `computeScheduleStatus`'s `remainingChunkIds` is non-empty and
+  at least one of those chunks was introduced on a day before today —
+  **deliberately fires even when today's own checklist also has
+  incomplete items**, not only when today's checklist is empty. Raised
+  directly by the user after the first version read a stricter, "only when
+  today is otherwise done" condition from the pass prose; corrected on the
+  spot ("it should definitely show up if there are incomplete tasks"). The
+  "fires even with other incomplete items" intent survives Pass 67's
+  change intact — only the practice-chunk-only scope of the pre-check was
+  the problem, and that check is gone outright, not narrowed.
 - **Target-finding:** scans `timeline.days` from day 1 forward, using
   `classifyDayCompletion` (Pass 45) to find the first `"behind"` day,
   reusing the same definition of "incomplete" every other completion
@@ -3784,6 +3799,36 @@ re-showing content that's since moved elsewhere.**
   regression test).
 - See [Algorithms.md](Algorithms.md#rescheduling) and
   [Algorithms.md](Algorithms.md#behind-schedule-detection).
+
+**Decision (Pass 67): the Pass 47 catch-up button's `hasBehindWork`
+pre-check is removed — `findEarliestBehindDay`'s own scan is now the sole
+source of truth for both whether the button shows and which day it
+targets.**
+
+- **Why:** the Pass 47 entry above's "Visibility" bullet describes the
+  original gate — `computeScheduleStatus`'s `remainingChunkIds` non-empty
+  and at least one of those chunks introduced before today — which only
+  ever looked at *practice chunks*. A piece where every practice chunk had
+  a logged session, but a past transition, combo, or live-due review still
+  had zero `doneDays` for its day, read as "nothing behind" and hid the
+  button even though `findEarliestBehindDay`'s own scan (via
+  `classifyDayCompletion`, item-type-agnostic since Pass 45) would have
+  found and pointed at that day correctly on its own.
+- **Fix:** delete `hasBehindWork` entirely; call `findEarliestBehindDay()`
+  unconditionally. Its own `dayNumber >= currentDay` boundary and existing
+  `isFullySwept` skip (Pass 48) already do everything the pre-check was
+  trying to do, just correctly and for every scheduled item type.
+  `ScheduleBanner.jsx` needed no change — its `hasCatchUp` gate already
+  keyed off `earliestBehindDay` alone; the narrower precondition was only
+  ever layered on in `TodayTab.jsx`.
+- **Verified:** a scratch script reproducing `findEarliestBehindDay`
+  verbatim over real `computeTimeline`/`generateAllChunks` fixtures (the
+  component itself has no test harness — see
+  [AI-GUIDELINES.md](AI-GUIDELINES.md)) confirmed the button now renders
+  and targets the correct day when every practice chunk is logged but a
+  transition is behind, still doesn't render when nothing is behind, and
+  still skips a fully-swept rescheduled day. `npm test`: 563/563.
+- See [Algorithms.md](Algorithms.md#behind-schedule-detection).
 
 ## Data model
 

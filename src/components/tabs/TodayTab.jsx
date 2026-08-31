@@ -161,9 +161,6 @@ export function TodayTab({
   // genuinely untouched work from a day that's already passed — a chunk
   // introduced *today* and not yet logged doesn't count, that's just normal,
   // unstarted "today," not "behind."
-  const hasBehindWork =
-    scheduleStatus.remainingChunkIds.length > 0 &&
-    scheduleStatus.remainingChunkIds.some((id) => timeline.introducedDay[id] < currentDay);
   // Reuses classifyDayCompletion (Pass 45) rather than a second definition
   // of "incomplete" — scans forward from day 1 so "earliest" really means
   // earliest, not just the day the first untouched chunk happens to live on
@@ -206,13 +203,14 @@ export function TodayTab({
     }
     return null;
   };
-  // Guards the "shouldn't happen" case named in the pass rather than
-  // assuming hasBehindWork's chunk-level signal and this day-level scan
-  // always agree: if the scan somehow comes up empty, earliestBehindDay
-  // stays null and ScheduleBanner's catch-up button simply doesn't render
-  // (its own gating condition, since it's passed this same value), rather
-  // than rendering a button whose click would silently do nothing.
-  const earliestBehindDay = hasBehindWork ? findEarliestBehindDay() : null;
+  // Run unconditionally (Pass 67) — this scan is now the sole source of
+  // truth for both whether the catch-up button shows and which day it
+  // points to. Its own dayNumber >= currentDay boundary and isFullySwept
+  // skip already do everything a separate chunk-level pre-check
+  // (hasBehindWork, removed) was trying to do, just correctly and for
+  // every scheduled item type (reviews, transitions, combos), not only
+  // practice chunks.
+  const earliestBehindDay = findEarliestBehindDay();
 
   // computeDueReviews only reads chunkSet.all; TodayTab already receives
   // exactly that list as `chunks`, so it's wrapped rather than threading a

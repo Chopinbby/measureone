@@ -166,7 +166,14 @@ chunking, scheduling, and confidence are actually computed, see
   on every call — reintroducing any persisted "has this been unlocked"
   state would silently bring back the exact bug that pass fixed (a
   run-through that, once available, sat permanently available forever
-  after, whether or not it still made sense). See
+  after, whether or not it still made sense). Neither `sectionRunThroughGate`
+  nor `computeSectionRunThroughs` takes a day parameter — both deliberately
+  answer "is this due right now," not "was this due on day N." As of Pass
+  68, the day-scoping instead lives one layer up: `SectionRunThroughPanel`
+  only renders when `isRealToday`, so a browsed past/future day never shows
+  (or lets you log against) today's live due-state. Don't try to fix a
+  future "wrong day" symptom by adding a day parameter to the two functions
+  above — the fix belongs at the display layer, same as this pass. See
   [`docs/Algorithms.md`](docs/Algorithms.md#section-run-throughs).
 - **`piece.sections` must always have `start <= end` — if you add a second
   way to create or edit sections, normalize it the same way
@@ -887,3 +894,37 @@ fix. **If you touch `mergeLiveDueReviews` or either consolidation-day
 render branch:** the guard belongs in `mergeLiveDueReviews` itself, not
 duplicated at each call site, since both callers rely on it unconditionally
 to decide what's safe to merge.
+
+**Since Pass 67**, Today's Practice's "Go to Day N" catch-up button
+(`findEarliestBehindDay`, `TodayTab.jsx`, Pass 47) no longer sits behind a
+second, narrower pre-check (`hasBehindWork`, removed) that only looked at
+practice chunks. The scan itself is now the sole source of truth for both
+whether the button shows and which day it targets — it already handled
+every scheduled item type correctly (transitions, combos, reviews) via
+`classifyDayCompletion`, but a piece with every practice chunk logged and
+only a past transition/review still incomplete used to hide the button
+anyway, since the old pre-check couldn't see anything but practice chunks.
+`ScheduleBanner.jsx` needed no change — it already gated its own button on
+`earliestBehindDay` alone. One side effect worth knowing: this also makes
+the pre-existing, still-open Pass 45 consolidation-day gap (a logged
+run-through still reads `"behind"` — see
+[`docs/Decisions.md`](docs/Decisions.md#ux)) more likely to actually
+surface to a learner, since the old pre-check was accidentally masking it
+whenever every practice chunk was otherwise caught up.
+
+**Since Pass 68**, `SectionRunThroughPanel` only renders on real "today" —
+threaded down via a new `isRealToday` prop from `TodayTab`. Browsing to a
+completed past day (or a future one) used to still show whatever section
+run-through was due *right now*, mislabeled as that day's own status,
+since `sectionRunThroughGate`/`computeSectionRunThroughs` (Pass 49) answer
+"is this due right now" with no day parameter — correct for what they're
+asked, but wrong to display unscoped. Logging one from a past day would
+also have silently attributed the session to `currentDay`, backdating it;
+fixed for free by the same gate, since `currentDay` at render time is now
+always the real current day by construction. Neither of the two `lib/
+chunking.js` functions changed. See
+[`docs/Decisions.md`](docs/Decisions.md#ux) for why the fix is a `useMemo`
+that short-circuits internally plus an early return after it, not a
+literal early return before the `useMemo` call (the latter would violate
+React's rules of hooks, since this component never unmounts across a day
+change).

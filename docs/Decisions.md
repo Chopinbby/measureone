@@ -3830,6 +3830,52 @@ targets.**
   still skips a fully-swept rescheduled day. `npm test`: 563/563.
 - See [Algorithms.md](Algorithms.md#behind-schedule-detection).
 
+**Decision (Pass 68): `SectionRunThroughPanel` only renders on real
+"today" — `sectionRunThroughGate`/`computeSectionRunThroughs` themselves
+are untouched.**
+
+- **Why:** those two functions (`lib/chunking.js`) answer "is this due
+  right now" off current, live session counts, with no day parameter —
+  correct for what they're actually asked, per the Pass 49 decision above.
+  But `SectionRunThroughPanel` rendered that same live answer regardless of
+  which day the learner was actually looking at, so browsing back to a
+  completed past day (or forward past today) showed *today's* due/locked
+  state mislabeled as that day's own — and logging one from a past day
+  would have silently attributed the session to `currentDay`, backdating
+  it, since `SectionRunThroughPanel` passes `currentDay` straight through
+  to `ChecklistItem` as the day a logged session gets attributed to.
+- **Fix:** thread `isRealToday` (already computed by `TodayTab` for other
+  panels) into `SectionRunThroughPanel`, and return `null` — skipping the
+  `computeSectionRunThroughs` call itself, not just hiding its result —
+  whenever it's false. The backdating risk is closed for free by the same
+  gate: once the panel only ever renders when `isRealToday`, `currentDay`
+  at render time is always the real current day by construction, so it
+  needed no separate fix.
+- **Deliberately not touched:** `sectionRunThroughGate`'s due/locked math
+  and the parity-check threshold sequence (Pass 49) — the bug was entirely
+  in *when* the answer got displayed, not in the answer itself, so no day
+  parameter was added to either function.
+- **One implementation deviation from how this was scoped:** doing the
+  early return literally *before* the existing `useMemo` call (skipping
+  the hook itself on a non-today render) would violate React's rules of
+  hooks — this component never unmounts when the learner navigates days,
+  so `isRealToday` flips on the same mounted instance across renders,
+  and conditionally skipping a hook call between renders of one instance
+  throws ("Rendered fewer hooks than expected"). Implemented instead as
+  `useMemo(() => (isRealToday ? computeSectionRunThroughs(...) : []), […,
+  isRealToday])` followed by the early return — same "skip the real
+  computation" property, no crash risk.
+- **Verified:** manually in the browser with a throwaway test piece —
+  confirmed the panel shows (unlocked, loggable) on today; disappears when
+  browsing to a completed past day; does not retroactively appear on a day
+  before a session that had just pushed the section's count to its next
+  due threshold; and stays hidden on a non-today day across Week view,
+  View all, and Interleaved mode alike (not just Day view), since the
+  panel sits outside `TodayTab`'s `viewMode` conditional entirely and this
+  one gate covers all of them. `npm test`: 563/563, unchanged (no `lib/`
+  logic changed).
+- See [Algorithms.md](Algorithms.md#section-run-throughs).
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as

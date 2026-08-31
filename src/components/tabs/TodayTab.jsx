@@ -497,6 +497,7 @@ export function TodayTab({
         piece={piece}
         practiceChunks={practiceChunks}
         currentDay={currentDay}
+        isRealToday={isRealToday}
         onLogSession={onLogSession}
         onUnlogSession={onUnlogSession}
       />

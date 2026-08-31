@@ -97,6 +97,10 @@ than jumping to a specific day.
    not due, then due again as practice continues), plus a locked/grayed
    preview the day before the next threshold is crossed; see
    [Algorithms.md](Algorithms.md#section-run-throughs) for exactly when.
+   **Since Pass 68**, it only appears while looking at real "today" —
+   browsing to a past or future day hides it entirely, in every view mode
+   (Day view, Week, View all, Interleaved alike), rather than showing
+   today's live due-state mislabeled as that day's own.
 5. **Since Pass 57**, `RandomStartPanel` appears once 2+ chunks/transitions/
    combos in the piece have 2+ logged sessions each — "Pick a starting
    point" picks one at random, so a practice session doesn't always start
@@ -196,9 +200,14 @@ week-vs-all-time and heatmap-window choices.
    quiet. **Since Pass 47, Today's version of this same banner can carry a
    second button** — "Go to Day N" — that jumps to the earliest day with
    real incomplete work instead of rebalancing the plan; an alternative
-   action, not a replacement, shown only when a chunk introduced before
-   today is still untouched (Overview and Timeline don't get this second
-   button, and render the banner exactly as before).
+   action, not a replacement. **As of Pass 67, shown whenever the
+   earliest-behind-day scan itself finds a day** (`classifyDayCompletion`-
+   based, covers every scheduled item type — new chunks, reviews,
+   transitions, combos) — not gated on the narrower, practice-chunk-only
+   pre-check this used to have, which could hide the button even when a
+   past transition or review was genuinely still incomplete (Overview and
+   Timeline don't get this second button, and render the banner exactly as
+   before).
 3. `handleReschedule` estimates whether the remaining material can
    realistically fit in the remaining days at the current pace. If it
    can't, the confirmation dialog names the shortfall and offers a way past

@@ -38,12 +38,20 @@ function LockedRunThroughRow({ item }) {
   );
 }
 
-export function SectionRunThroughPanel({ piece, practiceChunks, currentDay, onLogSession, onUnlogSession }) {
+export function SectionRunThroughPanel({ piece, practiceChunks, currentDay, isRealToday, onLogSession, onUnlogSession }) {
+  // sectionRunThroughGate (lib/chunking.js) answers "is this due right
+  // now" off current totals, with no day parameter — correct for what
+  // it's actually asked, but that means it has no idea whether the caller
+  // is looking at today or a browsed past day. Gating here, not there:
+  // skip the computation itself (not just hiding the result) whenever
+  // this isn't real "today", so a past day never shows — or logs a
+  // session against — a run-through that's only due as of right now.
   const items = useMemo(
-    () => computeSectionRunThroughs(piece, practiceChunks),
-    [piece, practiceChunks]
+    () => (isRealToday ? computeSectionRunThroughs(piece, practiceChunks) : []),
+    [piece, practiceChunks, isRealToday]
   );
 
+  if (!isRealToday) return null;
   if (items.length === 0) return null;
 
   return (

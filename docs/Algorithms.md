@@ -119,6 +119,22 @@ this is what makes the panel now read as a real, appearing/disappearing day
 task instead of a permanently-available option sitting in the background
 once unlocked, which was the pre-Pass-49 behavior this replaced.
 
+**Since Pass 68**, `SectionRunThroughPanel` also gates its own render on
+`isRealToday` (passed down from `TodayTab`), skipping the
+`computeSectionRunThroughs` call entirely when it's false. Neither
+`sectionRunThroughGate` nor `computeSectionRunThroughs` takes a day
+parameter — both answer "is this due right now" off live totals, which is
+correct for what they're asked, but meant the panel used to show that same
+live answer on a browsed past (or future) day, mislabeled as that day's
+own status; logging one from such a day would also have attributed the
+session to `currentDay`, silently backdating it. Gating the panel itself,
+not the two `lib/chunking.js` functions, fixes both: the display mislabel
+directly, and the backdating risk for free (`currentDay` at render time is
+now always the real current day by construction). See
+[Decisions.md](Decisions.md#ux) for the fix and why the early return can't
+be written literally before the component's `useMemo` call without
+breaking React's rules of hooks.
+
 ### Section-pair run-throughs: still a one-time unlock
 
 A combined section-pair run-through (`kind: "section-transition"`) between

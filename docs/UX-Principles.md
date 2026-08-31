@@ -133,3 +133,36 @@ have made them render a second time inside Settings' "Piece" panel, on top
 of Settings' own dedicated panels for each. The component is still shared
 (same `{draft, set}` editor, same behavior); only which screen chooses to
 mount it differs by design, for this specific case.
+
+## A browsed day is not "now" — live, unscoped state must not leak onto it
+
+Several features answer a "what's true right now" question off live,
+un-dated totals — computed fresh on every call, with no day parameter,
+because that's the correct shape for what they're actually asked (see
+[Algorithms.md](Algorithms.md#section-run-throughs) for one such function).
+That's fine as long as the *only* place they're read from is real "today."
+The recurring mistake is reading one of them from a component that also
+renders a browsed past or future day, which shows today's live answer
+relabeled as that day's own status — and, if the surface also logs data,
+can silently attribute it to the wrong day.
+
+This has now surfaced three times, in three different features, always
+fixed the same way — scope the *display* (and any write path through it)
+to real "today," never add a day parameter to the underlying live
+computation:
+
+- Pass 22: Week view is read-only specifically because a session logged
+  from a non-today cell would be keyed to the wrong day.
+- Pass 66: `mergeLiveDueReviews` only folds live-due reviews into real
+  "today" — a date-picker/day-nav browse to a different day is unaffected.
+- Pass 68: `SectionRunThroughPanel` only renders when `isRealToday` —
+  `sectionRunThroughGate`/`computeSectionRunThroughs` stay day-agnostic on
+  purpose.
+
+Treat a fourth instance of this exact shape (a live, un-dated "is this due
+right now" function whose result gets rendered somewhere a browsed day is
+also possible) as a strong prior that the fix is a display-layer gate on
+`isRealToday`, not a new parameter threaded into the computation itself.
+See [Decisions.md](Decisions.md#ux) (Pass 22, Pass 68) and
+[Decisions.md](Decisions.md#spaced-repetition--maintenance) (Pass 66) for
+the three writeups.

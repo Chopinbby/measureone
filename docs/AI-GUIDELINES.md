@@ -465,6 +465,29 @@ in opposite directions — one where state should have reset and didn't,
 one where an automatic reset would have fired too eagerly — so when
 adding logic like this, trace both directions before considering it done.
 
+The same "still the same mounted instance" fact has a sharper failure mode
+than stale state: it means you cannot move a hook call itself behind a
+new conditional early return, even when a spec asks for exactly that.
+Worked example (Pass 68): the task described gating
+`SectionRunThroughPanel` by adding `if (!isRealToday) return null;`
+*before* its existing `useMemo(...)` call — textually the same shape as
+the component's other early return, just checked first. Implemented
+literally, this calls `useMemo` on some renders and skips it on others,
+for the *same mounted component instance* (this panel never unmounts when
+the learner changes days — it's a fixed, unconditional child of
+`TodayTab`), which is exactly the "fewer hooks than expected" crash React
+throws for a component's hook count differing between renders. The
+existing entry above covers the same instance-persistence fact producing
+a stale-state bug; this is that same fact producing a crash instead. Fixed
+by keeping the `useMemo` call unconditional and short-circuiting to `[]`
+*inside* its callback based on the new condition, with the early return
+placed after it — same "skip the real computation" outcome the task
+asked for, no hook-order risk. Before implementing an early return a spec
+describes as going "before" an existing hook call in an
+always-rendered-but-sometimes-null component, check whether the condition
+gating it can flip on a live, mounted instance — if it can, the hook call
+itself cannot become conditional; only what happens inside it can.
+
 ## Cleaning up manually-injected test data needs a reload, not just a storage write
 
 When verifying a fix by writing a scratch piece directly into

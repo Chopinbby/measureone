@@ -41,7 +41,14 @@ maintenance-due random-start panel — see
 [Decisions.md](Decisions.md#scheduling); a piece whose remaining work
 doesn't fit the days left now offers a concrete way out inline — extend the
 target date, or extend the plan directly in "minutes per day" mode — rather
-than just a warning, see [Decisions.md](Decisions.md#scheduling)), section
+than just a warning, see [Decisions.md](Decisions.md#scheduling); **since
+Pass 46–48**, the Timeline tab shows completion states and its own
+reschedule entry point, Today's Practice has an alternative "go to the
+earliest unfinished day" action alongside Reschedule, a fully-rescheduled
+day collapses instead of showing its stale task list, and rescheduling the
+same piece more than once now correctly chains through its whole history
+instead of losing what an earlier reschedule had placed — see
+[Decisions.md](Decisions.md#scheduling)), section
 run-throughs (**since Pass 49** a repeating due/locked-preview gate, not a
 one-time unlock — see [Decisions.md](Decisions.md#scheduling)), reference
 recordings and (**since Pass 24**) reference documents (sheet music PDFs,

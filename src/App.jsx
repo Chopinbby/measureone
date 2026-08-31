@@ -1391,7 +1391,17 @@ export default function App() {
     }
 
     openRescheduleModal(
-      [{ pieceId: activePieceId, marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds } }],
+      [
+        {
+          pieceId: activePieceId,
+          // `previous: piece.rescheduleMarker` chains onto this piece's last
+          // reschedule (or null, its first) — see computeEffectiveTimeline
+          // (lib/scheduling.js) for why a second reschedule needs that
+          // chain instead of always re-deriving from the raw, never-
+          // rescheduled schedule.
+          marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds, previous: piece.rescheduleMarker || null },
+        },
+      ],
       "Reschedule remaining chunks?",
       message,
       suggestion
@@ -1691,7 +1701,17 @@ export default function App() {
                 onRescheduleAll={handleRescheduleAll}
               />
             )}
-            {activeTab === "timeline" && <TimelineTab chunks={chunks} timeline={timeline} onSelectDay={handleSelectDay} />}
+            {activeTab === "timeline" && (
+              <TimelineTab
+                chunks={chunks}
+                chunkSet={chunkSet}
+                timeline={timeline}
+                piece={piece}
+                currentDay={currentDay}
+                onSelectDay={handleSelectDay}
+                onReschedule={handleReschedule}
+              />
+            )}
             {activeTab === "map" && (
               <PieceMapTab
                 piece={piece}
@@ -2070,7 +2090,10 @@ const CSS = `
 .day-card.consolidation { background: rgba(185,138,62,0.08); }
 .day-card.rest { background: var(--paper); }
 .day-card.rest .day-card-min { color: var(--ink-faint); }
+.day-card.day-past { opacity: 0.55; }
 .day-card-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft); margin-bottom: 8px; }
+.day-card-day { display: inline-flex; align-items: center; gap: 4px; }
+.day-card-check { color: var(--ink-faint); opacity: 0.7; }
 .day-card-min { color: var(--brass-deep); }
 .day-card-note { font-size: 12.5px; color: var(--ink-soft); margin: 0; }
 .day-card-group { margin-bottom: 6px; }
@@ -2103,6 +2126,7 @@ const CSS = `
 .schedule-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(181,71,58,0.08); border: 1px solid rgba(181,71,58,0.3); border-radius: 14px; padding: 16px 20px; }
 .schedule-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
 .schedule-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; max-width: 480px; }
+.schedule-banner-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Non-blocking heads-up, not an alarm — amber rather than schedule-banner's
    brick red, since this never requires action (proceeding as-is is always

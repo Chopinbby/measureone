@@ -412,11 +412,33 @@ export function computeTimeline(piece, chunkSet) {
   return { days, learningDays, consolidationDays, halfPoint, introducedDay };
 }
 
-export function getEffectiveTimeline(piece, chunkSet) {
-  const marker = piece.rescheduleMarker;
+// Rescheduling a piece a *second* time used to discard the first
+// reschedule's placements for every day between the old asOfDay and the new
+// one: `original` was always the pristine, never-rescheduled computeTimeline
+// result, no matter how many times this piece had already been rebalanced.
+// A day that had genuinely-live content right up until the second
+// reschedule — including a session someone had actually logged there —
+// would revert to whatever that day happened to hold before any reschedule
+// ever ran, with no way to tell the two apart. Found via manual double-
+// reschedule testing: a chunk logged on its first-reschedule placement
+// became invisible in its real (now-reverted) spot and unmatched in its
+// pre-reschedule one, so it displayed as freshly unstarted even though
+// `piece.progress[id].doneDays` never lost the session.
+//
+// Fixed by chaining: each new rescheduleMarker now also carries `previous`,
+// the marker that was in effect right before it (or null, for a piece's
+// first-ever reschedule). `original` — the source for everything before
+// *this* marker's asOfDay — is the EFFECTIVE timeline as of that previous
+// marker, computed recursively, instead of always the raw schedule. A
+// once-rescheduled piece has `previous: null`, so this recursion bottoms
+// out at exactly the same `computeTimeline` call as before — no behavior
+// change for the single-reschedule case this was already tested against,
+// and an old saved piece with no `previous` field at all behaves the same
+// way (`marker.previous` reads as `undefined`, same falsy base case).
+function computeEffectiveTimeline(piece, chunkSet, marker) {
   if (!marker) return computeTimeline(piece, chunkSet);
 
-  const original = computeTimeline(piece, chunkSet);
+  const original = computeEffectiveTimeline(piece, chunkSet, marker.previous || null);
   const { practiceChunks, transitions, combos } = chunkSet;
   const chunkById = Object.fromEntries(practiceChunks.map((c) => [c.id, c]));
   const remainingChunks = marker.remainingChunkOrder.map((id) => chunkById[id]).filter(Boolean);
@@ -476,6 +498,10 @@ export function getEffectiveTimeline(piece, chunkSet) {
     // their original introduction day; only the re-placed ones shift.
     introducedDay: { ...original.introducedDay, ...shiftedIntroducedDay },
   };
+}
+
+export function getEffectiveTimeline(piece, chunkSet) {
+  return computeEffectiveTimeline(piece, chunkSet, piece.rescheduleMarker);
 }
 
 // A chunk only counts as "missed" once its scheduled day has actually passed
@@ -672,7 +698,12 @@ export function planRescheduleForPieces(pieces) {
         // gives that warning in full, and the bulk path shouldn't be the
         // less-informative way to do the same thing.
         fit,
-        marker: { asOfDay, remainingChunkOrder: remainingChunkIds },
+        // `previous: piece.rescheduleMarker` chains this reschedule onto
+        // whatever the piece's last one was (or null, its first) — see
+        // computeEffectiveTimeline for why a piece rescheduled more than
+        // once needs that chain instead of always re-deriving from the raw,
+        // never-rescheduled schedule.
+        marker: { asOfDay, remainingChunkOrder: remainingChunkIds, previous: piece.rescheduleMarker || null },
         extend,
       });
     } catch (e) {
@@ -766,7 +797,7 @@ export function computeMinutesModeAutoExtend(piece, chunkSet, timeline) {
     // Anchoring at the new last day instead means only that single
     // trailing day goes unplaced; everything else keeps the full, real
     // placement computeTimeline produces against the larger daysToLearn.
-    rescheduleMarker: { asOfDay: target, remainingChunkOrder: remainingChunkIds },
+    rescheduleMarker: { asOfDay: target, remainingChunkOrder: remainingChunkIds, previous: piece.rescheduleMarker || null },
   };
 }
 

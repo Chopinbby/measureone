@@ -96,7 +96,7 @@ chunking, scheduling, and confidence are actually computed, see
   `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`, `DocumentsEditor`)
   between `Wizard` and `SettingsTab`. Add new piece-level fields to one of
   these, not to a parallel implementation in each flow.
-- **Two specific regressions to watch for** if you touch scheduling —
+- **Specific regressions to watch for** if you touch scheduling —
   full context in [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler)
   and [`docs/Decisions.md`](docs/Decisions.md#scheduling):
   - Transitions must be scheduled as soon as both flanking chunks are
@@ -129,6 +129,26 @@ chunking, scheduling, and confidence are actually computed, see
     exactly the bug this function exists to fix; if a new call site reaches
     for the raw comparison instead, that's this regression coming back. See
     [`docs/Algorithms.md`](docs/Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
+  - **Rescheduling a piece more than once must chain through its whole
+    reschedule history, not just re-derive from the raw, never-rescheduled
+    schedule (Pass 48 follow-up).** `getEffectiveTimeline`
+    (`lib/scheduling.js`) recurses through each `rescheduleMarker`'s
+    `previous` link to compute what came before the *current* marker's
+    `asOfDay`, rather than always calling `computeTimeline` fresh. Without
+    that chain, a second reschedule silently discards everything the first
+    one actually placed for the days in between — including a session
+    someone genuinely logged there, which then displays as a completely
+    different, unstarted chunk (confirmed live, not hypothetical). Every
+    place that constructs a new marker (`App.jsx`'s `handleReschedule`;
+    `planRescheduleForPieces` and `computeMinutesModeAutoExtend`, both
+    `lib/scheduling.js`) must set `previous: piece.rescheduleMarker ||
+    null`, or this regression comes back for that path specifically. A
+    piece whose second reschedule already happened *before* this fix
+    existed has no `previous` link to recover — that piece's history is
+    genuinely unrecoverable, not just unfixed; it corrects itself only once
+    rescheduled again. See
+    [`docs/Algorithms.md`](docs/Algorithms.md#rescheduling) and
+    [`docs/Decisions.md`](docs/Decisions.md#scheduling).
 - **`Wizard` is create-only.** Editing an existing piece always goes through
   `SettingsTab`, never the wizard.
 - **Piece Map chunk detail is a modal, not inline** — this was a deliberate
@@ -479,6 +499,56 @@ revival-aware — a piece mid-revival can show "(behind N chunks)" against
 its *original*, pre-revival plan, not the revival plan actually being
 followed. See [`docs/Decisions.md`](docs/Decisions.md#open-questions) for
 both.
+
+**Since Pass 46**, the Timeline tab applies Pass 45's
+`classifyDayCompletion` to every day card: a past day grays out, and a
+fully-done one gets a small, transparent-styled check mark next to its day
+number — a card-grid analog of Pass 45's strikethrough, not literally the
+same treatment, since a card grid reads differently than a text list even
+though the underlying classification is shared. Timeline also gained its
+first reschedule entry point, having had none before, by rendering the
+existing `ScheduleBanner` component rather than building a second
+button/modal pairing.
+
+**Since Pass 47**, Today's Practice has a second way to act on being
+behind: a "Go to Day N" button that jumps to the earliest day with real
+incomplete work, reusing the same `onDayChange` day-navigation Today's
+Practice's own Previous/Next-day controls already use. It's explicitly an
+alternative to rescheduling, not a replacement — on request, it was folded
+into the *same* `ScheduleBanner` the Reschedule button already renders (two
+buttons, one banner, new copy) rather than stacking a second banner
+underneath. `ScheduleBanner` (`components/ScheduleBanner.jsx`) now takes
+two optional props, `earliestBehindDay`/`onDayChange`, passed only by
+Today's Practice — Overview and Timeline are unaffected and still render
+the original single-button banner.
+
+**Since Pass 48**, a day whose entire original task list was swept into a
+reschedule — on both Timeline and Today's Practice (single-day view and
+"View all") — collapses to a plain italic "Tasks rescheduled" line instead
+of re-showing content that's since moved elsewhere. A day with a mix of
+done, still-legitimately-scheduled, and moved items is untouched by this;
+only a day where *every* original item moved collapses. The check has to
+recognize a transition or combo as "moved" too, even though
+`rescheduleMarker.remainingChunkOrder` only ever lists practice-chunk ids —
+a transition/combo id is never itself in that list, even when it genuinely
+rode along with an untouched neighbor into the rescheduled remainder
+(mirrors `getEffectiveTimeline`'s own relocation filter via `linkedIds`,
+rather than a bare list-membership check that would have left almost every
+day past the first showing as "still has real content" purely from this
+id-namespace gap, not from anything actually left behind).
+
+**Two more bugs were found and fixed in the same session, as a direct
+consequence of building the above:**
+- The Pass 47 catch-up button's day search had no way to know a day it
+  found had since been collapsed by Pass 48 — it kept finding the earliest
+  *original* behind day (reliably day 1, once any reschedule has happened),
+  sending the user to a screen with nothing on it. Fixed by having that
+  search skip a day the same collapse check applies to and keep scanning
+  forward.
+- Rescheduling a piece a *second* time used to discard whatever the first
+  reschedule had actually placed for the days in between — see the new
+  regression note above (`rescheduleMarker.previous` chaining,
+  `getEffectiveTimeline`) for the mechanism and fix.
 
 **Since Pass 49**, a single-section run-through no longer unlocks once and
 stays available forever — it's a repeating gate (`sectionRunThroughGate`,

@@ -21,7 +21,7 @@ import {
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -1308,19 +1308,27 @@ export default function App() {
 
   const handleReschedule = () => {
     const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
-    if (status.remainingChunkIds.length === 0) {
-      // Nothing untouched among *practice chunks* — the only unit this
-      // reschedule mechanism (and rescheduleMarker/getEffectiveTimeline
-      // underneath it) actually knows how to re-place. Usually that really
-      // does mean "nothing to do." But isPlanActuallyComplete's "days"-mode
-      // bar also covers transitions/combos (chunkSet.all) — so a piece can
-      // still correctly show the reschedule nudge (real work left) while
-      // having zero untouched *practice* chunks, if the one thing left is a
-      // transition or focus block riding on already-touched neighbors. A
-      // reschedule genuinely can't help there (there's no day-placement
-      // problem to solve, just something still waiting to be logged), so
-      // say that plainly instead of a click that silently does nothing —
-      // see docs/Decisions.md#scheduling.
+    // Pass 73 follow-up to Pass 65: a transition/combo's own logged status
+    // was never checked directly anywhere in the reschedule mechanism —
+    // computeEffectiveTimeline could only infer it indirectly from whether
+    // a flanking/linked practice chunk was still untouched, so a connector
+    // whose neighbors were BOTH already practiced was invisible to every
+    // reschedule, forever, no matter how many times the piece was
+    // rescheduled again (confirmed, reported precisely). This checks the
+    // connector directly instead of guessing from its neighbors.
+    const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+    // A connector only overrides the alert once its own scheduled day has
+    // actually passed — the same introducedDay < currentDay gate
+    // missedCount applies to practice chunks — so one that simply hasn't
+    // been introduced yet (not overdue, just not due) doesn't count.
+    const qualifyingConnectorIds = remainingConnectorIds.filter(
+      (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < currentDay
+    );
+    if (status.remainingChunkIds.length === 0 && qualifyingConnectorIds.length === 0) {
+      // Genuinely nothing to do: every practice chunk has been introduced
+      // AND no connector is both untouched and overdue. isPlanActuallyComplete's
+      // "days"-mode bar also covers transitions/combos (chunkSet.all), so
+      // this can still correctly stay silent once the plan is truly done.
       if (!isPlanActuallyComplete(piece, chunkSet, timeline)) {
         window.alert(
           "Every practice chunk has already been introduced — there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"View all\" on Today's Practice to find it."
@@ -1340,7 +1348,18 @@ export default function App() {
     const dayWord = (n) => (n === 1 ? "day" : "days");
     const remainWord = (n) => (n === 1 ? "remains" : "remain");
 
-    let message = `This will rebalance the ${status.remainingChunkIds.length} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`;
+    // Named per what's actually moving — a connector-only reschedule
+    // (zero untouched practice chunks, one or more stuck transitions/focus
+    // blocks) used to say "This will rebalance the 0 chunk(s)...", which
+    // is both confusing and literally wrong about what's about to happen.
+    const chunkCount = status.remainingChunkIds.length;
+    const connectorCount = remainingConnectorIds.length;
+    let message =
+      chunkCount > 0 && connectorCount > 0
+        ? `This will rebalance the ${chunkCount} chunk(s) and ${connectorCount} transition(s)/focus block(s) you haven't started yet across the days left in your plan. Everything you've already practiced stays where it is. Continue?`
+        : chunkCount > 0
+          ? `This will rebalance the ${chunkCount} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`
+          : `This will rebalance the ${connectorCount} transition(s)/focus block(s) you haven't started yet across the days left in your plan. Everything you've already practiced stays where it is. Continue?`;
     let suggestion = null;
     if (!fits) {
       // Extends the plan just far enough that requiredDays worth of days are
@@ -1399,7 +1418,7 @@ export default function App() {
           // (lib/scheduling.js) for why a second reschedule needs that
           // chain instead of always re-deriving from the raw, never-
           // rescheduled schedule.
-          marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds, previous: piece.rescheduleMarker || null },
+          marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
         },
       ],
       "Reschedule remaining chunks?",
@@ -1453,6 +1472,13 @@ export default function App() {
     const nameOf = (p) => p.piece.name || "Untitled piece";
     const names = plans.map(nameOf).join(", ");
     const totalChunks = plans.reduce((s, p) => s + p.marker.remainingChunkOrder.length, 0);
+    // A piece can now be included here purely via a stuck, overdue
+    // connector (Pass 65/73) — without this, a bulk reschedule made up
+    // entirely (or partly) of such pieces would say "This will rebalance
+    // the 0 chunk(s)...", the exact wording bug already fixed for the
+    // single-piece path but missed here at the time, since before that fix
+    // this situation could never actually arise.
+    const totalConnectors = plans.reduce((s, p) => s + p.marker.remainingConnectorIds.length, 0);
     // A piece already past its own target date gets an `extend` patch from
     // planRescheduleForPieces (Pass 39 follow-up) — its target date moves
     // as part of this action, so it no longer belongs in the "probably
@@ -1477,13 +1503,24 @@ export default function App() {
       ? `\n\n${stuck.length === 1 ? "" : `${stuck.length} more — `}${stuck.map(stuckNameOf).join(", ")}${stuck.length === 1 ? " is" : " are"} also behind schedule but ${stuck.length === 1 ? "isn't" : "aren't"} included here — ${stuck.length === 1 ? "it has" : "they have"} nothing unstarted left to reschedule. What's stuck ${stuck.length === 1 ? "there is" : "there are"} a transition, focus block, or review waiting to be logged instead — check "View all" on ${stuck.length === 1 ? "its" : "each of their"} Today's Practice.`
       : "";
 
+    // Named per what's actually moving, same as the single-piece dialog —
+    // a bulk reschedule can now be made up entirely of connector-only
+    // pieces, so "chunk(s)" alone (or worse, "0 chunk(s)") would be wrong.
+    const whatsMoving =
+      totalChunks > 0 && totalConnectors > 0
+        ? `${totalChunks} chunk(s) and ${totalConnectors} transition(s)/focus block(s)`
+        : totalChunks > 0
+          ? `${totalChunks} chunk(s)`
+          : `${totalConnectors} transition(s)/focus block(s)`;
+    const alreadyPracticedNote = totalConnectors > 0 ? "Everything you've already practiced stays where it is" : "Chunks you've already practiced stay where they are";
+
     const message =
       `${plans.length} piece${plans.length === 1 ? " is" : "s are"} behind schedule: ${names}.\n\n` +
       // "...and each piece keeps its own target date" only when that's
       // actually true for every piece here — dropped rather than stated
       // falsely whenever extendingNote is about to say otherwise for some
       // of them.
-      `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are${extending.length ? "" : ", and each piece keeps its own target date"}.` +
+      `This will rebalance the ${whatsMoving} you haven't started yet across the days left in each piece's own plan. ${alreadyPracticedNote}${extending.length ? "" : ", and each piece keeps its own target date"}.` +
       `${extendingNote}${warning}${stuckNote}\n\nContinue?`;
 
     openRescheduleModal(

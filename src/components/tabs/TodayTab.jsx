@@ -181,9 +181,16 @@ export function TodayTab({
   // would otherwise land on gets skipped, not returned, so "earliest
   // incomplete day" keeps meaning a day with something real left to do.
   const marker = piece.rescheduleMarker;
+  // remainingConnectorIds (Pass 73 follow-up to Pass 65) checks a
+  // connector's own logged status directly, alongside — not instead of —
+  // the neighbor-based check below: see DayChecklist.jsx's fuller comment
+  // on this same check for why the neighbor check alone used to leave a
+  // stuck, never-logged connector invisible forever once both its
+  // neighbors were practiced.
   const isMovedId = (id) => {
     if (!marker) return false;
     if (marker.remainingChunkOrder.includes(id)) return true;
+    if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
     const c = chunkById[id];
     if (!c || !c.linkedIds) return false;
     return c.kind === "combo"

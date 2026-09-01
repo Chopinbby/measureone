@@ -122,10 +122,18 @@ export function DayChecklist({
   // would treat almost every day past the very first as "still has real
   // content" purely because of this id-namespace gap, not because anything
   // on it was actually left behind.
+  //
+  // remainingConnectorIds (Pass 73 follow-up to Pass 65) checks a
+  // connector's own logged status directly, alongside — not instead of —
+  // the neighbor-based check above: a connector whose neighbors are both
+  // already practiced but whose own doneDays is still empty used to be
+  // invisible to this check entirely, unmovable by any reschedule no
+  // matter how many times the piece was rescheduled again.
   const marker = piece.rescheduleMarker;
   const isMovedId = (id) => {
     if (!marker) return false;
     if (marker.remainingChunkOrder.includes(id)) return true;
+    if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
     const c = chunkById[id];
     if (!c || !c.linkedIds) return false;
     return c.kind === "combo"

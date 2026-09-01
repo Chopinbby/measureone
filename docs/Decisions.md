@@ -1060,6 +1060,169 @@ own visibility widened to match.**
   in the common case.
 - See [Algorithms.md](Algorithms.md#behind-schedule-detection).
 
+**Decision (Pass 65, mitigated but not fixed; Pass 73, the actual fix): a
+connector's own logged status is now checked directly, instead of being
+inferred from its neighbors.**
+
+- **The bug, reported precisely by the user and confirmed directly against
+  the code:** `computeScheduleStatus` — the function every reschedule path
+  uses to decide what's "remaining" — was called with
+  `chunkSet.practiceChunks` only, at every call site
+  (`handleReschedule`/`App.jsx`, `planRescheduleForPieces`/`lib/scheduling.js`).
+  Transitions and combos never entered its "remaining" concept at all.
+  Worse, `getEffectiveTimeline`'s own `remainingTransitions`/`remainingCombos`
+  filters didn't check a transition's or combo's own logged status either —
+  they inferred it indirectly, from whether at least one of its
+  flanking/linked chunks was still untouched. Once both flanking chunks had
+  been practiced at least once, a transition dropped out of that filter —
+  even with zero `doneDays` of its own — and was never re-placed by any
+  future reschedule. It just kept whatever day the original
+  `computeTimeline` call gave it, permanently, no matter how many times the
+  piece was rescheduled. A partial, deliberate mitigation already existed
+  in `handleReschedule`: when literally every practice chunk was touched,
+  it showed an explanatory alert instead of silently doing nothing — but
+  that only covered the case where nothing else was left at all. When
+  other chunks were still genuinely remaining elsewhere in the piece, a
+  reschedule proceeded normally and stranded the transition/combo with no
+  warning whatsoever. Pass 65 shipped as scoped, confirmed by the user — a
+  closer look afterward found real coordination gaps this scope didn't
+  cover, spun off as Pass 73.
+- **What Pass 73 initially assumed, and where that assumption broke:**
+  Pass 73's own build order treated Pass 65's neighbor-inference filter as
+  the *shipped fix* to coordinate other code around, not as the mitigation
+  Pass 65's own bug report already named it. Attempting the originally
+  scoped build (widen `handleReschedule`'s guard, keep
+  `remainingChunkOrder` practice-chunk-only) surfaced a real, verified
+  mechanical contradiction: an empty `remainingChunkOrder` can never
+  satisfy a neighbor-membership filter, so "let the reschedule proceed"
+  under that scope would have changed nothing observable for the
+  connector. This was presented back to the user rather than guessed
+  through, together with the two narrower options considered (suppress the
+  alert without relocating anything; force an already-touched neighbor's
+  id into `remainingChunkOrder` anyway, risking that chunk being
+  re-scheduled as if newly unlearned). **The user asked for a third
+  option: fix the actual root cause Pass 65's report identified.**
+- **The fix:** `computeRemainingConnectorIds(piece, chunkSet)`
+  (`lib/scheduling.js`) is `computeScheduleStatus`'s "ever touched" check
+  applied directly to `chunkSet.transitions`/`chunkSet.combos` — no
+  neighbor inference. Every marker constructor
+  (`handleReschedule`/`planRescheduleForPieces`) now carries this as a new
+  `marker.remainingConnectorIds` field, and `computeEffectiveTimeline`
+  checks it *alongside* (not instead of) the original neighbor-inference
+  filter, so a connector whose neighbor genuinely is still remaining still
+  rides along exactly as before. Verified this doesn't misplace anything
+  even when a connector's own neighbors are absent from the rescheduled
+  remainder's chunk set (because they're already touched): `computeTimeline`'s
+  transition/combo placement already falls back to the sub-plan's own
+  halfway point when a linked chunk isn't present in that specific call's
+  own chunk set — confirmed directly against a real piece, not just
+  reasoned about. The one alternative rejected: forcing an already-touched
+  neighbor's id into `remainingChunkOrder` just to give the old filter
+  something to match, which would have re-scheduled that neighbor as if
+  newly unlearned.
+- **Coordinated alongside the fix:** `handleReschedule`'s guard and
+  `planRescheduleForPieces`' eligibility check both now treat a
+  "qualifying connector" (untouched AND actually overdue — the same
+  `introducedDay < currentDay` gate `missedCount` applies to practice
+  chunks) as an independent reason to proceed instead of
+  alerting/excluding. The confirmation dialog for a connector-only
+  reschedule now says "N transition(s)/focus block(s)" instead of the old,
+  literal "0 chunk(s)". The three "is this moved" display checks
+  (`DayChecklist.jsx`/`TodayTab.jsx`/`TimelineTab.jsx`) each now also check
+  `marker.remainingConnectorIds` directly, alongside their pre-existing
+  (and already-correct) neighbor check. `findStuckBehindPieces` (Pass 70's
+  own follow-up) was updated to exclude a piece now handled via a
+  qualifying connector, so it can't appear in both "reschedulable" and
+  "nothing to reschedule" in the same confirmation flow.
+- **Same-session follow-up, flagged then requested:**
+  `computeMinutesModeAutoExtend`'s own marker construction
+  (`lib/scheduling.js`) also builds a `rescheduleMarker` — initially left
+  out of scope and flagged as a related gap, then fixed once asked for.
+  This is arguably the call site where the bug matters most: this
+  function's own existing comment already notes that `remainingChunkIds`
+  is "typically empty here," since `computeTimeline`'s halfPoint rule
+  guarantees every practice chunk was introduced well within the
+  *original* plan by the time a minutes-mode piece needs auto-extending —
+  meaning a connector's own logged status was the *only* signal that could
+  ever have caught a stuck one on this path. Fixed with the identical
+  pattern: `computeRemainingConnectorIds(piece, chunkSet)` computed
+  alongside `remainingChunkIds`, carried as
+  `rescheduleMarker.remainingConnectorIds`. `estimateRescheduleFit`'s
+  effort estimate stays practice-chunk-only — a connector-only reschedule's
+  "does this fit" check doesn't factor in the connector's own time cost (in
+  practice this doesn't produce a wrong "doesn't fit" warning, since zero
+  remaining practice-chunk effort trivially always "fits").
+- **Verified:** `npm test` green — 575 tests, including three new tests
+  that confirm actual *relocation* (not just that eligibility/guard logic
+  passes), one per marker-constructing call site
+  (`handleReschedule`, `planRescheduleForPieces`,
+  `computeMinutesModeAutoExtend`): a piece with every practice chunk
+  touched but one transition genuinely stuck is rescheduled/extended, and
+  the transition is confirmed present in the resulting remainder's own
+  days, not just absent from an alert. Three pre-existing tests were
+  updated to match the new, correct behavior — one asserted a
+  stuck-connector piece had "nothing to reschedule" (that was the bug; now
+  it correctly finds something), one needed its expected marker shape
+  updated for the new field, and one needed its fixture to actually touch
+  every chunk (including transitions) to mean what its name claimed.
+  Manually in the browser: built a real 12-measure piece, logged every
+  practice chunk while deliberately leaving its two transitions untouched,
+  confirmed the reschedule dialog said "2 transition(s)/focus block(s)"
+  (not "0 chunk(s)"), applied it, and confirmed across Timeline, "View
+  all", and single Day view that the transitions' old single-item days
+  collapsed to "Tasks rescheduled" while old days with a genuine mix of
+  moved and still-legitimate content correctly stayed live (Pass 48's
+  partial-day rule, unaffected) — and that the transitions reappeared as
+  live, loggable content on new days within the rescheduled remainder. The
+  `computeMinutesModeAutoExtend` fix itself was verified at the unit-test
+  level only (not separately reproduced live in the browser) — its
+  trigger condition (a minutes-mode piece already past its own day count)
+  is the same mechanism already covered end-to-end for the other two call
+  sites, and the fix is line-for-line the same pattern.
+- **Same-session follow-up, found in a critical second-pass review before
+  commit, all three fixed on request:**
+  1. **`handleRescheduleAll` (`App.jsx`) had the identical "0 chunk(s)"
+     wording bug** the single-piece dialog had already been fixed for —
+     missed the first time because that message wasn't touched during the
+     original fix, and before this pass, `planRescheduleForPieces` could
+     never have included a connector-only piece in the first place, so the
+     bug was unreachable until the fix above made it reachable. Now sums
+     `remainingConnectorIds` across every included piece the same way
+     `totalChunks` already summed `remainingChunkOrder`, and names both
+     ("N chunk(s) and N transition(s)/focus block(s)") using the identical
+     three-way phrasing the single-piece dialog uses. Verified live: built
+     a second connector-only test piece, triggered "Reschedule all" across
+     it plus a genuinely-missed-chunks piece, and confirmed the dialog read
+     "16 chunk(s) and 17 transition(s)/focus block(s)" — the connector
+     count checked out exactly against both pieces' own untouched
+     transitions, including the ordinary piece's, which had never been
+     specifically exercised before.
+  2. **`planRescheduleForPieces`'s eligibility guard had a second,
+     provably-redundant OR'd condition** left over from an earlier,
+     more defensive first draft of the connector fix — whenever the first
+     half of the check was false, the second half always was too (a
+     missed practice chunk implies `remainingChunkIds > 0`; a qualifying
+     connector implies `remainingConnectorIds > 0`), so it never
+     independently changed the outcome. Simplified to the one condition
+     that actually does the work; full test suite re-confirmed unchanged
+     behavior.
+  3. **The "furthest behind first" sort in the same function keyed on
+     `missedCount` alone**, which is always exactly 0 for a
+     connector-only piece by construction — meaning such a piece always
+     sorted dead last in the bulk confirmation's naming order, no matter
+     how long its connector had actually been stuck. Now sorts on
+     `missedCount + remainingConnectorIds.length`, a simple combined
+     weight that at least gives a stuck connector some influence on the
+     order instead of an implicit "least behind" default. New regression
+     test: two connector-only pieces with different connector counts,
+     confirming the one with more sorts first rather than by insertion
+     order (the previous behavior when both tied at `missedCount === 0`).
+  - **Verified:** `npm test` green — 576 tests. Manual browser
+    verification of fix (1) as described above; fixes (2) and (3) are
+    pure logic/ordering changes with no new browser-observable surface
+    beyond what the existing verification already covered.
+- See [Algorithms.md](Algorithms.md#rescheduling).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,

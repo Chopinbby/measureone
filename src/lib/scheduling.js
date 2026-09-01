@@ -443,8 +443,29 @@ function computeEffectiveTimeline(piece, chunkSet, marker) {
   const chunkById = Object.fromEntries(practiceChunks.map((c) => [c.id, c]));
   const remainingChunks = marker.remainingChunkOrder.map((id) => chunkById[id]).filter(Boolean);
   const remainingIds = new Set(remainingChunks.map((c) => c.id));
-  const remainingTransitions = transitions.filter((t) => t.linkedIds.some((id) => remainingIds.has(id)));
-  const remainingCombos = combos.filter((c) => remainingIds.has(c.linkedIds[0]));
+  // A transition/combo only ever rode into the remainder indirectly, via
+  // this neighbor check — never checked against its OWN logged status.
+  // Pass 65 reported this precisely: once both of a transition's flanking
+  // chunks (or a combo's one anchor chunk) had been practiced, the
+  // connector dropped out of this filter permanently, even with zero
+  // doneDays of its own — stranded on whatever day the original
+  // computeTimeline call gave it, unmovable by any future reschedule, no
+  // matter how many times the piece was rescheduled again. Pass 65 shipped
+  // only this neighbor-inference filter as a mitigation, not a fix for
+  // that exact gap (its own bug report says so explicitly) — kept here
+  // unchanged, since a connector whose neighbor genuinely IS still
+  // remaining should still ride along with it exactly as before.
+  //
+  // remainingConnectorIds (Pass 73 follow-up) is the real fix: a direct,
+  // self-status check via computeRemainingConnectorIds below, carried on
+  // the marker alongside remainingChunkOrder. `|| []` handles a marker
+  // saved before this field existed — it just falls back to the
+  // neighbor-only behavior above, exactly as it always did.
+  const remainingConnectorIds = new Set(marker.remainingConnectorIds || []);
+  const remainingTransitions = transitions.filter(
+    (t) => remainingConnectorIds.has(t.id) || t.linkedIds.some((id) => remainingIds.has(id))
+  );
+  const remainingCombos = combos.filter((c) => remainingConnectorIds.has(c.id) || remainingIds.has(c.linkedIds[0]));
 
   const asOfDay = clamp(marker.asOfDay, 1, original.days.length);
   const remainingDayCount = Math.max(1, original.days.length - asOfDay + 1);
@@ -528,6 +549,30 @@ export function computeScheduleStatus(piece, practiceChunks, timeline, currentDa
     if (introducedOn && introducedOn < currentDay) missedCount++;
   });
   return { missedCount, remainingChunkIds };
+}
+
+// Which transitions/combos have never been logged at all — computeScheduleStatus's
+// "ever touched" check (above), applied directly to connectors instead of
+// practice chunks. Every reschedule call site used to call
+// computeScheduleStatus with chunkSet.practiceChunks only, so a
+// transition/combo's own doneDays never factored into "what's remaining"
+// anywhere — the only signal available was computeEffectiveTimeline's
+// neighbor-inference filter (see the comment there), which can't tell "this
+// connector itself is untouched" apart from "this connector's neighbors are
+// untouched." Confirmed as a real, reported bug (Pass 65); this direct
+// check is what actually closes it (Pass 73 follow-up) — feeds
+// marker.remainingConnectorIds, which computeEffectiveTimeline reads
+// alongside (not instead of) the neighbor check.
+//
+// Ungated by currentDay, matching remainingChunkIds' own scope exactly — a
+// connector not yet due still belongs in a fresh marker's remainder just
+// as an unintroduced practice chunk does; day-gating only matters for
+// deciding whether to alert instead of reschedule (see handleReschedule/
+// planRescheduleForPieces, which additionally check timeline.introducedDay
+// for that specific decision).
+export function computeRemainingConnectorIds(piece, chunkSet) {
+  const untouched = (x) => ((piece.progress[x.id] || {}).doneDays || []).length === 0;
+  return [...chunkSet.transitions, ...chunkSet.combos].filter(untouched).map((x) => x.id);
 }
 
 // Per-day completion status for a single timeline day, relative to
@@ -730,7 +775,25 @@ export function planRescheduleForPieces(pieces) {
         timeline,
         cutoffDay
       );
-      if (missedCount === 0 || remainingChunkIds.length === 0) return;
+      const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+      // A connector counts toward eligibility only once it's actually due —
+      // the same introducedDay < cutoffDay gate missedCount applies to
+      // practice chunks — so a connector that simply hasn't been introduced
+      // yet doesn't force a piece into "Reschedule all" prematurely. Pass 73
+      // follow-up to Pass 65: without this, a piece with every practice
+      // chunk touched but a genuinely stuck, overdue connector was excluded
+      // here exactly like it was in handleReschedule's single-piece guard.
+      const qualifyingConnectorIds = remainingConnectorIds.filter(
+        (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < cutoffDay
+      );
+      // Simplified from an earlier version that OR'd in a second,
+      // provably-redundant condition (remainingChunkIds.length === 0 &&
+      // remainingConnectorIds.length === 0) — whenever this first check is
+      // false, that second one always was too (missedCount > 0 implies
+      // remainingChunkIds > 0; a qualifying connector implies
+      // remainingConnectorIds > 0), so it never independently changed the
+      // outcome. Found in review, removed rather than left as dead weight.
+      if (missedCount === 0 && qualifyingConnectorIds.length === 0) return;
 
       const fit = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds);
 
@@ -766,7 +829,7 @@ export function planRescheduleForPieces(pieces) {
         // computeEffectiveTimeline for why a piece rescheduled more than
         // once needs that chain instead of always re-deriving from the raw,
         // never-rescheduled schedule.
-        marker: { asOfDay, remainingChunkOrder: remainingChunkIds, previous: piece.rescheduleMarker || null },
+        marker: { asOfDay, remainingChunkOrder: remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
         extend,
       });
     } catch (e) {
@@ -775,7 +838,12 @@ export function planRescheduleForPieces(pieces) {
   });
   // Furthest behind first — that's the order the confirmation lists them in,
   // so the piece most in need of this is the one the user reads first.
-  plans.sort((a, b) => b.missedCount - a.missedCount);
+  // Sorting on missedCount alone (found in review) always ranked a
+  // connector-only piece dead last, however long its connector had been
+  // stuck, since such a piece's missedCount is always 0 by construction —
+  // folding in the connector count gives it a real, if simple, weight in
+  // the ordering instead of an implicit "least behind" default.
+  plans.sort((a, b) => (b.missedCount + b.marker.remainingConnectorIds.length) - (a.missedCount + a.marker.remainingConnectorIds.length));
   return plans;
 }
 
@@ -812,6 +880,18 @@ export function findStuckBehindPieces(pieces) {
       // below.
       const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, cutoffDay);
       if (remainingChunkIds.length > 0) return; // planRescheduleForPieces already has this one covered
+
+      // Pass 73 follow-up to Pass 65: a piece with a genuinely stuck,
+      // overdue connector (transition/combo, never logged) is now ALSO
+      // covered by planRescheduleForPieces — it must be excluded here too,
+      // or it would show up in both lists at once (once as reschedulable,
+      // once as "nothing to reschedule"), the exact contradiction this
+      // function exists to prevent. Same qualifying condition
+      // planRescheduleForPieces itself applies.
+      const qualifyingConnectorIds = computeRemainingConnectorIds(piece, chunkSet).filter(
+        (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < cutoffDay
+      );
+      if (qualifyingConnectorIds.length > 0) return;
 
       if (countBehindDays(piece, timeline, cutoffDay) > 0) {
         stuck.push({ pieceId, piece });
@@ -889,6 +969,17 @@ export function computeMinutesModeAutoExtend(piece, chunkSet, timeline) {
   if (target <= piece.daysToLearn) return null;
 
   const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, timeline.days.length);
+  // Same gap Pass 65/73 fixed for handleReschedule/planRescheduleForPieces,
+  // flagged but deliberately left unfixed here at the time — by the point
+  // this auto-extend fires, introduction is normally long complete
+  // (comment below), which is exactly the state where a connector's own
+  // logged status (not its neighbors') is the only thing that can tell
+  // computeEffectiveTimeline it still needs a placement. Without this, a
+  // stuck, never-logged transition/combo on a minutes-mode piece could
+  // never be caught by this auto-extend path at all, even though the
+  // single-piece and bulk reschedule paths both now catch the identical
+  // case.
+  const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
   return {
     daysToLearn: target,
     // asOfDay is pinned to the *new* final day — not `timeline.days.length`,
@@ -904,7 +995,12 @@ export function computeMinutesModeAutoExtend(piece, chunkSet, timeline) {
     // Anchoring at the new last day instead means only that single
     // trailing day goes unplaced; everything else keeps the full, real
     // placement computeTimeline produces against the larger daysToLearn.
-    rescheduleMarker: { asOfDay: target, remainingChunkOrder: remainingChunkIds, previous: piece.rescheduleMarker || null },
+    rescheduleMarker: {
+      asOfDay: target,
+      remainingChunkOrder: remainingChunkIds,
+      remainingConnectorIds,
+      previous: piece.rescheduleMarker || null,
+    },
   };
 }
 

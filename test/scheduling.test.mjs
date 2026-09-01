@@ -20,8 +20,9 @@ import {
   classifyDayCompletion,
   countBehindDays,
   findStuckBehindPieces,
+  computeRemainingConnectorIds,
 } from "../src/lib/scheduling.js";
-import { addDaysISO, todayISODate, elapsedDay } from "../src/lib/utils.js";
+import { addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "../src/lib/utils.js";
 
 function basePiece(overrides) {
   return {
@@ -651,6 +652,40 @@ describe("computeMinutesModeAutoExtend — Pass 39: keeps a minutes-mode plan pr
       "still not learned, so still correctly not 'complete' — only the calendar gate moved"
     );
   });
+
+  // Same gap as handleReschedule/planRescheduleForPieces (Pass 65/73) —
+  // flagged as deliberately unfixed at the time, then fixed here on
+  // request. Every practice chunk touched (remainingChunkOrder empty,
+  // matching this function's own "typically empty here" comment) but one
+  // transition genuinely never logged — the marker this function builds
+  // must carry it via remainingConnectorIds, not just silently strand it.
+  test("[fix] a stuck, never-logged transition is carried into the marker via remainingConnectorIds, not stranded", () => {
+    const piece0 = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(10) }); // elapsedDay 11
+    const chunkSet = generateAllChunks(piece0);
+    const progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1], stage: "settling" }]));
+    const piece = { ...piece0, progress };
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+
+    const result = computeMinutesModeAutoExtend(piece, chunkSet, timeline);
+    assert.ok(result, "an extension patch is returned");
+    assert.deepEqual(
+      result.rescheduleMarker.remainingConnectorIds.sort(),
+      chunkSet.transitions.map((t) => t.id).sort(),
+      "every never-touched transition is carried, since none of them have been logged at all"
+    );
+
+    // Confirm it's not just present in the marker but actually re-placed —
+    // the same relocation check used for the other two call sites.
+    const rescheduled = { ...piece, ...result };
+    const after = getEffectiveTimeline(rescheduled, chunkSet);
+    const stuckId = result.rescheduleMarker.remainingConnectorIds[0];
+    const newOccurrence = after.days.find(
+      (d) =>
+        d.dayNumber >= result.rescheduleMarker.asOfDay &&
+        [...d.newChunkIds, ...d.specialChunkIds, ...d.reviewChunkIds].includes(stuckId)
+    );
+    assert.ok(newOccurrence, "the stuck transition must be re-placed somewhere in the extended remainder");
+  });
 });
 
 describe("Tier 2 — due dates beyond this plan's own days[] are dropped from this bounded view, not clamped in wrong or crashed on", () => {
@@ -1031,10 +1066,11 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
     const chunkSet = generateAllChunks(piece);
     const timeline = getEffectiveTimeline(piece, chunkSet);
     const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, 6);
+    const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
 
     const [plan] = planRescheduleForPieces({ piece });
 
-    assert.deepEqual(plan.marker, { asOfDay: 6, remainingChunkOrder: remainingChunkIds, previous: null });
+    assert.deepEqual(plan.marker, { asOfDay: 6, remainingChunkOrder: remainingChunkIds, remainingConnectorIds, previous: null });
   });
 
   test("paused and archived pieces are left alone", () => {
@@ -1136,10 +1172,18 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
     assert.deepEqual(planRescheduleForPieces({ finishedLongAgo }), [], "genuinely done — a bulk reschedule must not touch it");
   });
 
-  test("a piece with every chunk already practiced has nothing to reschedule", () => {
+  test("a piece with every chunk — practice AND every transition/combo — already practiced has nothing to reschedule", () => {
     const piece = behindPieceOnDay6({ name: "Done" });
     const chunkSet = generateAllChunks(piece);
-    piece.progress = Object.fromEntries(chunkSet.practiceChunks.map((c) => [c.id, { doneDays: [1] }]));
+    // Pass 73 follow-up to Pass 65: touching only practiceChunks here used
+    // to still leave every transition/combo untouched — under the old,
+    // neighbor-only inference that didn't matter (a reschedule couldn't see
+    // them either way), but now that connectors are checked directly, a
+    // piece with an untouched transition genuinely does have something to
+    // reschedule. This test's own name promises "every chunk" — so the
+    // fixture has to actually touch every chunk, including connectors, to
+    // mean what it says.
+    piece.progress = Object.fromEntries(chunkSet.all.map((c) => [c.id, { doneDays: [1] }]));
 
     assert.deepEqual(planRescheduleForPieces({ piece }), []);
   });
@@ -1170,6 +1214,44 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
 
     assert.ok(plans[0].missedCount >= plans[plans.length - 1].missedCount);
     assert.equal(plans[0].pieceId, "more");
+  });
+
+  // [fix, found in review] the sort used to key on missedCount alone, which
+  // is always 0 for a connector-only piece by construction — meaning such
+  // a piece always sorted dead last, no matter how many stuck connectors it
+  // actually had. This proves connector count now genuinely affects
+  // ordering between two otherwise-tied (missedCount 0) pieces.
+  test("[fix] a connector-only piece with more stuck connectors sorts before one with fewer, not by insertion order", () => {
+    function connectorOnlyPiece(overrides) {
+      const piece0 = basePiece({
+        minutesPerDay: 5,
+        daysToLearn: 30,
+        startDate: startedDaysAgo(20),
+        progress: {},
+        ...overrides,
+      });
+      const chunkSet = generateAllChunks(piece0);
+      const timeline = getEffectiveTimeline(piece0, chunkSet);
+      const progress = {};
+      timeline.days.forEach((day) => {
+        day.newChunkIds.forEach((id) => {
+          progress[id] = progress[id] || { doneDays: [] };
+          progress[id].doneDays.push(day.dayNumber);
+        });
+      });
+      return { ...piece0, progress };
+    }
+
+    // 12 measures / customChunkSize 4 -> 3 practice chunks -> 2 transitions.
+    const fewerStuck = connectorOnlyPiece({ name: "FewerStuck", totalMeasures: 12, measureDifficulty: Array(12).fill(1) });
+    // 20 measures -> 5 practice chunks -> 4 transitions.
+    const moreStuck = connectorOnlyPiece({ name: "MoreStuck", totalMeasures: 20, measureDifficulty: Array(20).fill(1) });
+
+    const plans = planRescheduleForPieces({ fewerStuck, moreStuck });
+
+    assert.equal(plans.length, 2, "test setup sanity check — both are reschedulable via their stuck connectors");
+    assert.ok(plans.every((p) => p.missedCount === 0), "test setup sanity check — both tie at missedCount 0");
+    assert.equal(plans[0].pieceId, "moreStuck", "more stuck connectors must sort first, not whichever was inserted first");
   });
 });
 
@@ -1204,15 +1286,92 @@ describe("findStuckBehindPieces — same-session follow-up: which pieces Master 
     return { ...piece0, progress };
   }
 
-  test("a piece with every practice chunk touched but a transition still stuck is returned here, not by planRescheduleForPieces", () => {
+  // Pass 73 follow-up to Pass 65: this test used to characterize the OLD,
+  // buggy behavior — planRescheduleForPieces couldn't see a stuck,
+  // never-logged transition at all (it only ever inferred a connector's
+  // status indirectly from its neighbors), so findStuckBehindPieces had to
+  // exist purely to keep such a piece from silently vanishing from the
+  // bulk reschedule flow. Now that computeRemainingConnectorIds checks a
+  // connector's own logged status directly, planRescheduleForPieces
+  // correctly finds this piece itself — so it must NOT also appear here,
+  // or it would show up in both "reschedulable" and "nothing to
+  // reschedule" at once.
+  test("a piece with every practice chunk touched but a transition still stuck is now handled by planRescheduleForPieces directly, not by this function", () => {
     const piece = pieceWithOnlyATransitionStuck({ name: "StuckOnly" });
 
     const plans = planRescheduleForPieces({ piece });
-    assert.deepEqual(plans, [], "nothing untouched for a reschedule to move — planRescheduleForPieces must not include it");
+    assert.equal(plans.length, 1, "the stuck transition is now a real, direct reason to reschedule");
+    assert.equal(plans[0].pieceId, "piece");
+    assert.ok(plans[0].marker.remainingConnectorIds.length > 0, "the marker actually carries the stuck connector's id");
 
     const stuck = findStuckBehindPieces({ piece });
-    assert.equal(stuck.length, 1, "the same piece must surface here instead, or it would silently disappear from the bulk flow");
-    assert.equal(stuck[0].pieceId, "piece");
+    assert.deepEqual(stuck, [], "already covered by planRescheduleForPieces — must not also appear as stuck");
+  });
+
+  // Verifies the *bulk* path doesn't just clear its eligibility check — the
+  // marker it actually produces must, once applied, give the connector a
+  // real new placement. Eligibility passing and relocation happening are
+  // two different claims; the old neighbor-only filter could never have
+  // satisfied this even if eligibility had somehow let the piece through.
+  test("[fix, Pass 73] applying planRescheduleForPieces' own marker actually re-places the stuck connector, not just clears eligibility", () => {
+    const piece = pieceWithOnlyATransitionStuck({ name: "RelocateBulk" });
+    const chunkSet = generateAllChunks(piece);
+    const [plan] = planRescheduleForPieces({ piece });
+
+    const rescheduled = { ...piece, rescheduleMarker: plan.marker };
+    const after = getEffectiveTimeline(rescheduled, chunkSet);
+
+    const stuckId = plan.marker.remainingConnectorIds[0];
+    const newOccurrence = after.days.find(
+      (d) =>
+        d.dayNumber >= plan.marker.asOfDay &&
+        [...d.newChunkIds, ...d.specialChunkIds, ...d.reviewChunkIds].includes(stuckId)
+    );
+    assert.ok(newOccurrence, "the stuck connector must be re-placed somewhere in the rescheduled remainder, not left stranded");
+  });
+
+  // handleReschedule itself lives in App.jsx (a React component — no
+  // render harness in this test suite, per CLAUDE.md's "logic that needs a
+  // regression test belongs in lib/" rule), so this mirrors its exact
+  // guard/marker-building logic line for line against the same shared
+  // functions, rather than testing App.jsx directly. Covers the
+  // single-piece path's guard (does it stop alerting?) AND relocation
+  // (does the connector actually move?) in one test, matching the pass's
+  // own two-part verification requirement.
+  test("[fix, Pass 73] the single-piece path's own guard/marker logic: no longer blocks, and actually relocates the stuck connector", () => {
+    const piece = pieceWithOnlyATransitionStuck({ name: "RelocateSolo" });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const currentDay = getCurrentDay(piece, timeline.days.length);
+
+    const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, currentDay);
+    const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+    const qualifyingConnectorIds = remainingConnectorIds.filter(
+      (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < currentDay
+    );
+
+    // The exact condition handleReschedule's guard now checks — both being
+    // true here means the "nothing to reschedule" alert would NOT fire,
+    // where before this fix it always would have (remainingChunkIds alone
+    // was empty).
+    assert.equal(status.remainingChunkIds.length, 0, "test setup sanity check — no untouched practice chunks");
+    assert.ok(qualifyingConnectorIds.length > 0, "test setup sanity check — a real, overdue, never-logged connector exists");
+
+    const marker = {
+      asOfDay: currentDay,
+      remainingChunkOrder: status.remainingChunkIds,
+      remainingConnectorIds,
+      previous: piece.rescheduleMarker || null,
+    };
+    const rescheduled = { ...piece, rescheduleMarker: marker };
+    const after = getEffectiveTimeline(rescheduled, chunkSet);
+
+    const stuckId = qualifyingConnectorIds[0];
+    const newOccurrence = after.days.find(
+      (d) =>
+        d.dayNumber >= currentDay && [...d.newChunkIds, ...d.specialChunkIds, ...d.reviewChunkIds].includes(stuckId)
+    );
+    assert.ok(newOccurrence, "the stuck connector must be re-placed somewhere in the rescheduled remainder");
   });
 
   test("a piece that's genuinely on schedule (nothing behind at all) appears in neither list", () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { formatRange, formatDuration, todayISODate } from "../../../lib/utils";
 import { DIFFICULTY_META, SESSION_OUTCOME_META } from "../../../lib/constants";
 import {
@@ -41,7 +41,18 @@ export function InterleavePanel({
   const safeIndex = items.length ? index % items.length : 0;
   const current = items[safeIndex];
 
+  // Pass 72 — mirrors ChecklistItem.jsx's timerStartRef: records the wall-
+  // clock moment the current running segment began, plus the seconds it
+  // started from, so the tick below can recompute elapsedSeconds from
+  // Date.now() instead of blindly incrementing. resetTurn (below) zeroes
+  // this out whenever a NEW turn starts — whether triggered by the
+  // rotation timer itself, a manual skip, or a manual log — since the
+  // rotation can advance to a new chunk without `running` ever toggling,
+  // so the effect below (keyed on `running`) wouldn't otherwise notice.
+  const turnStartRef = useRef(null);
+
   const resetTurn = () => {
+    turnStartRef.current = { startedAt: Date.now(), baseSeconds: 0 };
     setElapsedSeconds(0);
     setReps("");
     setBpm("");
@@ -55,14 +66,25 @@ export function InterleavePanel({
 
   useEffect(() => {
     if (!running || items.length === 0) return;
+    // Resuming after a pause carries over the seconds already elapsed —
+    // same as resetTurn does for a fresh turn, but anchored to elapsedSeconds
+    // (not 0) since a pause doesn't reset the turn itself.
+    turnStartRef.current = { startedAt: Date.now(), baseSeconds: elapsedSeconds };
     const id = setInterval(() => {
-      setElapsedSeconds((s) => {
-        if (s + 1 >= ROTATION_SECONDS) {
-          advance();
-          return 0;
-        }
-        return s + 1;
-      });
+      const recomputed =
+        turnStartRef.current.baseSeconds + Math.round((Date.now() - turnStartRef.current.startedAt) / 1000);
+      // A backgrounded tab can let real elapsed time run well past
+      // ROTATION_SECONDS — possibly several rotations' worth — before this
+      // tick ever fires. advance() (via resetTurn) resets turnStartRef to
+      // *this* moment, so the very next tick starts counting fresh toward
+      // the new chunk's own rotation instead of immediately tripping this
+      // same check again — advancing exactly once per tick that notices
+      // the crossing, not once per rotation-length missed.
+      if (recomputed >= ROTATION_SECONDS) {
+        advance();
+      } else {
+        setElapsedSeconds(recomputed);
+      }
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps

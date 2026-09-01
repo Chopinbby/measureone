@@ -14,10 +14,7 @@ export function FocusPanel({ piece, chunks, currentDay }) {
   return (
     <div className="panel focus-panel">
       <h3>Needs the most work right now</h3>
-      <p className="wizard-hint">
-        Ranked by confidence across everything you've touched so far — not just what's on today's
-        schedule.
-      </p>
+      <p className="wizard-hint">Ranked by confidence across everything you've touched so far.</p>
       <div className="focus-list">
         {ranked.map(({ chunk, conf }) => (
           <div key={chunk.id} className="focus-row">

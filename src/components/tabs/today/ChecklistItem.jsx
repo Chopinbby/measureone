@@ -100,7 +100,19 @@ export function ChecklistItem({
   useEffect(() => {
     if (!timerRunning) return;
     timerStartRef.current = { startedAt: Date.now(), baseSeconds: durationSeconds };
-    const id = setInterval(() => setDurationSeconds((s) => s + 1), 1000);
+    // Pass 72 — recomputed from the wall clock on every tick, not a blind
+    // `s + 1`, so the live display self-corrects on whatever tick actually
+    // fires. A backgrounded tab throttles/skips setInterval ticks (browsers
+    // do this to save power), so a plain increment would silently fall
+    // behind real elapsed time and only "catch up" one second at a time
+    // once the tab is foregrounded again. Recomputing from
+    // timerStartRef.current each tick means the very first tick after
+    // returning already shows the true elapsed time.
+    const id = setInterval(() => {
+      setDurationSeconds(
+        timerStartRef.current.baseSeconds + Math.round((Date.now() - timerStartRef.current.startedAt) / 1000)
+      );
+    }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);

@@ -443,8 +443,29 @@ function computeEffectiveTimeline(piece, chunkSet, marker) {
   const chunkById = Object.fromEntries(practiceChunks.map((c) => [c.id, c]));
   const remainingChunks = marker.remainingChunkOrder.map((id) => chunkById[id]).filter(Boolean);
   const remainingIds = new Set(remainingChunks.map((c) => c.id));
-  const remainingTransitions = transitions.filter((t) => t.linkedIds.some((id) => remainingIds.has(id)));
-  const remainingCombos = combos.filter((c) => remainingIds.has(c.linkedIds[0]));
+  // A transition/combo only ever rode into the remainder indirectly, via
+  // this neighbor check — never checked against its OWN logged status.
+  // Pass 65 reported this precisely: once both of a transition's flanking
+  // chunks (or a combo's one anchor chunk) had been practiced, the
+  // connector dropped out of this filter permanently, even with zero
+  // doneDays of its own — stranded on whatever day the original
+  // computeTimeline call gave it, unmovable by any future reschedule, no
+  // matter how many times the piece was rescheduled again. Pass 65 shipped
+  // only this neighbor-inference filter as a mitigation, not a fix for
+  // that exact gap (its own bug report says so explicitly) — kept here
+  // unchanged, since a connector whose neighbor genuinely IS still
+  // remaining should still ride along with it exactly as before.
+  //
+  // remainingConnectorIds (Pass 73 follow-up) is the real fix: a direct,
+  // self-status check via computeRemainingConnectorIds below, carried on
+  // the marker alongside remainingChunkOrder. `|| []` handles a marker
+  // saved before this field existed — it just falls back to the
+  // neighbor-only behavior above, exactly as it always did.
+  const remainingConnectorIds = new Set(marker.remainingConnectorIds || []);
+  const remainingTransitions = transitions.filter(
+    (t) => remainingConnectorIds.has(t.id) || t.linkedIds.some((id) => remainingIds.has(id))
+  );
+  const remainingCombos = combos.filter((c) => remainingConnectorIds.has(c.id) || remainingIds.has(c.linkedIds[0]));
 
   const asOfDay = clamp(marker.asOfDay, 1, original.days.length);
   const remainingDayCount = Math.max(1, original.days.length - asOfDay + 1);
@@ -530,6 +551,30 @@ export function computeScheduleStatus(piece, practiceChunks, timeline, currentDa
   return { missedCount, remainingChunkIds };
 }
 
+// Which transitions/combos have never been logged at all — computeScheduleStatus's
+// "ever touched" check (above), applied directly to connectors instead of
+// practice chunks. Every reschedule call site used to call
+// computeScheduleStatus with chunkSet.practiceChunks only, so a
+// transition/combo's own doneDays never factored into "what's remaining"
+// anywhere — the only signal available was computeEffectiveTimeline's
+// neighbor-inference filter (see the comment there), which can't tell "this
+// connector itself is untouched" apart from "this connector's neighbors are
+// untouched." Confirmed as a real, reported bug (Pass 65); this direct
+// check is what actually closes it (Pass 73 follow-up) — feeds
+// marker.remainingConnectorIds, which computeEffectiveTimeline reads
+// alongside (not instead of) the neighbor check.
+//
+// Ungated by currentDay, matching remainingChunkIds' own scope exactly — a
+// connector not yet due still belongs in a fresh marker's remainder just
+// as an unintroduced practice chunk does; day-gating only matters for
+// deciding whether to alert instead of reschedule (see handleReschedule/
+// planRescheduleForPieces, which additionally check timeline.introducedDay
+// for that specific decision).
+export function computeRemainingConnectorIds(piece, chunkSet) {
+  const untouched = (x) => ((piece.progress[x.id] || {}).doneDays || []).length === 0;
+  return [...chunkSet.transitions, ...chunkSet.combos].filter(untouched).map((x) => x.id);
+}
+
 // Per-day completion status for a single timeline day, relative to
 // currentDay: "future" | "done" | "behind" | "empty". Pure and side-effect
 // free, written once (Pass 45) specifically so Pass 46 (Timeline tab) can
@@ -568,6 +613,15 @@ export function classifyDayCompletion(day, piece, currentDay) {
   if (!ids.length) return "empty";
   const allDone = ids.every((id) => ((piece.progress[id] || {}).doneDays || []).includes(day.dayNumber));
   return allDone ? "done" : "behind";
+}
+
+// How many distinct timeline days are "behind" (per classifyDayCompletion)
+// as of currentDay — a day-count sibling to computeScheduleStatus's
+// chunk-count missedCount, for surfaces that want to say "N days behind"
+// instead of "N chunks behind" (a day with several missed chunks only
+// counts once here).
+export function countBehindDays(piece, timeline, currentDay) {
+  return timeline.days.filter((d) => classifyDayCompletion(d, piece, currentDay) === "behind").length;
 }
 
 // Will the not-yet-started work actually fit in the days this plan has
@@ -647,27 +701,99 @@ export function computeReschedulePastPlanExtension(piece, anchorDay, requiredDay
 // One malformed piece is skipped and logged rather than throwing, matching
 // how MasterAgendaTab already walks this same pieces map — a bulk action
 // across every piece shouldn't be all-or-nothing on one bad record.
+//
+// Shared by planRescheduleForPieces and findStuckBehindPieces below — both
+// need to answer "is this piece even a candidate to consider at all"
+// before asking their own, different follow-up question, and both need to
+// agree on that first answer or the two lists could disagree about a piece
+// neither of them actually meant to disagree about (e.g. one treating a
+// paused piece as a candidate and the other not). Returns `null` for a
+// piece that's out of consideration entirely (missing, inactive, mid-
+// revival, no real timeline, or its plan is actually complete), otherwise
+// `{ chunkSet, timeline, asOfDay, cutoffDay }`.
+//
+// asOfDay and cutoffDay answer two different questions and must not be
+// conflated. asOfDay (`getCurrentDay`, clamped to `timeline.days.length`)
+// anchors a reschedule marker at a real timeline day — it has to stay
+// clamped, or a marker built from it would point past the end of
+// `timeline.days`. cutoffDay is for "how behind is this piece" checks
+// (missedCount, countBehindDays) instead: once a piece's whole calendar
+// plan has elapsed (`elapsedDay(piece) > timeline.days.length`), nothing
+// is "not yet due" anymore, but asOfDay's clamp leaves the literal last
+// day perpetually judged against itself (`dayNumber >= currentDay` is
+// always true when both equal `timeline.days.length`) — so it can never
+// register as behind under that reckoning, no matter how overdue it
+// really is. cutoffDay bumps one past the last day specifically in that
+// situation, mirroring the identical `timeline.days.length + 1` MasterAgendaTab's
+// own needsReschedule branch already uses for its `behindDaysCount`.
+//
+// **Found in review, before commit, same session:** without cutoffDay,
+// `findStuckBehindPieces` below used asOfDay for its own countBehindDays
+// check, which meant it could never register the literal last day of an
+// already-expired plan as behind, while MasterAgendaTab's own
+// needsReschedule branch (which already used length+1 for the identical
+// question) could. Confirmed by direct calculation — the arithmetic gap
+// itself is real and unambiguous (`classifyDayCompletion` always reads
+// `day.dayNumber === timeline.days.length` as `"future"` when currentDay
+// is clamped to that same value) — but a live, end-to-end repro through
+// this scheduler's actual introduction-window logic was NOT obtained: in
+// every configuration tried, a transition/combo that's still genuinely
+// untouched by the time a piece is fully past its plan always turned out
+// to also have an earlier occurrence (introduction or a Tier 1/2 review)
+// well before the last day, which the *old*, unbumped cutoff already
+// caught correctly — so the gap this closes may be real but narrower or
+// rarer in practice than first assessed. Kept anyway: it's a strict
+// correctness improvement with zero measured regressions (full existing
+// test suite passed unmodified), not a speculative one bolted on for a
+// scenario proven not to occur.
+function eligiblePieceContext(piece) {
+  if (!piece) return null;
+  if ((piece.status || "active") !== "active") return null;
+  if (isInRevival(piece)) return null;
+
+  const chunkSet = generateAllChunks(piece);
+  const timeline = getEffectiveTimeline(piece, chunkSet);
+  if (!timeline || !timeline.days || !timeline.days.length) return null;
+  if (isPlanActuallyComplete(piece, chunkSet, timeline)) return null;
+
+  const asOfDay = getCurrentDay(piece, timeline.days.length);
+  const cutoffDay = elapsedDay(piece) > timeline.days.length ? timeline.days.length + 1 : asOfDay;
+  return { chunkSet, timeline, asOfDay, cutoffDay };
+}
+
 export function planRescheduleForPieces(pieces) {
   const plans = [];
   Object.entries(pieces || {}).forEach(([pieceId, piece]) => {
     try {
-      if (!piece) return;
-      if ((piece.status || "active") !== "active") return;
-      if (isInRevival(piece)) return;
+      const ctx = eligiblePieceContext(piece);
+      if (!ctx) return;
+      const { chunkSet, timeline, asOfDay, cutoffDay } = ctx;
 
-      const chunkSet = generateAllChunks(piece);
-      const timeline = getEffectiveTimeline(piece, chunkSet);
-      if (!timeline || !timeline.days || !timeline.days.length) return;
-      if (isPlanActuallyComplete(piece, chunkSet, timeline)) return;
-
-      const asOfDay = getCurrentDay(piece, timeline.days.length);
       const { missedCount, remainingChunkIds } = computeScheduleStatus(
         piece,
         chunkSet.practiceChunks,
         timeline,
-        asOfDay
+        cutoffDay
       );
-      if (missedCount === 0 || remainingChunkIds.length === 0) return;
+      const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+      // A connector counts toward eligibility only once it's actually due —
+      // the same introducedDay < cutoffDay gate missedCount applies to
+      // practice chunks — so a connector that simply hasn't been introduced
+      // yet doesn't force a piece into "Reschedule all" prematurely. Pass 73
+      // follow-up to Pass 65: without this, a piece with every practice
+      // chunk touched but a genuinely stuck, overdue connector was excluded
+      // here exactly like it was in handleReschedule's single-piece guard.
+      const qualifyingConnectorIds = remainingConnectorIds.filter(
+        (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < cutoffDay
+      );
+      // Simplified from an earlier version that OR'd in a second,
+      // provably-redundant condition (remainingChunkIds.length === 0 &&
+      // remainingConnectorIds.length === 0) — whenever this first check is
+      // false, that second one always was too (missedCount > 0 implies
+      // remainingChunkIds > 0; a qualifying connector implies
+      // remainingConnectorIds > 0), so it never independently changed the
+      // outcome. Found in review, removed rather than left as dead weight.
+      if (missedCount === 0 && qualifyingConnectorIds.length === 0) return;
 
       const fit = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds);
 
@@ -703,7 +829,7 @@ export function planRescheduleForPieces(pieces) {
         // computeEffectiveTimeline for why a piece rescheduled more than
         // once needs that chain instead of always re-deriving from the raw,
         // never-rescheduled schedule.
-        marker: { asOfDay, remainingChunkOrder: remainingChunkIds, previous: piece.rescheduleMarker || null },
+        marker: { asOfDay, remainingChunkOrder: remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
         extend,
       });
     } catch (e) {
@@ -712,8 +838,69 @@ export function planRescheduleForPieces(pieces) {
   });
   // Furthest behind first — that's the order the confirmation lists them in,
   // so the piece most in need of this is the one the user reads first.
-  plans.sort((a, b) => b.missedCount - a.missedCount);
+  // Sorting on missedCount alone (found in review) always ranked a
+  // connector-only piece dead last, however long its connector had been
+  // stuck, since such a piece's missedCount is always 0 by construction —
+  // folding in the connector count gives it a real, if simple, weight in
+  // the ordering instead of an implicit "least behind" default.
+  plans.sort((a, b) => (b.missedCount + b.marker.remainingConnectorIds.length) - (a.missedCount + a.marker.remainingConnectorIds.length));
   return plans;
+}
+
+// Pieces that are genuinely behind by day-count (countBehindDays — the
+// same signal ScheduleBanner and Master Agenda's per-piece badge use) but
+// that planRescheduleForPieces above will never include, because they have
+// no untouched practice-chunk material (`remainingChunkIds`) for a
+// reschedule to actually move. Everything they've introduced has been
+// touched at least once; what's still open is a transition, combo, or
+// review sitting unlogged past its day — a reschedule genuinely can't help
+// there, the same reasoning handleReschedule's single-piece path already
+// encodes as an explanatory alert instead of silently doing nothing (see
+// docs/Decisions.md#scheduling).
+//
+// Exists so a caller that widens its own "is this piece behind" check to
+// match Master Agenda's badge (countBehindDays, not just missedCount) can
+// still tell the two groups apart and say something honest about the
+// difference, instead of a piece just silently vanishing from a bulk
+// reschedule's confirmation with no explanation. Shares
+// eligiblePieceContext with planRescheduleForPieces so the two functions
+// can never disagree about which pieces are even candidates to begin
+// with — only about what to do with a candidate once found.
+export function findStuckBehindPieces(pieces) {
+  const stuck = [];
+  Object.entries(pieces || {}).forEach(([pieceId, piece]) => {
+    try {
+      const ctx = eligiblePieceContext(piece);
+      if (!ctx) return;
+      const { chunkSet, timeline, cutoffDay } = ctx;
+
+      // remainingChunkIds doesn't depend on which day it's evaluated
+      // against (it's a plain "ever touched at all" check) — cutoffDay
+      // vs. asOfDay makes no difference here, only for countBehindDays
+      // below.
+      const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, cutoffDay);
+      if (remainingChunkIds.length > 0) return; // planRescheduleForPieces already has this one covered
+
+      // Pass 73 follow-up to Pass 65: a piece with a genuinely stuck,
+      // overdue connector (transition/combo, never logged) is now ALSO
+      // covered by planRescheduleForPieces — it must be excluded here too,
+      // or it would show up in both lists at once (once as reschedulable,
+      // once as "nothing to reschedule"), the exact contradiction this
+      // function exists to prevent. Same qualifying condition
+      // planRescheduleForPieces itself applies.
+      const qualifyingConnectorIds = computeRemainingConnectorIds(piece, chunkSet).filter(
+        (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < cutoffDay
+      );
+      if (qualifyingConnectorIds.length > 0) return;
+
+      if (countBehindDays(piece, timeline, cutoffDay) > 0) {
+        stuck.push({ pieceId, piece });
+      }
+    } catch (e) {
+      console.error(`Error checking stuck-behind state for piece ${pieceId}:`, e);
+    }
+  });
+  return stuck;
 }
 
 // Is this piece's plan actually finished, or just past its calendar
@@ -782,6 +969,17 @@ export function computeMinutesModeAutoExtend(piece, chunkSet, timeline) {
   if (target <= piece.daysToLearn) return null;
 
   const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, timeline.days.length);
+  // Same gap Pass 65/73 fixed for handleReschedule/planRescheduleForPieces,
+  // flagged but deliberately left unfixed here at the time — by the point
+  // this auto-extend fires, introduction is normally long complete
+  // (comment below), which is exactly the state where a connector's own
+  // logged status (not its neighbors') is the only thing that can tell
+  // computeEffectiveTimeline it still needs a placement. Without this, a
+  // stuck, never-logged transition/combo on a minutes-mode piece could
+  // never be caught by this auto-extend path at all, even though the
+  // single-piece and bulk reschedule paths both now catch the identical
+  // case.
+  const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
   return {
     daysToLearn: target,
     // asOfDay is pinned to the *new* final day — not `timeline.days.length`,
@@ -797,7 +995,12 @@ export function computeMinutesModeAutoExtend(piece, chunkSet, timeline) {
     // Anchoring at the new last day instead means only that single
     // trailing day goes unplaced; everything else keeps the full, real
     // placement computeTimeline produces against the larger daysToLearn.
-    rescheduleMarker: { asOfDay: target, remainingChunkOrder: remainingChunkIds, previous: piece.rescheduleMarker || null },
+    rescheduleMarker: {
+      asOfDay: target,
+      remainingChunkOrder: remainingChunkIds,
+      remainingConnectorIds,
+      previous: piece.rescheduleMarker || null,
+    },
   };
 }
 
@@ -818,7 +1021,19 @@ export function computeMinutesModeAutoExtend(piece, chunkSet, timeline) {
 // isPlanActuallyComplete needs both the real piece and its full chunk set,
 // not just one derived number — still a pure function of its inputs, same
 // as every other export here.
-export function shouldShowScheduleBanner(piece, chunkSet, timeline, missedCount) {
+//
+// The last argument was originally always `computeScheduleStatus`'s
+// missedCount (base practice chunks only). Same-session follow-up to Pass
+// 70: ScheduleBanner.jsx now passes `countBehindDays` instead — a piece
+// with every practice chunk touched but a transition, combo, or review
+// still unlogged past its day is genuinely still behind, and missedCount
+// alone couldn't see that (it never looks past practiceChunks), which used
+// to suppress this banner — including Today's Practice's "Go to Day N"
+// button, whose own day-search already had no such blind spot — for a
+// piece that plainly still needed it. This function itself doesn't care
+// which count it's handed; it just needs "is anything behind" as a number
+// greater than zero.
+export function shouldShowScheduleBanner(piece, chunkSet, timeline, behindCount) {
   if (isPlanActuallyComplete(piece, chunkSet, timeline)) return false;
-  return missedCount > 0;
+  return behindCount > 0;
 }

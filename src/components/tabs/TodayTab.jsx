@@ -181,9 +181,16 @@ export function TodayTab({
   // would otherwise land on gets skipped, not returned, so "earliest
   // incomplete day" keeps meaning a day with something real left to do.
   const marker = piece.rescheduleMarker;
+  // remainingConnectorIds (Pass 73 follow-up to Pass 65) checks a
+  // connector's own logged status directly, alongside — not instead of —
+  // the neighbor-based check below: see DayChecklist.jsx's fuller comment
+  // on this same check for why the neighbor check alone used to leave a
+  // stuck, never-logged connector invisible forever once both its
+  // neighbors were practiced.
   const isMovedId = (id) => {
     if (!marker) return false;
     if (marker.remainingChunkOrder.includes(id)) return true;
+    if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
     const c = chunkById[id];
     if (!c || !c.linkedIds) return false;
     return c.kind === "combo"
@@ -369,12 +376,12 @@ export function TodayTab({
                 <p className="schedule-banner-title">Past your target date</p>
                 <p className="schedule-banner-sub">
                   Every chunk has been introduced — what's left is a transition or focus block
-                  still waiting to be logged. Nothing to reschedule; check "View all" below to find
+                  still waiting to be logged. Nothing to reschedule; check "All Tasks" below to find
                   it.
                 </p>
               </div>
               <button className="primary-btn" onClick={() => leaveInterleaved("all")}>
-                View all
+                All Tasks
               </button>
             </>
           )}
@@ -392,16 +399,9 @@ export function TodayTab({
         </div>
         <div className="day-nav-controls">
           <div className="segmented">
-            <button className={viewMode === "day" ? "active" : ""} onClick={() => leaveInterleaved("day")}>Day view</button>
-            <button className={viewMode === "week" ? "active" : ""} onClick={() => leaveInterleaved("week")}>Week</button>
-            <button className={viewMode === "all" ? "active" : ""} onClick={() => leaveInterleaved("all")}>View all</button>
-            <button
-              className={viewMode === "interleave" ? "active" : ""}
-              disabled={interleaveItems.length === 0}
-              onClick={() => setViewMode("interleave")}
-            >
-              Interleaved
-            </button>
+            <button className={viewMode === "day" ? "active" : ""} onClick={() => leaveInterleaved("day")}>Day View</button>
+            <button className={viewMode === "week" ? "active" : ""} onClick={() => leaveInterleaved("week")}>Week View</button>
+            <button className={viewMode === "all" ? "active" : ""} onClick={() => leaveInterleaved("all")}>All Tasks</button>
           </div>
           {viewMode === "day" && (
             <>
@@ -415,6 +415,21 @@ export function TodayTab({
           )}
         </div>
       </div>
+      {/* Pulled out of the segmented view-mode control (Day View/Week
+          View/All Tasks) into its own button — entering Interleaved mode
+          is a distinct action, not another way to view the same day, so it
+          reads oddly grouped alongside those three. Doesn't route through
+          leaveInterleaved like the others do, since you're never leaving
+          Interleaved mode by clicking this — only entering it. */}
+      <button
+        type="button"
+        className={`ghost-btn interleave-mode-btn ${viewMode === "interleave" ? "active" : ""}`}
+        style={{ alignSelf: "flex-start" }}
+        disabled={interleaveItems.length === 0}
+        onClick={() => setViewMode("interleave")}
+      >
+        Interleaved practice
+      </button>
       {interleaveItems.length === 0 && (
         <p className="wizard-hint" style={{ marginTop: -8 }}>
           Interleaved mode unlocks once at least one chunk graduates past Stabilizing — no chunks have graduated past

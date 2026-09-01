@@ -13,7 +13,7 @@ import { PIECE_STATUS_LABEL } from "../lib/constants";
 // No work-title heading here (removed this pass): the hero card's eyebrow
 // directly above already names the work, so a second heading in this panel
 // was the same title twice on the same screen.
-export function PartSwitcher({ parts, activeId, onSelectPart, onAddPart }) {
+export function PartSwitcher({ parts, activeId, onSelectPart, onAddPart, embedded = false }) {
   const touchedPct = useMemo(() => {
     const out = {};
     parts.forEach((p) => {
@@ -27,27 +27,29 @@ export function PartSwitcher({ parts, activeId, onSelectPart, onAddPart }) {
     return out;
   }, [parts]);
 
-  return (
-    <div className="panel part-switcher">
-      <div className="part-list">
-        {parts.map((p, i) => (
-          <button
-            key={p.id}
-            className={`part-chip ${p.id === activeId ? "active" : ""}`}
-            onClick={() => p.id !== activeId && onSelectPart(p.id)}
-          >
-            <span className="part-chip-idx mono">{i + 1}</span>
-            <span className="part-chip-name">{p.name || "Untitled movement"}</span>
-            {p.status && p.status !== "active" && (
-              <span className={`badge ${p.status}`}>{PIECE_STATUS_LABEL[p.status]}</span>
-            )}
-            <span className="part-chip-pct mono">{touchedPct[p.id]}%</span>
-          </button>
-        ))}
-        <button className="part-chip add" onClick={onAddPart}>
-          <Plus size={14} /> Add a movement
+  const partList = (
+    <div className="part-list">
+      {parts.map((p, i) => (
+        <button
+          key={p.id}
+          className={`part-chip ${p.id === activeId ? "active" : ""}`}
+          onClick={() => p.id !== activeId && onSelectPart(p.id)}
+        >
+          <span className="part-chip-idx mono">{i + 1}</span>
+          <span className="part-chip-name">{p.name || "Untitled movement"}</span>
+          {p.status && p.status !== "active" && (
+            <span className={`badge ${p.status}`}>{PIECE_STATUS_LABEL[p.status]}</span>
+          )}
+          <span className="part-chip-pct mono">{touchedPct[p.id]}%</span>
         </button>
-      </div>
+      ))}
+      <button className="part-chip add" onClick={onAddPart}>
+        <Plus size={14} /> Add a movement
+      </button>
     </div>
   );
+
+  if (embedded) return partList;
+
+  return <div className="panel part-switcher">{partList}</div>;
 }

@@ -21,7 +21,7 @@ import {
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, planRescheduleForPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
+import { getEffectiveTimeline, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -965,7 +965,7 @@ export default function App() {
 
   // User-directed follow-up: the one place the "leave Interleaved mode with
   // an unresolved provisional log" warning actually confirms and discards —
-  // called both from TodayTab itself (its own Day view/Week/View all
+  // called both from TodayTab itself (its own Day View/Week View/All Tasks
   // buttons, via onConfirmLeaveInterleaved below) and from here in App.jsx
   // (the sidebar nav and the piece switcher, via guardLeavingInterleaved),
   // so the warning text and the discard behavior can't drift between the
@@ -1308,22 +1308,30 @@ export default function App() {
 
   const handleReschedule = () => {
     const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
-    if (status.remainingChunkIds.length === 0) {
-      // Nothing untouched among *practice chunks* — the only unit this
-      // reschedule mechanism (and rescheduleMarker/getEffectiveTimeline
-      // underneath it) actually knows how to re-place. Usually that really
-      // does mean "nothing to do." But isPlanActuallyComplete's "days"-mode
-      // bar also covers transitions/combos (chunkSet.all) — so a piece can
-      // still correctly show the reschedule nudge (real work left) while
-      // having zero untouched *practice* chunks, if the one thing left is a
-      // transition or focus block riding on already-touched neighbors. A
-      // reschedule genuinely can't help there (there's no day-placement
-      // problem to solve, just something still waiting to be logged), so
-      // say that plainly instead of a click that silently does nothing —
-      // see docs/Decisions.md#scheduling.
+    // Pass 73 follow-up to Pass 65: a transition/combo's own logged status
+    // was never checked directly anywhere in the reschedule mechanism —
+    // computeEffectiveTimeline could only infer it indirectly from whether
+    // a flanking/linked practice chunk was still untouched, so a connector
+    // whose neighbors were BOTH already practiced was invisible to every
+    // reschedule, forever, no matter how many times the piece was
+    // rescheduled again (confirmed, reported precisely). This checks the
+    // connector directly instead of guessing from its neighbors.
+    const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+    // A connector only overrides the alert once its own scheduled day has
+    // actually passed — the same introducedDay < currentDay gate
+    // missedCount applies to practice chunks — so one that simply hasn't
+    // been introduced yet (not overdue, just not due) doesn't count.
+    const qualifyingConnectorIds = remainingConnectorIds.filter(
+      (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < currentDay
+    );
+    if (status.remainingChunkIds.length === 0 && qualifyingConnectorIds.length === 0) {
+      // Genuinely nothing to do: every practice chunk has been introduced
+      // AND no connector is both untouched and overdue. isPlanActuallyComplete's
+      // "days"-mode bar also covers transitions/combos (chunkSet.all), so
+      // this can still correctly stay silent once the plan is truly done.
       if (!isPlanActuallyComplete(piece, chunkSet, timeline)) {
         window.alert(
-          "Every practice chunk has already been introduced — there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"View all\" on Today's Practice to find it."
+          "Every practice chunk has already been introduced — there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"All Tasks\" on Today's Practice to find it."
         );
       }
       return;
@@ -1340,7 +1348,18 @@ export default function App() {
     const dayWord = (n) => (n === 1 ? "day" : "days");
     const remainWord = (n) => (n === 1 ? "remains" : "remain");
 
-    let message = `This will rebalance the ${status.remainingChunkIds.length} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`;
+    // Named per what's actually moving — a connector-only reschedule
+    // (zero untouched practice chunks, one or more stuck transitions/focus
+    // blocks) used to say "This will rebalance the 0 chunk(s)...", which
+    // is both confusing and literally wrong about what's about to happen.
+    const chunkCount = status.remainingChunkIds.length;
+    const connectorCount = remainingConnectorIds.length;
+    let message =
+      chunkCount > 0 && connectorCount > 0
+        ? `This will rebalance the ${chunkCount} chunk(s) and ${connectorCount} transition(s)/focus block(s) you haven't started yet across the days left in your plan. Everything you've already practiced stays where it is. Continue?`
+        : chunkCount > 0
+          ? `This will rebalance the ${chunkCount} chunk(s) you haven't started yet across the days left in your plan. Chunks you've already practiced stay where they are. Continue?`
+          : `This will rebalance the ${connectorCount} transition(s)/focus block(s) you haven't started yet across the days left in your plan. Everything you've already practiced stays where it is. Continue?`;
     let suggestion = null;
     if (!fits) {
       // Extends the plan just far enough that requiredDays worth of days are
@@ -1399,7 +1418,7 @@ export default function App() {
           // (lib/scheduling.js) for why a second reschedule needs that
           // chain instead of always re-deriving from the raw, never-
           // rescheduled schedule.
-          marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds, previous: piece.rescheduleMarker || null },
+          marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
         },
       ],
       "Reschedule remaining chunks?",
@@ -1422,11 +1441,44 @@ export default function App() {
   // them, and point at the per-piece button for the detail.
   const handleRescheduleAll = () => {
     const plans = planRescheduleForPieces(pieces);
-    if (!plans.length) return;
+    // Master Agenda's "N pieces are behind schedule" panel now uses the
+    // same wider, day-based "behind" signal its own per-piece badges use
+    // (countBehindDays, not just missedCount) — see docs/Decisions.md#scheduling.
+    // A piece can satisfy that wider signal purely from an unlogged
+    // transition, combo, or review, with every practice chunk already
+    // touched — planRescheduleForPieces can never include a piece like
+    // that (there's no untouched practice-chunk material for it to move),
+    // so without this, such a piece would just silently vanish from this
+    // point on: counted in the panel above, then dropped with no
+    // explanation once the button was actually clicked. findStuckBehindPieces
+    // finds exactly that set, so it can be named and explained instead.
+    const stuck = findStuckBehindPieces(pieces);
+    const stuckNameOf = (s) => s.piece.name || "Untitled piece";
+
+    if (!plans.length) {
+      // Nothing this action can actually move, but the panel that offered
+      // this button was showing for a reason — say what that reason is
+      // instead of the button silently doing nothing, mirroring
+      // handleReschedule's own single-piece alert for the identical
+      // situation.
+      if (stuck.length) {
+        window.alert(
+          `${stuck.length} piece${stuck.length === 1 ? " is" : "s are"} behind schedule (${stuck.map(stuckNameOf).join(", ")}), but ${stuck.length === 1 ? "it has" : "they have"} no unstarted material left to reschedule — what's stuck is a transition, focus block, or review waiting to be logged instead. Check "All Tasks" on ${stuck.length === 1 ? "its" : "each"} Today's Practice to find it.`
+        );
+      }
+      return;
+    }
 
     const nameOf = (p) => p.piece.name || "Untitled piece";
     const names = plans.map(nameOf).join(", ");
     const totalChunks = plans.reduce((s, p) => s + p.marker.remainingChunkOrder.length, 0);
+    // A piece can now be included here purely via a stuck, overdue
+    // connector (Pass 65/73) — without this, a bulk reschedule made up
+    // entirely (or partly) of such pieces would say "This will rebalance
+    // the 0 chunk(s)...", the exact wording bug already fixed for the
+    // single-piece path but missed here at the time, since before that fix
+    // this situation could never actually arise.
+    const totalConnectors = plans.reduce((s, p) => s + p.marker.remainingConnectorIds.length, 0);
     // A piece already past its own target date gets an `extend` patch from
     // planRescheduleForPieces (Pass 39 follow-up) — its target date moves
     // as part of this action, so it no longer belongs in the "probably
@@ -1443,14 +1495,33 @@ export default function App() {
       ? `\n\nHeads up: at your current pace, ${tight.length === 1 ? "" : `${tight.length} of these — `}${tight.map(nameOf).join(", ")}${tight.length === 1 ? " probably won't" : " — probably won't"} fit in the days ${tight.length === 1 ? "its plan has" : "their plans have"} left. Rescheduling packs things in as tightly as possible either way; open ${tight.length === 1 ? "it" : "them"} individually for the details, or extend the timeline in Settings.`
       : "";
 
+    // A piece counted in Master Agenda's summary above but excluded here
+    // because it has nothing reschedulable — named explicitly so the
+    // count this dialog is about to act on never silently diverges from
+    // the count that panel just showed.
+    const stuckNote = stuck.length
+      ? `\n\n${stuck.length === 1 ? "" : `${stuck.length} more — `}${stuck.map(stuckNameOf).join(", ")}${stuck.length === 1 ? " is" : " are"} also behind schedule but ${stuck.length === 1 ? "isn't" : "aren't"} included here — ${stuck.length === 1 ? "it has" : "they have"} nothing unstarted left to reschedule. What's stuck ${stuck.length === 1 ? "there is" : "there are"} a transition, focus block, or review waiting to be logged instead — check "All Tasks" on ${stuck.length === 1 ? "its" : "each of their"} Today's Practice.`
+      : "";
+
+    // Named per what's actually moving, same as the single-piece dialog —
+    // a bulk reschedule can now be made up entirely of connector-only
+    // pieces, so "chunk(s)" alone (or worse, "0 chunk(s)") would be wrong.
+    const whatsMoving =
+      totalChunks > 0 && totalConnectors > 0
+        ? `${totalChunks} chunk(s) and ${totalConnectors} transition(s)/focus block(s)`
+        : totalChunks > 0
+          ? `${totalChunks} chunk(s)`
+          : `${totalConnectors} transition(s)/focus block(s)`;
+    const alreadyPracticedNote = totalConnectors > 0 ? "Everything you've already practiced stays where it is" : "Chunks you've already practiced stay where they are";
+
     const message =
       `${plans.length} piece${plans.length === 1 ? " is" : "s are"} behind schedule: ${names}.\n\n` +
       // "...and each piece keeps its own target date" only when that's
       // actually true for every piece here — dropped rather than stated
       // falsely whenever extendingNote is about to say otherwise for some
       // of them.
-      `This will rebalance the ${totalChunks} chunk(s) you haven't started yet across the days left in each piece's own plan. Chunks you've already practiced stay where they are${extending.length ? "" : ", and each piece keeps its own target date"}.` +
-      `${extendingNote}${warning}\n\nContinue?`;
+      `This will rebalance the ${whatsMoving} you haven't started yet across the days left in each piece's own plan. ${alreadyPracticedNote}${extending.length ? "" : ", and each piece keeps its own target date"}.` +
+      `${extendingNote}${warning}${stuckNote}\n\nContinue?`;
 
     openRescheduleModal(
       plans.map(({ pieceId, marker, extend }) => ({ pieceId, marker, extend })),
@@ -1645,9 +1716,6 @@ export default function App() {
                       ))}
                     </div>
                   ))}
-                  <button className="piece-switcher-add" onClick={() => openWizard()}>
-                    <Plus size={14} /> Add new piece
-                  </button>
                 </div>
               )}
             </div>
@@ -1668,8 +1736,13 @@ export default function App() {
               })}
             </div>
             <div className="sidebar-foot">
-              <button className="ghost-btn full" onClick={startEditing}>
-                <Pencil size={14} /> Edit piece
+              {activeTab === "overview" && (
+                <button className="ghost-btn full" onClick={startEditing}>
+                  <Pencil size={14} /> Edit piece
+                </button>
+              )}
+              <button className="ghost-btn full" onClick={() => openWizard()}>
+                <Plus size={14} /> Add new piece
               </button>
             </div>
           </nav>
@@ -1946,7 +2019,7 @@ const CSS = `
 .nav-item span { flex: 1; }
 .nav-item:hover { background: rgba(185,138,62,0.1); color: var(--ink); }
 .nav-item.active { background: var(--brass); color: var(--white); }
-.sidebar-foot { padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
+.sidebar-foot { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
 
 .piece-switcher { position: relative; }
 .piece-switcher-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
@@ -1956,8 +2029,6 @@ const CSS = `
 .piece-switcher-item { text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-switcher-item:hover { background: rgba(185,138,62,0.08); }
 .piece-switcher-item.active { background: var(--brass); color: var(--white); font-weight: 600; }
-.piece-switcher-add { display: flex; align-items: center; gap: 6px; text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--brass-deep); font-weight: 600; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
-.piece-switcher-add:hover { background: rgba(185,138,62,0.08); }
 .piece-switcher-work { display: flex; flex-direction: column; gap: 2px; }
 .piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 6px 0 1px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-switcher-work .piece-switcher-item { margin-left: 8px; }
@@ -2067,7 +2138,7 @@ const CSS = `
 .day-preview-row.clickable { width: 100%; background: none; border: none; border-bottom: 1px solid var(--line); font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .day-preview-row.clickable:last-child { border-bottom: none; }
 .day-preview-row.clickable:hover .day-desc { color: var(--brass-deep); }
-.day-num { width: 56px; color: var(--brass-deep); flex-shrink: 0; }
+.day-num { min-width: 56px; white-space: nowrap; color: var(--brass-deep); flex-shrink: 0; }
 .day-desc { flex: 1; color: var(--ink-soft); }
 .day-min { color: var(--ink-faint); flex-shrink: 0; }
 .all-pieces-col { width: 90px; flex-shrink: 0; color: var(--ink-faint); }
@@ -2287,6 +2358,7 @@ const CSS = `
 .ghost-btn { display: inline-flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--line); color: var(--ink); border-radius: 9px; padding: 9px 16px; font-size: 13.5px; font-weight: 500; transition: border-color .15s, background .15s; }
 .ghost-btn:hover { border-color: var(--brass); background: rgba(185,138,62,0.06); }
 .ghost-btn.full { width: 100%; justify-content: center; }
+.ghost-btn.active { background: var(--brass); color: var(--white); border-color: var(--brass); }
 
 .danger-btn { display: inline-flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--brick); color: var(--brick); border-radius: 9px; padding: 9px 16px; font-size: 13.5px; font-weight: 600; }
 .danger-btn:hover:not(:disabled) { background: rgba(181,71,58,0.08); }

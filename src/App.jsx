@@ -1716,9 +1716,6 @@ export default function App() {
                       ))}
                     </div>
                   ))}
-                  <button className="piece-switcher-add" onClick={() => openWizard()}>
-                    <Plus size={14} /> Add new piece
-                  </button>
                 </div>
               )}
             </div>
@@ -1739,8 +1736,13 @@ export default function App() {
               })}
             </div>
             <div className="sidebar-foot">
-              <button className="ghost-btn full" onClick={startEditing}>
-                <Pencil size={14} /> Edit piece
+              {activeTab === "overview" && (
+                <button className="ghost-btn full" onClick={startEditing}>
+                  <Pencil size={14} /> Edit piece
+                </button>
+              )}
+              <button className="ghost-btn full" onClick={() => openWizard()}>
+                <Plus size={14} /> Add new piece
               </button>
             </div>
           </nav>
@@ -2017,7 +2019,7 @@ const CSS = `
 .nav-item span { flex: 1; }
 .nav-item:hover { background: rgba(185,138,62,0.1); color: var(--ink); }
 .nav-item.active { background: var(--brass); color: var(--white); }
-.sidebar-foot { padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
+.sidebar-foot { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
 
 .piece-switcher { position: relative; }
 .piece-switcher-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
@@ -2027,8 +2029,6 @@ const CSS = `
 .piece-switcher-item { text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-switcher-item:hover { background: rgba(185,138,62,0.08); }
 .piece-switcher-item.active { background: var(--brass); color: var(--white); font-weight: 600; }
-.piece-switcher-add { display: flex; align-items: center; gap: 6px; text-align: left; padding: 8px 10px; border-radius: 6px; border: none; background: transparent; font-size: 13px; color: var(--brass-deep); font-weight: 600; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
-.piece-switcher-add:hover { background: rgba(185,138,62,0.08); }
 .piece-switcher-work { display: flex; flex-direction: column; gap: 2px; }
 .piece-switcher-work-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; padding: 6px 0 1px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-switcher-work .piece-switcher-item { margin-left: 8px; }
@@ -2138,7 +2138,7 @@ const CSS = `
 .day-preview-row.clickable { width: 100%; background: none; border: none; border-bottom: 1px solid var(--line); font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .day-preview-row.clickable:last-child { border-bottom: none; }
 .day-preview-row.clickable:hover .day-desc { color: var(--brass-deep); }
-.day-num { width: 56px; color: var(--brass-deep); flex-shrink: 0; }
+.day-num { min-width: 56px; white-space: nowrap; color: var(--brass-deep); flex-shrink: 0; }
 .day-desc { flex: 1; color: var(--ink-soft); }
 .day-min { color: var(--ink-faint); flex-shrink: 0; }
 .all-pieces-col { width: 90px; flex-shrink: 0; color: var(--ink-faint); }

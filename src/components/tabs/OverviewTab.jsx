@@ -108,10 +108,22 @@ export function OverviewTab({
           </p>
           <RecordingsList recordings={piece.recordings} />
           <DocumentsList documents={piece.documents} />
+          {/* The "N movement(s), N plan(s)" summary line that used to sit
+              here was removed once the actual chip list landed directly
+              below it (Pass 71) — with the chips right there, showing
+              real names and per-movement progress, the bare count read as
+              the same fact stated twice. Same reasoning PartSwitcher.jsx's
+              own comment already documents for dropping its redundant
+              work-title heading once the eyebrow above already named the
+              work. */}
           {piece.workId && workParts && workParts.length > 0 && (
-            <p className="hero-sub">
-              {workParts.length} movement{workParts.length === 1 ? "" : "s"}, {workParts.length} plan{workParts.length === 1 ? "" : "s"}
-            </p>
+            <PartSwitcher
+              parts={workParts}
+              activeId={piece.id}
+              onSelectPart={onSelectPart}
+              onAddPart={onAddPart}
+              embedded
+            />
           )}
         </div>
       </div>
@@ -137,15 +149,6 @@ export function OverviewTab({
               : "Paused — off your Master Agenda and won't flag chunks as behind schedule. Confidence still fades the same as an active piece. Resume it any time from Settings."}
           </p>
         </div>
-      )}
-
-      {piece.workId && workParts && workParts.length > 0 && (
-        <PartSwitcher
-          parts={workParts}
-          activeId={piece.id}
-          onSelectPart={onSelectPart}
-          onAddPart={onAddPart}
-        />
       )}
 
       <ManuscriptStrip chunks={practiceChunks} />

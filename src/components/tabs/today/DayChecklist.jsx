@@ -89,11 +89,27 @@ export function DayChecklist({
   // stable, so relative order otherwise is unaffected.
   items.sort((a, b) => (a.role === "combo" ? 1 : 0) - (b.role === "combo" ? 1 : 0));
 
+  // withLiveReviewStatus (lib/scheduling.js) already stripped any review
+  // here whose due date has passed out of day.reviewChunkIds before this
+  // component ever saw it — it's already live and actionable on today's
+  // own screen (mergeLiveDueReviews), so re-showing it here as a
+  // still-open task would just duplicate it. staleReviewIds is what got
+  // pulled, kept around only so this note can say so instead of the item
+  // silently vanishing with no explanation.
+  const staleReviewNote = day.staleReviewIds && day.staleReviewIds.length > 0 && (
+    <p className="wizard-hint" style={{ fontStyle: "italic", margin: "8px 0 0" }}>
+      {day.staleReviewIds.length === 1 ? "1 review" : `${day.staleReviewIds.length} reviews`} originally scheduled
+      here {day.staleReviewIds.length === 1 ? "is" : "are"} now tracked as due — see Today's Practice.
+    </p>
+  );
+
   if (items.length === 0) {
     return (
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
-        <p className="wizard-hint" style={{ margin: 0 }}>Nothing scheduled.</p>
+        <p className="wizard-hint" style={{ margin: 0 }}>
+          {staleReviewNote ? <em>Already due — see Today's Practice</em> : "Nothing scheduled."}
+        </p>
       </div>
     );
   }
@@ -143,6 +159,7 @@ export function DayChecklist({
           />
         ))}
       </div>
+      {staleReviewNote}
     </div>
   );
 }

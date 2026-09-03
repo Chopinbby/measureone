@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, isDayFullySwept } from "../../lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, isDayFullySwept } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
@@ -61,6 +61,13 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
 
           const chunkSet = generateAllChunks(piece);
           let timeline = getEffectiveTimeline(piece, chunkSet);
+          // A review whose due date has passed sits on its original day
+          // forever, looking like a still-open task, duplicating what's
+          // already merged in live below — see withLiveReviewStatus
+          // (lib/scheduling.js). computeElapsedDay(piece) (real, unclamped
+          // elapsed day), not `dayNumber` below — that one tracks whichever
+          // date the picker is browsing, not real "today".
+          timeline = withLiveReviewStatus(timeline, piece, computeElapsedDay(piece));
           const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
 
           if (!timeline || !timeline.days || !timeline.days.length) return;
@@ -98,7 +105,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             const extension = computeMinutesModeAutoExtend(piece, chunkSet, timeline);
             if (extension) {
               piece = { ...piece, ...extension };
-              timeline = getEffectiveTimeline(piece, chunkSet);
+              timeline = withLiveReviewStatus(getEffectiveTimeline(piece, chunkSet), piece, computeElapsedDay(piece));
               dayNumber = computeElapsedDay(piece) + daysFromToday;
             }
           }
@@ -399,7 +406,16 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               ))}
             </div>
           )}
-          {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 && (
+          {/* withLiveReviewStatus (lib/scheduling.js) already pulled a
+              passed-due review out of day.reviewChunkIds (hence
+              reviewRanges above) — it's already live and actionable on
+              today's own card elsewhere, not stuck here. This just says
+              so instead of it silently vanishing. */}
+          {day.staleReviewIds && day.staleReviewIds.length > 0 && (
+            <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic" }}>Now due — see today</p>
+          )}
+          {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 &&
+            !(day.staleReviewIds && day.staleReviewIds.length > 0) && (
             <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
           )}
         </>

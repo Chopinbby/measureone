@@ -421,18 +421,51 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
    because it wasted the back half on run-throughs instead of targeted
    work.
 
-**Known gap, investigated but not fixed (Pass 75):** Tier 2 placement
-(`entry.nextDueDate` → a day number, via `daysBetweenInclusive`) is a pure
-function of the piece and its progress — it has no notion of "today," so
-it has no way to tell that a placement day has already passed. Once a
-review's due date slips into the past, its placement just sits there,
-unaddressed, indistinguishable from a still-open task — while
-`mergeLiveDueReviews` (`lib/maintenance.js`, Pass 66) separately, correctly
-surfaces the same review as due on today's actual screen. The two can show
-the same review twice with nothing connecting them, and this is entirely
-independent of rescheduling — a `rescheduleMarker` isn't involved anywhere
-in this mechanism. See [Decisions.md](Decisions.md#open-questions) (Pass
-75) for the full trace and why it wasn't fixed here.
+**Since Pass 75 (same-session follow-up, once asked for directly):** Tier 2
+placement (`entry.nextDueDate` → a day number, via `daysBetweenInclusive`)
+is a pure function of the piece and its progress — it has no notion of
+"today," so on its own it has no way to tell that a placement day has
+already passed. Once a review's due date slips into the past, its
+placement used to just sit there, unaddressed, indistinguishable from a
+still-open task — while `mergeLiveDueReviews` (`lib/maintenance.js`, Pass
+66) separately, correctly surfaces the same review as due on today's
+actual screen. The two could show the same review twice with nothing
+connecting them, and this was entirely independent of rescheduling — a
+`rescheduleMarker` isn't involved anywhere in this mechanism.
+
+`withLiveReviewStatus(timeline, piece, realCurrentDay)` (`lib/scheduling.js`)
+fixes this by post-processing whatever `getEffectiveTimeline` already
+produced, applied once at its two real call sites (`App.jsx`,
+`MasterAgendaTab.jsx`) rather than as a per-surface check. For any day
+before `realCurrentDay`, a review chunk id not logged on that exact day is
+pulled out of `reviewChunkIds` and reported separately as
+`day.staleReviewIds`, *but only if `entry.nextDueDate` is actually set* —
+that's what distinguishes a genuine Tier 2 review (always has one, by
+`computeTimeline`'s own placement gate above) from a Tier 1 "first touch"
+review (never does, since it's for a chunk that's never been logged at
+all). Skipping that check was a real bug caught before shipping: a Tier 1
+review has no `nextDueDate`, so `computeDueReviews` never surfaces it live
+either — stripping it the same way a stale Tier 2 review gets stripped
+would make it vanish with nothing live to point to instead. Consolidation
+days are skipped entirely too, mirroring `mergeLiveDueReviews`'s own
+identical guard — their `reviewChunkIds` blankets every practice chunk
+regardless of ladder state (a different mechanism, the synthetic
+`"__consolidation__"` progress key), not a pile of Tier 2 reviews to judge
+the same way.
+
+Every consumer of `timeline.days[]` gets the corrected `reviewChunkIds` for
+free from this one change: `classifyDayCompletion`/`countBehindDays` stop
+reading a stale review as still-incomplete work, and the four rendering
+surfaces that already had an "explain what happened to this content"
+precedent (`isDayFullySwept`'s "Tasks rescheduled") each show a small note
+("Now due — see today" / "Already due — see Today's Practice") instead of
+the item silently vanishing. Overview's first-week list needed no change
+at all — it already just sums `reviewChunkIds` into a measure count, so it
+automatically stops counting a stale review, just without an explicit note
+pointing at where it went (a deliberate, accepted asymmetry, not an
+oversight). See [Decisions.md](Decisions.md#open-questions) for the full
+investigation history, including why the original two-reading framing
+missed what was actually being asked.
 
 ## Deriving daysToLearn from minutesPerDay (scheduleMode: "minutes")
 

@@ -88,6 +88,17 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, rea
                           ))}
                         </div>
                       )}
+                      {/* withLiveReviewStatus (lib/scheduling.js) already
+                          pulled a passed-due review out of
+                          d.reviewChunkIds above — it's already live and
+                          actionable on today's own screen
+                          (mergeLiveDueReviews), not stuck here. This just
+                          says so instead of it silently vanishing. */}
+                      {d.staleReviewIds && d.staleReviewIds.length > 0 && (
+                        <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic", marginTop: 4 }}>
+                          Now due — see today
+                        </p>
+                      )}
                     </>
                   )}
                 </button>

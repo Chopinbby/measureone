@@ -208,7 +208,16 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
                       ))}
                     </div>
                   )}
-                  {d.newChunkIds.length === 0 && d.specialChunkIds.length === 0 && d.reviewChunkIds.length === 0 && (
+                  {/* withLiveReviewStatus (lib/scheduling.js) already
+                      pulled a passed-due review out of d.reviewChunkIds
+                      above — it's already live and actionable on today's
+                      own screen (mergeLiveDueReviews), not stuck here.
+                      This just says so instead of it silently vanishing. */}
+                  {d.staleReviewIds && d.staleReviewIds.length > 0 && (
+                    <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic" }}>Now due — see today</p>
+                  )}
+                  {d.newChunkIds.length === 0 && d.specialChunkIds.length === 0 && d.reviewChunkIds.length === 0 &&
+                    !(d.staleReviewIds && d.staleReviewIds.length > 0) && (
                     <p className="day-card-note">Nothing scheduled</p>
                   )}
                 </>

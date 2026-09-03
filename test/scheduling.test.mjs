@@ -22,6 +22,7 @@ import {
   findStuckBehindPieces,
   computeRemainingConnectorIds,
   isDayFullySwept,
+  withLiveReviewStatus,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "../src/lib/utils.js";
 
@@ -589,6 +590,107 @@ describe("Pass 75 follow-up — isDayFullySwept also recognizes an id done on a 
     });
     const day8 = { dayNumber: 8, newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1"] };
     assert.equal(isDayFullySwept(day8, piece), false);
+  });
+});
+
+describe("withLiveReviewStatus — a review whose due date has passed shouldn't look like a still-open task on its original day", () => {
+  // The bug this fixes has nothing to do with rescheduling:
+  // computeTimeline's Tier 2 placement has no notion of "today", so once a
+  // review's placement day is in the past, it just sits there forever,
+  // unaddressed — duplicating what mergeLiveDueReviews (lib/maintenance.js,
+  // Pass 66) already, separately, surfaces on today's own screen.
+  test("a review not logged on its own (past) placement day gets pulled out of reviewChunkIds and reported as staleReviewIds", () => {
+    const piece = basePiece({ progress: { c1: { doneDays: [2], nextDueDate: "2026-01-08" } } });
+    const timeline = {
+      days: [
+        { dayNumber: 8, type: "learning", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1"] },
+      ],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15); // "today" is day 15 — day 8 is in the past
+    assert.deepEqual(result.days[0].reviewChunkIds, []);
+    assert.deepEqual(result.days[0].staleReviewIds, ["c1"]);
+  });
+
+  test("a review actually logged on its own placement day is left alone — it's genuine, current content, not stale", () => {
+    const piece = basePiece({ progress: { c1: { doneDays: [8] } } }); // logged exactly on day 8
+    const timeline = {
+      days: [{ dayNumber: 8, type: "learning", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1"] }],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15);
+    assert.deepEqual(result.days[0].reviewChunkIds, ["c1"]);
+    assert.equal(result.days[0].staleReviewIds, undefined);
+  });
+
+  test("a review on today or a future day is never touched, even if unlogged", () => {
+    const piece = basePiece({ progress: {} });
+    const timeline = {
+      days: [
+        { dayNumber: 15, type: "learning", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1"] }, // today
+        { dayNumber: 20, type: "learning", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c5"] }, // future
+      ],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15);
+    assert.deepEqual(result.days[0].reviewChunkIds, ["c1"]);
+    assert.deepEqual(result.days[1].reviewChunkIds, ["c5"]);
+  });
+
+  test("a mixed day: only the stale review is pulled, real newChunkIds/specialChunkIds content is untouched", () => {
+    const piece = basePiece({ progress: { c1: { doneDays: [2], nextDueDate: "2026-01-08" } } });
+    const timeline = {
+      days: [{ dayNumber: 8, type: "learning", newChunkIds: ["c9"], specialChunkIds: ["t1"], reviewChunkIds: ["c1"] }],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15);
+    assert.deepEqual(result.days[0].newChunkIds, ["c9"]);
+    assert.deepEqual(result.days[0].specialChunkIds, ["t1"]);
+    assert.deepEqual(result.days[0].reviewChunkIds, []);
+    assert.deepEqual(result.days[0].staleReviewIds, ["c1"]);
+  });
+
+  test("[regression] a Tier 1 'first touch' review (never logged at all, no nextDueDate) is never treated as stale", () => {
+    // Found live, not hypothetical: a Tier 1 review is placed the day
+    // after a chunk's introduction for a chunk that's NEVER been logged
+    // (computeTimeline, above) — such a chunk has no progress entry at
+    // all, so an earlier version of this fix (checking only doneDays,
+    // no nextDueDate) treated it exactly like a stale Tier 2 review and
+    // stripped it — but computeDueReviews' own gate requires
+    // entry.nextDueDate to surface anything live, so a Tier 1 review
+    // pulled this way would vanish with literally nothing live to point
+    // to instead. Reproduced against a real 16-measure, 4-chunk piece in
+    // the browser before this guard existed: every never-touched chunk's
+    // first-touch review disappeared from Timeline/Week view/Master
+    // Agenda, mislabeled "Now due — see today" even though nothing
+    // showed there.
+    const piece = basePiece({ progress: {} }); // c9 has no progress entry at all
+    const timeline = {
+      days: [{ dayNumber: 2, type: "learning", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c9"] }],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15);
+    assert.deepEqual(result.days[0].reviewChunkIds, ["c9"]);
+    assert.equal(result.days[0].staleReviewIds, undefined);
+  });
+
+  test("[regression] a consolidation day's reviewChunkIds (every practice chunk, regardless of ladder state) is never touched", () => {
+    // Consolidation days blanket reviewChunkIds with every practice chunk
+    // (computeTimeline) — a completely different mechanism (the
+    // synthetic "__consolidation__" progress key, not each chunk's own
+    // doneDays) that happens to reuse the same field name. Confirmed this
+    // doesn't get misread as a pile of stale Tier 2 reviews.
+    const piece = basePiece({ progress: {} }); // nothing logged for c1/c5 anywhere
+    const timeline = {
+      days: [{ dayNumber: 8, type: "consolidation", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1", "c5"] }],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15);
+    assert.deepEqual(result.days[0].reviewChunkIds, ["c1", "c5"]);
+    assert.equal(result.days[0].staleReviewIds, undefined);
+  });
+
+  test("a paused piece is left entirely untouched — its live due list is suppressed too, so stripping here would leave nothing to point to", () => {
+    const piece = basePiece({ status: "paused", progress: {} });
+    const timeline = {
+      days: [{ dayNumber: 8, type: "learning", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1"] }],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15);
+    assert.strictEqual(result, timeline);
   });
 });
 

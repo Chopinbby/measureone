@@ -1376,23 +1376,23 @@ logic.**
   render function shared by both the Learning-phase and Maintenance-due
   card lists, so both get the fix from a single change — branches on it
   right after its existing `consolidation` check.
-- **The "review" question — flagged per the pass's own instruction,
-  genuinely not built:** the pass offered two readings of "review should
-  be pulled forward the same way" and required confirming which was meant
-  before writing any review-specific code. Confirming it directly with
-  the user surfaced a third, more precise framing, and tracing the actual
-  mechanism (`computeTimeline`'s Tier 2 placement, `lib/scheduling.js`)
-  showed the real issue isn't reschedule-specific at all — a review's
-  placement day can go stale relative to today regardless of whether a
-  reschedule ever happened, since `computeTimeline` has no concept of
-  "today" to begin with. Fixing it properly would touch every past-day
-  display surface in the app, not just this pass's two files, and may sit
-  in tension with an already-documented design stance ("a review arriving
-  late is schedule slack, never a failure"). **The user chose to scope
-  this out as its own separate pass** once that was explained, rather than
-  build it now under an expanded, unplanned scope. See
-  [Open questions](#open-questions) for the full write-up, including
-  where a future pass should start reading from.
+- **The "review" question — initially flagged, not built, per the pass's
+  own instruction; resolved later the same session once the user came
+  back and asked for it directly.** The pass offered two readings of
+  "review should be pulled forward the same way" and required confirming
+  which was meant before writing any review-specific code. Confirming it
+  directly with the user surfaced a third, more precise framing, and
+  tracing the actual mechanism (`computeTimeline`'s Tier 2 placement,
+  `lib/scheduling.js`) showed the real issue isn't reschedule-specific at
+  all — a review's placement day can go stale relative to today
+  regardless of whether a reschedule ever happened, since `computeTimeline`
+  has no concept of "today" to begin with. Fixing it properly touched
+  every past-day display surface in the app, not just this pass's two
+  files — the user chose to scope it out as its own effort at first,
+  rather than build it under an expanded, unplanned scope, then asked for
+  exactly that effort once Pass 75 itself was done and committed. See
+  [Open questions](#open-questions) for the full write-up, including the
+  fix and a real Tier-1-review bug found and corrected before it shipped.
 - **Verified:** full test suite green (580 tests — no `lib/`-level code
   changed, `isDayFullySwept` itself untouched, only two new callers) and
   `npm run build` clean. Manual, in-browser, reproducing the original
@@ -5916,12 +5916,15 @@ oversight to silently fix; surface it instead.
     still-open task in all four.
   - See [Algorithms.md](Algorithms.md#rescheduling) for the full mechanism
     and the code-level comment explaining the review-scoping guard.
-- **(Pass 75) A review sitting on a past, unaddressed day reads as an
-  open task there forever — and this turns out to have nothing to do with
-  rescheduling.** Flagged per the pass's own instruction to confirm before
-  writing any review-specific code; confirming it led to a real,
-  investigated finding, not just a restated question — worth a full
-  write-up so whoever picks this up next doesn't have to re-derive it.
+- ~~A review sitting on a past, unaddressed day reads as an open task
+  there forever — and this turns out to have nothing to do with
+  rescheduling.~~ **Resolved the same session, once the user directly
+  asked to come back and build it.** Originally flagged (Pass 75) per its
+  own instruction to confirm before writing any review-specific code;
+  confirming it led to a real, investigated finding, not just a restated
+  question, and was deliberately deferred as its own scoped effort rather
+  than folded into Pass 75. Full history below, kept intact since the
+  investigation is what made the eventual fix small and correct.
   - **What was asked, and what it actually turned out to be:** the pass
     offered two readings — (a) the original report was really about a
     transition/combo loosely called "review" (already covered, nothing to
@@ -5950,24 +5953,69 @@ oversight to silently fix; surface it instead.
     still-open task on whatever day it first became due, with nothing
     connecting the two. Rescheduling is just one way a learner would
     notice this, not the cause.
-  - **Why this wasn't built even in its "smaller" form:** fixing it
-    properly touches every surface that renders a past day — Timeline,
-    Day view, Week view, Master Agenda, Overview's first-week list — not
-    just the two files Pass 75 touched, and it may also sit in tension
-    with an existing, deliberate design principle already documented
-    elsewhere in this file: "a review arriving late is schedule slack,
-    never a failure" (`DueReviewPanel`'s own copy: "Some of these have
-    been waiting a few days. That's fine — take them in order.").
-    Whether an old, stale-looking placement should be visually
-    suppressed/relabeled without contradicting that "late is fine, not a
-    failure" stance is itself a real design question, not just an
-    implementation detail. Presented back to the user once this was
-    understood, rather than built on the strength of an answer given
-    before this nuance was visible; **the user chose to scope this out as
-    its own separate pass**, not build it now and not fold it into Pass
-    75's touched files.
-  - Not started. A future pass on this should start from `computeTimeline`'s
-    Tier 2 placement loop and `mergeLiveDueReviews`
-    (both above) rather than re-deriving the mechanism from scratch. See
-    [Scheduling](#scheduling) (Pass 75 decision) and
-    [Algorithms.md](Algorithms.md#rescheduling).
+  - **Why building it touches more than two files, but not the "late
+    review is fine" principle:** the fix had to reach every surface that
+    renders a past day (Timeline, Day view, Week view, Master Agenda,
+    Overview's first-week list), not just Pass 75's two files. It does
+    *not* contradict "a review arriving late is schedule slack, never a
+    failure" (`DueReviewPanel`'s own copy) — that principle is about the
+    *ladder* never penalizing lateness, which this doesn't touch at all;
+    what's fixed here is purely a display duplicate, and the review stays
+    exactly as available, unpenalized, and logged from today's live list
+    as it always was.
+  - **The fix:** `withLiveReviewStatus(timeline, piece, realCurrentDay)`
+    (`lib/scheduling.js`) is applied once, centrally, to whatever
+    `getEffectiveTimeline` already produced — at its two real call sites
+    (`App.jsx`, `MasterAgendaTab.jsx`) — rather than as a per-surface
+    check. Every consumer of `timeline.days[]` gets the corrected
+    `reviewChunkIds` for free: a review not logged on its own placement
+    day, before real "today", is pulled out and reported separately as
+    `day.staleReviewIds`, so the four rendering surfaces that already had
+    an "explain what happened to this content" precedent
+    (`isDayFullySwept`'s "Tasks rescheduled") could each add a small
+    "Now due — see today" / "Already due — see Today's Practice" note
+    instead of the item just vanishing unexplained. Overview's first-week
+    list needed *no* code change at all — it already just reads
+    `reviewMeasures` off `reviewChunkIds`, so it automatically stops
+    counting a stale review without a special note (a smaller, and
+    arguably better, resolution than adding a fifth copy of the same
+    wording, discussed and left as a deliberate asymmetry rather than
+    something to chase for consistency's own sake).
+  - **A real bug found and fixed before shipping, not shipped as scoped:**
+    the first version of the check only asked "has this id been done on
+    some day other than this one" — which also caught, and wrongly pulled,
+    every Tier 1 "first touch" review (placed for a chunk that's *never*
+    been logged at all, per `computeTimeline` above). Reproduced live: a
+    fresh 16-measure, 4-chunk piece showed every never-touched chunk's
+    Tier 1 review vanish, mislabeled "Now due — see today" — but
+    `computeDueReviews` requires `entry.nextDueDate` to surface anything
+    live at all, and a Tier 1 chunk never has one, so nothing was actually
+    there to point to. Fixed by requiring `entry.nextDueDate` truthy
+    before considering an id stale — a Tier 2 review always has one by
+    construction (`computeTimeline`'s own placement gate), a Tier 1 review
+    never does, so this cleanly separates the two without needing to know
+    which tier placed a given id.
+  - **A second guard, carried over from the investigation rather than
+    found fresh:** consolidation days blanket `reviewChunkIds` with every
+    practice chunk regardless of ladder state — a different mechanism
+    entirely (the synthetic `"__consolidation__"` progress key) that
+    happens to reuse the same field name. Mirrors `mergeLiveDueReviews`'s
+    own identical skip for the same reason.
+  - **Verified:** 6 new regression tests (`withLiveReviewStatus` describe
+    block, `test/scheduling.test.mjs`), including dedicated ones for both
+    bugs above — each confirmed to fail without its guard and pass with
+    it, not just written and trusted. Full suite green (592 tests), clean
+    build. Manual, in-browser: built a real 16-measure/4-chunk piece,
+    injected one chunk (`c1`) with a genuine Tier 2 ladder state
+    (`nextDueDate` several days past, matching a real logged-then-overdue
+    chunk) alongside three never-touched chunks (each carrying their own
+    Tier 1 first-touch review) — confirmed only `c1`'s review was pulled
+    (all three Tier 1 reviews rendered normally, real content, unaffected)
+    across all four touched surfaces (Timeline, Today's Practice Day
+    view + Week view + "All Tasks", Master Agenda's date-browsed card),
+    and confirmed `c1`'s review still correctly appeared live on today's
+    own screen with its real overdue count ("Next review was due 12 days
+    ago").
+  - See [Algorithms.md](Algorithms.md#rescheduling) for the mechanism and
+    [Scheduling](#scheduling) (Pass 75 decision) for where this was first
+    scoped out.

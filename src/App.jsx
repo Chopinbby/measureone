@@ -21,7 +21,7 @@ import {
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -221,10 +221,25 @@ export default function App() {
   const chunkSet = useMemo(() => (piece ? generateAllChunks(piece) : null), [piece]);
   const chunks = chunkSet ? chunkSet.all : [];
   const practiceChunks = chunkSet ? chunkSet.practiceChunks : [];
-  const timeline = useMemo(() => (piece ? getEffectiveTimeline(piece, chunkSet) : null), [piece, chunkSet]);
+  // Raw, pre-review-status timeline — realCurrentDay is clamped off its
+  // days.length, which withLiveReviewStatus below never changes (it only
+  // edits reviewChunkIds within existing days), so computing
+  // realCurrentDay off this raw value first and the corrected `timeline`
+  // second (using that same realCurrentDay) avoids a circular dependency
+  // between the two.
+  const rawTimeline = useMemo(() => (piece ? getEffectiveTimeline(piece, chunkSet) : null), [piece, chunkSet]);
   const realCurrentDay = useMemo(
-    () => (piece && timeline ? getCurrentDay(piece, timeline.days.length) : 1),
-    [piece, timeline]
+    () => (piece && rawTimeline ? getCurrentDay(piece, rawTimeline.days.length) : 1),
+    [piece, rawTimeline]
+  );
+  // A review whose due date has passed sits on its original day forever,
+  // looking like a still-open task, duplicating what's already shown live
+  // on today's screen — see withLiveReviewStatus (lib/scheduling.js) for
+  // the full mechanism. Applied here, once, so every tab consuming
+  // `timeline` gets the corrected reviewChunkIds for free.
+  const timeline = useMemo(
+    () => (piece && rawTimeline ? withLiveReviewStatus(rawTimeline, piece, realCurrentDay) : rawTimeline),
+    [piece, rawTimeline, realCurrentDay]
   );
   const currentDay = dayOverride || realCurrentDay;
 

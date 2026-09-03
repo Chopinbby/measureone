@@ -240,15 +240,17 @@ export function TodayTab({
     setViewMode("day");
   };
 
-  // Interleaved mode (Pass 29) reuses this exact "today" list rather than
-  // building a separate chunk-selection mechanism — just narrowed to
-  // chunks that have actually left Stabilizing (isInterleaveEligible,
-  // lib/ladder.js). A chunk can appear twice in todaysIds (e.g. a review
-  // id also present some other way); de-duped the same way todaysRanges
-  // already does below.
-  const interleaveItems = [...new Set(todaysIds)]
-    .map((id) => chunkById[id])
-    .filter(Boolean)
+  // Interleaved mode (Pass 29) — every chunk in the whole piece that's
+  // actually left Stabilizing (isInterleaveEligible, lib/ladder.js), not
+  // just whatever happens to be scheduled for today specifically. Used to
+  // be scoped to todaysIds (today's own newChunkIds/specialChunkIds/
+  // reviewChunkIds) — narrowed on request to the piece-wide pool instead,
+  // since a graduated chunk from an earlier day is exactly as valid to
+  // interleave against as one that happens to be due today. `chunks` is
+  // already exactly chunkSet.all (practice chunks, transitions, combos),
+  // with no duplicate ids, so no de-duping is needed the way todaysIds
+  // required below.
+  const interleaveItems = chunks
     .filter((c) => isInterleaveEligible(piece.progress[c.id]))
     .map((c) => ({ id: c.id, chunk: c }));
 
@@ -409,15 +411,23 @@ export function TodayTab({
         type="button"
         className={`ghost-btn interleave-mode-btn ${viewMode === "interleave" ? "active" : ""}`}
         style={{ alignSelf: "flex-start" }}
-        disabled={interleaveItems.length === 0}
+        disabled={interleaveItems.length < 2}
         onClick={() => setViewMode("interleave")}
       >
         Interleaved practice
       </button>
-      {interleaveItems.length === 0 && (
+      {/* Pass 69 — needs two qualifying chunks to actually rotate between,
+          not just one, so the unlock threshold moved from "zero" to "fewer
+          than two". That means the hint now has to cover a state that
+          couldn't previously occur: exactly one chunk graduated. Reusing
+          the old "no chunks have graduated" sentence for that case would
+          be wrong (a chunk genuinely has graduated), so the copy branches
+          instead of using one static sentence for both. */}
+      {interleaveItems.length < 2 && (
         <p className="wizard-hint" style={{ marginTop: -8 }}>
-          Interleaved mode unlocks once at least one chunk graduates past Stabilizing — no chunks have graduated past
-          Stabilizing yet.
+          {interleaveItems.length === 0
+            ? "Interleaved mode unlocks once at least two chunks graduate past Stabilizing — no chunks have graduated past Stabilizing yet."
+            : "Interleaved mode unlocks once at least two chunks graduate past Stabilizing — only one chunk has graduated past Stabilizing so far."}
         </p>
       )}
 

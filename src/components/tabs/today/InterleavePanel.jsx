@@ -11,14 +11,17 @@ import {
 } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
 
-// Fixed for this pass (Pass 29) — a tuning choice, not a design one.
-// Configurable-per-user rotation interval is explicitly deferred scope.
-const ROTATION_SECONDS = 240;
+// Fixed for this pass (Pass 29), graded by difficulty since Pass 69 — a
+// tuning choice, not a design one. Configurable-per-user rotation interval
+// is still explicitly deferred scope; this only varies the fixed duration
+// by how hard the current chunk is. "hard" keeps the original flat value.
+const ROTATION_SECONDS_BY_DIFFICULTY = { easy: 120, medium: 180, hard: 240 };
 
 // Interleaved practice: rotates through chunks that have graduated past
 // Stabilizing, prompting a log (or an explicit skip) for whichever one is
-// "up" every ROTATION_SECONDS. Reuses the exact same rep/BPM/manualFail
-// inputs and onLogSession call that ChecklistItem's regular checklist uses
+// "up" every ROTATION_SECONDS_BY_DIFFICULTY[current chunk's difficulty]
+// seconds. Reuses the exact same rep/BPM/manualFail inputs and
+// onLogSession call that ChecklistItem's regular checklist uses
 // — this file doesn't reimplement that path, it just drives it from a
 // mode-level timer instead of a per-item one (mirroring the setInterval/
 // durationSeconds pattern ChecklistItem already uses for its own timer).
@@ -66,6 +69,20 @@ export function InterleavePanel({
 
   useEffect(() => {
     if (!running || items.length === 0) return;
+    // Pass 69 — rotation duration is now graded by the CURRENT chunk's own
+    // difficulty, not a flat constant, so the threshold this interval
+    // checks against has to be captured fresh for whichever chunk is
+    // actually showing right now. Without `current?.id` in the dependency
+    // array below, this closure would keep whatever chunk was current when
+    // the effect last (re)ran — advance() rotates `index`/`current` forward
+    // without this effect itself re-running, so a later tick could
+    // silently check the OLD chunk's duration against the NEW chunk's
+    // elapsed time. Adding it tears the interval down and recreates it on
+    // every rotation, same as if `running` had toggled — resetTurn()
+    // inside advance() already zeroes elapsedSeconds, so this doesn't
+    // change today's reset behavior, it just keeps the threshold pointed
+    // at the right chunk.
+    const rotationSeconds = ROTATION_SECONDS_BY_DIFFICULTY[current.chunk.difficultyLabel];
     // Resuming after a pause carries over the seconds already elapsed —
     // same as resetTurn does for a fresh turn, but anchored to elapsedSeconds
     // (not 0) since a pause doesn't reset the turn itself.
@@ -74,13 +91,13 @@ export function InterleavePanel({
       const recomputed =
         turnStartRef.current.baseSeconds + Math.round((Date.now() - turnStartRef.current.startedAt) / 1000);
       // A backgrounded tab can let real elapsed time run well past
-      // ROTATION_SECONDS — possibly several rotations' worth — before this
+      // rotationSeconds — possibly several rotations' worth — before this
       // tick ever fires. advance() (via resetTurn) resets turnStartRef to
       // *this* moment, so the very next tick starts counting fresh toward
       // the new chunk's own rotation instead of immediately tripping this
       // same check again — advancing exactly once per tick that notices
       // the crossing, not once per rotation-length missed.
-      if (recomputed >= ROTATION_SECONDS) {
+      if (recomputed >= rotationSeconds) {
         advance();
       } else {
         setElapsedSeconds(recomputed);
@@ -88,7 +105,7 @@ export function InterleavePanel({
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, items.length]);
+  }, [running, items.length, current?.id]);
 
   if (items.length === 0 || !current) {
     return (
@@ -184,7 +201,7 @@ export function InterleavePanel({
           {running ? "Pause" : "Start"} rotation
         </button>
         <span className="timer-display mono">
-          {formatDuration(elapsedSeconds)} / {formatDuration(ROTATION_SECONDS)}
+          {formatDuration(elapsedSeconds)} / {formatDuration(ROTATION_SECONDS_BY_DIFFICULTY[chunk.difficultyLabel])}
         </span>
       </div>
 

@@ -11,8 +11,19 @@ import { shouldShowScheduleBanner, countBehindDays } from "../lib/scheduling";
 // they are passed, the "go to the oldest unfinished day" action folds into
 // this same banner instead of Today rendering a second one right below it —
 // combined on request once both existed side by side.
-export function ScheduleBanner({ piece, chunkSet, timeline, currentDay, onReschedule, earliestBehindDay, onDayChange }) {
-  const behindDays = countBehindDays(piece, timeline, currentDay);
+// `currentDay` used to double as both "how behind is this piece" and "what
+// day is being browsed" — the same value, conflated. Pass 74: schedule
+// status must always be measured against the real current day, never the
+// browsed one (Timeline/day-nav can set `currentDay` to a past or future
+// day), so this only ever takes `realCurrentDay` now — there's nothing else
+// here that needed the browsed day in the first place.
+export function ScheduleBanner({ piece, chunkSet, timeline, realCurrentDay, onReschedule, earliestBehindDay, onDayChange }) {
+  // Passed through so countBehindDays can recognize a connector that rode
+  // along into a reschedule via a linked practice chunk, not just one
+  // whose own id is directly listed on the marker — see isDayFullySwept
+  // (lib/scheduling.js).
+  const chunkById = Object.fromEntries((chunkSet?.all || []).map((c) => [c.id, c]));
+  const behindDays = countBehindDays(piece, timeline, realCurrentDay, chunkById);
   // Pass 16, redefined Pass 39 — shouldShowScheduleBanner needs the full
   // piece/chunkSet (not just a precomputed elapsedDay number) to tell
   // "still in the plan" from "plan's actually over" from "calendar ran out

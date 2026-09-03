@@ -13,7 +13,7 @@ import { InterleavePanel } from "./today/InterleavePanel";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival } from "../../lib/revival";
-import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion } from "../../lib/scheduling";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, isDayFullySwept } from "../../lib/scheduling";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, hasPendingProvisionalSession } from "../../lib/utils";
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
@@ -84,6 +84,7 @@ export function TodayTab({
   chunks,
   timeline,
   currentDay,
+  realCurrentDay,
   onDayChange,
   isRealToday,
   onJumpToday,
@@ -165,8 +166,11 @@ export function TodayTab({
   // of "incomplete" — scans forward from day 1 so "earliest" really means
   // earliest, not just the day the first untouched chunk happens to live on
   // (a day can be "behind" from an unfinished review/transition even once
-  // every chunk it *introduced* is done). Stops before currentDay itself:
-  // classifyDayCompletion treats currentDay and later as "future," never
+  // every chunk it *introduced* is done). Stops before realCurrentDay
+  // itself (Pass 74 — this scan anchors to the real current day, not
+  // whichever day is currently being browsed, so a catch-up target found
+  // while paging through the past/future is still correct): classifyDay-
+  // Completion treats realCurrentDay and later as "future," never
   // "behind," so scanning further is guaranteed empty.
   //
   // A day classifyDayCompletion calls "behind" can still be one Pass 48
@@ -176,37 +180,17 @@ export function TodayTab({
   // any reschedule, the earliest "behind" day is reliably day 1 again (its
   // stale newChunkIds are still all undone, by definition), so without this
   // guard the button would send you to that empty collapsed day instead of
-  // wherever the work actually moved. isMovedId/isFullySwept mirror
-  // TimelineTab.jsx and DayChecklist.jsx's checks exactly — a day this scan
-  // would otherwise land on gets skipped, not returned, so "earliest
-  // incomplete day" keeps meaning a day with something real left to do.
-  const marker = piece.rescheduleMarker;
-  // remainingConnectorIds (Pass 73 follow-up to Pass 65) checks a
-  // connector's own logged status directly, alongside — not instead of —
-  // the neighbor-based check below: see DayChecklist.jsx's fuller comment
-  // on this same check for why the neighbor check alone used to leave a
-  // stuck, never-logged connector invisible forever once both its
-  // neighbors were practiced.
-  const isMovedId = (id) => {
-    if (!marker) return false;
-    if (marker.remainingChunkOrder.includes(id)) return true;
-    if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
-    const c = chunkById[id];
-    if (!c || !c.linkedIds) return false;
-    return c.kind === "combo"
-      ? marker.remainingChunkOrder.includes(c.linkedIds[0])
-      : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
-  };
-  const isFullySwept = (d) => {
-    if (marker == null || d.dayNumber >= marker.asOfDay) return false;
-    const ids = [...d.newChunkIds, ...d.specialChunkIds, ...d.reviewChunkIds];
-    return ids.length > 0 && ids.every(isMovedId);
-  };
+  // wherever the work actually moved. isDayFullySwept (lib/scheduling.js,
+  // shared with TimelineTab.jsx and DayChecklist.jsx — Pass 74 follow-up
+  // consolidated what used to be three separate copies of this exact
+  // check) — a day this scan would otherwise land on gets skipped, not
+  // returned, so "earliest incomplete day" keeps meaning a day with
+  // something real left to do.
   const findEarliestBehindDay = () => {
     for (const d of timeline.days) {
-      if (d.dayNumber >= currentDay) break;
-      if (isFullySwept(d)) continue;
-      if (classifyDayCompletion(d, piece, currentDay) === "behind") return d.dayNumber;
+      if (d.dayNumber >= realCurrentDay) break;
+      if (isDayFullySwept(d, piece, chunkById)) continue;
+      if (classifyDayCompletion(d, piece, realCurrentDay) === "behind") return d.dayNumber;
     }
     return null;
   };
@@ -256,15 +240,17 @@ export function TodayTab({
     setViewMode("day");
   };
 
-  // Interleaved mode (Pass 29) reuses this exact "today" list rather than
-  // building a separate chunk-selection mechanism — just narrowed to
-  // chunks that have actually left Stabilizing (isInterleaveEligible,
-  // lib/ladder.js). A chunk can appear twice in todaysIds (e.g. a review
-  // id also present some other way); de-duped the same way todaysRanges
-  // already does below.
-  const interleaveItems = [...new Set(todaysIds)]
-    .map((id) => chunkById[id])
-    .filter(Boolean)
+  // Interleaved mode (Pass 29) — every chunk in the whole piece that's
+  // actually left Stabilizing (isInterleaveEligible, lib/ladder.js), not
+  // just whatever happens to be scheduled for today specifically. Used to
+  // be scoped to todaysIds (today's own newChunkIds/specialChunkIds/
+  // reviewChunkIds) — narrowed on request to the piece-wide pool instead,
+  // since a graduated chunk from an earlier day is exactly as valid to
+  // interleave against as one that happens to be due today. `chunks` is
+  // already exactly chunkSet.all (practice chunks, transitions, combos),
+  // with no duplicate ids, so no de-duping is needed the way todaysIds
+  // required below.
+  const interleaveItems = chunks
     .filter((c) => isInterleaveEligible(piece.progress[c.id]))
     .map((c) => ({ id: c.id, chunk: c }));
 
@@ -350,7 +336,7 @@ export function TodayTab({
         piece={piece}
         chunkSet={chunkSet}
         timeline={timeline}
-        currentDay={currentDay}
+        realCurrentDay={realCurrentDay}
         onReschedule={onReschedule}
         earliestBehindDay={earliestBehindDay}
         onDayChange={onDayChange}
@@ -425,15 +411,23 @@ export function TodayTab({
         type="button"
         className={`ghost-btn interleave-mode-btn ${viewMode === "interleave" ? "active" : ""}`}
         style={{ alignSelf: "flex-start" }}
-        disabled={interleaveItems.length === 0}
+        disabled={interleaveItems.length < 2}
         onClick={() => setViewMode("interleave")}
       >
         Interleaved practice
       </button>
-      {interleaveItems.length === 0 && (
+      {/* Pass 69 — needs two qualifying chunks to actually rotate between,
+          not just one, so the unlock threshold moved from "zero" to "fewer
+          than two". That means the hint now has to cover a state that
+          couldn't previously occur: exactly one chunk graduated. Reusing
+          the old "no chunks have graduated" sentence for that case would
+          be wrong (a chunk genuinely has graduated), so the copy branches
+          instead of using one static sentence for both. */}
+      {interleaveItems.length < 2 && (
         <p className="wizard-hint" style={{ marginTop: -8 }}>
-          Interleaved mode unlocks once at least one chunk graduates past Stabilizing — no chunks have graduated past
-          Stabilizing yet.
+          {interleaveItems.length === 0
+            ? "Interleaved mode unlocks once at least two chunks graduate past Stabilizing — no chunks have graduated past Stabilizing yet."
+            : "Interleaved mode unlocks once at least two chunks graduate past Stabilizing — only one chunk has graduated past Stabilizing so far."}
         </p>
       )}
 

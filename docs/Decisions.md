@@ -1223,6 +1223,190 @@ inferred from its neighbors.**
     beyond what the existing verification already covered.
 - See [Algorithms.md](Algorithms.md#rescheduling).
 
+**Decision (Pass 74): reschedule and the schedule banner anchor to the
+real current day, not whichever day is currently being browsed.**
+
+- **The bug, reported precisely: a reschedule confirmed while browsing a
+  past day (via Timeline or Today's Practice's day-nav) saved a marker
+  anchored to that past day, not today** — e.g. clicking Reschedule while
+  paged to day 19 wrote `rescheduleMarker.asOfDay: 19` even though real
+  elapsed time put "today" at day 29. `App.jsx` had always computed two
+  separate values — `realCurrentDay` (real elapsed time, clamped to the
+  plan) and `currentDay = dayOverride || realCurrentDay` (whichever day
+  Timeline/day-nav is currently showing) — but `handleReschedule`'s
+  `computeScheduleStatus` call, its overdue-connector filter,
+  `estimateRescheduleFit`, and the marker's own `asOfDay` all read the
+  browsed `currentDay`. `ScheduleBanner`'s `countBehindDays` call inherited
+  the same bug at one remove, since it just took whatever `currentDay` its
+  caller passed straight through.
+- **The fix:** every one of those reads now uses `realCurrentDay` instead.
+  `ScheduleBanner` takes a `realCurrentDay` prop and no longer accepts
+  `currentDay` at all — nothing else in the component read it, so once its
+  one internal use switched, the prop itself was removable rather than
+  merely unused. `OverviewTab`, `TodayTab`, and `TimelineTab` (the three
+  `ScheduleBanner` call sites) each gained a `realCurrentDay` prop threaded
+  from `App.jsx`'s existing variable. `TodayTab`'s `findEarliestBehindDay`
+  (the Pass 47 catch-up-button scan) got the identical fix for the
+  identical reason — its scan boundary and `classifyDayCompletion` call
+  now use `realCurrentDay`, so the button's target can't shift depending
+  on what's on screen. Every *other* `currentDay` use in those three
+  components — the day-list display, week-index selection, and per-day
+  completion checks for whichever day is actually being browsed — is
+  deliberately untouched; those are correctly about the browsed day, and
+  conflating them with schedule-eligibility was never the bug.
+- **Checked and confirmed still safe, not changed reflexively:**
+  `TodayTab`'s `needsRescheduleNudge`/`hasReschedulableWork` (the "past
+  your target date" prompt, and the practice-chunk-only reschedulability
+  gate feeding it) both compute off `currentDay`, matching the pattern this
+  pass fixed everywhere else — but `needsRescheduleNudge` is itself gated
+  on `isRealToday`, which is only ever true when `currentDay === realCurrentDay`
+  by construction. Verified this by reading the surrounding code rather
+  than trusting the variable name alone, per the pass's own instruction not
+  to change it reflexively just because it matched the pattern.
+- **On successful confirm, `App.jsx` now also resets `dayOverride` to
+  `null`** (`handleConfirmReschedule` and
+  `handleConfirmRescheduleWithExtension`) — the same reset `onJumpToday`
+  already used. Once a reschedule anchors correctly to `realCurrentDay`,
+  there's nothing incomplete left before today for a browsed past day to
+  keep showing, so landing back on today automatically is both the fix's
+  natural consequence and what the original bug report actually wanted.
+- **Same-session follow-up, found during this pass's manual verification
+  and fixed on request:** `countBehindDays` had no notion of Pass 48's
+  "fully swept into a reschedule" collapse the way `TodayTab`/
+  `TimelineTab`'s own day lists do (they apply an `isFullySwept` check
+  before calling `classifyDayCompletion`; `countBehindDays` didn't).
+  Confirmed live: immediately after a reschedule that swept every
+  pre-reschedule day, `ScheduleBanner` still read "18 days behind
+  schedule" — the same figure as before the reschedule — even though every
+  one of those days now correctly showed "Tasks rescheduled" and the
+  earliest-behind-day scan (which does apply the sweep filter) correctly
+  found nothing, so the "Go to Day N" button disappeared while the
+  adjacent day-count kept citing the stale number. Not something
+  `realCurrentDay` anchoring caused — `countBehindDays` was already
+  anchored to the correct day both before and after that fix; it simply
+  never learned about the sweep.
+  - **The fix:** `isDayFullySwept(day, piece, chunkById = {})`
+    (`lib/scheduling.js`) extracts the one rule `TodayTab`/`TimelineTab`/
+    `DayChecklist` each already duplicated locally — a day before the
+    marker's `asOfDay` whose every scheduled id is accounted for on the
+    marker (directly, or a connector riding along via a linked practice
+    chunk) reads as moved, not behind. `countBehindDays` gained a fourth,
+    optional `chunkById` parameter and now excludes a fully-swept day from
+    its count. Every call site (`ScheduleBanner`, `OverviewTab`,
+    `MasterAgendaTab`'s two sites, `findStuckBehindPieces`) was updated to
+    supply a `chunkById` built from whatever chunk set it already had in
+    scope — none needed a new one computed just for this. The three
+    existing local `isFullySwept` implementations were deliberately left
+    alone: they already worked correctly and weren't the reported bug, so
+    folding them into the shared function too would have been an
+    unrequested refactor riding along with a bug fix.
+  - **Verified:** four new regression tests
+    (`test/scheduling.test.mjs`, "Pass 74 follow-up — countBehindDays
+    excludes days fully swept into a reschedule") — a fully-swept day
+    excluded even with nothing logged; a day with a genuine mix of swept
+    and still-real content still counts (only a *fully* swept day is
+    excluded); a day at or after the marker's `asOfDay` is never treated
+    as swept; and the connector-linkedIds fallback only fires when
+    `chunkById` is actually supplied. Confirmed each of the two
+    exclusion-behavior tests can actually fail: temporarily reverted
+    `countBehindDays` to drop the `isDayFullySwept` filter, re-ran the
+    suite, watched both fail with the exact stale counts the bug produced
+    (2 instead of 0, 1 instead of 0), then restored the fix. Manual,
+    in-browser: rebuilt the same reproduction piece as the anchoring fix
+    above, rescheduled it from "18 days behind," and confirmed the banner
+    disappeared entirely afterward (the piece is genuinely no longer
+    behind) on Overview, Timeline, and Today's Practice alike — instead of
+    the stale "18 days behind schedule" it showed before this follow-up.
+- **Verified (the `realCurrentDay`-anchoring fix itself):** `npm test`
+  green — 580 tests total, including the four new ones above (the
+  anchoring fix itself changed no `lib/`-level behavior — every edit there
+  is either prop threading or which already-existing variable a call site
+  reads, both living in `App.jsx`/component props). Manual, in-browser,
+  with a real piece (`startDate` set ~18 days in the past, 39-day plan,
+  zero sessions logged): confirmed the banner read "18 days behind
+  schedule" identically whether browsing day 1 (past), day 30 (future), or
+  real-today (day 19); confirmed the "Go to Day 1" catch-up target didn't
+  move across any of those browsed days; clicked Reschedule while parked
+  on day 1 and confirmed via `localStorage` that the saved
+  `rescheduleMarker.asOfDay` was `19` (real today), not `1`; confirmed the
+  confirm landed back on "Day 19 of 39" with no "(viewing)" suffix, and
+  that the catch-up button was gone (nothing left for it to point at, now
+  that Pass 73 is also shipped); confirmed Overview's and Timeline's
+  banners read correctly ("18 days behind schedule") even when switched to
+  directly from Today's Practice while still parked on a past day, without
+  returning to today first.
+- See [Algorithms.md](Algorithms.md#rescheduling).
+
+**Decision (Pass 75, follow-up to Pass 73): Week view and Master Agenda
+get the same reschedule-sweep collapse Day view and Timeline already had —
+built as calls to the existing shared `isDayFullySwept`, not new local
+logic.**
+
+- **The report:** a rescheduled day still showed its stale, real-looking
+  tasks in Week view; clicking into the identical day (Day view) already
+  correctly read "Tasks rescheduled." The pass's own build instruction was
+  explicit that a *partial* port (Pass 73's own-state connector check
+  alone, without the original Pass 48 neighbor-based condition, or vice
+  versa) would still be wrong for the ordinary case — these two surfaces
+  had never had *either* half.
+- **Why this came out simpler than the instruction implied:** the same
+  session's earlier Pass 74 follow-up had already consolidated the three
+  existing duplicated `isMovedId`/`isFullySwept` closures
+  (`DayChecklist`/`TodayTab`/`TimelineTab`) into one shared
+  `isDayFullySwept(day, piece, chunkById)` (`lib/scheduling.js`), which
+  already carries both halves — the direct marker-membership check and the
+  connector-linkedIds fallback. So "build the full logic" here meant
+  calling that one function from two more places, not writing a fourth and
+  fifth copy of it. Worth flagging as a genuine, if small, build-order
+  discovery: had Pass 75 been written before that consolidation happened,
+  its own instruction to "build the full logic, not a partial port" would
+  have been asking for a real port of ~15 lines of duplicated closure code
+  into two more files, not a two-line call site addition — the actual
+  work this pass needed was smaller than the pass description anticipated,
+  purely as a downstream benefit of an unrelated same-session refactor.
+- **`WeekView.jsx`:** computes `isFullySwept` per day inline (next to the
+  existing `specialIsCombo` line) and branches on it in the same order
+  Timeline's day cards already use — `consolidation` → `rest` →
+  `isFullySwept` → normal content. No new prop needed; `piece` was already
+  passed in from `TodayTab`.
+- **`MasterAgendaTab.jsx`:** computes `isFullySwept` once per piece inside
+  the `agendaData` `useMemo` (where `chunkById` is already built for this
+  piece) and carries it as a new field on the pushed item, the same
+  pattern `behindDaysCount` already uses. `renderPieceCard` — the one
+  render function shared by both the Learning-phase and Maintenance-due
+  card lists, so both get the fix from a single change — branches on it
+  right after its existing `consolidation` check.
+- **The "review" question — initially flagged, not built, per the pass's
+  own instruction; resolved later the same session once the user came
+  back and asked for it directly.** The pass offered two readings of
+  "review should be pulled forward the same way" and required confirming
+  which was meant before writing any review-specific code. Confirming it
+  directly with the user surfaced a third, more precise framing, and
+  tracing the actual mechanism (`computeTimeline`'s Tier 2 placement,
+  `lib/scheduling.js`) showed the real issue isn't reschedule-specific at
+  all — a review's placement day can go stale relative to today
+  regardless of whether a reschedule ever happened, since `computeTimeline`
+  has no concept of "today" to begin with. Fixing it properly touched
+  every past-day display surface in the app, not just this pass's two
+  files — the user chose to scope it out as its own effort at first,
+  rather than build it under an expanded, unplanned scope, then asked for
+  exactly that effort once Pass 75 itself was done and committed. See
+  [Open questions](#open-questions) for the full write-up, including the
+  fix and a real Tier-1-review bug found and corrected before it shipped.
+- **Verified:** full test suite green (580 tests — no `lib/`-level code
+  changed, `isDayFullySwept` itself untouched, only two new callers) and
+  `npm run build` clean. Manual, in-browser, reproducing the original
+  report: built a test piece 18 days behind schedule, confirmed Week view
+  showed real content pre-reschedule, rescheduled it, and confirmed every
+  swept day (16, 17, 18) now reads "Tasks rescheduled" in Week view,
+  matching Day view exactly for the same day (16) checked side by side.
+  Same check for Master Agenda: browsing its date picker to a swept day
+  (Aug 30) showed "Tasks rescheduled" on the piece's card; browsing to a
+  genuinely still-scheduled day (Sep 5, post-reschedule) showed real
+  content and a correct "3 days behind" badge — confirming the new check
+  doesn't over-collapse a day with legitimate remaining work.
+- See [Algorithms.md](Algorithms.md#rescheduling).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -2262,7 +2446,14 @@ surface until the plan ran out.**
   and the Reassess panel's `todaysRanges` still read the plan day's
   *original*, unmerged `reviewChunkIds` — a newly-surfaced live-due item
   is loggable from the day checklist but doesn't yet appear in either of
-  those; flagged as a possible follow-up, not decided.
+  those; flagged as a possible follow-up, not decided. **Update, Pass
+  69's same-session follow-up (see the Interleaved-mode decision
+  below):** `interleaveItems` no longer reads any day's `reviewChunkIds`
+  at all, merged or not — it's now a piece-wide filter over live ladder
+  `stage`, which appears to close this half of the gap as a side effect
+  (reasoned through, not separately reproduced against this exact
+  scenario). `todaysRanges` is untouched and still has the gap described
+  here.
 - See [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
 
 **Same-session follow-up, per direct request: a review is now priced by
@@ -2859,6 +3050,103 @@ immediately like a normal logged session (Pass 29 follow-up).**
 - **A third gap, found on critical review after the above shipped, not during the original build: two more sidebar controls changed `activeTab`/`activePieceId` without going through the guard at all.** The "Edit piece" button (`startEditing`) and finishing the "+ Add new piece" wizard (`handleComplete`) both live in the persistent sidebar, visible from Interleaved mode same as the nav list and piece switcher, and both were missed in the original implementation because the review-then-build pass only exercised the three routes it had explicitly set out to test, not an exhaustive audit of every place `setActiveTab`/`setActivePieceId` is called in `App.jsx`. Not a data-loss bug — neither path discarded anything on its own, they just silently skipped the warning — but squarely inside what "a different app tab, or a different piece" was already understood to mean. Fixed the same way as the other three: one `if (!guardLeavingInterleaved()) return;` line at the top of each handler. For `handleComplete` specifically, gating at the very top means a cancelled leave attempt also skips creating the new piece — verified deliberately, not incidentally: the wizard modal stays open (`wizardOpen` is only set to `false` further down in the same function, which a `return` above it never reaches) with the learner's already-entered fields intact, so cancelling costs nothing beyond having to click "Generate my plan" again once the pending log is dealt with.
 - **Verification note:** the persistence bug specifically is not something a pure-function unit test would have caught or would meaningfully validate — it lived entirely in *React's state-batching order relative to an effect's dependency array*, not in any computable input/output logic. This repo has no React render harness (`CLAUDE.md`), so the real verification for all three bugs was live browser testing: reproducing the infinite loop via the console warning, then confirming it was gone; reproducing the lost discard via an actual reload, then confirming the reload preserved it after the fix; and for the two missed routes, confirming both the cancel path (nothing created/discarded, wizard data preserved) and the confirm path (discards, proceeds, survives a reload) same as the original three.
 - Verified with `test/utils.test.mjs` (`hasPendingProvisionalSession` — the day-scoped pending check) and `test/interleave-leave-warning.test.mjs` (mirrors of `confirmAndDiscardProvisional`/`guardLeavingInterleaved`, since both are closures inside `App.jsx`: prompts with the exact wording, discards every pending chunk id on confirm, discards *nothing* on cancel, no-ops with nothing pending). Both confirmed to actually fail when the corresponding behavior was reverted — this coverage is at the shared-function level, so it already covered the two routes found in review without needing new tests once they were wired to the same function. Manually verified in-browser, end to end, for all **five** leave routes (Today's Practice's own Day view/Week/View all buttons, the sidebar nav list, the piece switcher, the "Edit piece" button, and finishing the "Add new piece" wizard) — for each: the cancel path blocks the action and preserves the provisional; the confirm path shows the exact requested wording, discards, proceeds, and survives a real reload; and normal navigation with nothing pending proceeds with zero `confirm()` calls at all, confirmed via an instrumented call counter. `npm test`: 352/352.
+
+**Decision (Pass 69): Interleaved practice needs two graduated chunks to unlock, not one, and its rotation duration is graded by the current chunk's own difficulty instead of a flat 4 minutes.**
+
+- **Why the threshold moved:** a single qualifying chunk can't actually
+  rotate against anything — Interleaved practice's whole premise is
+  switching between different material. The old `interleaveItems.length
+  === 0` gate let the button enable the instant exactly one chunk
+  graduated, into a mode with nothing to interleave. Moved to `< 2`
+  (`TodayTab.jsx`); the lock hint now distinguishes "no chunks have
+  graduated" from "only one chunk has graduated" — a state the old gate
+  never needed to describe, since it only ever had one locked state to
+  explain.
+- **Why the duration is graded:** requested directly, as a tuning
+  refinement to the flat interval Pass 29 shipped with (still explicitly
+  not user-configurable — see
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)).
+  `ROTATION_SECONDS_BY_DIFFICULTY = { easy: 120, medium: 180, hard: 240 }`
+  (`InterleavePanel.jsx`) replaces the flat `ROTATION_SECONDS = 240`;
+  `hard` keeps the exact original value, `easy`/`medium` rotate faster.
+- **A real bug caught before shipping, not shipped as scoped:** the
+  rotation-trigger `useEffect`'s dependency array was `[running,
+  items.length]` — it doesn't include `index`/`current`, so the
+  `setInterval` closure keeps whatever chunk was current when the effect
+  last (re)ran. `advance()` moves `index`/`current` forward *without*
+  this effect re-running, so a naive read of
+  `current.chunk.difficultyLabel` inside the existing closure would keep
+  checking a stale chunk's threshold against a live chunk's elapsed time
+  after a mid-session rotation. Fixed by adding `current?.id` to the
+  dependency array, tearing the interval down and rebuilding it on every
+  rotation — `resetTurn()` (already called from `advance()`) already
+  zeroes `elapsedSeconds`, so this doesn't change any existing reset
+  behavior, it only fixes which chunk's threshold the rebuilt interval
+  checks against.
+- **Verified:** manually, in-browser, using a `Date.now()` override to
+  fast-forward real elapsed time without waiting out actual 2/3/4-minute
+  intervals — confirmed each difficulty's rotation fires at its own
+  threshold (not the old flat 240s, and not another difficulty's
+  threshold): an easy chunk advanced at ~125s, a medium chunk advanced at
+  ~183s but was confirmed to *not* advance at 185s while showing as hard
+  (proving the check is genuinely per-chunk, not "whichever is
+  shortest"), and a hard chunk correctly waited past 240s. `npm test`:
+  592/592 — no `lib/` changes, both touched files are components.
+
+**Same-session follow-up, per direct request: the eligible-chunk pool
+(`TodayTab`'s `interleaveItems`) is scoped to every graduated chunk in the
+whole piece, not just whatever the currently-viewed day happens to
+schedule.**
+
+- **Why:** raised directly by the user, immediately after this pass's own
+  summary flagged — as a discovery, not a decision — that the pool was
+  today-scoped. Previously built from `todaysIds`
+  (`[...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds]`,
+  de-duplicated) filtered by `isInterleaveEligible` — meaning a chunk that
+  graduated past Stabilizing on an earlier day was invisible to
+  Interleaved mode entirely unless it also happened to be scheduled (or,
+  for a past-plan piece, live-due) on the exact day being viewed.
+- **The fix:** `interleaveItems` now filters `chunks` (`chunkSet.all` —
+  every practice chunk, transition, and combo in the piece, already a
+  prop this component receives) directly by `isInterleaveEligible`, with
+  no day-scoping and no de-duplication needed (`chunks` has no duplicate
+  ids the way `todaysIds` could). Nothing downstream needed to change:
+  session logging already attributes to `todaysDayNumber` independent of
+  which chunk from the pool is being practiced, and the
+  pending-provisional check (`hasPendingProvisionalSession`) is keyed the
+  same way.
+- **Confirmed safe against one specific worry, not just assumed:** could a
+  chunk flagged `needsRelearning` now wrongly surface piece-wide? Traced
+  through `computeLadderAdvance` (`lib/ladder.js`) directly — the flag can
+  only be *set* while `stage === "stabilizing"` (rule 1's own condition),
+  and `demote("stabilizing")` is a floor (stays at `stabilizing`), so a
+  freshly-flagged chunk never has `stage` advance past Stabilizing at the
+  moment it's flagged. Graduating a flagged chunk *out* of Stabilizing
+  auto-clears the flag in that same transition (the pass branch's own
+  comment: "graduating out of Stabilizing (the only stage a flagged chunk
+  can be in)"). The two states — `needsRelearning: true` and `stage` past
+  Stabilizing — are mutually exclusive by construction, so
+  `isInterleaveEligible` already excludes every flagged chunk regardless
+  of pool scope; this wasn't a gap to fix.
+- **A likely, not separately verified, side effect on an older flagged
+  gap:** a Pass 66 follow-up entry above flagged that a review only
+  surfaced *live* (via `mergeLiveDueReviews`, folded into
+  `dayForChecklist` — not the plan day's own original, unmerged
+  `reviewChunkIds`) never appeared in `interleaveItems`, since the old
+  pool read the unmerged `day` directly. Since the pool is no longer
+  built from any day's placement at all — only from live ladder `stage`
+  — a chunk with a live-due review that's past Stabilizing is now
+  included unconditionally, which appears to close that gap as a side
+  effect. Not deliberately reproduced against that exact original
+  scenario, so this is a reasoned inference from reading both mechanisms,
+  not a confirmed fix — worth a direct check before relying on it.
+- **Verified:** manually, in-browser — built a piece where only one chunk
+  was scheduled for the day being viewed, with all three chunks marked
+  graduated (their next reviews weeks away, not due that day or any day
+  soon). Confirmed Interleaved mode unlocked immediately ("1 OF 3") and
+  rotation correctly stepped through all three, despite only one being on
+  that day's own schedule. `npm test`: 592/592.
+- See [Algorithms.md](Algorithms.md#isinterleaveeligible--interleaved-modes-eligibility-rule-pass-29).
 
 **Decision: `practiceBPM`'s pass/soft-miss step becomes gap-proportional (a "tempo ratchet"), replacing the flat `ladderConfig.bpmSteps` deltas that had driven it since Pass 1 — and a soft-miss now steps `practiceBPM` forward instead of backward.**
 
@@ -5649,3 +5937,189 @@ oversight to silently fix; surface it instead.
   make unilaterally. See
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
   61 decision).
+- ~~`countBehindDays`'s "N days behind" figure doesn't know about Pass 48's
+  "fully swept into a reschedule" collapse, so it can cite a stale count
+  immediately after a reschedule.~~ **Resolved the same session, once
+  asked for directly.** `isDayFullySwept` (`lib/scheduling.js`) now shares
+  the identical rule `TodayTab`/`TimelineTab`/`DayChecklist` already
+  applied locally, and `countBehindDays` excludes a fully-swept day from
+  its count instead of citing it as still behind — a piece that's just
+  been rescheduled now correctly shows no banner at all, rather than the
+  same stale "N days behind" it read before the reschedule. **Follow-up in
+  the same session, from a critical self-review before commit:** those
+  three components' own local `isMovedId`/`isFullySwept` closures — until
+  then left as independent, unrefactored duplicates of the exact rule
+  `isDayFullySwept` was extracted from — were replaced with direct calls
+  to the shared function, so the "is this day swept" rule now has exactly
+  one implementation instead of four. Re-verified manually across all
+  three rendering paths (Timeline's day cards, Today's single-Day view,
+  Today's "All Tasks" view) both before and after a reschedule; `npm run
+  build` and the full test suite stayed green throughout. See
+  [Scheduling](#scheduling) (Pass 74 decision, same-session follow-up) and
+  [Algorithms.md](Algorithms.md#rescheduling) (Pass 74 note) for the
+  mechanics, and
+  [Behind-schedule detection](Algorithms.md#behind-schedule-detection) for
+  `classifyDayCompletion`'s own still-open, unrelated gap (a logged
+  consolidation-day run-through) that this did not touch.
+- ~~`isDayFullySwept` only checks the *current* (most recent)
+  `rescheduleMarker`, never its `previous` chain — so a chunk relocated by
+  an *earlier* reschedule and then genuinely completed before a *later*
+  one leaves its original, pre-first-reschedule day un-collapsed.~~
+  **Resolved the same session, once the user directly asked whether it
+  could be.** Originally logged here as a design question rather than a
+  mechanical fix, since the obvious fix (walk the whole `previous` chain,
+  checking every past marker) is a real architectural choice, not
+  something to make unilaterally. The user's follow-up question — is
+  walking the whole history really the most efficient option, especially
+  once a piece has been rescheduled many times? — led to a materially
+  better fix instead of the originally-proposed one: rather than asking
+  "was this id ever swept by *any* past reschedule," `isMovedId` now asks
+  a simpler, marker-history-free question — has this id been done on some
+  day *other* than the one being checked? That's a single `doneDays`
+  lookup, O(1) regardless of reschedule count, and it's a strict
+  improvement over chain-walking, not just a faster equivalent: it also
+  catches a chunk logged ahead of schedule with **no** reschedule
+  involved at all, which walking the marker chain never would have.
+  Verified equivalent-or-better by direct reasoning (walking the chain can
+  only ever find an id in some past marker's `remainingChunkOrder` when
+  that id is *currently* done — `remainingChunkOrder` always includes
+  every untouched chunk, so "in an old marker's list but not the new one"
+  reduces exactly to "now done") — not just asserted; see
+  [Algorithms.md](Algorithms.md#rescheduling) for the reduction spelled
+  out in full.
+  - **A second, real bug found while building this fix, not shipped:**
+    naively applying "done elsewhere" to every id on a day — including
+    `reviewChunkIds` — would have misread nearly every genuine, still-open
+    Tier 2 review as stale. A chunk under review always has *some* prior
+    `doneDays` (that's why it's due for review again), almost never
+    including that specific review's own day until actually logged, so
+    the same check that correctly catches a stale introduction would have
+    incorrectly swallowed a live review into "Tasks rescheduled" too.
+    Caught by deliberately writing a regression test to probe exactly
+    this shape before considering the fix done — confirmed failing
+    against the naive version, confirmed passing once the check was
+    scoped to `newChunkIds`/`specialChunkIds` only. Reviews were never
+    tracked by `remainingChunkOrder`/`remainingConnectorIds` to begin
+    with (Tier 2 placement is a wholly separate mechanism), so excluding
+    them here isn't a workaround — it's the check correctly staying
+    within the boundary of what a reschedule marker was ever meant to
+    describe.
+  - **Verified:** two new regression tests confirmed to fail without the
+    fix and pass with it (the original "done elsewhere" gap, and the
+    two-reschedule scenario), plus two more guarding against
+    over-collapse (a chunk done exactly on the day being checked; the
+    review-scoping case above) — full suite green (585 tests). Manual,
+    in-browser: rebuilt the exact two-reschedule scenario (reschedule once,
+    log the relocated chunk on its new day via direct state — clicking
+    through 15 remaining chunks isn't necessary to reach this state, only
+    the one that matters — reschedule again by constructing the chained
+    marker the same way `handleReschedule` would) and confirmed the
+    chunk's original day now reads "Tasks rescheduled" consistently across
+    Timeline, Today's Practice (both Day view and Week view), and Master
+    Agenda — where, before this fix, it would have shown the chunk as a
+    still-open task in all four.
+  - See [Algorithms.md](Algorithms.md#rescheduling) for the full mechanism
+    and the code-level comment explaining the review-scoping guard.
+- ~~A review sitting on a past, unaddressed day reads as an open task
+  there forever — and this turns out to have nothing to do with
+  rescheduling.~~ **Resolved the same session, once the user directly
+  asked to come back and build it.** Originally flagged (Pass 75) per its
+  own instruction to confirm before writing any review-specific code;
+  confirming it led to a real, investigated finding, not just a restated
+  question, and was deliberately deferred as its own scoped effort rather
+  than folded into Pass 75. Full history below, kept intact since the
+  investigation is what made the eventual fix small and correct.
+  - **What was asked, and what it actually turned out to be:** the pass
+    offered two readings — (a) the original report was really about a
+    transition/combo loosely called "review" (already covered, nothing to
+    build), or (b) a genuine Tier 2 review's own scheduled placement
+    should become reschedule-*relocatable*, the same way an un-started
+    chunk now is. Neither was quite it. The user's own framing, once
+    asked directly, was narrower and more accurate: a review that's
+    overdue shouldn't just sit on its original day looking like a
+    still-open task once it's *also* being tracked live elsewhere —
+    "just stop showing it as stale," not "physically move it."
+  - **Why even that turned out bigger than it looked:** tracing
+    `computeTimeline`'s Tier 2 placement (`lib/scheduling.js`) shows this
+    isn't reschedule-specific at all. A review's placement day comes from
+    `daysBetweenInclusive(piece.startDate, entry.nextDueDate)` — a live
+    calendar date converted to a plan-day number — computed fresh on
+    every render, with or without any `rescheduleMarker`. If that date has
+    already passed, the review sits on that (now past) day exactly as
+    described, whether or not a reschedule ever happened; `computeTimeline`
+    has no concept of "today" at all, so it has no way to know the
+    placement is stale. Meanwhile `computeDueReviews`/`mergeLiveDueReviews`
+    (Pass 66, `lib/maintenance.js`) already surfaces the exact same review
+    as due, live, on today's screen — de-duplicated only against *today's*
+    own bounded-timeline slot, never against the old day it originally
+    sat on. So the same review can genuinely show twice: once, correctly,
+    as live and actionable today; once, statically, as an apparently
+    still-open task on whatever day it first became due, with nothing
+    connecting the two. Rescheduling is just one way a learner would
+    notice this, not the cause.
+  - **Why building it touches more than two files, but not the "late
+    review is fine" principle:** the fix had to reach every surface that
+    renders a past day (Timeline, Day view, Week view, Master Agenda,
+    Overview's first-week list), not just Pass 75's two files. It does
+    *not* contradict "a review arriving late is schedule slack, never a
+    failure" (`DueReviewPanel`'s own copy) — that principle is about the
+    *ladder* never penalizing lateness, which this doesn't touch at all;
+    what's fixed here is purely a display duplicate, and the review stays
+    exactly as available, unpenalized, and logged from today's live list
+    as it always was.
+  - **The fix:** `withLiveReviewStatus(timeline, piece, realCurrentDay)`
+    (`lib/scheduling.js`) is applied once, centrally, to whatever
+    `getEffectiveTimeline` already produced — at its two real call sites
+    (`App.jsx`, `MasterAgendaTab.jsx`) — rather than as a per-surface
+    check. Every consumer of `timeline.days[]` gets the corrected
+    `reviewChunkIds` for free: a review not logged on its own placement
+    day, before real "today", is pulled out and reported separately as
+    `day.staleReviewIds`, so the four rendering surfaces that already had
+    an "explain what happened to this content" precedent
+    (`isDayFullySwept`'s "Tasks rescheduled") could each add a small
+    "Now due — see today" / "Already due — see Today's Practice" note
+    instead of the item just vanishing unexplained. Overview's first-week
+    list needed *no* code change at all — it already just reads
+    `reviewMeasures` off `reviewChunkIds`, so it automatically stops
+    counting a stale review without a special note (a smaller, and
+    arguably better, resolution than adding a fifth copy of the same
+    wording, discussed and left as a deliberate asymmetry rather than
+    something to chase for consistency's own sake).
+  - **A real bug found and fixed before shipping, not shipped as scoped:**
+    the first version of the check only asked "has this id been done on
+    some day other than this one" — which also caught, and wrongly pulled,
+    every Tier 1 "first touch" review (placed for a chunk that's *never*
+    been logged at all, per `computeTimeline` above). Reproduced live: a
+    fresh 16-measure, 4-chunk piece showed every never-touched chunk's
+    Tier 1 review vanish, mislabeled "Now due — see today" — but
+    `computeDueReviews` requires `entry.nextDueDate` to surface anything
+    live at all, and a Tier 1 chunk never has one, so nothing was actually
+    there to point to. Fixed by requiring `entry.nextDueDate` truthy
+    before considering an id stale — a Tier 2 review always has one by
+    construction (`computeTimeline`'s own placement gate), a Tier 1 review
+    never does, so this cleanly separates the two without needing to know
+    which tier placed a given id.
+  - **A second guard, carried over from the investigation rather than
+    found fresh:** consolidation days blanket `reviewChunkIds` with every
+    practice chunk regardless of ladder state — a different mechanism
+    entirely (the synthetic `"__consolidation__"` progress key) that
+    happens to reuse the same field name. Mirrors `mergeLiveDueReviews`'s
+    own identical skip for the same reason.
+  - **Verified:** 6 new regression tests (`withLiveReviewStatus` describe
+    block, `test/scheduling.test.mjs`), including dedicated ones for both
+    bugs above — each confirmed to fail without its guard and pass with
+    it, not just written and trusted. Full suite green (592 tests), clean
+    build. Manual, in-browser: built a real 16-measure/4-chunk piece,
+    injected one chunk (`c1`) with a genuine Tier 2 ladder state
+    (`nextDueDate` several days past, matching a real logged-then-overdue
+    chunk) alongside three never-touched chunks (each carrying their own
+    Tier 1 first-touch review) — confirmed only `c1`'s review was pulled
+    (all three Tier 1 reviews rendered normally, real content, unaffected)
+    across all four touched surfaces (Timeline, Today's Practice Day
+    view + Week view + "All Tasks", Master Agenda's date-browsed card),
+    and confirmed `c1`'s review still correctly appeared live on today's
+    own screen with its real overdue count ("Next review was due 12 days
+    ago").
+  - See [Algorithms.md](Algorithms.md#rescheduling) for the mechanism and
+    [Scheduling](#scheduling) (Pass 75 decision) for where this was first
+    scoped out.

@@ -188,6 +188,18 @@ chunking, scheduling, and confidence are actually computed, see
   `piece`), never persisted. If something schedule-related needs to persist
   (like the reschedule marker), it goes on `piece` as input data, and the
   derivation recomputes from it.
+- **`countBehindDays`/`isDayFullySwept` (`lib/scheduling.js`) take an
+  optional fourth `chunkById` argument — pass it.** It defaults to `{}` so
+  a caller that omits it degrades gracefully instead of crashing, but
+  degrading means *silently under-detecting* a reschedule sweep (a
+  connector that rode along via a linked practice chunk, rather than being
+  listed directly on the marker, won't be recognized as moved) — the same
+  symptom class Pass 74's follow-up fix exists to prevent, just reintroduced
+  quietly at whichever call site forgets the argument. Every current call
+  site (`ScheduleBanner`, `OverviewTab`, `MasterAgendaTab`'s two sites,
+  `findStuckBehindPieces`) builds `chunkById` from whatever chunk set it
+  already has in scope — a new call site should do the same rather than
+  relying on the default.
 - **A key in `piece.progress` may not exist in the chunk set — always
   handle the miss.** `piece.progress` is persisted; the chunk set is
   re-derived. Three kinds of key won't resolve: `__consolidation__`,
@@ -214,6 +226,21 @@ chunking, scheduling, and confidence are actually computed, see
   bite twice, independently, in the same broader session
   (`tempoRatchetK`, then `holdingReviewCount`) — see
   [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) for the checklist.
+- **`realCurrentDay` and `currentDay` are not interchangeable — reschedule
+  eligibility, fit estimation, and a new marker's `asOfDay` must always
+  anchor to `realCurrentDay` (Pass 74).** `currentDay = dayOverride ||
+  realCurrentDay` is whichever day Timeline/day-nav happens to be
+  browsing; `realCurrentDay` is the real, unclamped elapsed day. Before
+  this fix, `handleReschedule` (`App.jsx`) and `ScheduleBanner`'s own
+  `countBehindDays` call both read `currentDay`, so clicking Reschedule
+  while paged to a past day anchored the new marker to that past day
+  instead of today (reported precisely: a marker anchored at day 19 while
+  real-today was day 29). The two values are only interchangeable while
+  nobody is browsing away from today, which is exactly the condition that
+  let this bug hide — if you add a new reschedule-eligibility or
+  schedule-status computation, anchor it to `realCurrentDay`, not
+  whichever `currentDay` the surrounding component happens to be showing.
+  See [`docs/Decisions.md`](docs/Decisions.md#scheduling).
 
 ## Revival
 
@@ -928,3 +955,63 @@ that short-circuits internally plus an early return after it, not a
 literal early return before the `useMemo` call (the latter would violate
 React's rules of hooks, since this component never unmounts across a day
 change).
+
+**Since Pass 69**, Interleaved practice needs two chunks graduated past
+Stabilizing to unlock, not one (`interleaveItems.length < 2`, not
+`=== 0`) — a single chunk can't actually rotate against anything. Its
+rotation duration is graded by the *current* chunk's own difficulty
+(`ROTATION_SECONDS_BY_DIFFICULTY` in `InterleavePanel.jsx`: 2/3/4 minutes
+for easy/medium/hard, "hard" keeping the original flat value) instead of
+a flat 4 minutes for every chunk — fixing this correctly required adding
+`current?.id` to the rotation-trigger effect's dependency array, or a
+mid-session rotation would silently keep checking the previous chunk's
+threshold. **Same-session follow-up, per direct request:** the eligible
+pool (`TodayTab`'s `interleaveItems`) is no longer scoped to whatever the
+currently-viewed day happens to schedule — it's every chunk in the whole
+piece that's graduated past Stabilizing, so a chunk that graduated on an
+earlier day is immediately available, not only once it comes back due.
+This also appears to close an older, separately-flagged gap for free (a
+live-due-only review never showing up in `interleaveItems`) — reasoned
+through, not separately confirmed; see
+[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance)
+for both decisions and the confirmed-safe check against `needsRelearning`
+chunks.
+
+**Since Pass 74**, reschedule and the schedule banner anchor to real
+"today" (`realCurrentDay`), never to whichever day Timeline/day-nav
+happens to be browsing (`currentDay`) — see the new "regressions to watch
+for" bullet above for the mechanism. A successful reschedule now also
+resets `dayOverride` to `null` (`App.jsx`), landing the user back on real
+today automatically, the same reset `onJumpToday` already used.
+
+**Since Pass 75**, Week view and Master Agenda apply the same
+"was this day fully swept into a reschedule" collapse Day view and
+Timeline already had (`isDayFullySwept`, `lib/scheduling.js`) — a
+rescheduled day used to still show real, clickable-looking tasks on these
+two surfaces specifically. **Two same-session follow-ups, both found
+during critical review before commit, not shipped as originally scoped:**
+first, `isDayFullySwept` itself had a real gap — it only ever checked the
+*most recent* `rescheduleMarker`, so a task moved by an earlier reschedule
+and then completed before a later one was never recognized as "moved" on
+its original day. The fix is **not** to walk the whole reschedule chain
+(the first fix proposed, and rejected once asked whether that was really
+the most efficient option) — it's simpler and doesn't reference markers
+at all: has this id been done on some day *other* than the one being
+checked? One `doneDays` lookup, same cost regardless of how many times the
+piece has been rescheduled. Second: a review whose due date has passed
+used to sit on its original bounded-timeline day forever, looking like a
+still-open task — this turned out to have nothing to do with rescheduling
+at all (`computeTimeline` has no notion of "today"), fixed centrally via
+`withLiveReviewStatus` (`lib/scheduling.js`), applied once wherever the
+timeline gets built so every screen gets the fix for free. Both follow-ups
+had a real bug caught before shipping, not just an initial pass: the
+"done elsewhere" check must never apply to `reviewChunkIds` the way it can
+to `newChunkIds`/`specialChunkIds` — it only counts an id as stale when
+`piece.progress[id].nextDueDate` is actually set, since a genuine Tier 2
+review always has one but a Tier 1 "first touch" review (a chunk never
+logged at all) never does; checking only `doneDays` wrongly stripped every
+never-touched chunk's first-touch review in testing, before this guard
+existed. See
+[`docs/Decisions.md`](docs/Decisions.md#scheduling) and
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the full
+investigation trail on both.

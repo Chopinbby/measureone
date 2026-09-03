@@ -18,6 +18,7 @@ export function OverviewTab({
   chunkSet,
   timeline,
   currentDay,
+  realCurrentDay,
   onReschedule,
   onAddPiece,
   onStartRevival,
@@ -33,10 +34,16 @@ export function OverviewTab({
   // shortcut below relabels toward Master Agenda's existing "Maintenance"
   // vocabulary instead of implying new material is still being introduced.
   const planComplete = chunkSet && timeline ? isPlanActuallyComplete(piece, chunkSet, timeline) : false;
+  // Built here (not just below, where it was originally introduced) so it
+  // can also feed countBehindDays' isDayFullySwept check just below —
+  // lets a connector that rode along into a reschedule via a linked
+  // practice chunk be recognized as moved, not just one directly listed
+  // on the marker.
+  const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   // For "The first week"'s today-row note below — reused rather than a
   // separate count, per Pass 45's build note.
   const { missedCount } = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
-  const behindDays = countBehindDays(piece, timeline, currentDay);
+  const behindDays = countBehindDays(piece, timeline, currentDay, chunkById);
   // Pass 64 — this panel used to always show days 1-7, forever, regardless
   // of how far into the plan the piece actually was. Now it follows
   // currentDay with the same week-grouping math TimelineTab already uses
@@ -50,7 +57,6 @@ export function OverviewTab({
   // the array's actual length — neither needs special-casing here.
   const weekIndex = Math.floor((currentDay - 1) / 7);
   const weekDays = timeline.days.slice(weekIndex * 7, weekIndex * 7 + 7);
-  const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const tierMeasures = { untouched: 0, learned: 0, comfortable: 0, mastered: 0 };
   practiceChunks.forEach((c) => {
     tierMeasures[computeProgressTier(c, piece)] += c.measureCount;
@@ -73,7 +79,7 @@ export function OverviewTab({
           <Plus size={14} /> Add new piece
         </button>
       </div>
-      <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
+      <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} realCurrentDay={realCurrentDay} onReschedule={onReschedule} />
       {revivalTriggers.triggered && (
         <div className="revival-banner">
           <div>

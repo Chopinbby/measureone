@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChecklistItem } from "./ChecklistItem";
 import { NumberInput } from "../../NumberInput";
 import { formatMinutes } from "../../../lib/utils";
+import { isDayFullySwept } from "../../../lib/scheduling";
 
 // Consolidation-day logging: stop count replaces the old bare "mark
 // complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
@@ -88,11 +89,27 @@ export function DayChecklist({
   // stable, so relative order otherwise is unaffected.
   items.sort((a, b) => (a.role === "combo" ? 1 : 0) - (b.role === "combo" ? 1 : 0));
 
+  // withLiveReviewStatus (lib/scheduling.js) already stripped any review
+  // here whose due date has passed out of day.reviewChunkIds before this
+  // component ever saw it — it's already live and actionable on today's
+  // own screen (mergeLiveDueReviews), so re-showing it here as a
+  // still-open task would just duplicate it. staleReviewIds is what got
+  // pulled, kept around only so this note can say so instead of the item
+  // silently vanishing with no explanation.
+  const staleReviewNote = day.staleReviewIds && day.staleReviewIds.length > 0 && (
+    <p className="wizard-hint" style={{ fontStyle: "italic", margin: "8px 0 0" }}>
+      {day.staleReviewIds.length === 1 ? "1 review" : `${day.staleReviewIds.length} reviews`} originally scheduled
+      here {day.staleReviewIds.length === 1 ? "is" : "are"} now tracked as due — see Today's Practice.
+    </p>
+  );
+
   if (items.length === 0) {
     return (
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
-        <p className="wizard-hint" style={{ margin: 0 }}>Nothing scheduled.</p>
+        <p className="wizard-hint" style={{ margin: 0 }}>
+          {staleReviewNote ? <em>Already due — see Today's Practice</em> : "Nothing scheduled."}
+        </p>
       </div>
     );
   }
@@ -102,50 +119,19 @@ export function DayChecklist({
   // (lib/scheduling.js) only replaces days from asOfDay onward, so an
   // untouched day further back keeps showing the exact list that got swept
   // into the reschedule, duplicating tasks that now also appear on their new
-  // day. Collapse only when EVERY item this day originally scheduled ended
-  // up moved — a day with any real remaining content (done or still
-  // legitimately scheduled) renders normally. Re-derived from the live
-  // marker on every render, same as everything else here — no separate
-  // persisted flag. Shared by both View all (one DayChecklist per timeline
-  // day) and the single-day view — day nav has no logic that skips a
+  // day. isDayFullySwept (lib/scheduling.js, shared with TodayTab.jsx and
+  // TimelineTab.jsx — Pass 74 follow-up consolidated what used to be three
+  // separate copies of this exact check) collapses this only when EVERY
+  // item this day originally scheduled ended up moved — a day with any real
+  // remaining content (done or still legitimately scheduled) renders
+  // normally. Shared by both View all (one DayChecklist per timeline day)
+  // and the single-day view — day nav has no logic that skips a
   // fully-swept day, so this same check is what keeps that reachable case
-  // from showing stale duplicates too.
-  //
-  // remainingChunkOrder (computeScheduleStatus) only ever lists
-  // *practice*-chunk ids, but specialChunkIds/reviewChunkIds routinely hold
-  // a transition or combo id instead (its role here comes through as
-  // "transition"/"combo" from chunkById[id].kind above) — never itself in
-  // remainingChunkOrder, even when it genuinely got carried into the
-  // rescheduled remainder (getEffectiveTimeline moves a transition whenever
-  // either linked chunk remains, and a combo whenever its one linked chunk
-  // does — the same linkedIds check mirrored here). Bare membership alone
-  // would treat almost every day past the very first as "still has real
-  // content" purely because of this id-namespace gap, not because anything
-  // on it was actually left behind.
-  //
-  // remainingConnectorIds (Pass 73 follow-up to Pass 65) checks a
-  // connector's own logged status directly, alongside — not instead of —
-  // the neighbor-based check above: a connector whose neighbors are both
-  // already practiced but whose own doneDays is still empty used to be
-  // invisible to this check entirely, unmovable by any reschedule no
-  // matter how many times the piece was rescheduled again.
-  const marker = piece.rescheduleMarker;
-  const isMovedId = (id) => {
-    if (!marker) return false;
-    if (marker.remainingChunkOrder.includes(id)) return true;
-    if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
-    const c = chunkById[id];
-    if (!c || !c.linkedIds) return false;
-    return c.kind === "combo"
-      ? marker.remainingChunkOrder.includes(c.linkedIds[0])
-      : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
-  };
-  const isFullySwept =
-    marker != null &&
-    day.dayNumber < marker.asOfDay &&
-    items.every((item) => isMovedId(item.id));
-
-  if (isFullySwept) {
+  // from showing stale duplicates too. `items` maps 1:1 off the same
+  // newChunkIds/specialChunkIds/reviewChunkIds isDayFullySwept reads
+  // directly off `day`, just relabeled with a role — passing `day` itself
+  // checks the identical id set.
+  if (isDayFullySwept(day, piece, chunkById)) {
     return (
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
@@ -173,6 +159,7 @@ export function DayChecklist({
           />
         ))}
       </div>
+      {staleReviewNote}
     </div>
   );
 }

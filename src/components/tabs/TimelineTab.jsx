@@ -1,9 +1,9 @@
 import { Check } from "lucide-react";
 import { formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
-import { classifyDayCompletion } from "../../lib/scheduling";
+import { classifyDayCompletion, isDayFullySwept } from "../../lib/scheduling";
 import { ScheduleBanner } from "../ScheduleBanner";
 
-export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, onSelectDay, onReschedule }) {
+export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, realCurrentDay, onSelectDay, onReschedule }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const mergedRangesFor = (ids) => mergeRanges(ids.map((id) => chunkById[id]));
   const weeks = [];
@@ -19,7 +19,7 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, onS
         </p>
       </div>
 
-      <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} currentDay={currentDay} onReschedule={onReschedule} />
+      <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} realCurrentDay={realCurrentDay} onReschedule={onReschedule} />
 
       {weeks.map((week, wi) => (
         <div key={wi} className="panel">
@@ -33,45 +33,14 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, onS
               // from asOfDay onward, so an untouched day further back keeps
               // showing the exact list that got swept into the reschedule,
               // duplicating tasks that now also appear on their new day.
-              // Collapse only when EVERY id that day originally scheduled
-              // ended up moved — a day with any real remaining content
-              // (done or still legitimately scheduled) renders normally.
-              // Re-derived from the live marker on every render, same as
-              // everything else here — no separate persisted flag.
-              //
-              // remainingChunkOrder (computeScheduleStatus) only ever lists
-              // *practice*-chunk ids, but specialChunkIds/reviewChunkIds
-              // routinely hold a transition or combo id instead — a
-              // transition/combo id is never itself in remainingChunkOrder,
-              // even when it genuinely got carried into the rescheduled
-              // remainder (getEffectiveTimeline moves a transition whenever
-              // either linked chunk remains, and a combo whenever its one
-              // linked chunk does — the same linkedIds check mirrored here).
-              // Checking bare membership alone would treat almost every day
-              // past the very first as "still has real content" purely
-              // because of this id-namespace gap, not because anything on
-              // it was actually left behind.
-              // remainingConnectorIds (Pass 73 follow-up to Pass 65) checks
-              // a connector's own logged status directly, alongside — not
-              // instead of — the neighbor-based check below: see
-              // DayChecklist.jsx's fuller comment on this same check.
-              const marker = piece.rescheduleMarker;
-              const isMovedId = (id) => {
-                if (!marker) return false;
-                if (marker.remainingChunkOrder.includes(id)) return true;
-                if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
-                const c = chunkById[id];
-                if (!c || !c.linkedIds) return false;
-                return c.kind === "combo"
-                  ? marker.remainingChunkOrder.includes(c.linkedIds[0])
-                  : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
-              };
-              const scheduledIds = [...d.newChunkIds, ...d.specialChunkIds, ...d.reviewChunkIds];
-              const isFullySwept =
-                marker != null &&
-                d.dayNumber < marker.asOfDay &&
-                scheduledIds.length > 0 &&
-                scheduledIds.every(isMovedId);
+              // isDayFullySwept (lib/scheduling.js, shared with TodayTab.jsx
+              // and DayChecklist.jsx — Pass 74 follow-up consolidated what
+              // used to be three separate copies of this exact check)
+              // collapses this card only when EVERY id the day originally
+              // scheduled ended up moved — a day with any real remaining
+              // content (done or still legitimately scheduled) renders
+              // normally.
+              const isFullySwept = isDayFullySwept(d, piece, chunkById);
               return (
                 <button
                   key={d.dayNumber}
@@ -118,6 +87,17 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, onS
                             <span key={`${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                           ))}
                         </div>
+                      )}
+                      {/* withLiveReviewStatus (lib/scheduling.js) already
+                          pulled a passed-due review out of
+                          d.reviewChunkIds above — it's already live and
+                          actionable on today's own screen
+                          (mergeLiveDueReviews), not stuck here. This just
+                          says so instead of it silently vanishing. */}
+                      {d.staleReviewIds && d.staleReviewIds.length > 0 && (
+                        <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic", marginTop: 4 }}>
+                          Now due — see today
+                        </p>
                       )}
                     </>
                   )}

@@ -166,3 +166,17 @@ also possible) as a strong prior that the fix is a display-layer gate on
 See [Decisions.md](Decisions.md#ux) (Pass 22, Pass 68) and
 [Decisions.md](Decisions.md#spaced-repetition--maintenance) (Pass 66) for
 the three writeups.
+
+**Since Pass 74, a related but mechanically different trap surfaced next
+door.** `handleReschedule`/`ScheduleBanner` were never day-agnostic — they
+already took a day argument — but `App.jsx` was passing `currentDay`
+(`dayOverride || realCurrentDay`: whichever day is being *browsed*) where
+`realCurrentDay` (always the real day) was needed, so browsing to a past or
+future day could shift *when rescheduling itself considers a chunk
+overdue*, not just what got rendered. Same root principle — a browsed day
+must not stand in for "now" — but the failure mode is different: not a
+day-agnostic function leaking today's answer everywhere, but two
+same-shaped day values that look interchangeable and aren't. Worth
+checking for on any future change in this neighborhood, alongside the
+three above. See [Architecture.md](Architecture.md#state-management) and
+[Decisions.md](Decisions.md#scheduling).

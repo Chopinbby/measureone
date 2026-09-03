@@ -21,7 +21,7 @@ import {
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
 import { generateAllChunks } from "./lib/chunking";
-import { getEffectiveTimeline, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -221,10 +221,25 @@ export default function App() {
   const chunkSet = useMemo(() => (piece ? generateAllChunks(piece) : null), [piece]);
   const chunks = chunkSet ? chunkSet.all : [];
   const practiceChunks = chunkSet ? chunkSet.practiceChunks : [];
-  const timeline = useMemo(() => (piece ? getEffectiveTimeline(piece, chunkSet) : null), [piece, chunkSet]);
+  // Raw, pre-review-status timeline — realCurrentDay is clamped off its
+  // days.length, which withLiveReviewStatus below never changes (it only
+  // edits reviewChunkIds within existing days), so computing
+  // realCurrentDay off this raw value first and the corrected `timeline`
+  // second (using that same realCurrentDay) avoids a circular dependency
+  // between the two.
+  const rawTimeline = useMemo(() => (piece ? getEffectiveTimeline(piece, chunkSet) : null), [piece, chunkSet]);
   const realCurrentDay = useMemo(
-    () => (piece && timeline ? getCurrentDay(piece, timeline.days.length) : 1),
-    [piece, timeline]
+    () => (piece && rawTimeline ? getCurrentDay(piece, rawTimeline.days.length) : 1),
+    [piece, rawTimeline]
+  );
+  // A review whose due date has passed sits on its original day forever,
+  // looking like a still-open task, duplicating what's already shown live
+  // on today's screen — see withLiveReviewStatus (lib/scheduling.js) for
+  // the full mechanism. Applied here, once, so every tab consuming
+  // `timeline` gets the corrected reviewChunkIds for free.
+  const timeline = useMemo(
+    () => (piece && rawTimeline ? withLiveReviewStatus(rawTimeline, piece, realCurrentDay) : rawTimeline),
+    [piece, rawTimeline, realCurrentDay]
   );
   const currentDay = dayOverride || realCurrentDay;
 
@@ -1218,6 +1233,11 @@ export default function App() {
 
     if (Object.keys(saved).length) setPieces((prev) => ({ ...prev, ...saved }));
 
+    // Pass 74: land back on real "today" — once rescheduled, there's
+    // nothing incomplete left before today for a browsed past day to be
+    // showing, and today is the natural place to be regardless. Same reset
+    // onJumpToday already uses.
+    setDayOverride(null);
     closeRescheduleModal();
 
     if (failedNames.length) {
@@ -1254,6 +1274,8 @@ export default function App() {
       daysToLearn: rescheduleSuggestion.daysToLearn,
       rescheduleMarker: activeTarget.marker,
     }));
+    // Pass 74: same "land back on today" reset as handleConfirmReschedule.
+    setDayOverride(null);
     closeRescheduleModal();
   };
 
@@ -1307,7 +1329,14 @@ export default function App() {
     new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
   const handleReschedule = () => {
-    const status = computeScheduleStatus(piece, practiceChunks, timeline, currentDay);
+    // Pass 74: anchored to realCurrentDay, not currentDay — currentDay is
+    // whatever day is currently being browsed (Timeline/day-nav can set it
+    // to a past or future day via dayOverride), and reschedule eligibility,
+    // fit estimation, and the new marker's asOfDay must all be measured
+    // against the real current day regardless of what's on screen. Reported
+    // live as a marker anchored to a browsed past day (e.g. day 19 while
+    // real-today was day 29) instead of today.
+    const status = computeScheduleStatus(piece, practiceChunks, timeline, realCurrentDay);
     // Pass 73 follow-up to Pass 65: a transition/combo's own logged status
     // was never checked directly anywhere in the reschedule mechanism —
     // computeEffectiveTimeline could only infer it indirectly from whether
@@ -1322,7 +1351,7 @@ export default function App() {
     // missedCount applies to practice chunks — so one that simply hasn't
     // been introduced yet (not overdue, just not due) doesn't count.
     const qualifyingConnectorIds = remainingConnectorIds.filter(
-      (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < currentDay
+      (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < realCurrentDay
     );
     if (status.remainingChunkIds.length === 0 && qualifyingConnectorIds.length === 0) {
       // Genuinely nothing to do: every practice chunk has been introduced
@@ -1341,7 +1370,7 @@ export default function App() {
       piece,
       practiceChunks,
       timeline,
-      currentDay,
+      realCurrentDay,
       status.remainingChunkIds
     );
 
@@ -1418,7 +1447,7 @@ export default function App() {
           // (lib/scheduling.js) for why a second reschedule needs that
           // chain instead of always re-deriving from the raw, never-
           // rescheduled schedule.
-          marker: { asOfDay: currentDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
+          marker: { asOfDay: realCurrentDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
         },
       ],
       "Reschedule remaining chunks?",
@@ -1756,6 +1785,7 @@ export default function App() {
                 chunkSet={chunkSet}
                 timeline={timeline}
                 currentDay={currentDay}
+                realCurrentDay={realCurrentDay}
                 onReschedule={handleReschedule}
                 onAddPiece={() => openWizard()}
                 onStartRevival={handleOpenRevival}
@@ -1781,6 +1811,7 @@ export default function App() {
                 timeline={timeline}
                 piece={piece}
                 currentDay={currentDay}
+                realCurrentDay={realCurrentDay}
                 onSelectDay={handleSelectDay}
                 onReschedule={handleReschedule}
               />
@@ -1822,6 +1853,7 @@ export default function App() {
                 chunks={chunks}
                 timeline={timeline}
                 currentDay={currentDay}
+                realCurrentDay={realCurrentDay}
                 isRealToday={currentDay === realCurrentDay}
                 onDayChange={(d) => setDayOverride(clamp(d, 1, timeline.days.length))}
                 onJumpToday={() => setDayOverride(null)}

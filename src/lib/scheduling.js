@@ -525,6 +525,79 @@ export function getEffectiveTimeline(piece, chunkSet) {
   return computeEffectiveTimeline(piece, chunkSet, piece.rescheduleMarker);
 }
 
+// A review whose due date has passed sits on its original bounded-timeline
+// day forever, unaddressed, looking exactly like a still-open task —
+// duplicating what mergeLiveDueReviews (lib/maintenance.js, Pass 66)
+// already, separately, surfaces on today's actual screen. This has nothing
+// to do with rescheduling: computeTimeline has no notion of "today" at
+// all, so once a review's placement day has passed, nothing else in the
+// pipeline ever revisits it.
+//
+// A review sitting on any day *before* realCurrentDay, not logged on that
+// exact day, is unconditionally also live-due right now — no separate
+// nextDueDate comparison is needed to know that. Tier 2 placement (above)
+// derives a review's day number directly from its nextDueDate via the
+// same startDate anchor elapsedDay/getCurrentDay use, and snapOrDrop only
+// ever snaps a placement *forward*, never backward — so a placement day
+// strictly earlier than today can only exist because its nextDueDate
+// calendar-maps to a date that has already passed.
+//
+// Scoped to exactly when mergeLiveDueReviews would actually be surfacing
+// this same review live elsewhere: computeDueReviews suppresses its whole
+// due list for a paused/archived or mid-revival piece, so stripping a
+// review here too in that state would make it vanish with nothing live to
+// point to instead — worse than leaving it, not better.
+//
+// Applied once, centrally, to whatever getEffectiveTimeline already
+// produced, rather than as a per-surface check: every consumer of
+// timeline.days[] (Timeline, Day view, Week view, Overview's first-week
+// list, Master Agenda) gets the corrected reviewChunkIds for free, and
+// classifyDayCompletion/countBehindDays stop reading a stale review as
+// still-incomplete work too — the same way they already stopped reading a
+// swept chunk that way (isDayFullySwept, above). Doesn't touch day.minutes
+// — same "don't bother re-costing a stale day" precedent isDayFullySwept
+// already set (a swept day's header still shows its original, stale
+// minutes figure too).
+export function withLiveReviewStatus(timeline, piece, realCurrentDay) {
+  if ((piece.status || "active") !== "active" || isInRevival(piece)) return timeline;
+  const days = timeline.days.map((day) => {
+    // Consolidation days blanket reviewChunkIds with every practice chunk
+    // regardless of ladder state (computeTimeline, above) — a completely
+    // different mechanism (the whole-piece run-through, tracked via the
+    // synthetic "__consolidation__" progress key, not each chunk's own
+    // doneDays) that happens to reuse the same field name. Treating those
+    // as stale Tier 2 reviews would be wrong, not just redundant — mirrors
+    // mergeLiveDueReviews' own identical skip (lib/maintenance.js) for the
+    // same reason.
+    if (day.type === "consolidation") return day;
+    if (day.dayNumber >= realCurrentDay || !day.reviewChunkIds.length) return day;
+    // Only a genuine Tier 2 review (already on the ladder, entry.nextDueDate
+    // set) is guaranteed to also be live-tracked by computeDueReviews —
+    // that function's own gate requires nextDueDate, full stop
+    // (lib/maintenance.js). A Tier 1 "first touch" review (above) is
+    // placed for a chunk that's never been logged at all, so it never has
+    // a nextDueDate and is never surfaced by computeDueReviews either —
+    // treating it as "stale" the same way would make it vanish here with
+    // nothing live to point to instead, exactly the failure mode this
+    // function exists to avoid. Confirmed live: without this guard, every
+    // never-touched chunk's first-touch review disappeared, mislabeled
+    // "Now due — see today" even though nothing showed there.
+    const staleReviewIds = day.reviewChunkIds.filter((id) => {
+      const entry = piece.progress[id] || {};
+      if (!entry.nextDueDate) return false;
+      const doneDays = entry.doneDays || [];
+      return !doneDays.includes(day.dayNumber);
+    });
+    if (!staleReviewIds.length) return day;
+    return {
+      ...day,
+      reviewChunkIds: day.reviewChunkIds.filter((id) => !staleReviewIds.includes(id)),
+      staleReviewIds,
+    };
+  });
+  return { ...timeline, days };
+}
+
 // A chunk only counts as "missed" once its scheduled day has actually passed
 // and it still has zero logged sessions — not simply because it hasn't been
 // checked off yet today, and not from a same-day confidence dip.
@@ -615,13 +688,96 @@ export function classifyDayCompletion(day, piece, currentDay) {
   return allDone ? "done" : "behind";
 }
 
+// A day whose entire original task list was swept into a reschedule
+// (getEffectiveTimeline only replaces days from the marker's asOfDay
+// onward — an untouched day further back still carries its stale
+// pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds) reads as
+// "moved elsewhere," not as still-incomplete work. TodayTab/TimelineTab/
+// DayChecklist each already collapsed this locally to a plain "Tasks
+// rescheduled" line (Pass 48) rather than re-showing content that now
+// lives on its new day; extracted here (Pass 74 follow-up) so
+// countBehindDays below can apply the identical rule instead of counting
+// a fully-swept day as still behind — before this, the schedule banner
+// kept citing a stale "N days behind" figure immediately after a
+// reschedule, even once every day-list surface and the catch-up scan had
+// already caught up (confirmed live: 18 days behind, pre- and
+// post-reschedule, identically).
+//
+// A connector (transition/combo) id is never itself in
+// marker.remainingChunkOrder (that list is practice-chunk ids only), even
+// when it genuinely rode along into the rescheduled remainder —
+// getEffectiveTimeline moves a transition whenever either linked chunk
+// remains, and a combo whenever its one linked chunk does; the linkedIds
+// fallback below mirrors that. `chunkById` is optional and defaults to
+// `{}`: without it, a connector can still be recognized as moved via
+// `marker.remainingConnectorIds` (Pass 73) directly, just not via the
+// linkedIds fallback — so omitting it can only undercount a sweep, never
+// overcount one.
+//
+// Found-and-fixed gap: only checking the *current* marker misses an id
+// that was swept by an *earlier* reschedule and has *since* been
+// completed — by the time a later reschedule runs, it's no longer
+// "remaining" (it's done), so it drops out of that marker's
+// remainingChunkOrder, and its original, pre-first-reschedule day never
+// learns it was ever moved. The fix doesn't need to walk the whole
+// history of rescheduleMarker.previous links to find out, though —
+// walking every past marker is answering an unnecessarily roundabout
+// version of the real question. What actually matters is simpler and
+// doesn't reference markers at all: has this id been done on some day
+// OTHER than this one? If so, its presence here is stale regardless of
+// *why* (an earlier reschedule's relocation, or simply logged ahead of
+// schedule before this day arrived) — one O(1) lookup against doneDays,
+// same cost whether the piece was rescheduled once or fifty times.
+// Guarded to `!doneDays.includes(day.dayNumber)` specifically so a day
+// that's genuinely, fully done *on this exact day* still renders its real
+// content (and gets its own "done" treatment from classifyDayCompletion)
+// rather than being swallowed into "Tasks rescheduled" too.
+//
+// That "done elsewhere" check is scoped to newChunkIds/specialChunkIds
+// only — never reviewChunkIds. A reschedule marker's remainingChunkOrder/
+// remainingConnectorIds only ever track introduction/connector placement;
+// a review was never a candidate for being "remaining" in that sense to
+// begin with (Tier 2 placement is a wholly separate mechanism — see
+// Algorithms.md's "Timeline — scheduler"). A chunk under review always
+// has *some* prior doneDays (that's why it's due for review again) that
+// almost never include *this* review's own day until it's actually
+// logged — applying the same "done elsewhere" test to reviewChunkIds
+// would misread nearly every genuine, still-open review as stale and
+// silently swallow it into "Tasks rescheduled". Caught before shipping by
+// a regression test built specifically to probe this.
+export function isDayFullySwept(day, piece, chunkById = {}) {
+  const marker = piece.rescheduleMarker;
+  if (marker == null || day.dayNumber >= marker.asOfDay) return false;
+  const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
+  if (!ids.length) return false;
+  const introOrConnectorIds = new Set([...day.newChunkIds, ...day.specialChunkIds]);
+  const isMovedId = (id) => {
+    if (introOrConnectorIds.has(id)) {
+      const doneDays = (piece.progress[id] || {}).doneDays || [];
+      if (doneDays.length > 0 && !doneDays.includes(day.dayNumber)) return true;
+    }
+    if (marker.remainingChunkOrder.includes(id)) return true;
+    if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
+    const c = chunkById[id];
+    if (!c || !c.linkedIds) return false;
+    return c.kind === "combo"
+      ? marker.remainingChunkOrder.includes(c.linkedIds[0])
+      : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
+  };
+  return ids.every(isMovedId);
+}
+
 // How many distinct timeline days are "behind" (per classifyDayCompletion)
 // as of currentDay — a day-count sibling to computeScheduleStatus's
 // chunk-count missedCount, for surfaces that want to say "N days behind"
 // instead of "N chunks behind" (a day with several missed chunks only
-// counts once here).
-export function countBehindDays(piece, timeline, currentDay) {
-  return timeline.days.filter((d) => classifyDayCompletion(d, piece, currentDay) === "behind").length;
+// counts once here). A fully-swept day (isDayFullySwept, above) is
+// excluded rather than counted "behind" — same rule the day-list surfaces
+// already applied to themselves, now shared here too.
+export function countBehindDays(piece, timeline, currentDay, chunkById = {}) {
+  return timeline.days.filter(
+    (d) => !isDayFullySwept(d, piece, chunkById) && classifyDayCompletion(d, piece, currentDay) === "behind"
+  ).length;
 }
 
 // Will the not-yet-started work actually fit in the days this plan has
@@ -893,7 +1049,8 @@ export function findStuckBehindPieces(pieces) {
       );
       if (qualifyingConnectorIds.length > 0) return;
 
-      if (countBehindDays(piece, timeline, cutoffDay) > 0) {
+      const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
+      if (countBehindDays(piece, timeline, cutoffDay, chunkById) > 0) {
         stuck.push({ pieceId, piece });
       }
     } catch (e) {

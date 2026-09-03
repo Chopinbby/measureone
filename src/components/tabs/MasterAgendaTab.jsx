@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays } from "../../lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, isDayFullySwept } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
@@ -61,6 +61,13 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
 
           const chunkSet = generateAllChunks(piece);
           let timeline = getEffectiveTimeline(piece, chunkSet);
+          // A review whose due date has passed sits on its original day
+          // forever, looking like a still-open task, duplicating what's
+          // already merged in live below — see withLiveReviewStatus
+          // (lib/scheduling.js). computeElapsedDay(piece) (real, unclamped
+          // elapsed day), not `dayNumber` below — that one tracks whichever
+          // date the picker is browsing, not real "today".
+          timeline = withLiveReviewStatus(timeline, piece, computeElapsedDay(piece));
           const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
 
           if (!timeline || !timeline.days || !timeline.days.length) return;
@@ -98,7 +105,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             const extension = computeMinutesModeAutoExtend(piece, chunkSet, timeline);
             if (extension) {
               piece = { ...piece, ...extension };
-              timeline = getEffectiveTimeline(piece, chunkSet);
+              timeline = withLiveReviewStatus(getEffectiveTimeline(piece, chunkSet), piece, computeElapsedDay(piece));
               dayNumber = computeElapsedDay(piece) + daysFromToday;
             }
           }
@@ -128,7 +135,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               // mirroring TodayTab's own days-mode-only nudge.
               if (piece.scheduleMode === "minutes") return;
               if (selectedDate !== todayISODate()) return;
-              const behindDaysCount = countBehindDays(piece, timeline, timeline.days.length + 1);
+              const behindDaysCount = countBehindDays(piece, timeline, timeline.days.length + 1, chunkById);
               items.push({ pieceId, piece, needsReschedule: true, behindDaysCount, totalTime: 0 });
               return;
             }
@@ -185,7 +192,17 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
 
           // How many days are behind schedule for this piece as of this day —
           // same computation ScheduleBanner uses, called once per piece.
-          const behindDaysCount = countBehindDays(piece, timeline, dayNumber);
+          const behindDaysCount = countBehindDays(piece, timeline, dayNumber, chunkById);
+
+          // Pass 75 — same isDayFullySwept check DayChecklist/TodayTab/
+          // TimelineTab already apply (Pass 48, widened Pass 73): a day
+          // before the reschedule marker's asOfDay still carries its stale
+          // pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds,
+          // duplicating tasks that now also appear on their new day. Master
+          // Agenda had never had this check at all, so a rescheduled day
+          // showed real, clickable-looking tasks here that Day view already
+          // knew to collapse to "Tasks rescheduled".
+          const isFullySwept = isDayFullySwept(day, piece, chunkById);
 
           items.push({
             pieceId,
@@ -196,6 +213,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             specialRanges,
             reviewRanges,
             specialIsCombo,
+            isFullySwept,
             totalTime: day.minutes,
             behindDaysCount,
           });
@@ -336,7 +354,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
     )
   );
 
-  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
+  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, isFullySwept, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
     <div key={pieceId} className="piece-card">
       <div className="piece-card-head">
         <div>
@@ -360,6 +378,8 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
         </div>
       ) : day.type === "consolidation" ? (
         <p className="day-card-note">Full run-through of the piece</p>
+      ) : isFullySwept ? (
+        <p className="day-card-note"><em>Tasks rescheduled</em></p>
       ) : (
         <>
           {newRanges.length > 0 && (
@@ -386,7 +406,16 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               ))}
             </div>
           )}
-          {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 && (
+          {/* withLiveReviewStatus (lib/scheduling.js) already pulled a
+              passed-due review out of day.reviewChunkIds (hence
+              reviewRanges above) — it's already live and actionable on
+              today's own card elsewhere, not stuck here. This just says
+              so instead of it silently vanishing. */}
+          {day.staleReviewIds && day.staleReviewIds.length > 0 && (
+            <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic" }}>Now due — see today</p>
+          )}
+          {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 &&
+            !(day.staleReviewIds && day.staleReviewIds.length > 0) && (
             <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
           )}
         </>

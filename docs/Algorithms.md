@@ -421,6 +421,19 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
    because it wasted the back half on run-throughs instead of targeted
    work.
 
+**Known gap, investigated but not fixed (Pass 75):** Tier 2 placement
+(`entry.nextDueDate` → a day number, via `daysBetweenInclusive`) is a pure
+function of the piece and its progress — it has no notion of "today," so
+it has no way to tell that a placement day has already passed. Once a
+review's due date slips into the past, its placement just sits there,
+unaddressed, indistinguishable from a still-open task — while
+`mergeLiveDueReviews` (`lib/maintenance.js`, Pass 66) separately, correctly
+surfaces the same review as due on today's actual screen. The two can show
+the same review twice with nothing connecting them, and this is entirely
+independent of rescheduling — a `rescheduleMarker` isn't involved anywhere
+in this mechanism. See [Decisions.md](Decisions.md#open-questions) (Pass
+75) for the full trace and why it wasn't fixed here.
+
 ## Deriving daysToLearn from minutesPerDay (scheduleMode: "minutes")
 
 `computeTimeline` treats `piece.daysToLearn` purely as an input — it never
@@ -2333,23 +2346,67 @@ re-running the exact manual verification from the first follow-up
 Tasks" view all still collapsed correctly, pre- and post-reschedule) plus
 a clean `npm run build` and the full test suite green throughout.
 
-**A narrower, pre-existing gap surfaced while verifying the above, left
-open rather than fixed:** `isDayFullySwept` (and the three closures it was
-extracted from, all the way back to Pass 48) only ever checks the
-*current* `rescheduleMarker` — never the `previous` chain
-`getEffectiveTimeline` itself already walks (see
-[Rescheduling](#rescheduling) below). Confirmed by direct script repro,
-not just reasoning: a chunk relocated by a *first* reschedule and then
-genuinely completed before a *second* one drops out of the second marker's
-`remainingChunkOrder` (correctly — it's done), which means it no longer
-satisfies `isMovedId` either, so its original, pre-*first*-reschedule day
-never collapses to "Tasks rescheduled" and still counts as "behind," even
-though the work is genuinely done under a different day number. No data is
-affected (`doneDays` stays correct throughout) — display-only, and narrow
-(needs two reschedules with a completion in the gap between them). Not
-fixed: whether `isDayFullySwept` should walk the whole marker chain the
-way `getEffectiveTimeline` does is a real design question, not a
-mechanical one. See [Decisions.md](Decisions.md#open-questions).
+**A narrower, pre-existing gap surfaced while verifying the above — since
+fixed, same session, once the user asked whether it could be:**
+`isDayFullySwept` (and the three closures it was extracted from, all the
+way back to Pass 48) only checked the *current* `rescheduleMarker` —
+never the `previous` chain `getEffectiveTimeline` itself already walks
+(see [Rescheduling](#rescheduling) below). Confirmed by direct script
+repro, not just reasoning: a chunk relocated by a *first* reschedule and
+then genuinely completed before a *second* one drops out of the second
+marker's `remainingChunkOrder` (correctly — it's done), which means it no
+longer satisfied `isMovedId` either, so its original, pre-*first*-
+reschedule day never collapsed to "Tasks rescheduled" and still counted
+as "behind," even though the work was genuinely done under a different
+day number.
+
+**The fix does *not* walk the marker chain.** Walking every past
+`rescheduleMarker.previous` to ask "was this id ever swept by *any*
+reschedule" was the first fix proposed — asked directly whether that was
+actually the most efficient option, and it isn't: the underlying fact
+that question is trying to reach is always simpler and doesn't reference
+markers at all — has this id been done on some day *other* than the one
+being checked? If so, its presence here is stale regardless of *why* (an
+earlier reschedule's relocation, or simply logged ahead of schedule) —
+one `doneDays` lookup, O(1) regardless of how many times the piece has
+been rescheduled, versus walking a chain of unbounded length. `isMovedId`
+now checks this first, guarded to `!doneDays.includes(day.dayNumber)` so
+a day genuinely, fully done *on that exact day* still renders its real
+content rather than being swallowed into "Tasks rescheduled" too.
+
+**This "done elsewhere" check only applies to `newChunkIds`/
+`specialChunkIds` — never `reviewChunkIds`.** Caught by a regression test
+built specifically to probe it, before shipping: a `rescheduleMarker`
+only ever tracks introduction/connector placement, never review
+placement (Tier 2 review scheduling is a wholly separate mechanism — the
+"Timeline — scheduler" section above). A chunk under review always has
+*some* prior `doneDays` (that's why it's due for review again) which
+almost never include *that specific review's* own day until it's actually
+logged. Applying the same "done elsewhere" test uniformly to
+`reviewChunkIds` would have misread nearly every genuine, still-open
+review as stale and silently collapsed it into "Tasks rescheduled" —
+caught in testing, not shipped. See [Decisions.md](Decisions.md#scheduling)
+for the full back-and-forth this took to arrive at, including the
+initially-proposed (and rejected) chain-walking approach.
+
+**Since Pass 75**, `isDayFullySwept` has two more callers:
+`WeekView.jsx` and `MasterAgendaTab.jsx`. Both had never had *any*
+reschedule-sweep awareness — not even the original, pre-Pass-73
+neighbor-only version — so a rescheduled day showed real, clickable-
+looking tasks on these two surfaces specifically, while Day view (via
+`DayChecklist`) and Timeline already knew to collapse the identical day to
+"Tasks rescheduled." `WeekView` computes `isFullySwept` per day inline,
+right alongside its existing `specialIsCombo` line, and branches on it the
+same way Timeline's day cards do (`consolidation` → `rest` → `isFullySwept`
+→ normal). `MasterAgendaTab` computes it once per piece inside its
+`agendaData` `useMemo` (where `chunkById` is already built) and threads it
+through as a new field on the pushed item, the same way `behindDaysCount`
+already is — `renderPieceCard` (the single render function shared by both
+the Learning-phase and Maintenance-due card lists) branches on it right
+after its existing `consolidation` check. Neither surface needed a new
+prop from `App.jsx`: `WeekView` already receives `piece` from `TodayTab`,
+and `MasterAgendaTab` already builds `chunkSet`/`chunkById` per piece
+internally.
 
 ## Revival
 

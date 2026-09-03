@@ -1,5 +1,6 @@
 import { addDaysISO, todayISODate, formatRange, mergeRanges, formatMinutes, clamp } from "../../../lib/utils";
 import { totalDueMinutes } from "../../../lib/maintenance";
+import { isDayFullySwept } from "../../../lib/scheduling";
 
 /* ------------------------------------------------------------------ */
 /*  Week view — 7 days at a glance, current day highlighted.           */
@@ -141,6 +142,16 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
         {days.map((d) => {
           const isCurrent = d.dayNumber === currentDay;
           const specialIsCombo = d.specialChunkIds.some((id) => chunkById[id]?.kind === "combo");
+          // Pass 75 — same isDayFullySwept check DayChecklist/TodayTab's
+          // own single-day view/TimelineTab already apply (Pass 48, widened
+          // Pass 73): a day before the reschedule marker's asOfDay still
+          // carries its stale pre-reschedule newChunkIds/specialChunkIds/
+          // reviewChunkIds, duplicating tasks that now also appear on their
+          // new day. Week view had never had this check at all, so a
+          // rescheduled day showed real, clickable-looking tasks here that
+          // clicking into (Day view) already knew to collapse to "Tasks
+          // rescheduled" — the exact report this pass exists to fix.
+          const isFullySwept = isDayFullySwept(d, piece, chunkById);
           return (
             <button
               key={d.dayNumber}
@@ -169,6 +180,8 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
                 <p className="day-card-note">Full run-through of the piece</p>
               ) : d.type === "rest" ? (
                 <p className="day-card-note">Rest day</p>
+              ) : isFullySwept ? (
+                <p className="day-card-note"><em>Tasks rescheduled</em></p>
               ) : (
                 <>
                   {d.newChunkIds.length > 0 && (

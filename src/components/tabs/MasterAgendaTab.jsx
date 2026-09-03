@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays } from "../../lib/scheduling";
+import { getEffectiveTimeline, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, isDayFullySwept } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
@@ -187,6 +187,16 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
           // same computation ScheduleBanner uses, called once per piece.
           const behindDaysCount = countBehindDays(piece, timeline, dayNumber, chunkById);
 
+          // Pass 75 — same isDayFullySwept check DayChecklist/TodayTab/
+          // TimelineTab already apply (Pass 48, widened Pass 73): a day
+          // before the reschedule marker's asOfDay still carries its stale
+          // pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds,
+          // duplicating tasks that now also appear on their new day. Master
+          // Agenda had never had this check at all, so a rescheduled day
+          // showed real, clickable-looking tasks here that Day view already
+          // knew to collapse to "Tasks rescheduled".
+          const isFullySwept = isDayFullySwept(day, piece, chunkById);
+
           items.push({
             pieceId,
             piece,
@@ -196,6 +206,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             specialRanges,
             reviewRanges,
             specialIsCombo,
+            isFullySwept,
             totalTime: day.minutes,
             behindDaysCount,
           });
@@ -336,7 +347,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
     )
   );
 
-  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
+  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, isFullySwept, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
     <div key={pieceId} className="piece-card">
       <div className="piece-card-head">
         <div>
@@ -360,6 +371,8 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
         </div>
       ) : day.type === "consolidation" ? (
         <p className="day-card-note">Full run-through of the piece</p>
+      ) : isFullySwept ? (
+        <p className="day-card-note"><em>Tasks rescheduled</em></p>
       ) : (
         <>
           {newRanges.length > 0 && (

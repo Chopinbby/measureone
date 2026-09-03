@@ -640,12 +640,49 @@ export function classifyDayCompletion(day, piece, currentDay) {
 // `marker.remainingConnectorIds` (Pass 73) directly, just not via the
 // linkedIds fallback — so omitting it can only undercount a sweep, never
 // overcount one.
+//
+// Found-and-fixed gap: only checking the *current* marker misses an id
+// that was swept by an *earlier* reschedule and has *since* been
+// completed — by the time a later reschedule runs, it's no longer
+// "remaining" (it's done), so it drops out of that marker's
+// remainingChunkOrder, and its original, pre-first-reschedule day never
+// learns it was ever moved. The fix doesn't need to walk the whole
+// history of rescheduleMarker.previous links to find out, though —
+// walking every past marker is answering an unnecessarily roundabout
+// version of the real question. What actually matters is simpler and
+// doesn't reference markers at all: has this id been done on some day
+// OTHER than this one? If so, its presence here is stale regardless of
+// *why* (an earlier reschedule's relocation, or simply logged ahead of
+// schedule before this day arrived) — one O(1) lookup against doneDays,
+// same cost whether the piece was rescheduled once or fifty times.
+// Guarded to `!doneDays.includes(day.dayNumber)` specifically so a day
+// that's genuinely, fully done *on this exact day* still renders its real
+// content (and gets its own "done" treatment from classifyDayCompletion)
+// rather than being swallowed into "Tasks rescheduled" too.
+//
+// That "done elsewhere" check is scoped to newChunkIds/specialChunkIds
+// only — never reviewChunkIds. A reschedule marker's remainingChunkOrder/
+// remainingConnectorIds only ever track introduction/connector placement;
+// a review was never a candidate for being "remaining" in that sense to
+// begin with (Tier 2 placement is a wholly separate mechanism — see
+// Algorithms.md's "Timeline — scheduler"). A chunk under review always
+// has *some* prior doneDays (that's why it's due for review again) that
+// almost never include *this* review's own day until it's actually
+// logged — applying the same "done elsewhere" test to reviewChunkIds
+// would misread nearly every genuine, still-open review as stale and
+// silently swallow it into "Tasks rescheduled". Caught before shipping by
+// a regression test built specifically to probe this.
 export function isDayFullySwept(day, piece, chunkById = {}) {
   const marker = piece.rescheduleMarker;
   if (marker == null || day.dayNumber >= marker.asOfDay) return false;
   const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
   if (!ids.length) return false;
+  const introOrConnectorIds = new Set([...day.newChunkIds, ...day.specialChunkIds]);
   const isMovedId = (id) => {
+    if (introOrConnectorIds.has(id)) {
+      const doneDays = (piece.progress[id] || {}).doneDays || [];
+      if (doneDays.length > 0 && !doneDays.includes(day.dayNumber)) return true;
+    }
     if (marker.remainingChunkOrder.includes(id)) return true;
     if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
     const c = chunkById[id];

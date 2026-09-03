@@ -1337,6 +1337,76 @@ real current day, not whichever day is currently being browsed.**
   returning to today first.
 - See [Algorithms.md](Algorithms.md#rescheduling).
 
+**Decision (Pass 75, follow-up to Pass 73): Week view and Master Agenda
+get the same reschedule-sweep collapse Day view and Timeline already had —
+built as calls to the existing shared `isDayFullySwept`, not new local
+logic.**
+
+- **The report:** a rescheduled day still showed its stale, real-looking
+  tasks in Week view; clicking into the identical day (Day view) already
+  correctly read "Tasks rescheduled." The pass's own build instruction was
+  explicit that a *partial* port (Pass 73's own-state connector check
+  alone, without the original Pass 48 neighbor-based condition, or vice
+  versa) would still be wrong for the ordinary case — these two surfaces
+  had never had *either* half.
+- **Why this came out simpler than the instruction implied:** the same
+  session's earlier Pass 74 follow-up had already consolidated the three
+  existing duplicated `isMovedId`/`isFullySwept` closures
+  (`DayChecklist`/`TodayTab`/`TimelineTab`) into one shared
+  `isDayFullySwept(day, piece, chunkById)` (`lib/scheduling.js`), which
+  already carries both halves — the direct marker-membership check and the
+  connector-linkedIds fallback. So "build the full logic" here meant
+  calling that one function from two more places, not writing a fourth and
+  fifth copy of it. Worth flagging as a genuine, if small, build-order
+  discovery: had Pass 75 been written before that consolidation happened,
+  its own instruction to "build the full logic, not a partial port" would
+  have been asking for a real port of ~15 lines of duplicated closure code
+  into two more files, not a two-line call site addition — the actual
+  work this pass needed was smaller than the pass description anticipated,
+  purely as a downstream benefit of an unrelated same-session refactor.
+- **`WeekView.jsx`:** computes `isFullySwept` per day inline (next to the
+  existing `specialIsCombo` line) and branches on it in the same order
+  Timeline's day cards already use — `consolidation` → `rest` →
+  `isFullySwept` → normal content. No new prop needed; `piece` was already
+  passed in from `TodayTab`.
+- **`MasterAgendaTab.jsx`:** computes `isFullySwept` once per piece inside
+  the `agendaData` `useMemo` (where `chunkById` is already built for this
+  piece) and carries it as a new field on the pushed item, the same
+  pattern `behindDaysCount` already uses. `renderPieceCard` — the one
+  render function shared by both the Learning-phase and Maintenance-due
+  card lists, so both get the fix from a single change — branches on it
+  right after its existing `consolidation` check.
+- **The "review" question — flagged per the pass's own instruction,
+  genuinely not built:** the pass offered two readings of "review should
+  be pulled forward the same way" and required confirming which was meant
+  before writing any review-specific code. Confirming it directly with
+  the user surfaced a third, more precise framing, and tracing the actual
+  mechanism (`computeTimeline`'s Tier 2 placement, `lib/scheduling.js`)
+  showed the real issue isn't reschedule-specific at all — a review's
+  placement day can go stale relative to today regardless of whether a
+  reschedule ever happened, since `computeTimeline` has no concept of
+  "today" to begin with. Fixing it properly would touch every past-day
+  display surface in the app, not just this pass's two files, and may sit
+  in tension with an already-documented design stance ("a review arriving
+  late is schedule slack, never a failure"). **The user chose to scope
+  this out as its own separate pass** once that was explained, rather than
+  build it now under an expanded, unplanned scope. See
+  [Open questions](#open-questions) for the full write-up, including
+  where a future pass should start reading from.
+- **Verified:** full test suite green (580 tests — no `lib/`-level code
+  changed, `isDayFullySwept` itself untouched, only two new callers) and
+  `npm run build` clean. Manual, in-browser, reproducing the original
+  report: built a test piece 18 days behind schedule, confirmed Week view
+  showed real content pre-reschedule, rescheduled it, and confirmed every
+  swept day (16, 17, 18) now reads "Tasks rescheduled" in Week view,
+  matching Day view exactly for the same day (16) checked side by side.
+  Same check for Master Agenda: browsing its date picker to a swept day
+  (Aug 30) showed "Tasks rescheduled" on the piece's card; browsing to a
+  genuinely still-scheduled day (Sep 5, post-reschedule) showed real
+  content and a correct "3 days behind" badge — confirming the new check
+  doesn't over-collapse a day with legitimate remaining work.
+- See [Algorithms.md](Algorithms.md#rescheduling).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -5787,34 +5857,117 @@ oversight to silently fix; surface it instead.
   [Behind-schedule detection](Algorithms.md#behind-schedule-detection) for
   `classifyDayCompletion`'s own still-open, unrelated gap (a logged
   consolidation-day run-through) that this did not touch.
-- **`isDayFullySwept` only checks the *current* (most recent)
+- ~~`isDayFullySwept` only checks the *current* (most recent)
   `rescheduleMarker`, never its `previous` chain — so a chunk relocated by
   an *earlier* reschedule and then genuinely completed before a *later*
-  one leaves its original, pre-first-reschedule day un-collapsed.**
-  Confirmed directly (not just reasoned about) via a scripted repro: chunk
-  `c1`, originally scheduled on day 1, gets relocated to day 5 by a first
-  reschedule (`asOfDay: 5`); logging it done on day 5 correctly removes it
-  from a *second* reschedule's `remainingChunkOrder` (`asOfDay: 10,
-  previous: <first marker>`) — but `isDayFullySwept(day1, ...)` under that
-  second marker still returns `false`, because `c1` is no longer "still
-  remaining" by the time the check runs, so it no longer satisfies
-  `isMovedId` either. Original day 1 renders `c1` as a live, unloggable-
-  for-day-1 checklist item instead of collapsing to "Tasks rescheduled,"
-  and `countBehindDays` counts it as behind — even though the work is
-  genuinely done, just under a different day number
-  (`piece.progress.c1.doneDays === [5]`, correct and intact; nothing is
-  data-corrupted, this is a display-only quirk). **Confirmed pre-existing,
-  not introduced by Pass 74 or its same-session follow-up above**: the
-  three original `isMovedId`/`isFullySwept` closures this was extracted
-  from checked only `piece.rescheduleMarker` directly too, with no
-  `previous`-chain traversal, all the way back to Pass 48 — the extraction
-  carried this limitation forward unchanged rather than introducing it.
-  Narrow trigger (needs two reschedules, with a relocated chunk completed
-  in the gap between them) and cosmetic-only in consequence, so not fixed
-  here — deciding whether `isDayFullySwept` should walk `marker.previous`
-  the way `getEffectiveTimeline` itself already does (see
-  [Rescheduling](Algorithms.md#rescheduling)) is a real design question,
-  not a mechanical fix, and belongs to a human call rather than a
-  self-directed one. See
-  [Algorithms.md](Algorithms.md#rescheduling) for the `previous`-chaining
-  mechanism this gap sits alongside.
+  one leaves its original, pre-first-reschedule day un-collapsed.~~
+  **Resolved the same session, once the user directly asked whether it
+  could be.** Originally logged here as a design question rather than a
+  mechanical fix, since the obvious fix (walk the whole `previous` chain,
+  checking every past marker) is a real architectural choice, not
+  something to make unilaterally. The user's follow-up question — is
+  walking the whole history really the most efficient option, especially
+  once a piece has been rescheduled many times? — led to a materially
+  better fix instead of the originally-proposed one: rather than asking
+  "was this id ever swept by *any* past reschedule," `isMovedId` now asks
+  a simpler, marker-history-free question — has this id been done on some
+  day *other* than the one being checked? That's a single `doneDays`
+  lookup, O(1) regardless of reschedule count, and it's a strict
+  improvement over chain-walking, not just a faster equivalent: it also
+  catches a chunk logged ahead of schedule with **no** reschedule
+  involved at all, which walking the marker chain never would have.
+  Verified equivalent-or-better by direct reasoning (walking the chain can
+  only ever find an id in some past marker's `remainingChunkOrder` when
+  that id is *currently* done — `remainingChunkOrder` always includes
+  every untouched chunk, so "in an old marker's list but not the new one"
+  reduces exactly to "now done") — not just asserted; see
+  [Algorithms.md](Algorithms.md#rescheduling) for the reduction spelled
+  out in full.
+  - **A second, real bug found while building this fix, not shipped:**
+    naively applying "done elsewhere" to every id on a day — including
+    `reviewChunkIds` — would have misread nearly every genuine, still-open
+    Tier 2 review as stale. A chunk under review always has *some* prior
+    `doneDays` (that's why it's due for review again), almost never
+    including that specific review's own day until actually logged, so
+    the same check that correctly catches a stale introduction would have
+    incorrectly swallowed a live review into "Tasks rescheduled" too.
+    Caught by deliberately writing a regression test to probe exactly
+    this shape before considering the fix done — confirmed failing
+    against the naive version, confirmed passing once the check was
+    scoped to `newChunkIds`/`specialChunkIds` only. Reviews were never
+    tracked by `remainingChunkOrder`/`remainingConnectorIds` to begin
+    with (Tier 2 placement is a wholly separate mechanism), so excluding
+    them here isn't a workaround — it's the check correctly staying
+    within the boundary of what a reschedule marker was ever meant to
+    describe.
+  - **Verified:** two new regression tests confirmed to fail without the
+    fix and pass with it (the original "done elsewhere" gap, and the
+    two-reschedule scenario), plus two more guarding against
+    over-collapse (a chunk done exactly on the day being checked; the
+    review-scoping case above) — full suite green (585 tests). Manual,
+    in-browser: rebuilt the exact two-reschedule scenario (reschedule once,
+    log the relocated chunk on its new day via direct state — clicking
+    through 15 remaining chunks isn't necessary to reach this state, only
+    the one that matters — reschedule again by constructing the chained
+    marker the same way `handleReschedule` would) and confirmed the
+    chunk's original day now reads "Tasks rescheduled" consistently across
+    Timeline, Today's Practice (both Day view and Week view), and Master
+    Agenda — where, before this fix, it would have shown the chunk as a
+    still-open task in all four.
+  - See [Algorithms.md](Algorithms.md#rescheduling) for the full mechanism
+    and the code-level comment explaining the review-scoping guard.
+- **(Pass 75) A review sitting on a past, unaddressed day reads as an
+  open task there forever — and this turns out to have nothing to do with
+  rescheduling.** Flagged per the pass's own instruction to confirm before
+  writing any review-specific code; confirming it led to a real,
+  investigated finding, not just a restated question — worth a full
+  write-up so whoever picks this up next doesn't have to re-derive it.
+  - **What was asked, and what it actually turned out to be:** the pass
+    offered two readings — (a) the original report was really about a
+    transition/combo loosely called "review" (already covered, nothing to
+    build), or (b) a genuine Tier 2 review's own scheduled placement
+    should become reschedule-*relocatable*, the same way an un-started
+    chunk now is. Neither was quite it. The user's own framing, once
+    asked directly, was narrower and more accurate: a review that's
+    overdue shouldn't just sit on its original day looking like a
+    still-open task once it's *also* being tracked live elsewhere —
+    "just stop showing it as stale," not "physically move it."
+  - **Why even that turned out bigger than it looked:** tracing
+    `computeTimeline`'s Tier 2 placement (`lib/scheduling.js`) shows this
+    isn't reschedule-specific at all. A review's placement day comes from
+    `daysBetweenInclusive(piece.startDate, entry.nextDueDate)` — a live
+    calendar date converted to a plan-day number — computed fresh on
+    every render, with or without any `rescheduleMarker`. If that date has
+    already passed, the review sits on that (now past) day exactly as
+    described, whether or not a reschedule ever happened; `computeTimeline`
+    has no concept of "today" at all, so it has no way to know the
+    placement is stale. Meanwhile `computeDueReviews`/`mergeLiveDueReviews`
+    (Pass 66, `lib/maintenance.js`) already surfaces the exact same review
+    as due, live, on today's screen — de-duplicated only against *today's*
+    own bounded-timeline slot, never against the old day it originally
+    sat on. So the same review can genuinely show twice: once, correctly,
+    as live and actionable today; once, statically, as an apparently
+    still-open task on whatever day it first became due, with nothing
+    connecting the two. Rescheduling is just one way a learner would
+    notice this, not the cause.
+  - **Why this wasn't built even in its "smaller" form:** fixing it
+    properly touches every surface that renders a past day — Timeline,
+    Day view, Week view, Master Agenda, Overview's first-week list — not
+    just the two files Pass 75 touched, and it may also sit in tension
+    with an existing, deliberate design principle already documented
+    elsewhere in this file: "a review arriving late is schedule slack,
+    never a failure" (`DueReviewPanel`'s own copy: "Some of these have
+    been waiting a few days. That's fine — take them in order.").
+    Whether an old, stale-looking placement should be visually
+    suppressed/relabeled without contradicting that "late is fine, not a
+    failure" stance is itself a real design question, not just an
+    implementation detail. Presented back to the user once this was
+    understood, rather than built on the strength of an answer given
+    before this nuance was visible; **the user chose to scope this out as
+    its own separate pass**, not build it now and not fold it into Pass
+    75's touched files.
+  - Not started. A future pass on this should start from `computeTimeline`'s
+    Tier 2 placement loop and `mergeLiveDueReviews`
+    (both above) rather than re-deriving the mechanism from scratch. See
+    [Scheduling](#scheduling) (Pass 75 decision) and
+    [Algorithms.md](Algorithms.md#rescheduling).

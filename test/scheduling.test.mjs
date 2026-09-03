@@ -21,6 +21,7 @@ import {
   countBehindDays,
   findStuckBehindPieces,
   computeRemainingConnectorIds,
+  isDayFullySwept,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "../src/lib/utils.js";
 
@@ -493,6 +494,101 @@ describe("Pass 74 follow-up — countBehindDays excludes days fully swept into a
     // With chunkById supplied, the linkedIds fallback recognizes t1 as
     // having ridden along with c1 into the rescheduled remainder.
     assert.equal(countBehindDays(piece, timeline, 5, chunkById), 0);
+  });
+});
+
+describe("Pass 75 follow-up — isDayFullySwept also recognizes an id done on a different day, not just one still 'remaining' on the current marker", () => {
+  // The gap this closes: an id swept by an *earlier* reschedule and then
+  // genuinely completed before a *later* one drops out of the later
+  // marker's remainingChunkOrder (correctly — it's done), so checking only
+  // the current marker misses that its original, pre-first-reschedule day
+  // was ever swept at all. Rather than walking the whole chain of past
+  // markers to answer "was this ever swept by *any* reschedule" (an O(number
+  // of reschedules) question), the fix asks a simpler, equivalent question
+  // that doesn't reference markers at all: has this id been done on some
+  // OTHER day? If so, its presence here is stale regardless of *why* — one
+  // O(1) doneDays lookup, same cost no matter how many times the piece has
+  // been rescheduled.
+  test("an id done on a different day than the one being checked reads as moved, even with no rescheduleMarker.previous chain to walk", () => {
+    const piece = basePiece({
+      progress: { c1: { doneDays: [5] } }, // done, but on day 5 — not day 1
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: [], remainingConnectorIds: [], previous: null },
+    });
+    const timeline = {
+      days: [{ dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] }],
+    };
+    // c1 isn't in remainingChunkOrder (it's done, not "remaining") — before
+    // this fix, that alone meant day 1 read as still behind.
+    assert.equal(isDayFullySwept(timeline.days[0], piece), true);
+    assert.equal(countBehindDays(piece, timeline, 5), 0);
+  });
+
+  test("[regression] the exact two-reschedule scenario: a chunk relocated by an earlier reschedule and completed before a later one", () => {
+    // Mirrors a direct script repro against the real scheduler functions,
+    // not just a hand-built fixture: reschedule A relocates c1 off day 1;
+    // c1 gets logged done on its new day; reschedule B then correctly
+    // excludes c1 from ITS OWN remainingChunkOrder (it's done) — the
+    // question is whether day 1 (untouched by either marker's own
+    // recompute, since it's before both asOfDays) still learns c1 was
+    // ever swept.
+    const markerA = { asOfDay: 5, remainingChunkOrder: ["c1"], remainingConnectorIds: [], previous: null };
+    const piece = basePiece({
+      progress: { c1: { doneDays: [5] } }, // completed on day 5, the day markerA relocated it to
+      rescheduleMarker: { asOfDay: 10, remainingChunkOrder: [], remainingConnectorIds: [], previous: markerA },
+    });
+    const day1 = { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(isDayFullySwept(day1, piece), true);
+  });
+
+  test("does NOT over-collapse: an id done exactly on the day being checked still renders as real, done content", () => {
+    const piece = basePiece({
+      progress: { c1: { doneDays: [1] } }, // done, and on day 1 itself
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: [], remainingConnectorIds: [], previous: null },
+    });
+    const day1 = { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    // c1's own completion day matches this day exactly — this is genuine,
+    // current content (classifyDayCompletion already calls it "done"), not
+    // a stale leftover, so it must NOT collapse to "Tasks rescheduled".
+    assert.equal(isDayFullySwept(day1, piece), false);
+  });
+
+  test("a mixed day (an introduction id done elsewhere, plus a genuine still-open review) still renders normally, not swept", () => {
+    const piece = basePiece({
+      progress: {
+        c1: { doneDays: [5] }, // introduced here, but done on day 5 — stale here
+        c9: { doneDays: [1] }, // c9's own introduction, logged day 1 — now due for review again
+      },
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: [], remainingConnectorIds: [], previous: null },
+    });
+    const day1 = {
+      dayNumber: 1,
+      newChunkIds: ["c1"],
+      specialChunkIds: [],
+      // c9's review is due today (day 1) but hasn't been logged today —
+      // c9's own doneDays ([1]) is from its original introduction, not
+      // this review, which is exactly the shape that would trip the
+      // "done elsewhere" check if it weren't scoped away from reviews.
+      reviewChunkIds: ["c9"],
+    };
+    // c1 alone would satisfy isMovedId (done elsewhere), but c9's review
+    // is real, unaddressed, still-due work — the day must render
+    // normally, not collapse.
+    assert.equal(isDayFullySwept(day1, piece), false);
+  });
+
+  test("[regression] a genuine, not-yet-logged Tier 2 review must never read as swept, no matter how stale its chunk's prior doneDays look", () => {
+    // The bug this guards against: a chunk under review always has SOME
+    // prior doneDays (that's why it's due for review again), almost never
+    // including this specific review day until it's actually logged.
+    // Naively applying the same "done elsewhere" test used for
+    // introductions to reviewChunkIds would misread nearly every
+    // legitimate, still-open review as stale.
+    const piece = basePiece({
+      progress: { c1: { doneDays: [2] } }, // introduced/practiced day 2 only
+      rescheduleMarker: { asOfDay: 20, remainingChunkOrder: [], remainingConnectorIds: [], previous: null },
+    });
+    const day8 = { dayNumber: 8, newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1"] };
+    assert.equal(isDayFullySwept(day8, piece), false);
   });
 });
 

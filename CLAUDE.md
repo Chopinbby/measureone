@@ -188,6 +188,18 @@ chunking, scheduling, and confidence are actually computed, see
   `piece`), never persisted. If something schedule-related needs to persist
   (like the reschedule marker), it goes on `piece` as input data, and the
   derivation recomputes from it.
+- **`countBehindDays`/`isDayFullySwept` (`lib/scheduling.js`) take an
+  optional fourth `chunkById` argument — pass it.** It defaults to `{}` so
+  a caller that omits it degrades gracefully instead of crashing, but
+  degrading means *silently under-detecting* a reschedule sweep (a
+  connector that rode along via a linked practice chunk, rather than being
+  listed directly on the marker, won't be recognized as moved) — the same
+  symptom class Pass 74's follow-up fix exists to prevent, just reintroduced
+  quietly at whichever call site forgets the argument. Every current call
+  site (`ScheduleBanner`, `OverviewTab`, `MasterAgendaTab`'s two sites,
+  `findStuckBehindPieces`) builds `chunkById` from whatever chunk set it
+  already has in scope — a new call site should do the same rather than
+  relying on the default.
 - **A key in `piece.progress` may not exist in the chunk set — always
   handle the miss.** `piece.progress` is persisted; the chunk set is
   re-derived. Three kinds of key won't resolve: `__consolidation__`,

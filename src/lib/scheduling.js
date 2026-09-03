@@ -615,13 +615,59 @@ export function classifyDayCompletion(day, piece, currentDay) {
   return allDone ? "done" : "behind";
 }
 
+// A day whose entire original task list was swept into a reschedule
+// (getEffectiveTimeline only replaces days from the marker's asOfDay
+// onward — an untouched day further back still carries its stale
+// pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds) reads as
+// "moved elsewhere," not as still-incomplete work. TodayTab/TimelineTab/
+// DayChecklist each already collapsed this locally to a plain "Tasks
+// rescheduled" line (Pass 48) rather than re-showing content that now
+// lives on its new day; extracted here (Pass 74 follow-up) so
+// countBehindDays below can apply the identical rule instead of counting
+// a fully-swept day as still behind — before this, the schedule banner
+// kept citing a stale "N days behind" figure immediately after a
+// reschedule, even once every day-list surface and the catch-up scan had
+// already caught up (confirmed live: 18 days behind, pre- and
+// post-reschedule, identically).
+//
+// A connector (transition/combo) id is never itself in
+// marker.remainingChunkOrder (that list is practice-chunk ids only), even
+// when it genuinely rode along into the rescheduled remainder —
+// getEffectiveTimeline moves a transition whenever either linked chunk
+// remains, and a combo whenever its one linked chunk does; the linkedIds
+// fallback below mirrors that. `chunkById` is optional and defaults to
+// `{}`: without it, a connector can still be recognized as moved via
+// `marker.remainingConnectorIds` (Pass 73) directly, just not via the
+// linkedIds fallback — so omitting it can only undercount a sweep, never
+// overcount one.
+export function isDayFullySwept(day, piece, chunkById = {}) {
+  const marker = piece.rescheduleMarker;
+  if (marker == null || day.dayNumber >= marker.asOfDay) return false;
+  const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
+  if (!ids.length) return false;
+  const isMovedId = (id) => {
+    if (marker.remainingChunkOrder.includes(id)) return true;
+    if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
+    const c = chunkById[id];
+    if (!c || !c.linkedIds) return false;
+    return c.kind === "combo"
+      ? marker.remainingChunkOrder.includes(c.linkedIds[0])
+      : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
+  };
+  return ids.every(isMovedId);
+}
+
 // How many distinct timeline days are "behind" (per classifyDayCompletion)
 // as of currentDay — a day-count sibling to computeScheduleStatus's
 // chunk-count missedCount, for surfaces that want to say "N days behind"
 // instead of "N chunks behind" (a day with several missed chunks only
-// counts once here).
-export function countBehindDays(piece, timeline, currentDay) {
-  return timeline.days.filter((d) => classifyDayCompletion(d, piece, currentDay) === "behind").length;
+// counts once here). A fully-swept day (isDayFullySwept, above) is
+// excluded rather than counted "behind" — same rule the day-list surfaces
+// already applied to themselves, now shared here too.
+export function countBehindDays(piece, timeline, currentDay, chunkById = {}) {
+  return timeline.days.filter(
+    (d) => !isDayFullySwept(d, piece, chunkById) && classifyDayCompletion(d, piece, currentDay) === "behind"
+  ).length;
 }
 
 // Will the not-yet-started work actually fit in the days this plan has
@@ -893,7 +939,8 @@ export function findStuckBehindPieces(pieces) {
       );
       if (qualifyingConnectorIds.length > 0) return;
 
-      if (countBehindDays(piece, timeline, cutoffDay) > 0) {
+      const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
+      if (countBehindDays(piece, timeline, cutoffDay, chunkById) > 0) {
         stuck.push({ pieceId, piece });
       }
     } catch (e) {

@@ -128,7 +128,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               // mirroring TodayTab's own days-mode-only nudge.
               if (piece.scheduleMode === "minutes") return;
               if (selectedDate !== todayISODate()) return;
-              const behindDaysCount = countBehindDays(piece, timeline, timeline.days.length + 1);
+              const behindDaysCount = countBehindDays(piece, timeline, timeline.days.length + 1, chunkById);
               items.push({ pieceId, piece, needsReschedule: true, behindDaysCount, totalTime: 0 });
               return;
             }
@@ -185,7 +185,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
 
           // How many days are behind schedule for this piece as of this day —
           // same computation ScheduleBanner uses, called once per piece.
-          const behindDaysCount = countBehindDays(piece, timeline, dayNumber);
+          const behindDaysCount = countBehindDays(piece, timeline, dayNumber, chunkById);
 
           items.push({
             pieceId,

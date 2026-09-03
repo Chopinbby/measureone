@@ -417,6 +417,85 @@ describe("Pass 70 — countBehindDays (day-count sibling to computeScheduleStatu
   });
 });
 
+describe("Pass 74 follow-up — countBehindDays excludes days fully swept into a reschedule", () => {
+  // Reproduces the exact symptom found during Pass 74's manual verification:
+  // immediately after a reschedule, every pre-reschedule day still carries
+  // its stale (never-logged) ids — getEffectiveTimeline only replaces days
+  // from the marker's asOfDay onward — so without isDayFullySwept's filter,
+  // countBehindDays kept counting all of them as still "behind" even though
+  // TodayTab/TimelineTab already collapsed those same days to "Tasks
+  // rescheduled" and the earliest-behind-day catch-up scan (which does
+  // apply this filter) correctly found nothing left.
+  test("a day whose ids are all listed on the reschedule marker reads as moved, not behind, even with zero logged sessions", () => {
+    const piece = basePiece({
+      progress: {}, // nothing logged anywhere — the pre-fix bug counted every day below as behind
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c1", "c2"], remainingConnectorIds: [], previous: null },
+    });
+    const timeline = {
+      days: [
+        { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] },
+        { dayNumber: 2, newChunkIds: ["c2"], specialChunkIds: [], reviewChunkIds: [] },
+      ],
+    };
+    // Sanity: classifyDayCompletion alone (with no sweep awareness) still
+    // calls both "behind" — isDayFullySwept is a separate filter layered
+    // on top, not a change to classifyDayCompletion itself.
+    assert.equal(classifyDayCompletion(timeline.days[0], piece, 5), "behind");
+    assert.equal(classifyDayCompletion(timeline.days[1], piece, 5), "behind");
+    assert.equal(countBehindDays(piece, timeline, 5), 0);
+  });
+
+  test("a day with a genuine mix of swept and still-real content still counts as behind — only a FULLY swept day is excluded", () => {
+    const piece = basePiece({
+      progress: {},
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c1"], remainingConnectorIds: [], previous: null },
+    });
+    const timeline = {
+      days: [
+        // c1 was swept (listed on the marker); c2 was NOT — c2 still has
+        // real, unaddressed content on this day, so it must stay "behind".
+        { dayNumber: 1, newChunkIds: ["c1", "c2"], specialChunkIds: [], reviewChunkIds: [] },
+      ],
+    };
+    assert.equal(countBehindDays(piece, timeline, 5), 1);
+  });
+
+  test("a day at or after the marker's asOfDay is never treated as swept — getEffectiveTimeline only replaces days from asOfDay onward", () => {
+    const piece = basePiece({
+      progress: {},
+      rescheduleMarker: { asOfDay: 1, remainingChunkOrder: ["c1"], remainingConnectorIds: [], previous: null },
+    });
+    const timeline = {
+      days: [{ dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] }],
+    };
+    // dayNumber (1) >= asOfDay (1): this is a day the rescheduled remainder
+    // itself placed c1 onto, not a stale pre-reschedule day — must still
+    // read as behind if untouched.
+    assert.equal(countBehindDays(piece, timeline, 5), 1);
+  });
+
+  test("a connector that rode along via a linked practice chunk is only recognized as swept when chunkById is supplied", () => {
+    // t1 is a transition whose own id is never placed on the marker (only
+    // practice-chunk ids ever are) — it only reads as "moved" via its
+    // linkedIds pointing at c1, which chunkById is needed to resolve.
+    const piece = basePiece({
+      progress: {},
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c1"], remainingConnectorIds: [], previous: null },
+    });
+    const timeline = {
+      days: [{ dayNumber: 1, newChunkIds: [], specialChunkIds: ["t1"], reviewChunkIds: [] }],
+    };
+    const chunkById = { t1: { kind: "transition", linkedIds: ["c1", "c5"] } };
+    // Without chunkById (defaults to {}), t1 can't be resolved to a chunk
+    // at all — isMovedId's `if (!c || !c.linkedIds) return false` bails,
+    // so the day is (correctly, conservatively) still counted as behind.
+    assert.equal(countBehindDays(piece, timeline, 5), 1);
+    // With chunkById supplied, the linkedIds fallback recognizes t1 as
+    // having ridden along with c1 into the rescheduled remainder.
+    assert.equal(countBehindDays(piece, timeline, 5, chunkById), 0);
+  });
+});
+
 describe("Pass 16 — shouldShowScheduleBanner, redefined in Pass 39 around isPlanActuallyComplete", () => {
   // timeline.days.length is the only field isPlanActuallyComplete reads off
   // timeline itself — a 10-entry array stands in for a 10-day plan.

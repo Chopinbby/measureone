@@ -125,8 +125,10 @@ read-only; click a day to jump into Day view for it — see
 place to log), **"View all"**, which shows every day's checklist at once
 instead of just the current day, and **Interleaved** (added Pass 29 —
 rotates through chunks that have graduated past Stabilizing, one at a time
-on a timer, reusing the same rep/BPM inputs as Day view; disabled with an
-inline reason if nothing qualifies yet). Interleaved mode adds two things
+on a timer sized to the chunk's own difficulty since Pass 69, reusing the
+same rep/BPM inputs as Day view; **since Pass 69**, needs at least two
+qualifying chunks anywhere in the piece to enable, with a distinct inline
+hint below that threshold). Interleaved mode adds two things
 Day view doesn't have: "Skip, just save time" (records the time without
 logging an outcome), and a rough auto-classified result gets saved
 *provisionally* — the learner confirms or discards it later, from that
@@ -231,9 +233,11 @@ week-vs-all-time and heatmap-window choices.
    extension, `daysToLearn`/`targetDate` too); `getEffectiveTimeline` then
    keeps every already-passed day as it stood the last time the schedule
    was actually recomputed, and repacks only the untouched chunks into the
-   days that remain. **Since Pass 48**, a past day whose entire original
-   task list ended up moved by this repacking — Timeline and Today's
-   Practice alike — collapses to a plain "Tasks rescheduled" line instead
+   days that remain. **Since Pass 48** (and, for Week view and Master
+   Agenda too, **Pass 75**), a past day whose entire original task list
+   ended up moved by this repacking — Timeline, Today's Practice, Week
+   view, and Master Agenda alike — collapses to a plain "Tasks rescheduled"
+   line instead
    of re-showing content that's now a stale duplicate of wherever it
    actually landed; a day with any real remaining content (done or still
    legitimately scheduled) is unaffected and renders in full. **Since the
@@ -244,6 +248,18 @@ week-vs-all-time and heatmap-window choices.
    including a session someone had genuinely logged there. See
    [Algorithms.md](Algorithms.md#rescheduling) and
    [Decisions.md](Decisions.md#scheduling) for both mechanisms.
+
+**Since Pass 75, a stale review no longer just sits, unaddressed, on the
+past day it was originally placed on** — Timeline, Week view, Today's
+Practice, and Master Agenda all stop listing a Tier 2 review there once
+it's overdue and wasn't logged that day, showing a short note instead
+("Now due — see today," or Today's own day view's longer "…now tracked as
+due — see Today's Practice") pointing at where it's actually live now.
+Unrelated to rescheduling — this fires whether or not the piece has ever
+been rescheduled. A Tier 1 "first touch" review and a consolidation day are
+both untouched by this. See
+[Algorithms.md](Algorithms.md#timeline--scheduler) for the mechanism
+(`withLiveReviewStatus`).
 
 **Since Pass 39, Today's Practice can also show a second, separate banner**
 below the "N chunks behind schedule" one: a `"days"`-mode piece whose

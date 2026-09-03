@@ -1047,7 +1047,8 @@ Day view/Week/View all) that rotates practice through several chunks in
 turn rather than working one checklist top-to-bottom — the retrieval-
 practice benefit interleaving is known for only applies to material that's
 actually somewhat consolidated, so this deliberately doesn't open up to
-everything on today's plan.
+every chunk in the piece regardless of ladder stage — only ones that have
+actually left Stabilizing.
 
 - **Eligibility**: a chunk rotates in only once it's left Stabilizing —
   `isInterleaveEligible` (`src/lib/ladder.js`) checks
@@ -1056,18 +1057,29 @@ everything on today's plan.
   cleared Tier 1 at all (`stage` null/undefined), stays out of rotation.
   Plain per-chunk lookup against existing ladder state — no new persisted
   field.
-- **Item source**: reuses exactly the "today" list the rest of the tab
-  already computes — `[...day.newChunkIds, ...day.specialChunkIds,
+- **Item source (since Pass 69, previously today-only):** every chunk in
+  the whole piece (practice chunks, transitions, combos — `chunkSet.all`)
+  that passes the eligibility check above, regardless of whether anything
+  about it is scheduled for whichever day is currently being viewed. Built
+  in Pass 29 as exactly the "today" list the rest of the tab already
+  computes (`[...day.newChunkIds, ...day.specialChunkIds,
   ...day.reviewChunkIds]` mid-plan, or `computeDueReviews`'s `dueItems`
-  past the plan — filtered to eligible chunks only. No separate
-  chunk-selection mechanism; if a chunk isn't already part of today's
-  agenda, interleaving doesn't add it just because it's eligible.
+  past the plan) filtered to eligible chunks — narrowed to piece-wide on
+  direct request once that day-scoping was flagged as a discovery. A
+  chunk that graduated past Stabilizing on an earlier day is now
+  immediately available to interleave against, not only once it happens
+  to come back due. See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) (Pass 69,
+  same-session follow-up).
 - **Rotation timer**: mode-level, not per-item — one `setInterval`/
   `durationSeconds` counter (`InterleavePanel`,
   `src/components/tabs/today/InterleavePanel.jsx`) mirroring the pattern
-  `ChecklistItem`'s own per-chunk timer already uses, advancing to the next
-  eligible chunk every 4 minutes (fixed for this pass; a configurable
-  interval is deferred).
+  `ChecklistItem`'s own per-chunk timer already uses. **Since Pass 69**,
+  the interval is graded by the *current* chunk's own difficulty
+  (`ROTATION_SECONDS_BY_DIFFICULTY`: 2/3/4 minutes for easy/medium/hard)
+  rather than the original flat 4 minutes for every chunk — "hard" keeps
+  that original value. A configurable-per-user interval is still
+  explicitly deferred; this only varies the fixed duration by difficulty.
 - **Logging**: a rotation prompts the same rep/BPM/`manualFail` inputs and
   the same `onLogSession` call the regular checklist uses — a real logged
   attempt mid-rotation advances the ladder identically to logging it from
@@ -1096,11 +1108,15 @@ everything on today's plan.
   Interleaved practice — not marked done" line) rather than falling into
   the normal "Logged: N reps at X BPM" line, which has no reps/BPM to show
   for a skip.
-- **Empty state**: if nothing on today's list has graduated past
-  Stabilizing, the "Interleaved" toggle is disabled with an inline reason
-  ("No chunks have graduated past Stabilizing yet") rather than switching
-  into an empty rotation — same disabled-with-explanation pattern used
-  elsewhere in the app.
+- **Empty/locked state (since Pass 69, threshold widened from one)**: the
+  "Interleaved" toggle needs *two* eligible chunks in the piece-wide pool
+  to unlock, not one — a single chunk can't actually rotate against
+  anything. Disabled with an inline reason rather than switching into a
+  one-item or empty rotation, same disabled-with-explanation pattern used
+  elsewhere in the app; the reason now distinguishes zero qualifying
+  chunks ("No chunks have graduated past Stabilizing yet") from exactly
+  one ("only one chunk has graduated past Stabilizing so far") — a state
+  that couldn't occur under the original one-chunk threshold.
 - **Provisional logging for a rough interleaved attempt (follow-up, same
   pass)**: interleaved retrieval practice often *looks* worse than the same
   chunk would in focused, blocked practice, while still being the more

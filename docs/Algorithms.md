@@ -1638,11 +1638,26 @@ behind the Today tab's Interleaved mode
 ([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)):
 `entry.stage === "settling" || entry.stage === "holding"`. It's a plain
 per-chunk lookup against the same `ChunkProgress.stage` the ladder already
-maintains, not new derived or persisted state. `TodayTab` applies it as a
-filter over whichever "today" item list is already in scope — the
-newChunkIds/specialChunkIds/reviewChunkIds triple mid-plan, or
-`computeDueReviews`'s `dueItems` past the plan — rather than computing a
-separate rotation set.
+maintains, not new derived or persisted state.
+
+**Since Pass 69, `TodayTab`'s `interleaveItems` applies this filter
+piece-wide** — over `chunks` (`chunkSet.all`: every practice chunk,
+transition, and combo in the piece) — rather than over whichever "today"
+item list happened to be in scope (the old newChunkIds/specialChunkIds/
+reviewChunkIds triple mid-plan, or `computeDueReviews`'s `dueItems` past
+the plan). A chunk that graduated past Stabilizing on an earlier day is
+immediately eligible to rotate against, whether or not anything about it
+is scheduled for whichever day is currently being viewed. The mode also
+now needs *two* qualifying chunks to unlock, not one
+(`interleaveItems.length < 2`, not `=== 0`) — a single chunk can't
+actually rotate against anything — and its rotation duration is graded by
+the current chunk's own `difficultyLabel`
+(`ROTATION_SECONDS_BY_DIFFICULTY` in `InterleavePanel.jsx`: 2/3/4 minutes
+for easy/medium/hard, replacing the old flat 4 minutes for every chunk).
+See [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+reasoning, the piece-wide scoping's likely (not separately confirmed)
+side effect on an older flagged gap, and a real dependency-array bug
+caught before shipping.
 
 ### `isInRevival` — one definition of "in revival"
 

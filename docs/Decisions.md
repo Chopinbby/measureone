@@ -2446,7 +2446,14 @@ surface until the plan ran out.**
   and the Reassess panel's `todaysRanges` still read the plan day's
   *original*, unmerged `reviewChunkIds` — a newly-surfaced live-due item
   is loggable from the day checklist but doesn't yet appear in either of
-  those; flagged as a possible follow-up, not decided.
+  those; flagged as a possible follow-up, not decided. **Update, Pass
+  69's same-session follow-up (see the Interleaved-mode decision
+  below):** `interleaveItems` no longer reads any day's `reviewChunkIds`
+  at all, merged or not — it's now a piece-wide filter over live ladder
+  `stage`, which appears to close this half of the gap as a side effect
+  (reasoned through, not separately reproduced against this exact
+  scenario). `todaysRanges` is untouched and still has the gap described
+  here.
 - See [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
 
 **Same-session follow-up, per direct request: a review is now priced by
@@ -3043,6 +3050,103 @@ immediately like a normal logged session (Pass 29 follow-up).**
 - **A third gap, found on critical review after the above shipped, not during the original build: two more sidebar controls changed `activeTab`/`activePieceId` without going through the guard at all.** The "Edit piece" button (`startEditing`) and finishing the "+ Add new piece" wizard (`handleComplete`) both live in the persistent sidebar, visible from Interleaved mode same as the nav list and piece switcher, and both were missed in the original implementation because the review-then-build pass only exercised the three routes it had explicitly set out to test, not an exhaustive audit of every place `setActiveTab`/`setActivePieceId` is called in `App.jsx`. Not a data-loss bug — neither path discarded anything on its own, they just silently skipped the warning — but squarely inside what "a different app tab, or a different piece" was already understood to mean. Fixed the same way as the other three: one `if (!guardLeavingInterleaved()) return;` line at the top of each handler. For `handleComplete` specifically, gating at the very top means a cancelled leave attempt also skips creating the new piece — verified deliberately, not incidentally: the wizard modal stays open (`wizardOpen` is only set to `false` further down in the same function, which a `return` above it never reaches) with the learner's already-entered fields intact, so cancelling costs nothing beyond having to click "Generate my plan" again once the pending log is dealt with.
 - **Verification note:** the persistence bug specifically is not something a pure-function unit test would have caught or would meaningfully validate — it lived entirely in *React's state-batching order relative to an effect's dependency array*, not in any computable input/output logic. This repo has no React render harness (`CLAUDE.md`), so the real verification for all three bugs was live browser testing: reproducing the infinite loop via the console warning, then confirming it was gone; reproducing the lost discard via an actual reload, then confirming the reload preserved it after the fix; and for the two missed routes, confirming both the cancel path (nothing created/discarded, wizard data preserved) and the confirm path (discards, proceeds, survives a reload) same as the original three.
 - Verified with `test/utils.test.mjs` (`hasPendingProvisionalSession` — the day-scoped pending check) and `test/interleave-leave-warning.test.mjs` (mirrors of `confirmAndDiscardProvisional`/`guardLeavingInterleaved`, since both are closures inside `App.jsx`: prompts with the exact wording, discards every pending chunk id on confirm, discards *nothing* on cancel, no-ops with nothing pending). Both confirmed to actually fail when the corresponding behavior was reverted — this coverage is at the shared-function level, so it already covered the two routes found in review without needing new tests once they were wired to the same function. Manually verified in-browser, end to end, for all **five** leave routes (Today's Practice's own Day view/Week/View all buttons, the sidebar nav list, the piece switcher, the "Edit piece" button, and finishing the "Add new piece" wizard) — for each: the cancel path blocks the action and preserves the provisional; the confirm path shows the exact requested wording, discards, proceeds, and survives a real reload; and normal navigation with nothing pending proceeds with zero `confirm()` calls at all, confirmed via an instrumented call counter. `npm test`: 352/352.
+
+**Decision (Pass 69): Interleaved practice needs two graduated chunks to unlock, not one, and its rotation duration is graded by the current chunk's own difficulty instead of a flat 4 minutes.**
+
+- **Why the threshold moved:** a single qualifying chunk can't actually
+  rotate against anything — Interleaved practice's whole premise is
+  switching between different material. The old `interleaveItems.length
+  === 0` gate let the button enable the instant exactly one chunk
+  graduated, into a mode with nothing to interleave. Moved to `< 2`
+  (`TodayTab.jsx`); the lock hint now distinguishes "no chunks have
+  graduated" from "only one chunk has graduated" — a state the old gate
+  never needed to describe, since it only ever had one locked state to
+  explain.
+- **Why the duration is graded:** requested directly, as a tuning
+  refinement to the flat interval Pass 29 shipped with (still explicitly
+  not user-configurable — see
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)).
+  `ROTATION_SECONDS_BY_DIFFICULTY = { easy: 120, medium: 180, hard: 240 }`
+  (`InterleavePanel.jsx`) replaces the flat `ROTATION_SECONDS = 240`;
+  `hard` keeps the exact original value, `easy`/`medium` rotate faster.
+- **A real bug caught before shipping, not shipped as scoped:** the
+  rotation-trigger `useEffect`'s dependency array was `[running,
+  items.length]` — it doesn't include `index`/`current`, so the
+  `setInterval` closure keeps whatever chunk was current when the effect
+  last (re)ran. `advance()` moves `index`/`current` forward *without*
+  this effect re-running, so a naive read of
+  `current.chunk.difficultyLabel` inside the existing closure would keep
+  checking a stale chunk's threshold against a live chunk's elapsed time
+  after a mid-session rotation. Fixed by adding `current?.id` to the
+  dependency array, tearing the interval down and rebuilding it on every
+  rotation — `resetTurn()` (already called from `advance()`) already
+  zeroes `elapsedSeconds`, so this doesn't change any existing reset
+  behavior, it only fixes which chunk's threshold the rebuilt interval
+  checks against.
+- **Verified:** manually, in-browser, using a `Date.now()` override to
+  fast-forward real elapsed time without waiting out actual 2/3/4-minute
+  intervals — confirmed each difficulty's rotation fires at its own
+  threshold (not the old flat 240s, and not another difficulty's
+  threshold): an easy chunk advanced at ~125s, a medium chunk advanced at
+  ~183s but was confirmed to *not* advance at 185s while showing as hard
+  (proving the check is genuinely per-chunk, not "whichever is
+  shortest"), and a hard chunk correctly waited past 240s. `npm test`:
+  592/592 — no `lib/` changes, both touched files are components.
+
+**Same-session follow-up, per direct request: the eligible-chunk pool
+(`TodayTab`'s `interleaveItems`) is scoped to every graduated chunk in the
+whole piece, not just whatever the currently-viewed day happens to
+schedule.**
+
+- **Why:** raised directly by the user, immediately after this pass's own
+  summary flagged — as a discovery, not a decision — that the pool was
+  today-scoped. Previously built from `todaysIds`
+  (`[...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds]`,
+  de-duplicated) filtered by `isInterleaveEligible` — meaning a chunk that
+  graduated past Stabilizing on an earlier day was invisible to
+  Interleaved mode entirely unless it also happened to be scheduled (or,
+  for a past-plan piece, live-due) on the exact day being viewed.
+- **The fix:** `interleaveItems` now filters `chunks` (`chunkSet.all` —
+  every practice chunk, transition, and combo in the piece, already a
+  prop this component receives) directly by `isInterleaveEligible`, with
+  no day-scoping and no de-duplication needed (`chunks` has no duplicate
+  ids the way `todaysIds` could). Nothing downstream needed to change:
+  session logging already attributes to `todaysDayNumber` independent of
+  which chunk from the pool is being practiced, and the
+  pending-provisional check (`hasPendingProvisionalSession`) is keyed the
+  same way.
+- **Confirmed safe against one specific worry, not just assumed:** could a
+  chunk flagged `needsRelearning` now wrongly surface piece-wide? Traced
+  through `computeLadderAdvance` (`lib/ladder.js`) directly — the flag can
+  only be *set* while `stage === "stabilizing"` (rule 1's own condition),
+  and `demote("stabilizing")` is a floor (stays at `stabilizing`), so a
+  freshly-flagged chunk never has `stage` advance past Stabilizing at the
+  moment it's flagged. Graduating a flagged chunk *out* of Stabilizing
+  auto-clears the flag in that same transition (the pass branch's own
+  comment: "graduating out of Stabilizing (the only stage a flagged chunk
+  can be in)"). The two states — `needsRelearning: true` and `stage` past
+  Stabilizing — are mutually exclusive by construction, so
+  `isInterleaveEligible` already excludes every flagged chunk regardless
+  of pool scope; this wasn't a gap to fix.
+- **A likely, not separately verified, side effect on an older flagged
+  gap:** a Pass 66 follow-up entry above flagged that a review only
+  surfaced *live* (via `mergeLiveDueReviews`, folded into
+  `dayForChecklist` — not the plan day's own original, unmerged
+  `reviewChunkIds`) never appeared in `interleaveItems`, since the old
+  pool read the unmerged `day` directly. Since the pool is no longer
+  built from any day's placement at all — only from live ladder `stage`
+  — a chunk with a live-due review that's past Stabilizing is now
+  included unconditionally, which appears to close that gap as a side
+  effect. Not deliberately reproduced against that exact original
+  scenario, so this is a reasoned inference from reading both mechanisms,
+  not a confirmed fix — worth a direct check before relying on it.
+- **Verified:** manually, in-browser — built a piece where only one chunk
+  was scheduled for the day being viewed, with all three chunks marked
+  graduated (their next reviews weeks away, not due that day or any day
+  soon). Confirmed Interleaved mode unlocked immediately ("1 OF 3") and
+  rotation correctly stepped through all three, despite only one being on
+  that day's own schedule. `npm test`: 592/592.
+- See [Algorithms.md](Algorithms.md#isinterleaveeligible--interleaved-modes-eligibility-rule-pass-29).
 
 **Decision: `practiceBPM`'s pass/soft-miss step becomes gap-proportional (a "tempo ratchet"), replacing the flat `ladderConfig.bpmSteps` deltas that had driven it since Pass 1 — and a soft-miss now steps `practiceBPM` forward instead of backward.**
 

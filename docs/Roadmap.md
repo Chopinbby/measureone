@@ -48,7 +48,15 @@ earliest unfinished day" action alongside Reschedule, a fully-rescheduled
 day collapses instead of showing its stale task list, and rescheduling the
 same piece more than once now correctly chains through its whole history
 instead of losing what an earlier reschedule had placed — see
-[Decisions.md](Decisions.md#scheduling)), section
+[Decisions.md](Decisions.md#scheduling); **since Pass 74**, reschedule and
+the schedule banner anchor to the real current day rather than whichever
+day is being browsed, and a confirmed reschedule lands the user back on
+today automatically; **since Pass 75**, the fully-rescheduled-day collapse
+also applies to Week view and Master Agenda (previously Day view/Timeline
+only), and a review whose due date has passed no longer sits on its
+original day looking like a still-open task once it's already live on
+today's screen — see [Decisions.md](Decisions.md#scheduling) and
+[Decisions.md](Decisions.md#open-questions)), section
 run-throughs (**since Pass 49** a repeating due/locked-preview gate, not a
 one-time unlock — see [Decisions.md](Decisions.md#scheduling)), reference
 recordings and (**since Pass 24**) reference documents (sheet music PDFs,
@@ -98,7 +106,13 @@ auto-classified soft-miss/fail logged mid-rotation is saved
 **provisionally** (real reps/BPM, ladder untouched) until confirmed or
 discarded, since interleaved retrieval often looks rougher than blocked
 practice while still being more effective. Leaving Interleaved mode with
-an unresolved provisional now warns and discards on confirmation. See
+an unresolved provisional now warns and discards on confirmation. **Since
+Pass 69**, the mode needs two graduated chunks to unlock (not one — a
+single chunk can't rotate against anything), rotation duration is graded
+by the current chunk's own difficulty (2/3/4 minutes for easy/medium/hard,
+not a flat 4), and the eligible pool is scoped to every graduated chunk in
+the whole piece rather than just whatever the currently-viewed day happens
+to schedule. See
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
 and [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 **Since Pass 30**, Piece Map also surfaces a live-derived "tempo climbing"

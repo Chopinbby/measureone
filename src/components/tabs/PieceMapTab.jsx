@@ -40,6 +40,8 @@ export function PieceMapTab({
   onClearRelearning = () => {},
   onReassessRange = () => {},
   onLogSession = () => {},
+  onAssessmentTimerRiskChange = () => {},
+  onConfirmLeaveAssessmentTimer,
   sequentialMode = false,
   initialSelectedId = null,
   onFinishSequential,
@@ -139,19 +141,53 @@ export function PieceMapTab({
     setDurationSeconds(0);
   };
 
-  // Same "confirm before silently discarding unlogged work" pattern as
-  // Interleaved mode's guardLeavingInterleaved/confirmAndDiscardProvisional
-  // (App.jsx) — but fully local, since the assessment timer's state (unlike
-  // a provisional session) is never written to piece.progress until "Log
-  // assessed time" is clicked, so there's nothing to discard server-side on
-  // confirm: letting the existing reset-on-[selected] effect above run is
-  // enough. Guards every path that changes `selected` (or leaves
-  // sequentialMode entirely) while the timer is running or holds unlogged
-  // seconds. A no-op outside sequentialMode, since durationSeconds/timerRunning
-  // never move off their defaults there.
+  // Single source of truth for "is there assessment-timer work that would
+  // be silently lost right now" — read by the local guard below AND
+  // reported up to App.jsx (next effect) for cross-tab/piece-switch/End-
+  // revival gating, so the two can never disagree about when to ask. A
+  // no-op outside sequentialMode, since durationSeconds/timerRunning never
+  // move off their defaults there.
+  const hasAssessmentTimerRisk = timerRunning || durationSeconds > 0;
+
+  // Mirrors TodayTab's onInterleaveRiskChange reporting for Interleaved
+  // mode's own provisional-session risk (App.jsx's interleaveRisk state) —
+  // this component owns the only state that knows whether there's unlogged
+  // assessment time right now, so it has to be the one to tell App.jsx,
+  // which needs it to gate navigation this component has no say over
+  // (sidebar tabs, the piece switcher, Edit piece, End revival). Safe to
+  // key directly on the boolean (unlike interleaveRisk's array-of-ids,
+  // which needed a joined-string key to avoid a new-reference-every-render
+  // loop) since a boolean is already a stable primitive.
+  useEffect(() => {
+    onAssessmentTimerRiskChange(hasAssessmentTimerRisk);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAssessmentTimerRisk]);
+  // Defensive reset on unmount only — leaving this screen is already gated
+  // before this can unmount mid-risk, so this should be a no-op in
+  // practice, but a stale risk outliving the component it describes would
+  // be a strictly worse failure mode than a redundant reset. Mirrors
+  // TodayTab's identical unmount-reset effect for interleaveRisk.
+  useEffect(() => {
+    return () => onAssessmentTimerRiskChange(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Shared by every way THIS component can leave the current chunk while
+  // assessment-timer work is unlogged (Previous, Next, Finish reassessment,
+  // closing the detail panel). Delegates the actual confirm to
+  // onConfirmLeaveAssessmentTimer — the one function App.jsx owns — instead
+  // of keeping a second local copy of the warning text, so the wording
+  // (and any future change to it) can't drift between this path and the
+  // sidebar/piece-switcher/End-revival path, which reads the risk this
+  // component just reported above instead of recomputing it separately.
+  // Mirrors TodayTab's leaveInterleaved/onConfirmLeaveInterleaved split
+  // exactly. Falls back to proceeding unprompted if the prop is ever
+  // missing (only reachable if hasAssessmentTimerRisk is true with no
+  // caller wired to handle it, which shouldn't happen — see the defaults
+  // above) rather than crashing on an assumed-present function.
   const guardLeavingChunkTimer = () => {
-    if (!timerRunning && durationSeconds === 0) return true;
-    return window.confirm("This chunk's assessment timer hasn't been logged yet. Are you sure you want to leave before logging it?");
+    if (!hasAssessmentTimerRisk) return true;
+    return typeof onConfirmLeaveAssessmentTimer === "function" ? onConfirmLeaveAssessmentTimer() : true;
   };
   const changeSelected = (id) => {
     if (!guardLeavingChunkTimer()) return;
@@ -381,7 +417,7 @@ export function PieceMapTab({
                   <button
                     type="button"
                     className="ghost-btn"
-                    disabled={!timerRunning && durationSeconds === 0}
+                    disabled={!hasAssessmentTimerRisk}
                     onClick={logAssessedTime}
                   >
                     Log assessed time

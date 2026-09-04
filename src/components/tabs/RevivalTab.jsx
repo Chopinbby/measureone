@@ -29,6 +29,8 @@ export function RevivalTab({
   onConfirmProvisionalSession,
   onDiscardProvisionalSession,
   onEndRevival,
+  onAssessmentTimerRiskChange,
+  onConfirmLeaveAssessmentTimer,
 }) {
   const revival = piece.revival || {};
   // The piece's own default target, for expressing the tempo ladder's
@@ -104,6 +106,8 @@ export function RevivalTab({
               onSetMemoryAnchor={onSetMemoryAnchor}
               onReassessRange={onReassessRange}
               onLogSession={onLogSession}
+              onAssessmentTimerRiskChange={onAssessmentTimerRiskChange}
+              onConfirmLeaveAssessmentTimer={onConfirmLeaveAssessmentTimer}
               sequentialMode
               initialSelectedId={firstUnratedId}
               onFinishSequential={onFinishReassessment}
@@ -170,6 +174,7 @@ export function RevivalTab({
                       onDiscardProvisionalSession={onDiscardProvisionalSession}
                       tempoLadder={ladder}
                       memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[combo.id]}
+                      onReassessRange={onReassessRange}
                     />
                   );
                 })}
@@ -209,6 +214,7 @@ export function RevivalTab({
                             onDiscardProvisionalSession={onDiscardProvisionalSession}
                             tempoLadder={ladder}
                             memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[id]}
+                            onReassessRange={onReassessRange}
                           />
                         );
                       })}

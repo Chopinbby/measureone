@@ -117,6 +117,15 @@ export default function App() {
   // navigation controls TodayTab has no say over (the sidebar, the piece
   // switcher).
   const [interleaveRisk, setInterleaveRisk] = useState(null);
+  // Same idea as interleaveRisk immediately above, for a second, unrelated
+  // kind of unsaved work: Revival's per-chunk assessment timer
+  // (PieceMapTab's sequentialMode instance, rendered inside RevivalTab).
+  // Reported by PieceMapTab itself (it owns the timer state) via
+  // onAssessmentTimerRiskChange, so App.jsx can gate navigation that
+  // component has no say over — see guardLeavingActiveWork below, which
+  // checks both risks through one call instead of every gate point having
+  // to remember both individually.
+  const [assessmentTimerRisk, setAssessmentTimerRisk] = useState(false);
   // A list, not a single piece's status — the same confirmation covers both
   // the per-piece Reschedule button (one entry) and Master Agenda's
   // "Reschedule all" (one entry per behind-schedule piece). Each entry is
@@ -276,7 +285,7 @@ export default function App() {
   // Practice instead — you clicked "practice", so you should land where
   // you actually log it, not on the dashboard.
   const switchToPiece = (id, tab = "overview") => {
-    if (!guardLeavingInterleaved()) return;
+    if (!guardLeavingActiveWork()) return;
     setActivePieceId(id);
     setSwitcherOpen(false);
     setActiveTab(tab);
@@ -286,7 +295,7 @@ export default function App() {
   };
 
   const handleComplete = (finished, options = {}) => {
-    if (!guardLeavingInterleaved()) return;
+    if (!guardLeavingActiveWork()) return;
     const id = `p_${Date.now()}`;
     // Appends to the end of the switcher without waiting for a reload to
     // backfill it (validateAndMigratePiece isn't in the create path) —
@@ -453,7 +462,7 @@ export default function App() {
   // Editing state lives here, not inside SettingsTab, so switching tabs
   // mid-edit doesn't unmount (and lose) the in-progress draft.
   const startEditing = () => {
-    if (!guardLeavingInterleaved()) return;
+    if (!guardLeavingActiveWork()) return;
     setEditDraftState((d) => {
       if (d) return d;
       // Pieces created before the deadline-date field existed only have
@@ -1007,6 +1016,43 @@ export default function App() {
     return confirmAndDiscardProvisional(interleaveRisk.chunkIds, interleaveRisk.day);
   };
 
+  // Mirrors confirmAndDiscardProvisional's role above, for the assessment-
+  // timer risk instead of a provisional session: the one place this
+  // warning actually confirms, called both from PieceMapTab itself
+  // (Previous/Next/Finish/Close, via onConfirmLeaveAssessmentTimer below)
+  // and from here in App.jsx (via guardLeavingAssessmentTimer), so the
+  // wording can't drift between the two call sites. Unlike a provisional
+  // session, there's nothing to explicitly discard on confirm — the timer
+  // is local React state inside PieceMapTab that simply disappears once
+  // that component unmounts, so this only has to ask, never to clean up.
+  const confirmLeavingAssessmentTimer = () => {
+    return window.confirm(
+      "This chunk's assessment timer hasn't been logged yet. Are you sure you want to leave before logging it?"
+    );
+  };
+
+  // Same shape as guardLeavingInterleaved — reads the risk PieceMapTab
+  // reported (assessmentTimerRisk) since App.jsx has no other way to know
+  // whether a running/unlogged timer exists on a screen it doesn't own.
+  const guardLeavingAssessmentTimer = () => {
+    if (!assessmentTimerRisk) return true;
+    return confirmLeavingAssessmentTimer();
+  };
+
+  // Single checkpoint for every kind of "you'll lose something if you
+  // leave" risk this app currently tracks — every cross-tab/cross-piece
+  // navigation gate below calls this instead of the two guards above
+  // individually, so a gate point can't accidentally check one risk and
+  // forget the other, and a third kind of risk (if one is ever added) only
+  // needs wiring in here once rather than at every call site again. Short-
+  // circuits on the first "no" — if either guard's confirm is declined,
+  // the whole navigation is cancelled without asking about the other.
+  const guardLeavingActiveWork = () => {
+    if (!guardLeavingInterleaved()) return false;
+    if (!guardLeavingAssessmentTimer()) return false;
+    return true;
+  };
+
   const handleUpdateBPM = (chunkId, field, value) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
@@ -1280,6 +1326,13 @@ export default function App() {
   };
 
   const handleEndRevival = () => {
+    // This button lives on the same screen the assessment timer runs on
+    // (Revival's reassessment pass, PieceMapTab's sequentialMode instance)
+    // — ending revival unmounts it exactly like a tab/piece switch would,
+    // so it needs the same guard those get, checked before the "end this
+    // cycle?" confirm below rather than after (declining because of
+    // unlogged timer work shouldn't still prompt to end the cycle).
+    if (!guardLeavingActiveWork()) return;
     if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
     updatePiece((p) => ({
       ...p,
@@ -1756,7 +1809,7 @@ export default function App() {
                   <button
                     key={n.key}
                     className={`nav-item ${activeTab === n.key ? "active" : ""}`}
-                    onClick={() => { if (guardLeavingInterleaved()) setActiveTab(n.key); }}
+                    onClick={() => { if (guardLeavingActiveWork()) setActiveTab(n.key); }}
                   >
                     <Icon size={17} />
                     <span>{n.label}</span>
@@ -1846,6 +1899,8 @@ export default function App() {
                 onConfirmProvisionalSession={handleConfirmProvisionalSession}
                 onDiscardProvisionalSession={handleDiscardProvisionalSession}
                 onEndRevival={handleEndRevival}
+                onAssessmentTimerRiskChange={setAssessmentTimerRisk}
+                onConfirmLeaveAssessmentTimer={confirmLeavingAssessmentTimer}
               />
             )}
             {activeTab === "today" && (

@@ -467,6 +467,7 @@ export function TodayTab({
           onLogSession={onLogSession}
           onConfirmProvisionalSession={onConfirmProvisionalSession}
           onDiscardProvisionalSession={onDiscardProvisionalSession}
+          onReassessRange={onReassessRange}
         />
       ) : viewMode === "week" ? (
         <WeekView

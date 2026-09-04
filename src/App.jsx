@@ -1927,6 +1927,7 @@ export default function App() {
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onInterleaveRiskChange={setInterleaveRisk}
                 onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
+                onOpenRevival={handleOpenRevival}
               />
             )}
             {activeTab === "progress" && (

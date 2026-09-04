@@ -5083,6 +5083,41 @@ copy audit; see also Pass 24's rewrites to the reassessment and
   a real information loss (a returning user forgets why they started this
   revival) wasn't explicitly weighed — flagged here rather than decided.
 
+**Decision (Pass 78): Today's Practice redirects to a single panel while a
+revival is active, instead of showing the piece's regular bounded plan
+underneath it.**
+
+- **The bug this fixes:** `DueReviewPanel` (the past-the-plan due-reviews
+  view) already had its own `isInRevival` suppression copy — "Maintenance
+  reviews are set aside while a revival is running" — but that was the
+  *only* place in `TodayTab` that checked revival state. Every other view
+  mode (Day, Week, Interleaved, All Tasks) kept rendering the piece's
+  regular plan, with its own checklist items, review due-dates, and
+  section run-throughs, completely independent of — and stale relative to
+  — the separate plan Revival was actually generating and tracking. A
+  learner mid-revival who opened Today's Practice by habit would see and
+  could log against a plan that had nothing to do with what they were
+  actually supposed to be doing.
+- **Why a redirect panel, not removing "Today" from the sidebar:**
+  considered and rejected as a bigger UX change than this pass needed —
+  removing a persistent nav item is a more disruptive, more visible change
+  than swapping what appears under an item that's still there, and it
+  would have made "Today's Practice" behave differently from every other
+  tab (all of which stay in the nav regardless of piece state). The
+  redirect panel is the same idea `DueReviewPanel` already established for
+  its own narrower case, generalized to the whole tab rather than
+  reinvented — "Today" stays visible and clickable throughout a revival,
+  it just lands on an explanation-plus-button instead of a checklist.
+  `DueReviewPanel`'s own copy and behavior are untouched by this pass.
+- **Mechanics:** the check
+  (`isInRevival(piece)`, already imported) sits in `TodayTab.jsx` after
+  every Hook call — never before one, which would violate React's rules of
+  hooks — but before the `return` that branches on `viewMode`, so it's
+  independent of which mode was last selected and of whether
+  reassessment/plan-generation has happened yet (`isInRevival` only reads
+  `revival.active`). See
+  [Algorithms.md](Algorithms.md#isinrevival--one-definition-of-in-revival).
+
 ## Lifecycle
 
 **Decision — superseded for Archive specifically (see below): pause/archive

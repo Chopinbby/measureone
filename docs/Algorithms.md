@@ -1686,6 +1686,22 @@ item, revival tab render, `handleOpenRevival`), `OverviewTab`, `TodayTab`,
 `storage.js`'s `mergeImportedPiece`. Behaviour is unchanged at every one.
 See [Decisions.md](Decisions.md#revival).
 
+**Since Pass 78, `TodayTab` reads this function at the top level of its own
+render, not just inside `DueReviewPanel`.** Before this pass, `TodayTab`'s
+only `isInRevival` check was the suppression copy inside `DueReviewPanel`
+(the past-the-plan due-reviews view) — every other view mode (Day, Week,
+Interleaved, All Tasks) kept showing the piece's regular bounded plan even
+while a revival, with its own separate plan, was actively running. The new
+check sits after every Hook call in the component (same placement rule
+[Single-section run-throughs](#single-section-run-throughs-a-repeating-gate-not-a-one-time-unlock)'s
+Pass 68 `isRealToday` gate already follows, well above this section — a
+literal early return before a Hook call would violate React's rules of
+hooks) but before the `return` that branches on `viewMode`, so it
+replaces the entire rest of the render with one redirect panel regardless
+of which mode was last selected. See
+[Decisions.md](Decisions.md#revival) for the redirect-vs-remove-from-nav
+choice.
+
 > **Known gap, not fixed:** `validateAndMigratePiece` restores
 > `piece.revival` all-or-nothing (`piece.revival || {…defaults}`), so a
 > *partial* revival object never has its missing sub-fields filled in —

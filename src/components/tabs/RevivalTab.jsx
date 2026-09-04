@@ -23,6 +23,7 @@ export function RevivalTab({
   onReopenReassessment,
   onGeneratePlan,
   onSetTempoLadderFraction,
+  onReassessRange,
   onLogSession,
   onUnlogSession,
   onConfirmProvisionalSession,
@@ -101,6 +102,8 @@ export function RevivalTab({
               onUpdateBPM={onUpdateBPM}
               onSetManualConfidence={onSetManualConfidence}
               onSetMemoryAnchor={onSetMemoryAnchor}
+              onReassessRange={onReassessRange}
+              onLogSession={onLogSession}
               sequentialMode
               initialSelectedId={firstUnratedId}
               onFinishSequential={onFinishReassessment}

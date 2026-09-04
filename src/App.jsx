@@ -1840,6 +1840,7 @@ export default function App() {
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
                 onGeneratePlan={handleGenerateRevivalPlan}
                 onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
+                onReassessRange={handleReassessRange}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
                 onConfirmProvisionalSession={handleConfirmProvisionalSession}

@@ -493,18 +493,22 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
       </div>
 
       {subTab === "learning" && isToday && behindItems.length > 0 && onRescheduleAll && (
-        <div className="panel">
-          <h3>
-            {behindItems.length} piece{behindItems.length === 1 ? " is" : "s are"} behind schedule
-          </h3>
-          <p className="wizard-hint">
-            Rebalance what you haven't started yet across the days each plan has left — in one go, rather
-            than piece by piece. Chunks you've already practiced stay where they are, and every piece keeps
-            its own target date.
-          </p>
-          <button className="ghost-btn" onClick={onRescheduleAll}>
-            <RefreshCw size={14} /> Reschedule all
-          </button>
+        <div className="schedule-banner">
+          <div>
+            <p className="schedule-banner-title">
+              {behindItems.length} piece{behindItems.length === 1 ? " is" : "s are"} behind schedule
+            </p>
+            <p className="schedule-banner-sub">
+              Rebalance what you haven't started yet across the days each plan has left — in one go, rather
+              than piece by piece. Chunks you've already practiced stay where they are, and every piece keeps
+              its own target date.
+            </p>
+          </div>
+          <div className="schedule-banner-actions">
+            <button className="ghost-btn" onClick={onRescheduleAll}>
+              <RefreshCw size={14} /> Reschedule all
+            </button>
+          </div>
         </div>
       )}
 

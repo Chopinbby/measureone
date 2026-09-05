@@ -514,6 +514,7 @@ export function TodayTab({
           pastPlan={pastPlan}
           dueItems={dueItems}
           onSelectDay={handleSelectWeekDay}
+          onDayChange={onDayChange}
         />
       ) : (
         <div className="view-all-list">

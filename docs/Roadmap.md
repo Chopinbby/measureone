@@ -183,6 +183,41 @@ that item is about *deriving* the scheduling constants from real data;
 this stat is a display rollup of the existing hand-tuned
 `computeConfidence`, not a new model.
 
+> Passes 59-82 shipped a substantial amount (the tempo ratchet and
+> maintenance-mode pinning mentioned in the backlog item below, Holding's
+> tempo-floor retirement, revival reassessment's difficulty-reassess
+> button and per-chunk timer, Interleaved-mode refinements, and more —
+> see `git log` and [CLAUDE.md](../CLAUDE.md)'s own changelog for what
+> actually landed) but this "Since Pass N" list wasn't kept current
+> through that stretch. Not backfilled here — see the equivalent note in
+> [CLAUDE.md](../CLAUDE.md) for why. Treat a jump in pass numbers below as
+> a documentation gap, not evidence that nothing happened in between.
+
+**Since Pass 83**, both "Start revival" entry points (`OverviewTab`'s
+title-card button and its own auto-trigger banner) are disabled until a
+piece's plan is actually complete (`isPlanActuallyComplete`), and all
+three of `computeRevivalTriggers`' auto-trigger conditions are gated the
+same way — not just the 60-day staleness one, extended to the other two
+once reviewing the staleness fix live surfaced the identical
+contradiction for them. A new `computeAbandonedPlanReminder`
+(`lib/scheduling.js`) covers the piece this gate now excludes from
+revival messaging: an active, non-revival piece with real practice
+history gone 14+ days quiet, still with real work left in its plan, gets
+its own Overview banner (Reschedule / Pause actions) instead, escalating
+in flat weekly steps (14, 21, 28, ...); Master Agenda gets an equivalent
+aggregate banner for the subset whose entire plan calendar has run out.
+See [Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83),
+[Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83),
+and [Decisions.md](Decisions.md#revival). **This substantially — but not
+fully — resolves the "gate revival entry behind maintenance" item in the
+priority-ordered backlog below and in
+[Decisions.md](Decisions.md#open-questions):** it fixes the practical
+contradiction without needing the persisted piece-state that item
+originally assumed, but gating on `isPlanActuallyComplete` as a
+substitute has a newly-surfaced consequence for a piece "finished away
+from the app" that was never fully logged in-app — see that Decisions.md
+entry for the gap.
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold
@@ -233,7 +268,10 @@ assuming this section is stale.
    themselves (combo escalation *within* an already-triggered revival was
    already built separately — see
    [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)
-   for both). The live "what's due" query that works *beyond* the current
+   for both). **Since Pass 83, none of the three fires unless the piece's
+   plan is also actually complete** (`isPlanActuallyComplete`) — see the
+   note on this same page above and [Decisions.md](Decisions.md#revival).
+   The live "what's due" query that works *beyond* the current
    plan's bounded length (Pass 8, `computeDueReviews`) surfaces in both
    Master Agenda and the per-piece Today tab, suppressed for
    paused/archived pieces and pieces mid-revival. **"What does learned
@@ -251,9 +289,16 @@ assuming this section is stale.
    [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
    and [Decisions.md](Decisions.md#scheduling) for the mechanics, and
    [Decisions.md](Decisions.md#open-questions) for what's still queued
-   behind it — a first-class *persisted* "learned" state (gating revival
-   entry behind maintenance needs one; the live derivation alone isn't
-   that). Repertoire rotation (multiple pieces
+   behind it — a first-class *persisted* "learned" state. **As of Pass 83,
+   this no longer strictly blocks "gate revival entry behind
+   maintenance"** (the live `isPlanActuallyComplete` derivation turned out
+   to be enough to fix that item's actual contradiction — see
+   [Decisions.md](Decisions.md#revival)) — but the persisted state is
+   still genuinely missing for that item's *other* half (a manual Settings
+   transition for a piece finished away from the app), and gating on the
+   live derivation instead has its own new consequence for exactly that
+   piece shape; see [Decisions.md](Decisions.md#open-questions).
+   Repertoire rotation (multiple pieces
    competing for daily practice time while in maintenance) remains
    genuinely undesigned — see
    [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-5--repertoire-rotation-not-built).

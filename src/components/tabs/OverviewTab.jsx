@@ -1,4 +1,4 @@
-import { Plus, RefreshCw, Play } from "lucide-react";
+import { Plus, RefreshCw, Play, Pause, RotateCcw } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { ManuscriptDoodle, ManuscriptStrip } from "../Manuscript";
 import { RecordingsList } from "../fields/RecordingsList";
@@ -8,8 +8,20 @@ import { sumPracticeSeconds, formatHoursMinutes, formatMinutes } from "../../lib
 import { countLearnedSections } from "../../lib/chunking";
 import { computeConfidence, computeProgressTier, PROGRESS_TIER_META } from "../../lib/confidence";
 import { computeRevivalTriggers, isInRevival } from "../../lib/revival";
-import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, countBehindDays } from "../../lib/scheduling";
+import {
+  isPlanActuallyComplete,
+  computeScheduleStatus,
+  classifyDayCompletion,
+  countBehindDays,
+  computeAbandonedPlanReminder,
+} from "../../lib/scheduling";
 import { PIECE_STATUS_LABEL } from "../../lib/constants";
+
+// Same grayed-with-a-reason convention as SettingsTab.jsx's Archive button
+// (Pass 43) — disabled, not hidden, so the reason is visible rather than
+// the option just silently not being there.
+const REVIVAL_LOCKED_TITLE =
+  "Available once this piece's learning plan is actually finished. Revival is for a piece you've already learned.";
 
 export function OverviewTab({
   piece,
@@ -22,18 +34,28 @@ export function OverviewTab({
   onReschedule,
   onAddPiece,
   onStartRevival,
+  onPausePiece,
   workParts,
   onSelectPart,
   onAddPart,
   onSelectDay,
 }) {
   const revivalActive = isInRevival(piece);
-  const revivalTriggers = !revivalActive && chunkSet ? computeRevivalTriggers(piece, chunkSet) : { triggered: false, reasons: [] };
   // Past-plan (Pass 39's real "actually finished" check, not a raw calendar
   // comparison — CLAUDE.md) means there's nothing left to *learn*, so the
   // shortcut below relabels toward Master Agenda's existing "Maintenance"
   // vocabulary instead of implying new material is still being introduced.
+  // Computed before revivalTriggers (not just below, where it was
+  // originally introduced) so it can also gate computeRevivalTriggers'
+  // own 60-day staleness reason — that reason is specifically about a
+  // piece that's already been learned going quiet, not one still
+  // mid-learning; a still-unfinished piece going quiet is
+  // computeAbandonedPlanReminder's question instead (see the banner
+  // below), not revival's.
   const planComplete = chunkSet && timeline ? isPlanActuallyComplete(piece, chunkSet, timeline) : false;
+  const revivalTriggers = !revivalActive && chunkSet ? computeRevivalTriggers(piece, chunkSet, planComplete) : { triggered: false, reasons: [] };
+  const abandonedPlanReminder =
+    !revivalActive && chunkSet && timeline ? computeAbandonedPlanReminder(piece, chunkSet, timeline) : null;
   // Built here (not just below, where it was originally introduced) so it
   // can also feed countBehindDays' isDayFullySwept check just below —
   // lets a connector that rode along into a reschedule via a linked
@@ -72,7 +94,12 @@ export function OverviewTab({
   return (
     <div className="tab-pane">
       <div className="overview-top-row">
-        <button className="primary-btn" onClick={onStartRevival}>
+        <button
+          className="primary-btn"
+          disabled={!revivalActive && !planComplete}
+          title={!revivalActive && !planComplete ? REVIVAL_LOCKED_TITLE : undefined}
+          onClick={onStartRevival}
+        >
           <RefreshCw size={16} /> {revivalActive ? "Continue revival" : "Start revival"}
         </button>
         <button className="ghost-btn" onClick={onAddPiece}>
@@ -80,6 +107,24 @@ export function OverviewTab({
         </button>
       </div>
       <ScheduleBanner piece={piece} chunkSet={chunkSet} timeline={timeline} realCurrentDay={realCurrentDay} onReschedule={onReschedule} />
+      {abandonedPlanReminder && (
+        <div className="schedule-banner">
+          <div>
+            <p className="schedule-banner-title">
+              No practice logged for "{piece.name}" in {abandonedPlanReminder.milestoneDays} days
+            </p>
+            <p className="schedule-banner-sub">Would you like to reschedule remaining practice items, or pause this plan?</p>
+          </div>
+          <div className="schedule-banner-actions">
+            <button className="primary-btn" onClick={onReschedule}>
+              <RotateCcw size={15} /> Reschedule remaining days
+            </button>
+            <button className="ghost-btn" onClick={onPausePiece}>
+              <Pause size={15} /> Pause this plan
+            </button>
+          </div>
+        </div>
+      )}
       {revivalTriggers.triggered && (
         <div className="revival-banner">
           <div>
@@ -90,6 +135,18 @@ export function OverviewTab({
               ))}
             </ul>
           </div>
+          {/* No !revivalActive check needed here (unlike the title-card
+              button above) — revivalTriggers is computed as
+              !revivalActive && computeRevivalTriggers(...), so this whole
+              banner (and this button) can never render while a revival is
+              already active in the first place. No disabled/title guard
+              needed here either (unlike the title-card button, which can
+              render for a piece with no triggers at all): every one of
+              computeRevivalTriggers' three reasons now requires
+              planComplete to fire — it returns { triggered: false,
+              reasons: [] } outright when planComplete is false — so
+              revivalTriggers.triggered being true already guarantees
+              planComplete is true by the time this banner renders at all. */}
           <button className="primary-btn" onClick={onStartRevival}>
             <RefreshCw size={15} /> Start revival
           </button>

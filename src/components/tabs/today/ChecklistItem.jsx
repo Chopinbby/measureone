@@ -13,6 +13,7 @@ import {
 } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
+import { ReassessPanel } from "./ReassessPanel";
 
 export function ChecklistItem({
   chunk,
@@ -26,6 +27,7 @@ export function ChecklistItem({
   tempoLadder,
   memoryAnchor,
   onSetMemoryAnchor,
+  onReassessRange,
 }) {
   const entry = piece.progress[chunk.id] || {};
   const checked = (entry.doneDays || []).includes(day);
@@ -260,6 +262,32 @@ export function ChecklistItem({
           <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
           <span className="conf-pill mono">{conf}%</span>
         </div>
+
+        {/* Opt-in: only rendered where a caller passes onReassessRange —
+            currently RevivalTab's post-reassessment plan/escalation cards.
+            TodayTab's own day checklist and DueReviewPanel don't pass this
+            prop, so they keep their existing single, shared "today's
+            ranges" ReassessPanel at the bottom of the day instead of
+            gaining a second, per-item one. Unlike PieceMapTab/InterleavePanel
+            (one stateful "current chunk" slot reused across Previous/Next
+            or rotation), each ChecklistItem here is already keyed to one
+            stable chunk by its own list .map() — there's no cross-chunk
+            reuse for a key to guard against. The key is kept anyway,
+            matching MemoryAnchorField's identical key={chunk.id} a few
+            lines below in this same file, for consistency rather than to
+            fix a reproduced bug. Prefixed (reassess-${chunk.id}, not a
+            bare key={chunk.id}) only so it can never collide with that
+            MemoryAnchorField key if the two ever end up as literal
+            siblings under one parent. */}
+        {onReassessRange && (
+          <ReassessPanel
+            key={`reassess-${chunk.id}`}
+            piece={piece}
+            todaysRanges={[{ start: chunk.start, end: chunk.end }]}
+            onReassessRange={onReassessRange}
+          />
+        )}
+
         {session && session.skipped ? (
           // Pass 29 — a session logged via Interleaved mode's "skip, just
           // save time" action has no reps/BPM/outcome to report (that's the

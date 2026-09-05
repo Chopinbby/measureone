@@ -102,6 +102,7 @@ export function TodayTab({
   onSetMemoryAnchor,
   onInterleaveRiskChange,
   onConfirmLeaveInterleaved,
+  onOpenRevival,
 }) {
   const [viewMode, setViewMode] = useState("day");
   const day = timeline.days[currentDay - 1];
@@ -330,6 +331,40 @@ export function TodayTab({
     .filter((c) => ((piece.progress[c.id] || {}).sessions || []).length >= 2)
     .map((c) => chunkEntry(c, piece.memoryAnchors && piece.memoryAnchors[c.id]));
 
+  // Pass 78 — placed after every hook above (never before one — see the
+  // identical caution on SectionRunThroughPanel's isRealToday gate,
+  // lib/chunking.js's docs), so this never violates React's rules of
+  // hooks even though it replaces the entire rest of the render. The
+  // piece's regular plan (every viewMode: Day/Week/Interleaved/All Tasks,
+  // FocusPanel, SectionRunThroughPanel, the works) is meaningless while a
+  // revival is running — Revival has its own, separate plan — so this
+  // redirects instead of showing stale/irrelevant content. Independent of
+  // reassessmentComplete/plan existing yet: isInRevival only checks
+  // revival.active, so this covers every stage of a revival, not just
+  // once a plan has been generated. Same idea DueReviewPanel already
+  // applies to just the maintenance-review list (see its own
+  // isInRevival-gated copy above) — this generalizes it to the whole tab
+  // rather than changing what DueReviewPanel itself does.
+  if (isInRevival(piece)) {
+    return (
+      <div className="tab-pane">
+        <div className="tab-header">
+          <h1>Today's Practice</h1>
+        </div>
+        <div className="panel">
+          <h3>Set aside during revival</h3>
+          <p className="wizard-hint" style={{ margin: 0 }}>
+            This piece's regular plan is set aside while a revival is running — the Revival tab has what to
+            work on instead.
+          </p>
+          <button className="primary-btn" style={{ marginTop: 12 }} onClick={onOpenRevival}>
+            Go to Revival
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tab-pane">
       <ScheduleBanner
@@ -467,6 +502,7 @@ export function TodayTab({
           onLogSession={onLogSession}
           onConfirmProvisionalSession={onConfirmProvisionalSession}
           onDiscardProvisionalSession={onDiscardProvisionalSession}
+          onReassessRange={onReassessRange}
         />
       ) : viewMode === "week" ? (
         <WeekView
@@ -478,6 +514,7 @@ export function TodayTab({
           pastPlan={pastPlan}
           dueItems={dueItems}
           onSelectDay={handleSelectWeekDay}
+          onDayChange={onDayChange}
         />
       ) : (
         <div className="view-all-list">

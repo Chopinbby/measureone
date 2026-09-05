@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome, AlertTriangle } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
-import { clamp, formatRange, todayISODate, findRelatedChunks } from "../../lib/utils";
+import { clamp, formatRange, formatDuration, todayISODate, findRelatedChunks } from "../../lib/utils";
 import { DIFFICULTY_META, CONFIDENCE_PRESETS, ROLE_LABEL } from "../../lib/constants";
 import {
   computeConfidence,
@@ -13,6 +13,7 @@ import {
   hasClimbingTempo,
 } from "../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../lib/ladder";
+import { ReassessPanel } from "./today/ReassessPanel";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
 // logging"): undefined ("untouched") -> 'rough' -> 'lost' -> undefined.
@@ -37,6 +38,10 @@ export function PieceMapTab({
   onSetFlag = () => {},
   onSetMemoryAnchor = () => {},
   onClearRelearning = () => {},
+  onReassessRange = () => {},
+  onLogSession = () => {},
+  onAssessmentTimerRiskChange = () => {},
+  onConfirmLeaveAssessmentTimer,
   sequentialMode = false,
   initialSelectedId = null,
   onFinishSequential,
@@ -91,6 +96,103 @@ export function PieceMapTab({
   // Next/Previous doesn't carry an open editor onto the next chunk.
   const [bpmOverrideOpen, setBpmOverrideOpen] = useState(false);
   useEffect(() => setBpmOverrideOpen(false), [selected]);
+
+  // Pass 76 (sequentialMode only) — a per-chunk assessment timer, tracking
+  // time spent reassessing a chunk (not a graded practice rep). Same
+  // wall-clock reconciliation pattern as ChecklistItem's Pass 72 fix
+  // (timerStartRef captures the real start moment; each tick recomputes
+  // elapsed from Date.now() rather than blindly incrementing), so a
+  // backgrounded tab doesn't leave this display frozen or behind.
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  const timerStartRef = useRef(null);
+
+  useEffect(() => {
+    if (!timerRunning) return;
+    timerStartRef.current = { startedAt: Date.now(), baseSeconds: durationSeconds };
+    const id = setInterval(() => {
+      setDurationSeconds(
+        timerStartRef.current.baseSeconds + Math.round((Date.now() - timerStartRef.current.startedAt) / 1000)
+      );
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerRunning]);
+
+  // Assessment time belongs to the chunk it was spent on — Previous/Next
+  // within sequentialMode must not carry a running or accumulated timer
+  // over onto the next chunk.
+  useEffect(() => {
+    setTimerRunning(false);
+    setDurationSeconds(0);
+  }, [selected]);
+
+  const logAssessedTime = () => {
+    // Same wall-clock re-derivation submitLog (ChecklistItem) uses — reads
+    // the real elapsed time at the moment of the click rather than
+    // trusting the last interval tick's state.
+    const finalDurationSeconds =
+      timerRunning && timerStartRef.current
+        ? Math.max(0, timerStartRef.current.baseSeconds + Math.floor((Date.now() - timerStartRef.current.startedAt) / 1000))
+        : durationSeconds;
+    if (finalDurationSeconds <= 0) return;
+    onLogSession(selectedChunk.id, currentDay, { skipped: true, durationSeconds: finalDurationSeconds });
+    setTimerRunning(false);
+    setDurationSeconds(0);
+  };
+
+  // Single source of truth for "is there assessment-timer work that would
+  // be silently lost right now" — read by the local guard below AND
+  // reported up to App.jsx (next effect) for cross-tab/piece-switch/End-
+  // revival gating, so the two can never disagree about when to ask. A
+  // no-op outside sequentialMode, since durationSeconds/timerRunning never
+  // move off their defaults there.
+  const hasAssessmentTimerRisk = timerRunning || durationSeconds > 0;
+
+  // Mirrors TodayTab's onInterleaveRiskChange reporting for Interleaved
+  // mode's own provisional-session risk (App.jsx's interleaveRisk state) —
+  // this component owns the only state that knows whether there's unlogged
+  // assessment time right now, so it has to be the one to tell App.jsx,
+  // which needs it to gate navigation this component has no say over
+  // (sidebar tabs, the piece switcher, Edit piece, End revival). Safe to
+  // key directly on the boolean (unlike interleaveRisk's array-of-ids,
+  // which needed a joined-string key to avoid a new-reference-every-render
+  // loop) since a boolean is already a stable primitive.
+  useEffect(() => {
+    onAssessmentTimerRiskChange(hasAssessmentTimerRisk);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAssessmentTimerRisk]);
+  // Defensive reset on unmount only — leaving this screen is already gated
+  // before this can unmount mid-risk, so this should be a no-op in
+  // practice, but a stale risk outliving the component it describes would
+  // be a strictly worse failure mode than a redundant reset. Mirrors
+  // TodayTab's identical unmount-reset effect for interleaveRisk.
+  useEffect(() => {
+    return () => onAssessmentTimerRiskChange(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Shared by every way THIS component can leave the current chunk while
+  // assessment-timer work is unlogged (Previous, Next, Finish reassessment,
+  // closing the detail panel). Delegates the actual confirm to
+  // onConfirmLeaveAssessmentTimer — the one function App.jsx owns — instead
+  // of keeping a second local copy of the warning text, so the wording
+  // (and any future change to it) can't drift between this path and the
+  // sidebar/piece-switcher/End-revival path, which reads the risk this
+  // component just reported above instead of recomputing it separately.
+  // Mirrors TodayTab's leaveInterleaved/onConfirmLeaveInterleaved split
+  // exactly. Falls back to proceeding unprompted if the prop is ever
+  // missing (only reachable if hasAssessmentTimerRisk is true with no
+  // caller wired to handle it, which shouldn't happen — see the defaults
+  // above) rather than crashing on an assumed-present function.
+  const guardLeavingChunkTimer = () => {
+    if (!hasAssessmentTimerRisk) return true;
+    return typeof onConfirmLeaveAssessmentTimer === "function" ? onConfirmLeaveAssessmentTimer() : true;
+  };
+  const changeSelected = (id) => {
+    if (!guardLeavingChunkTimer()) return;
+    setSelected(id);
+  };
 
   // Pass 50 — the grid itself shows only base practice chunks (no gaps,
   // m.1 through the piece's last measure), so transitions/combos need
@@ -205,11 +307,11 @@ export function PieceMapTab({
       </div>
 
       {selectedChunk && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setSelected(null)}>
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => changeSelected(null)}>
           <div className="modal detail-modal" onClick={(e) => e.stopPropagation()}>
             <div className="detail-head">
               <h3>{formatRange(selectedChunk.start, selectedChunk.end)}</h3>
-              <button className="icon-btn" onClick={() => setSelected(null)} aria-label="Close">
+              <button className="icon-btn" onClick={() => changeSelected(null)} aria-label="Close">
                 <X size={16} />
               </button>
             </div>
@@ -234,7 +336,7 @@ export function PieceMapTab({
                   <span>Related chunks</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
                     {relatedChunks.map((rc) => (
-                      <button type="button" key={rc.id} className="link-btn" onClick={() => setSelected(rc.id)}>
+                      <button type="button" key={rc.id} className="link-btn" onClick={() => changeSelected(rc.id)}>
                         {relatedChunkLabel(rc)} — {formatRange(rc.start, rc.end)}
                       </button>
                     ))}
@@ -271,6 +373,55 @@ export function PieceMapTab({
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {sequentialMode && (
+                // key forces a fresh instance (open/from/to/level all reset)
+                // whenever the selected chunk changes — without it, Previous/
+                // Next carries this component's own internal state across
+                // chunks: an opened-but-not-yet-Applied panel would keep
+                // showing the PREVIOUS chunk's From/To values while the
+                // quick-pick chip above it already displays the new chunk's
+                // range, so clicking Apply silently reassessed the wrong
+                // measures. Confirmed live before this fix — same
+                // key={selectedChunk.id} idea MemoryAnchorField already uses
+                // below for the identical reason, but prefixed here: both
+                // are direct children of the same .modal-body, and a bare
+                // key={selectedChunk.id} collides with MemoryAnchorField's
+                // own key on every render (React warns "two children with
+                // the same key" and the reset silently doesn't take effect)
+                // since React only requires key-uniqueness among siblings,
+                // not globally.
+                <ReassessPanel
+                  key={`reassess-${selectedChunk.id}`}
+                  piece={piece}
+                  todaysRanges={[{ start: selectedChunk.start, end: selectedChunk.end }]}
+                  onReassessRange={onReassessRange}
+                />
+              )}
+
+              {sequentialMode && (
+                <div className="field">
+                  <span>Assessment timer</span>
+                  <div className="timer-row">
+                    <button
+                      type="button"
+                      className={`timer-btn ${timerRunning ? "running" : ""}`}
+                      onClick={() => setTimerRunning((r) => !r)}
+                    >
+                      {timerRunning ? "Stop" : "Start"} timer
+                    </button>
+                    <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={!hasAssessmentTimerRisk}
+                    onClick={logAssessedTime}
+                  >
+                    Log assessed time
+                  </button>
                 </div>
               )}
 
@@ -326,7 +477,7 @@ export function PieceMapTab({
                   <span>Current BPM</span>
                   <NumberInput value={selectedEntry.currentBPM || ""} min={20} max={400} onCommit={(n) => onUpdateBPM(selectedChunk.id, "currentBPM", n)} />
                   {sequentialMode && (
-                    <p className="tip-line">The fastest you can currently play it accurately — not the tempo you're aiming for.</p>
+                    <p className="tip-line">The fastest you can currently play it accurately, not necessarily the tempo you're aiming for.</p>
                   )}
                 </label>
                 {sequentialMode ? (
@@ -421,7 +572,7 @@ export function PieceMapTab({
                 <button
                   className="ghost-btn"
                   disabled={selectedIdx <= 0}
-                  onClick={() => setSelected(chunks[selectedIdx - 1].id)}
+                  onClick={() => changeSelected(chunks[selectedIdx - 1].id)}
                 >
                   <ChevronLeft size={16} /> Previous
                 </button>
@@ -429,9 +580,11 @@ export function PieceMapTab({
                   Item {selectedIdx + 1} of {chunks.length}
                 </p>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="ghost-btn" onClick={onFinishSequential}>Finish reassessment</button>
+                  <button className="ghost-btn" onClick={() => { if (guardLeavingChunkTimer()) onFinishSequential(); }}>
+                    Finish reassessment
+                  </button>
                   {selectedIdx < chunks.length - 1 && (
-                    <button className="primary-btn" onClick={() => setSelected(chunks[selectedIdx + 1].id)}>
+                    <button className="primary-btn" onClick={() => changeSelected(chunks[selectedIdx + 1].id)}>
                       Next <ChevronRight size={16} />
                     </button>
                   )}

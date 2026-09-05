@@ -1,3 +1,4 @@
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDaysISO, todayISODate, formatRange, mergeRanges, formatMinutes, clamp } from "../../../lib/utils";
 import { totalDueMinutes } from "../../../lib/maintenance";
 import { isDayFullySwept } from "../../../lib/scheduling";
@@ -36,7 +37,7 @@ function windowFor(currentDay, totalDays) {
   return { start, count: WINDOW };
 }
 
-export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pastPlan, dueItems, onSelectDay }) {
+export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pastPlan, dueItems, onSelectDay, onDayChange }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   // The filter(Boolean) is belt-and-braces, NOT a guard against a known
   // miss: ids taken from timeline.days[] always resolve, because the
@@ -131,13 +132,52 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
   const { start, count } = windowFor(currentDay, totalDays);
   const days = timeline.days.slice(start - 1, start - 1 + count);
   const planStart = piece.startDate || todayISODate();
+  // Pagination reuses windowFor's own recentering rather than tracking a
+  // separate offset: shifting currentDay by a full week and letting
+  // windowFor recompute {start, count} around the new value is sufficient,
+  // clamped here too (not just relying on windowFor's internal clamp, or
+  // App.jsx's own onDayChange clamp) so Previous/Next never requests a day
+  // outside the plan in the first place. Calls onDayChange directly, NOT
+  // onSelectDay — onSelectDay is TodayTab's handleSelectWeekDay, which
+  // also does setViewMode("day") unconditionally (it's built for "click a
+  // day cell to jump into it"). Reusing it here landed you back on Day
+  // view on every Previous/Next click, defeating the point of paging
+  // through the week without leaving it — confirmed live before this fix.
+  // onDayChange is the plain, view-mode-agnostic day setter TodayTab
+  // itself already receives from App.jsx, threaded straight through.
+  const atFirstWindow = start === 1;
+  const atLastWindow = start + count - 1 === totalDays;
 
   return (
     <div className="panel">
-      <h3>This week</h3>
-      <p className="wizard-hint">
-        Days {start}–{start + count - 1} of {totalDays}. Click any day to open it.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>This week</h3>
+          <p className="wizard-hint" style={{ margin: "4px 0 0" }}>
+            Days {start}–{start + count - 1} of {totalDays}. Click any day to open it.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            className="icon-btn"
+            disabled={atFirstWindow}
+            onClick={() => onDayChange(clamp(currentDay - WINDOW, 1, totalDays))}
+            aria-label="Previous week"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            disabled={atLastWindow}
+            onClick={() => onDayChange(clamp(currentDay + WINDOW, 1, totalDays))}
+            aria-label="Next week"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
       <div className="week-grid">
         {days.map((d) => {
           const isCurrent = d.dayNumber === currentDay;

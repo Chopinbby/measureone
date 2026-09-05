@@ -117,6 +117,15 @@ export default function App() {
   // navigation controls TodayTab has no say over (the sidebar, the piece
   // switcher).
   const [interleaveRisk, setInterleaveRisk] = useState(null);
+  // Same idea as interleaveRisk immediately above, for a second, unrelated
+  // kind of unsaved work: Revival's per-chunk assessment timer
+  // (PieceMapTab's sequentialMode instance, rendered inside RevivalTab).
+  // Reported by PieceMapTab itself (it owns the timer state) via
+  // onAssessmentTimerRiskChange, so App.jsx can gate navigation that
+  // component has no say over — see guardLeavingActiveWork below, which
+  // checks both risks through one call instead of every gate point having
+  // to remember both individually.
+  const [assessmentTimerRisk, setAssessmentTimerRisk] = useState(false);
   // A list, not a single piece's status — the same confirmation covers both
   // the per-piece Reschedule button (one entry) and Master Agenda's
   // "Reschedule all" (one entry per behind-schedule piece). Each entry is
@@ -131,6 +140,16 @@ export default function App() {
   // requiredDays estimate handleReschedule already computes — see
   // handleConfirmRescheduleWithExtension below for how it's applied.
   const [rescheduleSuggestion, setRescheduleSuggestion] = useState(null);
+  // Set by the reschedule dialog's "Set new target date" escape hatch,
+  // consumed by the effect below once Settings' edit view has actually
+  // rendered — a one-shot "scroll/focus the target-date field" request,
+  // not persistent UI state. Cleared unconditionally on the next relevant
+  // render regardless of whether activeTab actually became "settings" (see
+  // that effect), since startEditing's own guardLeavingActiveWork() can
+  // decline and leave activeTab unchanged — without that unconditional
+  // clear, a declined guard here would leave this flag pending to
+  // incorrectly fire on some later, unrelated arrival at Settings.
+  const [focusTargetDateOnSettings, setFocusTargetDateOnSettings] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -276,7 +295,7 @@ export default function App() {
   // Practice instead — you clicked "practice", so you should land where
   // you actually log it, not on the dashboard.
   const switchToPiece = (id, tab = "overview") => {
-    if (!guardLeavingInterleaved()) return;
+    if (!guardLeavingActiveWork()) return;
     setActivePieceId(id);
     setSwitcherOpen(false);
     setActiveTab(tab);
@@ -286,7 +305,7 @@ export default function App() {
   };
 
   const handleComplete = (finished, options = {}) => {
-    if (!guardLeavingInterleaved()) return;
+    if (!guardLeavingActiveWork()) return;
     const id = `p_${Date.now()}`;
     // Appends to the end of the switcher without waiting for a reload to
     // backfill it (validateAndMigratePiece isn't in the create path) —
@@ -453,7 +472,7 @@ export default function App() {
   // Editing state lives here, not inside SettingsTab, so switching tabs
   // mid-edit doesn't unmount (and lose) the in-progress draft.
   const startEditing = () => {
-    if (!guardLeavingInterleaved()) return;
+    if (!guardLeavingActiveWork()) return;
     setEditDraftState((d) => {
       if (d) return d;
       // Pieces created before the deadline-date field existed only have
@@ -465,6 +484,61 @@ export default function App() {
     setSettingsEditing(true);
     setActiveTab("settings");
   };
+  // Runs after startEditing (called from the reschedule dialog's "Set new
+  // target date" button) has landed on Settings — the target-date field
+  // sits 6 panels down (Piece, Sections, Tempo zones, Difficulty,
+  // Recurring material, then Schedule), not visible on arrival, so this
+  // scrolls it into view and focuses it instead of leaving the user to
+  // find it themselves. Keyed on the flag becoming true, checked against
+  // activeTab rather than assumed: startEditing's own
+  // guardLeavingActiveWork() can decline and never set activeTab to
+  // "settings" at all, in which case this only clears the flag and does
+  // nothing else. document.getElementById, not a ref, matches the plain
+  // id on that one input (ScheduleFields.jsx) — see the comment there.
+  //
+  // The scroll itself is deferred a tick, not called synchronously here:
+  // ScheduleFields.jsx has its own useEffect that recomputes minutesPerDay/
+  // daysToLearn right after this same Settings mount and can trigger a
+  // second render (e.g. the overloaded-pace warning banner appearing),
+  // shifting the page's layout out from under an already-centered scroll
+  // target. Confirmed live — the field landed off-screen (negative
+  // getBoundingClientRect().top) on a piece whose pace needed that
+  // recompute, while an otherwise-identical piece that didn't need it
+  // centered correctly. The short setTimeout lets that settle first.
+  //
+  // Real bug caught live while verifying this: the flag must NOT be reset
+  // synchronously in the same pass that schedules the timer. Both
+  // focusTargetDateOnSettings and activeTab sit in this effect's own
+  // dependency array — calling setFocusTargetDateOnSettings(false) inline
+  // here (before the timer fires) triggers an immediate re-render, which
+  // re-runs this effect, whose cleanup (clearTimeout) cancels the pending
+  // scroll before 50ms ever elapses. Confirmed by monkey-patching
+  // scrollIntoView/focus and finding they were never called at all. The
+  // flag is reset only once inside the timeout callback instead, after
+  // the scroll/focus have actually run — that reset still triggers a
+  // re-run of this effect, but by then there's no pending timer left to
+  // cancel, so it's harmless.
+  useEffect(() => {
+    if (!focusTargetDateOnSettings) return;
+    if (activeTab !== "settings") {
+      // startEditing's own guardLeavingActiveWork() declined and never
+      // switched tabs — nothing to scroll to. Still has to consume the
+      // flag here (synchronously is fine in THIS branch, since no timer
+      // was ever scheduled to race against), or it would misfire on some
+      // later, unrelated arrival at Settings.
+      setFocusTargetDateOnSettings(false);
+      return;
+    }
+    const id = setTimeout(() => {
+      const el = document.getElementById("settings-target-date-field");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus();
+      }
+      setFocusTargetDateOnSettings(false);
+    }, 50);
+    return () => clearTimeout(id);
+  }, [focusTargetDateOnSettings, activeTab]);
   const setEditDraft = (patch) => setEditDraftState((d) => ({ ...d, ...patch }));
   const handleSavePiece = (updated) => {
     // Typing a work title on a standalone piece promotes it into a work;
@@ -1007,6 +1081,43 @@ export default function App() {
     return confirmAndDiscardProvisional(interleaveRisk.chunkIds, interleaveRisk.day);
   };
 
+  // Mirrors confirmAndDiscardProvisional's role above, for the assessment-
+  // timer risk instead of a provisional session: the one place this
+  // warning actually confirms, called both from PieceMapTab itself
+  // (Previous/Next/Finish/Close, via onConfirmLeaveAssessmentTimer below)
+  // and from here in App.jsx (via guardLeavingAssessmentTimer), so the
+  // wording can't drift between the two call sites. Unlike a provisional
+  // session, there's nothing to explicitly discard on confirm — the timer
+  // is local React state inside PieceMapTab that simply disappears once
+  // that component unmounts, so this only has to ask, never to clean up.
+  const confirmLeavingAssessmentTimer = () => {
+    return window.confirm(
+      "This chunk's assessment timer hasn't been logged yet. Are you sure you want to leave before logging it?"
+    );
+  };
+
+  // Same shape as guardLeavingInterleaved — reads the risk PieceMapTab
+  // reported (assessmentTimerRisk) since App.jsx has no other way to know
+  // whether a running/unlogged timer exists on a screen it doesn't own.
+  const guardLeavingAssessmentTimer = () => {
+    if (!assessmentTimerRisk) return true;
+    return confirmLeavingAssessmentTimer();
+  };
+
+  // Single checkpoint for every kind of "you'll lose something if you
+  // leave" risk this app currently tracks — every cross-tab/cross-piece
+  // navigation gate below calls this instead of the two guards above
+  // individually, so a gate point can't accidentally check one risk and
+  // forget the other, and a third kind of risk (if one is ever added) only
+  // needs wiring in here once rather than at every call site again. Short-
+  // circuits on the first "no" — if either guard's confirm is declined,
+  // the whole navigation is cancelled without asking about the other.
+  const guardLeavingActiveWork = () => {
+    if (!guardLeavingInterleaved()) return false;
+    if (!guardLeavingAssessmentTimer()) return false;
+    return true;
+  };
+
   const handleUpdateBPM = (chunkId, field, value) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
@@ -1280,6 +1391,13 @@ export default function App() {
   };
 
   const handleEndRevival = () => {
+    // This button lives on the same screen the assessment timer runs on
+    // (Revival's reassessment pass, PieceMapTab's sequentialMode instance)
+    // — ending revival unmounts it exactly like a tab/piece switch would,
+    // so it needs the same guard those get, checked before the "end this
+    // cycle?" confirm below rather than after (declining because of
+    // unlogged timer work shouldn't still prompt to end the cycle).
+    if (!guardLeavingActiveWork()) return;
     if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
     updatePiece((p) => ({
       ...p,
@@ -1756,7 +1874,7 @@ export default function App() {
                   <button
                     key={n.key}
                     className={`nav-item ${activeTab === n.key ? "active" : ""}`}
-                    onClick={() => { if (guardLeavingInterleaved()) setActiveTab(n.key); }}
+                    onClick={() => { if (guardLeavingActiveWork()) setActiveTab(n.key); }}
                   >
                     <Icon size={17} />
                     <span>{n.label}</span>
@@ -1789,6 +1907,7 @@ export default function App() {
                 onReschedule={handleReschedule}
                 onAddPiece={() => openWizard()}
                 onStartRevival={handleOpenRevival}
+                onPausePiece={() => handleSetPieceStatus("paused")}
                 workParts={workParts}
                 onSelectPart={switchToPiece}
                 onAddPart={handleAddPart}
@@ -1840,11 +1959,14 @@ export default function App() {
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
                 onGeneratePlan={handleGenerateRevivalPlan}
                 onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
+                onReassessRange={handleReassessRange}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
                 onConfirmProvisionalSession={handleConfirmProvisionalSession}
                 onDiscardProvisionalSession={handleDiscardProvisionalSession}
                 onEndRevival={handleEndRevival}
+                onAssessmentTimerRiskChange={setAssessmentTimerRisk}
+                onConfirmLeaveAssessmentTimer={confirmLeavingAssessmentTimer}
               />
             )}
             {activeTab === "today" && (
@@ -1871,6 +1993,7 @@ export default function App() {
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onInterleaveRiskChange={setInterleaveRisk}
                 onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
+                onOpenRevival={handleOpenRevival}
               />
             )}
             {activeTab === "progress" && (
@@ -1976,13 +2099,35 @@ export default function App() {
                 // fully passed — "reschedule into current plan days" isn't
                 // a real alternative here (see the comment where this is
                 // set), so only the extend button shows.
-                <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
-                  Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
-                </button>
+                <>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => {
+                      closeRescheduleModal();
+                      startEditing();
+                      setFocusTargetDateOnSettings(true);
+                    }}
+                  >
+                    Set new target date
+                  </button>
+                  <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                    Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
+                  </button>
+                </>
               ) : (
                 <>
                   <button className="ghost-btn" onClick={handleConfirmReschedule}>
                     Reschedule into current plan days
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => {
+                      closeRescheduleModal();
+                      startEditing();
+                      setFocusTargetDateOnSettings(true);
+                    }}
+                  >
+                    Set new target date
                   </button>
                   <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
                     Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
@@ -2071,7 +2216,7 @@ const CSS = `
 .piece-switcher-drag-handle:active { cursor: grabbing; }
 .piece-switcher-dragging { opacity: 0.4; }
 .piece-switcher-drag-over { box-shadow: inset 0 2px 0 var(--brass); }
-.part-switcher .part-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.part-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .part-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; color: var(--ink-soft); font-weight: 600; }
 .part-chip:hover { border-color: var(--brass); color: var(--ink); }
 .part-chip.active { background: var(--brass); border-color: var(--brass); color: var(--white); }
@@ -2345,7 +2490,6 @@ const CSS = `
 .focus-conf { margin-left: auto; font-weight: 600; color: var(--brick); }
 
 .reassess-panel { border-color: rgba(185,138,62,0.35); }
-.reassess-prompt { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .reassess-quickpicks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
 
 .stat-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }

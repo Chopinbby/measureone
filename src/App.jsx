@@ -140,6 +140,16 @@ export default function App() {
   // requiredDays estimate handleReschedule already computes — see
   // handleConfirmRescheduleWithExtension below for how it's applied.
   const [rescheduleSuggestion, setRescheduleSuggestion] = useState(null);
+  // Set by the reschedule dialog's "Set new target date" escape hatch,
+  // consumed by the effect below once Settings' edit view has actually
+  // rendered — a one-shot "scroll/focus the target-date field" request,
+  // not persistent UI state. Cleared unconditionally on the next relevant
+  // render regardless of whether activeTab actually became "settings" (see
+  // that effect), since startEditing's own guardLeavingActiveWork() can
+  // decline and leave activeTab unchanged — without that unconditional
+  // clear, a declined guard here would leave this flag pending to
+  // incorrectly fire on some later, unrelated arrival at Settings.
+  const [focusTargetDateOnSettings, setFocusTargetDateOnSettings] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -474,6 +484,61 @@ export default function App() {
     setSettingsEditing(true);
     setActiveTab("settings");
   };
+  // Runs after startEditing (called from the reschedule dialog's "Set new
+  // target date" button) has landed on Settings — the target-date field
+  // sits 6 panels down (Piece, Sections, Tempo zones, Difficulty,
+  // Recurring material, then Schedule), not visible on arrival, so this
+  // scrolls it into view and focuses it instead of leaving the user to
+  // find it themselves. Keyed on the flag becoming true, checked against
+  // activeTab rather than assumed: startEditing's own
+  // guardLeavingActiveWork() can decline and never set activeTab to
+  // "settings" at all, in which case this only clears the flag and does
+  // nothing else. document.getElementById, not a ref, matches the plain
+  // id on that one input (ScheduleFields.jsx) — see the comment there.
+  //
+  // The scroll itself is deferred a tick, not called synchronously here:
+  // ScheduleFields.jsx has its own useEffect that recomputes minutesPerDay/
+  // daysToLearn right after this same Settings mount and can trigger a
+  // second render (e.g. the overloaded-pace warning banner appearing),
+  // shifting the page's layout out from under an already-centered scroll
+  // target. Confirmed live — the field landed off-screen (negative
+  // getBoundingClientRect().top) on a piece whose pace needed that
+  // recompute, while an otherwise-identical piece that didn't need it
+  // centered correctly. The short setTimeout lets that settle first.
+  //
+  // Real bug caught live while verifying this: the flag must NOT be reset
+  // synchronously in the same pass that schedules the timer. Both
+  // focusTargetDateOnSettings and activeTab sit in this effect's own
+  // dependency array — calling setFocusTargetDateOnSettings(false) inline
+  // here (before the timer fires) triggers an immediate re-render, which
+  // re-runs this effect, whose cleanup (clearTimeout) cancels the pending
+  // scroll before 50ms ever elapses. Confirmed by monkey-patching
+  // scrollIntoView/focus and finding they were never called at all. The
+  // flag is reset only once inside the timeout callback instead, after
+  // the scroll/focus have actually run — that reset still triggers a
+  // re-run of this effect, but by then there's no pending timer left to
+  // cancel, so it's harmless.
+  useEffect(() => {
+    if (!focusTargetDateOnSettings) return;
+    if (activeTab !== "settings") {
+      // startEditing's own guardLeavingActiveWork() declined and never
+      // switched tabs — nothing to scroll to. Still has to consume the
+      // flag here (synchronously is fine in THIS branch, since no timer
+      // was ever scheduled to race against), or it would misfire on some
+      // later, unrelated arrival at Settings.
+      setFocusTargetDateOnSettings(false);
+      return;
+    }
+    const id = setTimeout(() => {
+      const el = document.getElementById("settings-target-date-field");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus();
+      }
+      setFocusTargetDateOnSettings(false);
+    }, 50);
+    return () => clearTimeout(id);
+  }, [focusTargetDateOnSettings, activeTab]);
   const setEditDraft = (patch) => setEditDraftState((d) => ({ ...d, ...patch }));
   const handleSavePiece = (updated) => {
     // Typing a work title on a standalone piece promotes it into a work;
@@ -2033,13 +2098,35 @@ export default function App() {
                 // fully passed — "reschedule into current plan days" isn't
                 // a real alternative here (see the comment where this is
                 // set), so only the extend button shows.
-                <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
-                  Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
-                </button>
+                <>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => {
+                      closeRescheduleModal();
+                      startEditing();
+                      setFocusTargetDateOnSettings(true);
+                    }}
+                  >
+                    Set new target date
+                  </button>
+                  <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
+                    Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}
+                  </button>
+                </>
               ) : (
                 <>
                   <button className="ghost-btn" onClick={handleConfirmReschedule}>
                     Reschedule into current plan days
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => {
+                      closeRescheduleModal();
+                      startEditing();
+                      setFocusTargetDateOnSettings(true);
+                    }}
+                  >
+                    Set new target date
                   </button>
                   <button className="primary-btn" onClick={handleConfirmRescheduleWithExtension}>
                     Change target date to {formatDateReadable(rescheduleSuggestion.targetDate)}

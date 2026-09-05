@@ -132,6 +132,14 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
           <label className="field">
             <span>{isRevival ? "Review it by" : "Learn it by"}</span>
             <input
+              // Plain id, not a ref threaded down from App.jsx — this field
+              // is the target of the reschedule dialog's "Set new target
+              // date" escape hatch (App.jsx), which needs to scroll/focus
+              // it after switching tabs into Settings' edit view. A ref
+              // would mean forwardRef-wrapping this component just for one
+              // cross-cutting caller; the id is a small, contained way to
+              // address this one field from outside without that.
+              id="settings-target-date-field"
               type="date"
               min={startDate}
               value={draft.targetDate || ""}

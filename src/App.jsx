@@ -2402,7 +2402,6 @@ const CSS = `
 .focus-conf { margin-left: auto; font-weight: 600; color: var(--brick); }
 
 .reassess-panel { border-color: rgba(185,138,62,0.35); }
-.reassess-prompt { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .reassess-quickpicks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
 
 .stat-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }

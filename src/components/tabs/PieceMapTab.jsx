@@ -477,7 +477,7 @@ export function PieceMapTab({
                   <span>Current BPM</span>
                   <NumberInput value={selectedEntry.currentBPM || ""} min={20} max={400} onCommit={(n) => onUpdateBPM(selectedChunk.id, "currentBPM", n)} />
                   {sequentialMode && (
-                    <p className="tip-line">The fastest you can currently play it accurately — not the tempo you're aiming for.</p>
+                    <p className="tip-line">The fastest you can currently play it accurately, not necessarily the tempo you're aiming for.</p>
                   )}
                 </label>
                 {sequentialMode ? (

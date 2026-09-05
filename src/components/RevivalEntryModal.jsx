@@ -54,8 +54,9 @@ export function RevivalEntryModal({ piece, onCancel, onStart }) {
             />
             {!targetBPM && (
               <p className="tip-line">
-                This piece has no target tempo set, so there's nothing to start a fraction of — the
-                tempo ladder will start at a flat default instead.
+                The tempo ladder starts at a fraction of the target tempo. This piece has no given
+                target tempo, so there's nothing to start a fraction of. Set it in settings, or
+                practice tasks will suggest a flat default to start.
               </p>
             )}
           </label>

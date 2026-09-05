@@ -14,10 +14,12 @@ export function ReassessPanel({ piece, todaysRanges, onReassessRange }) {
   return (
     <div className="panel reassess-panel">
       {!open ? (
-        <div className="reassess-prompt">
-          <p className="wizard-hint" style={{ margin: 0 }}>Practiced something today? You can reassess difficulty for specific measures.</p>
+        <>
+          <p className="wizard-hint">
+            Found a passage easier or harder than you expected? You can reassess difficulty for specific measures.
+          </p>
           <button className="ghost-btn" onClick={() => setOpen(true)}>Reassess difficulty</button>
-        </div>
+        </>
       ) : (
         <>
           <h3>Reassess difficulty by measure</h3>

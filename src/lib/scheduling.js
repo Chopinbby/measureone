@@ -1194,3 +1194,41 @@ export function shouldShowScheduleBanner(piece, chunkSet, timeline, behindCount)
   if (isPlanActuallyComplete(piece, chunkSet, timeline)) return false;
   return behindCount > 0;
 }
+
+// A weekly-escalating "this plan has stalled" reminder — distinct from
+// computeRevivalTriggers' 60-day staleness reason (lib/revival.js), which
+// (as of this same change) only fires once a piece's plan is actually
+// finished (isPlanActuallyComplete). That gate left a real gap: a piece
+// still mid-learning whose target date has already passed, with no
+// practice logged in weeks, got no equivalent nudge at all. This fills
+// that gap without touching revival's own mechanism.
+//
+// Fires only for a piece that's active (mirrors every other
+// schedule-related banner's own status gate — paused/archived pieces are
+// consistently excluded from these throughout the app), not already in
+// revival (revival is its own recovery flow with its own messaging), has
+// logged practice at least once (`piece.lastLoggedAt` truthy — the same
+// precondition computeRevivalTriggers' staleness check already requires;
+// deliberately not extended with a `piece.createdAt` fallback for a piece
+// never touched at all, since that's a different situation than "went
+// quiet after being practiced"), and whose plan isn't actually complete.
+//
+// Returns null when none of that applies. Otherwise
+// `{ daysSinceLogged, milestoneDays, targetDatePassed }` —
+// `milestoneDays` steps in flat weekly increments (14, 21, 28, ...) off
+// `daysSinceLogged` rather than displaying that raw, daily-changing number,
+// so the reminder's wording only changes once a week instead of every day
+// it's shown.
+export function computeAbandonedPlanReminder(piece, chunkSet, timeline) {
+  if ((piece.status || "active") !== "active") return null;
+  if (isInRevival(piece)) return null;
+  if (!piece.lastLoggedAt) return null;
+  if (isPlanActuallyComplete(piece, chunkSet, timeline)) return null;
+
+  const daysSinceLogged = daysBetweenInclusive(piece.lastLoggedAt, todayISODate()) - 1;
+  if (daysSinceLogged < 14) return null;
+
+  const milestoneDays = Math.floor(daysSinceLogged / 7) * 7;
+  const targetDatePassed = elapsedDay(piece) > timeline.days.length;
+  return { daysSinceLogged, milestoneDays, targetDatePassed };
+}

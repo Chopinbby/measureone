@@ -183,6 +183,18 @@ function latestQualifyingSession(sessions, startedAt) {
 // touched, not a diluted version of 1/2, which can only fire off data a
 // logged run-through actually produced.
 //
+// All three require `planComplete` (the caller's own
+// `isPlanActuallyComplete` result) — revival is "a piece you've already
+// learned that's gone stale, gone rough, or lost a chunk," not a signal
+// for a piece still mid-learning. A rough run-through, a lost flag, or
+// weeks of silence on an *unfinished* piece isn't this condition; that's
+// `computeAbandonedPlanReminder`'s question instead (lib/scheduling.js),
+// which offers reschedule/pause rather than revival. (Condition 3 was the
+// first of the three gated this way; conditions 1 and 2 followed once it
+// was pointed out that a piece still mid-learning could otherwise trip
+// them just as easily as a finished one — same gap, same fix, applied to
+// all three rather than left half-closed.)
+//
 // 1. Stop count > 5 on a single logged run-through — reads the
 //    section-run-through sessions Pass 6 logs onto the synthetic
 //    "__consolidation__" progress entry (handleLogRunThrough, App.jsx).
@@ -198,7 +210,9 @@ function latestQualifyingSession(sessions, startedAt) {
 //
 // Returns { triggered, reasons } — reasons is a list of { key, label }
 // for every condition that independently fired, for display.
-export function computeRevivalTriggers(piece, chunkSet) {
+export function computeRevivalTriggers(piece, chunkSet, planComplete) {
+  if (!planComplete) return { triggered: false, reasons: [] };
+
   const reasons = [];
   const progress = piece.progress || {};
 

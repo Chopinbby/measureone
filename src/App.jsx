@@ -1907,6 +1907,7 @@ export default function App() {
                 onReschedule={handleReschedule}
                 onAddPiece={() => openWizard()}
                 onStartRevival={handleOpenRevival}
+                onPausePiece={() => handleSetPieceStatus("paused")}
                 workParts={workParts}
                 onSelectPart={switchToPiece}
                 onAddPart={handleAddPart}

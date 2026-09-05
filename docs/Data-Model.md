@@ -201,13 +201,23 @@ piece = {
                          // every progress entry (INCLUDING "__consolidation__"'s run-through
                          // sessions — excluding them was a real bug, fixed alongside Pass 7),
                          // recomputed on every load (not backfilled-and-locked-in like
-                         // startDate). Read by Revival's 60+-days-untouched auto-trigger
-                         // condition (computeRevivalTriggers, lib/revival.js, Pass 7) — a piece
-                         // whose only activity is run-throughs must not look falsely stale here.
-                         // Also read by AllPiecesTab's "days since last touched" column
-                         // (Pass 42) — the always-fresh-on-load guarantee is exactly why that
-                         // reads correctly for pieces saved long before this field existed.
-                         // See Repertoire-Lifecycle.md#revival-auto-triggers and
+                         // startDate) — see the "Bug found and fixed" note in
+                         // Repertoire-Lifecycle.md#revival-auto-triggers if you're hand-writing
+                         // a test/seed piece with this field: setting it directly has no effect
+                         // once the piece loads unless progress also has a real session dated
+                         // to match, since computeLastLoggedAt (lib/storage.js) always
+                         // recomputes it from progress on load. Read by Revival's
+                         // 60+-days-untouched auto-trigger condition (computeRevivalTriggers,
+                         // lib/revival.js, Pass 7; since Pass 83 also gated on planComplete — a
+                         // piece already learned, not one still mid-learning) — a piece whose
+                         // only activity is run-throughs must not look falsely stale here.
+                         // Also read by computeAbandonedPlanReminder (lib/scheduling.js, Pass
+                         // 83) — the still-mid-learning sibling condition — and by
+                         // AllPiecesTab's "days since last touched" column (Pass 42) — the
+                         // always-fresh-on-load guarantee is exactly why that reads correctly
+                         // for pieces saved long before this field existed. See
+                         // Repertoire-Lifecycle.md#revival-auto-triggers,
+                         // Algorithms.md#the-abandoned-plan-reminder-pass-83, and
                          // Decisions.md#spaced-repetition--maintenance.
   ladderConfig,          // { stabilizing, settling, holding, bpmSteps } — piece-level tunable
                          // config for the spaced-repetition maintenance ladder (stage lengths,

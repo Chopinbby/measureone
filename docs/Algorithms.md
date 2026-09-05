@@ -2011,6 +2011,54 @@ happen to have a same-day regular practice session — on every surface that
 calls this function, now including Timeline (Pass 46). See
 [Decisions.md](Decisions.md#open-questions).
 
+### The abandoned-plan reminder (Pass 83)
+
+`computeAbandonedPlanReminder(piece, chunkSet, timeline)`
+(`lib/scheduling.js`) is the still-mid-learning sibling to
+[Revival auto-triggers](#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83)'
+now-gated staleness reason: a piece with real practice history that's gone
+quiet is either "finished and stale" (revival's question, requires
+`planComplete`) or "unfinished and stale" (this function's question,
+requires `!planComplete`) — never both, by construction.
+
+Fires for a piece that is `active` (paused/archived pieces are excluded,
+the same convention every schedule-related banner in the app already
+follows), not currently `isInRevival`, has a real `piece.lastLoggedAt`
+(deliberately no `piece.createdAt` fallback for a piece never touched at
+all — that's a different situation than one that went quiet after real
+practice, and `createdAt` is a raw timestamp number rather than the ISO
+date string `daysBetweenInclusive` expects, so mixing the two in would
+silently break the day math), and whose plan isn't actually complete
+(`!isPlanActuallyComplete(piece, chunkSet, timeline)`, above). Once all of
+that holds, it requires at least 14 days since `lastLoggedAt`, returning
+`null` otherwise.
+
+Returns `{ daysSinceLogged, milestoneDays, targetDatePassed }`:
+
+- `milestoneDays` is `Math.floor(daysSinceLogged / 7) * 7` — a flat weekly
+  step (14, 21, 28, ...) off the real day count, not `daysSinceLogged`
+  itself. Displaying the raw number would mean the reminder's copy changes
+  every single day it's shown; the intent is a nudge that escalates
+  weekly, holding steady in between.
+- `targetDatePassed` is the same `elapsedDay(piece) > timeline.days.length`
+  test `isPlanActuallyComplete` itself starts with, surfaced separately so
+  a caller can tell "still has calendar time left but gone quiet" from
+  "the calendar's run out too" without re-deriving it.
+
+Surfaced as a new `OverviewTab.jsx` banner ("No practice logged for
+'\<piece\>' in N days. Would you like to reschedule remaining practice
+items, or pause this plan?") with Reschedule and Pause actions — Reschedule
+reuses the existing `onReschedule` prop/dialog unchanged, Pause is a new
+`onPausePiece` prop wired to the existing `handleSetPieceStatus("paused")`
+handler in `App.jsx`. For the `targetDatePassed` case specifically,
+`MasterAgendaTab.jsx` also gets an aggregate banner — built on that file's
+own pre-existing `needsReschedule` per-piece flag (already computed inside
+`agendaData`'s loop for "this piece's plan has fully elapsed with real
+work left"), not a second independent derivation of the same fact. See
+[Decisions.md](Decisions.md#scheduling) for why that banner is gated
+independently of the pre-existing "N days behind schedule" banner instead
+of merged into it.
+
 ## Rescheduling
 
 `getEffectiveTimeline(piece, chunkSet)`: when the user confirms "Reschedule
@@ -2600,17 +2648,42 @@ chunk-by-chunk instead of reopened per cell). See
 [Decisions.md](Decisions.md#revival) for why this reuses `manualConfidence`
 rather than introducing a separate scale.
 
-### Revival auto-triggers (Pass 7)
+### Revival auto-triggers (Pass 7, gated on plan completion since Pass 83)
 
-`computeRevivalTriggers(piece, chunkSet)` (`lib/revival.js`) is what
-`OverviewTab` calls to decide whether to surface the "This piece might be
-due for a revival" banner. It checks three independent conditions — see
+`computeRevivalTriggers(piece, chunkSet, planComplete)` (`lib/revival.js`)
+is what `OverviewTab` calls to decide whether to surface the "This piece
+might be due for a revival" banner. It checks three independent
+conditions — see
 [Repertoire-Lifecycle.md#revival-auto-triggers](Repertoire-Lifecycle.md#revival-auto-triggers)
 for the full design and [Decisions.md](Decisions.md#spaced-repetition--maintenance)
 for why they're three separately-checked conditions rather than one
 formula — and returns `{ triggered, reasons }`, where `reasons` is every
 condition that independently fired (not just the first), each as
-`{ key, label }` for direct display:
+`{ key, label }` for direct display.
+
+**Since Pass 83, all three conditions additionally require `planComplete`
+to be true** — a third argument the caller passes in (`OverviewTab`
+computes `isPlanActuallyComplete(piece, chunkSet, timeline)` before
+calling this). Implemented as a single early return
+(`if (!planComplete) return { triggered: false, reasons: [] };`) ahead of
+all three checks, not three separate gates, since the requirement is now
+uniform: revival is "a piece you've already learned that's gone stale,
+gone rough, or lost a chunk," not a signal for a piece still mid-learning.
+Before this, a piece still mid-learning could trigger this banner via any
+of the three conditions — confirmed live, not just reasoned about: a test
+piece with 2 chunks flagged `'lost'` and no completed plan still showed
+"this piece might be due for a revival" right next to a "Start revival"
+button the same pass had already disabled (`OverviewTab`'s own
+`planComplete` gate on the button itself). A still-unfinished, quiet piece
+gets [`computeAbandonedPlanReminder`](#the-abandoned-plan-reminder-pass-83)'s
+message instead, offering reschedule/pause rather than a workflow built
+for relearning something already once learned. See
+[Decisions.md](Decisions.md#revival) and
+[Decisions.md](Decisions.md#open-questions) for what this does and doesn't
+resolve of the longer-standing "gate revival entry behind maintenance"
+question.
+
+The three conditions themselves, unchanged by the above:
 
 1. **Stop count > 5 on a single logged run-through** — reads
    `progress["__consolidation__"].sessions`, the synthetic run-through log

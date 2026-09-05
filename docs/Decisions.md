@@ -1407,6 +1407,37 @@ logic.**
   doesn't over-collapse a day with legitimate remaining work.
 - See [Algorithms.md](Algorithms.md#rescheduling).
 
+**Decision (Pass 83): the abandoned-plan reminder's Master Agenda banner
+is a new, independently-gated banner, not folded into the existing "N
+days behind schedule" one.**
+
+- **Context:** `computeAbandonedPlanReminder` (`lib/scheduling.js`) needed
+  a Master Agenda surface for the case where a piece's plan calendar has
+  fully run out with real work left (`targetDatePassed`), matching the new
+  Overview banner. `MasterAgendaTab.jsx` already computes exactly that
+  condition per-piece as `needsReschedule` inside its `agendaData` loop —
+  reused directly rather than re-derived.
+- **Why not just extend the existing `behindItems`-based banner:** the two
+  conditions look almost identical in the common case (a piece whose whole
+  plan has elapsed with real work left is nearly always also "behind" by
+  `countBehindDays`), which made merging them the obvious first instinct.
+  Rejected once cross-checked against the pre-existing, still-open
+  "Reschedule all" open question above (a piece rescheduled once via "cram
+  into what's left" while already past its own plan can permanently read
+  `behindDaysCount === 0` and silently drop out of `behindItems` forever).
+  Gating the new banner on `behindItems.length > 0` too would have hidden
+  exactly the piece most in need of it — the one already stuck by that bug.
+  Built and gated independently instead: `pastTargetDateItems =
+  learningItems.filter(item => item.needsReschedule)`, its own banner,
+  its own condition.
+- **Verified live:** a piece whose 10-day plan started 25 days ago (target
+  date fully passed, nothing logged) produced its own "1 piece has passed
+  its target date" banner alongside — not instead of — the separate "N
+  pieces are behind schedule" banner, with different (correct) counts:
+  1 vs. 5 active pieces in the test fixture, confirming the two conditions
+  are genuinely not interchangeable in practice, not just in theory.
+- See [Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -5118,6 +5149,50 @@ underneath it.**
   `revival.active`). See
   [Algorithms.md](Algorithms.md#isinrevival--one-definition-of-in-revival).
 
+**Decision (Pass 83): both "Start revival" buttons, and all three of
+`computeRevivalTriggers`' conditions, are gated behind the same piece's
+plan actually being complete (`isPlanActuallyComplete`).**
+
+- **What shipped:** `OverviewTab.jsx`'s title-card "Start/Continue
+  revival" button and the auto-trigger banner's own "Start revival" button
+  are both disabled (with an explanatory title) until
+  `isPlanActuallyComplete(piece, chunkSet, timeline)` is true —
+  `!revivalActive` already excludes a piece already in revival from either
+  check, so this only ever gates a piece that hasn't started one yet.
+  `computeRevivalTriggers(piece, chunkSet, planComplete)` (`lib/revival.js`)
+  takes a new third argument and returns `{ triggered: false, reasons: [] }`
+  immediately when it's falsy, before checking any of its three
+  conditions. See
+  [Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83).
+- **Why all three conditions, not just staleness:** the request that
+  started this only named the 60-day staleness reason — revival is "a
+  piece you've already learned that's gone stale," so a piece still
+  mid-learning going quiet isn't that. Verifying that fix live surfaced
+  the identical contradiction for the other two: flagging 2 chunks
+  `'lost'` on an unfinished test piece still showed "this piece might be
+  due for a revival" right next to the button the same pass had already
+  disabled — a rough run-through or a lost flag on unfinished material is
+  exactly as little "due for a revival" as staleness is. Extended to all
+  three once this was pointed out, rather than leaving two of three
+  conditions carrying the same bug that had just been fixed for the third.
+- **Implementation shape:** a single early return
+  (`if (!planComplete) return { triggered: false, reasons: [] };`) rather
+  than three separate `if` guards, since the requirement is now uniform
+  across all three conditions. This also retired the banner's own inner
+  "Start revival" button's `disabled`/`title` guard as dead code —
+  `revivalTriggers.triggered` can no longer be true unless `planComplete`
+  already is, by construction, so a button that only ever renders inside
+  that `triggered` branch can never actually need to be disabled.
+- **What this does and doesn't resolve of the longer-standing "gate
+  revival entry behind maintenance" open question:** see
+  [Open questions](#open-questions) below — short version: it fixes the
+  actual contradiction that question was worried about, using the
+  already-existing `isPlanActuallyComplete` derivation instead of the
+  persisted `piece.stage` field that question's original design assumed
+  would be needed, but that substitution has its own new consequence for
+  a piece "finished away from the app" that was never fully logged in
+  this app.
+
 ## Lifecycle
 
 **Decision — superseded for Archive specifically (see below): pause/archive
@@ -5679,14 +5754,16 @@ oversight to silently fix; surface it instead.
   orphaned history is data to preserve, migrate onto the new chunks, or
   discard — a data-lifecycle question, and the discard option is
   irreversible. Not urgent; the visible behavior is already honest.
-- **Gate revival entry behind a piece being in maintenance — blocked until
-  "maintenance" is an actual mode.** Agreed in principle with the user
-  (Pass 19 follow-up): the "Start revival" entry point should not be
-  offered while a piece is still being learned. Revival would become
-  reachable only once a piece is in maintenance; a piece finished away
-  from the app would be moved into maintenance manually in Settings, and
-  *that* transition would prompt the revival sequence — which is also what
-  would place it on the Master Agenda under Revival.
+- **Gate revival entry behind a piece being in maintenance — the practical
+  contradiction is resolved (Pass 83); the originally-envisioned mechanism
+  is not, and gating on the substitute has its own new gap.** Agreed in
+  principle with the user (Pass 19 follow-up): the "Start revival" entry
+  point should not be offered while a piece is still being learned.
+  Revival would become reachable only once a piece is in maintenance; a
+  piece finished away from the app would be moved into maintenance
+  manually in Settings, and *that* transition would prompt the revival
+  sequence — which is also what would place it on the Master Agenda under
+  Revival.
   - **Why it's wanted:** starting a revival mid-learning currently puts a
     piece in a half-state. Master Agenda drops its learning card (the
     piece moves to the Revival subtab, losing its day-by-day detail),
@@ -5700,33 +5777,71 @@ oversight to silently fix; surface it instead.
     (`src/lib/ladder.js`) computes "is every chunk at Holding" for real, no
     longer just prose (see
     [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)).
-    That resolves the *technical* blocker named here. What's still
-    missing, and still blocks this specific item: `isPieceLearned` is a
-    live derivation, not a first-class *persisted* piece state — nothing
-    writes a `piece.stage`/`piece.mode` field a Settings control could set
+    That resolves the *technical* blocker named here. Left unresolved by
+    Pass 39 itself: `isPieceLearned` is a live derivation, not a
+    first-class *persisted* piece state — nothing writes a
+    `piece.stage`/`piece.mode` field a Settings control could set
     manually, which the "a piece finished away from the app would be moved
     into maintenance manually in Settings" half of this design explicitly
-    needs. Wiring the gate itself, and that manual Settings control, were
-    not in scope for Pass 39 (which built the rollup for a different
-    reason — see [Scheduling](#scheduling) — not for this item) and remain
-    unbuilt. This is queued **behind** that remaining piece, not alongside
-    it.
-  - **Three existing behaviours it must reconcile, none of which are
-    oversights:**
-    1. The Wizard deliberately allows starting a piece *directly* in
-       revival, for pieces learned before the user ever had this app — see
-       the decision on that in [Revival](#revival) above. A strict gate
-       breaks that path; the manual-Settings-transition idea is the
-       proposed replacement for it, and needs to actually cover that case.
-    2. Auto-trigger 3 (60+ days since anything was logged,
-       `computeRevivalTriggers`) fires for a piece *abandoned* mid-learning
-       — precisely the state a gate would forbid. Either the trigger stops
-       firing there, or the gate admits an exception.
-    3. Auto-triggers 1 and 2 read run-through data (stop count, chunks
-       flagged lost), which implies some learning already happened but not
-       necessarily completion.
-  - **Not started.** Recorded so the gate is designed *with* the
-    maintenance-mode work rather than bolted on afterwards.
+    needs.
+  - **What Pass 83 actually did, and why it counts as resolving the
+    *contradiction* without building the *mechanism* above:** rather than
+    wait on a persisted `piece.stage` field, both "Start revival" buttons
+    and all three of `computeRevivalTriggers`' conditions were gated
+    directly on the already-existing `isPlanActuallyComplete(piece,
+    chunkSet, timeline)` live derivation (see the decision in
+    [Revival](#revival) above). For a piece that completes its plan the
+    normal way — every scheduled item logged at least once, or (minutes
+    mode) every chunk at Holding — this achieves exactly the stated goal
+    with zero new persisted state: revival becomes reachable automatically
+    once the piece is actually done, no manual Settings step required.
+    The "three existing behaviours to reconcile" below are resolved as a
+    result, not worked around:
+    1. The Wizard's direct-to-revival-at-creation path (pieces learned
+       before the user ever had this app — see the decision on that in
+       [Revival](#revival) above) sets `revival.active` immediately at
+       creation, so it never reaches the gated button at all — `OverviewTab`
+       only disables it while `!revivalActive`. Unaffected by construction,
+       not by a special-cased exception.
+    2. and 3. (auto-triggers 1-3 firing on a piece not actually
+       finished) — this was the exact contradiction Pass 83 fixed, and the
+       fix applies uniformly to all three conditions, not just the
+       staleness one originally named here.
+  - **The new gap this substitution creates, not previously anticipated:**
+    `isPlanActuallyComplete`'s `"days"`-mode branch requires every item in
+    `chunkSet.all` to have `doneDays.length > 0` — at least one *logged*
+    session each. A piece "finished away from the app" in the sense this
+    open question's own design paragraph describes — created as an
+    ordinary (non-revival) piece, then genuinely learned/known by the
+    player without every single chunk ever being logged in MeasureOne —
+    can never satisfy that, and so can never pass `isPlanActuallyComplete`,
+    and so its "Start revival" button now stays **permanently** disabled,
+    with no escape hatch, unless it happens to have been created directly
+    into revival at Setup (case 1 above) instead. This is a real
+    regression risk for that specific piece shape, not a hypothetical:
+    before Pass 83, such a piece's "Start revival" button was always
+    clickable; after, it may never become so. Not caught before shipping
+    because verification focused on reproducing and closing the original
+    P2 contradiction (an *unfinished, actively behind* piece wrongly
+    suggesting revival), not on this *finished-but-under-logged* piece
+    shape, which is the opposite failure direction. **Not fixed — surfaced
+    here during a docs-accuracy pass, not decided.** Options for a future
+    pass: a manual Settings "mark as learned"/"finished elsewhere" override
+    (closest to the originally-envisioned mechanism above), loosening
+    `isPlanActuallyComplete`'s `"days"`-mode criterion itself (risks
+    weakening what "the plan is actually finished" means everywhere else
+    that function is read — see
+    [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
+    for every other load-bearing caller), or accepting the gap as a known
+    edge case and directing such a user toward the Wizard's
+    direct-to-revival path instead (awkward for a piece that already
+    exists).
+  - **Still queued, unbuilt:** the manual Settings maintenance-transition
+    control itself, and therefore the "a piece finished away from the app
+    would prompt the revival sequence on that transition, which is also
+    what would place it on Master Agenda under Revival" half of the
+    original design. Nothing in Pass 83 built a persisted mode/stage field
+    or a Settings control for it.
 
 - **`piece.revival` is restored all-or-nothing on load, unlike
   `ladderConfig` — the same shape-gap that caused a documented P1 crash.**

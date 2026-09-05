@@ -268,10 +268,23 @@ zones or difficulty reassessment. **"This piece is learned" is now
 implemented, as of Pass 39** — `isPieceLearned(piece, chunkSet)`
 (`src/lib/ladder.js`) is a live derivation (every practice chunk's ladder
 `stage` at Holding), not a persisted field on `piece`, so there is still no
-first-class piece-level "learned" *state* to gate other features on (e.g.
-the still-unbuilt "gate revival entry behind maintenance" item — see
-[`docs/Decisions.md`](docs/Decisions.md#open-questions)). See
-[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
+first-class piece-level "learned" *state* to gate other features on. **As
+of Pass 83, "gate revival entry behind maintenance" no longer needs that
+persisted state to fix the actual problem it was raised for**: both "Start
+revival" buttons and all three of `computeRevivalTriggers`' conditions
+(`lib/revival.js`) are now gated on the already-existing live
+`isPlanActuallyComplete` derivation instead of a stored `piece.stage`
+field — see [`docs/Decisions.md`](docs/Decisions.md#revival). The original
+item's *other* half (a manual Settings control to move a piece "finished
+away from the app" into maintenance) is still unbuilt, and Pass 83's
+gate has a real consequence for exactly that piece: one whose plan was
+never actually tracked to completion in-app can never satisfy
+`isPlanActuallyComplete`, so its "Start revival" button stays permanently
+disabled unless it was created directly into revival at Setup — see
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
+still-open remainder of this item. See
+[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
+for the "learned" rollup itself.
 **Don't confuse this with Pass 58's `computeOverallConfidence`** (see the
 Roadmap section below) — that's a continuous, always-moving 0–100 stat
 built from `computeConfidence`, deliberately not the same question as
@@ -311,9 +324,13 @@ demote-and-pin mechanism under the label "Needs reinforcement," and resets
 `ladderConfig` is built too (Pass 17 — `LadderConfigEditor`, under
 SettingsTab's "Maintenance ladder" panel). Still not built: a
 first-class *persisted* "learned" piece state to gate other features on
-(the roll-up above is a live derivation, not a stored field — see
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
-"gate revival entry behind maintenance" item this still blocks), a second
+(the roll-up above is a live derivation, not a stored field) — **though as
+of Pass 83, "gate revival entry behind maintenance" no longer needs that
+field to fix the contradiction it was raised over**; see
+[`docs/Decisions.md`](docs/Decisions.md#revival) for what shipped instead
+and [`docs/Decisions.md`](docs/Decisions.md#open-questions) for what's
+still genuinely open (a manual Settings maintenance-transition, and the
+new gap that creates for a piece never fully logged in-app) — a second
 Tier 1 rung, and Stage 5 repertoire rotation.
 If you're about to touch scheduling, confidence,
 or the practice-logging UI, check
@@ -1015,3 +1032,50 @@ existed. See
 [`docs/Decisions.md`](docs/Decisions.md#scheduling) and
 [`docs/Decisions.md`](docs/Decisions.md#open-questions) for the full
 investigation trail on both.
+
+> Passes 76-82 (revival reassessment's difficulty-reassess button and
+> per-chunk assessment timer; Interleaved/revival-plan reassess buttons and
+> a cross-tab timer guard; a fix for Today's Practice showing the wrong
+> plan mid-revival; assorted revival/reassess copy fixes; small UI fixes
+> across FocusPanel, Week view, and Master Agenda; and a "Set new target
+> date" reschedule-dialog button) shipped and were committed before this
+> changelog was brought back up to date — see `git log` for their own
+> commit messages, which have the per-pass detail this file's format would
+> otherwise carry. Not backfilled here to avoid reconstructing history
+> from summary rather than from having actually done the work this
+> session.
+
+**Since Pass 83**, both "Start revival" buttons (`OverviewTab`'s title
+card and its own auto-trigger banner) are disabled, with an explanatory
+title, until the piece's plan is actually complete
+(`isPlanActuallyComplete`) — revival is for a piece already learned, not
+one still mid-learning. Reviewing that live surfaced a real contradiction:
+`computeRevivalTriggers`' three auto-trigger conditions (a rough
+run-through's stop count, a lost flag, 60+ days of silence) didn't check
+plan completion at all, so an unfinished piece could still show "this
+piece might be due for a revival" right next to its own now-disabled
+button. Fixed by gating all three conditions behind the same
+`planComplete` check (a single early return, not three separate guards,
+once it was pointed out mid-session that gating only the staleness
+condition — the literal first ask — left the other two just as capable of
+reproducing the same contradiction) — see
+[`docs/Decisions.md`](docs/Decisions.md#revival) and
+[`docs/Algorithms.md`](docs/Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83).
+
+A still-unfinished, quiet piece needs its own message instead of
+revival's: new `computeAbandonedPlanReminder` (`lib/scheduling.js`) fires
+for an active, non-revival piece with real practice history that's gone
+14+ days without a session, still with real work left in its plan —
+surfaced as an Overview banner ("No practice logged for '\<piece\>' in N
+days. Would you like to reschedule remaining practice items, or pause this
+plan?") with Reschedule and Pause actions, the latter a new `onPausePiece`
+prop wired to the existing pause handler. The displayed day count steps in
+flat weekly increments (14, 21, 28, ...) rather than creeping up daily.
+Master Agenda gets the equivalent surface for a piece whose entire plan
+calendar has run out with real work left, via a new banner built on that
+file's own pre-existing `needsReschedule` per-piece flag — kept
+independent of the pre-existing "N days behind schedule" banner rather
+than merged into it, since a stuck piece (see the reschedule open question
+above) can read `behindDaysCount === 0` and silently drop out of that
+banner's count. See
+[`docs/Algorithms.md`](docs/Algorithms.md#the-abandoned-plan-reminder-pass-83).

@@ -2391,6 +2391,7 @@ const CSS = `
 .ghost-btn:hover { border-color: var(--brass); background: rgba(185,138,62,0.06); }
 .ghost-btn.full { width: 100%; justify-content: center; }
 .ghost-btn.active { background: var(--brass); color: var(--white); border-color: var(--brass); }
+.ghost-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .danger-btn { display: inline-flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--brick); color: var(--brick); border-radius: 9px; padding: 9px 16px; font-size: 13.5px; font-weight: 600; }
 .danger-btn:hover:not(:disabled) { background: rgba(181,71,58,0.08); }

@@ -376,11 +376,11 @@ export function TodayTab({
 
       <div className="tab-header day-nav">
         <div>
-          <h1>Today's Practice</h1>
+          {isRealToday && <h1>Daily Practice</h1>}
           <p className="hero-sub">
             {pastPlan
               ? `Plan complete — maintenance, day ${elapsedDay}`
-              : `Day ${currentDay} of ${timeline.days.length}${!isRealToday ? " (viewing)" : ""}`}
+              : `Day ${currentDay} of ${timeline.days.length}`}
           </p>
         </div>
         <div className="day-nav-controls">

@@ -601,6 +601,36 @@ they were, uncommitted, for it to handle. See
 [CLAUDE.md](../CLAUDE.md)'s Pass 38 note for what that other session's
 changes turned out to be.
 
+## A blocking native dialog isn't a dead end in the automated browser — read the console instead
+
+The in-session browser tool suppresses native `window.alert`/`window.confirm`
+dialogs rather than letting them block the page — a click that triggers one
+returns immediately, with no visible change on screen and no dialog to
+interact with. That looks like the click did nothing. It didn't: the
+suppressed call, including its full argument string, is written to the
+console as a warning (`"Page dialog suppressed (alert): "<the exact
+text>"..."`). Reading it back via the console-messages tool confirms not
+just that the code path ran, but the literal string it produced — useful
+whenever the thing you're verifying is copy, not just a code path
+(confirming a renamed string reached every `window.alert` call site,
+for instance).
+
+Worked example (Pass 84): three `window.alert` calls (a single-piece
+reschedule dialog and both halves of a bulk "stuck pieces" message) had a
+tab name renamed inside their template strings. Rather than trusting the
+source-level rename, two of the three were fired for real — a throwaway
+piece was seeded directly into the exact state each alert's `if` branch
+requires (every practice chunk and connector logged, but the piece pushed
+behind schedule via a backdated `startDate`, cross-checked beforehand
+against the real `computeScheduleStatus`/`computeRemainingConnectorIds`/
+`isPlanActuallyComplete` functions to confirm the branch would actually
+fire) — and the console's suppressed-dialog warning was read back to
+confirm the new tab name was actually in the string the running app
+produced, not just in the source line that was edited. The console output
+is truncated past roughly 200 characters, so a long message needs its tail
+confirmed separately (here, by having already read the exact source line)
+rather than assumed complete from the console alone.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

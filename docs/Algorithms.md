@@ -458,7 +458,7 @@ free from this one change: `classifyDayCompletion`/`countBehindDays` stop
 reading a stale review as still-incomplete work, and the four rendering
 surfaces that already had an "explain what happened to this content"
 precedent (`isDayFullySwept`'s "Tasks rescheduled") each show a small note
-("Now due — see today" / "Already due — see Today's Practice") instead of
+("Now due — see today" / "Already due — see Daily Practice") instead of
 the item silently vanishing. Overview's first-week list needed no change
 at all — it already just sums `reviewChunkIds` into a measure count, so it
 automatically stops counting a stale review, just without an explicit note
@@ -1844,7 +1844,7 @@ reasons. Each id is resolved in this order:
    (see [Section run-throughs](#section-run-throughs)), so they are *never*
    in `chunks` on any piece. Labelled `Play through: <section> (mm. a–b)`,
    using the same `start`-sorted ordering `computeSectionRunThroughs` uses,
-   so positional names ("Section 2") match what Today's Practice showed when
+   so positional names ("Section 2") match what Daily Practice showed when
    the session was logged.
 4. **Anything else** — genuinely stale. Editing a piece's measures,
    sections, or difficulty regenerates chunk ids, so sessions logged before
@@ -1902,7 +1902,7 @@ Timeline tab's day-card grid reuses the exact same call for its own
 gray/check treatment (a small muted check mark next to the day number
 instead of Overview's strikethrough — a card grid reads differently than a
 text list, even though the classification underneath is identical); **since
-Pass 47**, Today's Practice's catch-up-button day search scans
+Pass 47**, Daily Practice's catch-up-button day search scans
 `timeline.days` with this same function to find the earliest genuinely
 `"behind"` day. Overview's "first week" list (grays a past day regardless
 of `"done"` / `"behind"` / `"empty"`, strikes it through only when

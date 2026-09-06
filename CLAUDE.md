@@ -1015,3 +1015,26 @@ existed. See
 [`docs/Decisions.md`](docs/Decisions.md#scheduling) and
 [`docs/Decisions.md`](docs/Decisions.md#open-questions) for the full
 investigation trail on both.
+
+**Since Pass 84**, the "today" tab is relabeled **Daily Practice**
+everywhere it's named — the sidebar nav item (`NAV_BASE`, `App.jsx`) and
+the three reschedule alert/confirm strings that reference it by name. Its
+own `<h1>` now renders only on the real current day (`isRealToday`,
+gating the element the same way Pass 68 gated `SectionRunThroughPanel`),
+disappearing entirely — no empty gap, nothing left in its place — when
+browsing to any other day via day-nav or Timeline; the "Day X of Y" line
+right below it lost its `" (viewing)"` suffix at the same time; that line
+alone still shows on a browsed day, just without the qualifier, since the
+heading's own absence already signals "not today." Every earlier "Since
+Pass N" entry above still says "Today's Practice" — that's accurate
+history (it was called that at the time), not a leftover to fix. Only
+`App.jsx`/`TodayTab.jsx` were touched by the pass itself; two same-session
+follow-ups renamed the remaining user-visible mentions the pass had left
+out of its stated scope — `DayChecklist.jsx`'s two "see Today's Practice"
+stale-review notes, then `ProgressTab.jsx`'s two "check items off in
+Today's Practice" empty-state hints (the second one found only while
+verifying the first) — so those all now say "Daily Practice" too. A
+handful of code-comment-only mentions (`PieceCheckRow.jsx`,
+`ScheduleBanner.jsx`, `lib/chunking.js`, `lib/history.js`,
+`lib/scheduling.js`) are still unrenamed — not user-visible, low priority,
+see [`docs/Decisions.md`](docs/Decisions.md#open-questions).

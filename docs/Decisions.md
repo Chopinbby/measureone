@@ -4424,6 +4424,58 @@ are untouched.**
   logic changed).
 - See [Algorithms.md](Algorithms.md#section-run-throughs).
 
+**Decision (Pass 84): the "today" tab is relabeled Daily Practice
+everywhere it's named in the app, and its own `<h1>` now renders only on
+the real current day.**
+
+- **Why:** a plain rename request, plus a request to stop the heading (and
+  its "(viewing)" qualifier) from implying the tab has a per-day identity
+  worth restating on every browsed day — the day-count line under it
+  already communicates which day is showing.
+- **Renamed:** `NAV_BASE`'s "today" entry label (`App.jsx`), and the three
+  `window.alert`/`window.confirm` strings that reference the tab by name
+  (the single-piece "nothing left to reschedule" alert, and both halves of
+  the bulk "Reschedule all" stuck-pieces message).
+- **Heading gating:** `TodayTab.jsx`'s `<h1>` is now `{isRealToday &&
+  <h1>Daily Practice</h1>}` — the same `isRealToday`-gates-a-display-element
+  idiom Pass 68 established for `SectionRunThroughPanel` (see
+  [UX-Principles.md](UX-Principles.md#a-browsed-day-is-not-now--live-unscoped-state-must-not-leak-onto-it)),
+  reused here for a plain heading rather than a live due-status computation.
+  The `" (viewing)"` suffix on the "Day X of Y" line was removed at the same
+  time — that line still renders on every day, real-today or browsed,
+  just without the now-redundant qualifier (the heading's own absence
+  already signals "not today").
+- **Deliberately not touched:** anything that determines `isRealToday`
+  itself, and every other tab's own heading behavior — this pass only
+  changed Daily Practice's own header.
+- **Verified:** manually in the browser with a throwaway test piece — sidebar
+  reads "Daily Practice"; the heading shows on real today and disappears
+  entirely (no gap, no leftover text) when browsing to another day via
+  day-nav or Timeline; "Day X of Y" displays correctly, unqualified, on
+  both. The two reschedule alert paths were fired live (not just read from
+  source) by seeding a test piece into a "stuck" state — every practice
+  chunk and transition logged, but pushed behind schedule via a backdated
+  `startDate` — and reading the resulting `window.alert` calls off the
+  console, since native dialogs are suppressed in the automated browser;
+  see [AI-GUIDELINES.md](AI-GUIDELINES.md) for that technique. `npm test`:
+  592/592.
+- **Same-session follow-up, once a critical review flagged it:**
+  `DayChecklist.jsx` carried two literal microcopy strings ("see Today's
+  Practice") the pass itself had left out of its stated Touches list — a
+  real, live inconsistency between the tab's name everywhere else and
+  this specific line of copy, not caught until a skeptical second pass
+  over the diff asked what was still open. Fixed the same way as the rest
+  of the rename (find-and-replace, no logic touched); re-verified `npm
+  test`: 592/592 (unchanged, since this is component text with no `lib/`
+  logic behind it — no test harness exists for component rendering, see
+  [AI-GUIDELINES.md](AI-GUIDELINES.md)). **Found while verifying this
+  follow-up, flagged rather than folded in unprompted, then fixed once
+  asked for explicitly:** `ProgressTab.jsx` had two more "check items off
+  in Today's Practice" lines, on the Outcome-breakdown and
+  Recent-practice-history empty states — now also renamed, verified live
+  against a fresh piece's actual empty state (not just a compiled-output
+  check) — see [Open questions](#open-questions) below.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as
@@ -6123,3 +6175,29 @@ oversight to silently fix; surface it instead.
   - See [Algorithms.md](Algorithms.md#rescheduling) for the mechanism and
     [Scheduling](#scheduling) (Pass 75 decision) for where this was first
     scoped out.
+- ~~`DayChecklist.jsx` still says "Today's Practice" in two places, even
+  though Pass 84 renamed the tab to Daily Practice everywhere else.~~
+  **Resolved, same session.** Both lines ("…now tracked as due — see
+  Today's Practice" and "Already due — see Today's Practice") now read
+  "Daily Practice" — see the Pass 84 entry above.
+- ~~`ProgressTab.jsx` has two more leftover "Today's Practice" mentions,
+  found while fixing the `DayChecklist.jsx` pair above.~~ **Resolved, same
+  session.** Both instances of the hint line ("Nothing logged yet — check
+  items off in Today's Practice.") on the Outcome-breakdown and
+  Recent-practice-history empty states now read "Daily Practice." Verified
+  live in the browser — created a fresh piece with zero logged sessions
+  (the exact empty state that renders this line) and confirmed both panels
+  render the new wording, not just that the edit compiled cleanly.
+  **Still not renamed, lower priority since none of these are
+  user-visible:** a handful of code-comment-only "Today's Practice"
+  mentions remain in `PieceCheckRow.jsx`, `ScheduleBanner.jsx`,
+  `lib/chunking.js`, `lib/history.js`, and `lib/scheduling.js` — worth a
+  sweep sometime, not urgent.
+- **`TodayTab.jsx`'s `<h1>` now renders on no day at all when browsing
+  away from real "today"** (Pass 84) — the page has zero top-level
+  headings in that state. Nobody asked for a replacement and nothing
+  visibly breaks, but this is a minor semantic/accessibility gap (a page
+  should generally carry exactly one `<h1>`) worth a deliberate call
+  later: leave it as-is permanently, or give a browsed day some lightweight
+  heading of its own (e.g. "Day N" itself, or the piece name) instead of
+  none. Not fixed — flagged only.

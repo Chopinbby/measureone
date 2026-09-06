@@ -71,7 +71,7 @@ const NAV_BASE = [
   { key: "overview", label: "Piece Overview", icon: LayoutGrid },
   { key: "timeline", label: "Timeline", icon: CalendarDays },
   { key: "map", label: "Piece Map", icon: Music2 },
-  { key: "today", label: "Today's Practice", icon: ListChecks },
+  { key: "today", label: "Daily Practice", icon: ListChecks },
   { key: "progress", label: "Progress", icon: LineChart },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
@@ -1360,7 +1360,7 @@ export default function App() {
       // this can still correctly stay silent once the plan is truly done.
       if (!isPlanActuallyComplete(piece, chunkSet, timeline)) {
         window.alert(
-          "Every practice chunk has already been introduced — there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"All Tasks\" on Today's Practice to find it."
+          "Every practice chunk has already been introduced — there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"All Tasks\" on Daily Practice to find it."
         );
       }
       return;
@@ -1492,7 +1492,7 @@ export default function App() {
       // situation.
       if (stuck.length) {
         window.alert(
-          `${stuck.length} piece${stuck.length === 1 ? " is" : "s are"} behind schedule (${stuck.map(stuckNameOf).join(", ")}), but ${stuck.length === 1 ? "it has" : "they have"} no unstarted material left to reschedule — what's stuck is a transition, focus block, or review waiting to be logged instead. Check "All Tasks" on ${stuck.length === 1 ? "its" : "each"} Today's Practice to find it.`
+          `${stuck.length} piece${stuck.length === 1 ? " is" : "s are"} behind schedule (${stuck.map(stuckNameOf).join(", ")}), but ${stuck.length === 1 ? "it has" : "they have"} no unstarted material left to reschedule — what's stuck is a transition, focus block, or review waiting to be logged instead. Check "All Tasks" on ${stuck.length === 1 ? "its" : "each"} Daily Practice to find it.`
         );
       }
       return;
@@ -1529,7 +1529,7 @@ export default function App() {
     // count this dialog is about to act on never silently diverges from
     // the count that panel just showed.
     const stuckNote = stuck.length
-      ? `\n\n${stuck.length === 1 ? "" : `${stuck.length} more — `}${stuck.map(stuckNameOf).join(", ")}${stuck.length === 1 ? " is" : " are"} also behind schedule but ${stuck.length === 1 ? "isn't" : "aren't"} included here — ${stuck.length === 1 ? "it has" : "they have"} nothing unstarted left to reschedule. What's stuck ${stuck.length === 1 ? "there is" : "there are"} a transition, focus block, or review waiting to be logged instead — check "All Tasks" on ${stuck.length === 1 ? "its" : "each of their"} Today's Practice.`
+      ? `\n\n${stuck.length === 1 ? "" : `${stuck.length} more — `}${stuck.map(stuckNameOf).join(", ")}${stuck.length === 1 ? " is" : " are"} also behind schedule but ${stuck.length === 1 ? "isn't" : "aren't"} included here — ${stuck.length === 1 ? "it has" : "they have"} nothing unstarted left to reschedule. What's stuck ${stuck.length === 1 ? "there is" : "there are"} a transition, focus block, or review waiting to be logged instead — check "All Tasks" on ${stuck.length === 1 ? "its" : "each of their"} Daily Practice.`
       : "";
 
     // Named per what's actually moving, same as the single-piece dialog —

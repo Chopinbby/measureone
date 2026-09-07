@@ -354,6 +354,35 @@ describe("Pass 45 — classifyDayCompletion (per-day completion, for Overview's 
     const day = { dayNumber: 2, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
     assert.equal(classifyDayCompletion(day, piece, 4), "behind");
   });
+
+  // Once-open question (docs/Decisions.md#scheduling), resolved on direct
+  // request: logging a consolidation day's whole-piece run-through
+  // satisfies that day's schedule outright, even though it never writes
+  // each individual chunk's own doneDays — only the synthetic
+  // "__consolidation__" progress entry (handleLogRunThrough, App.jsx).
+  test("[fix] a consolidation day is 'done' once '__consolidation__' logs that exact day, even with every individual chunk still untouched", () => {
+    const piece = basePiece({ progress: { __consolidation__: { doneDays: [2] } } });
+    const day = { dayNumber: 2, type: "consolidation", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1", "c2", "c3"] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "done");
+  });
+
+  test("[fix] a consolidation day stays 'behind' when '__consolidation__' was logged on a different day", () => {
+    const piece = basePiece({ progress: { __consolidation__: { doneDays: [3] } } });
+    const day = { dayNumber: 2, type: "consolidation", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1", "c2", "c3"] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "behind");
+  });
+
+  test("[fix] a consolidation day with no '__consolidation__' entry at all is 'behind', not 'empty' (reviewChunkIds is never actually empty for one)", () => {
+    const piece = basePiece({ progress: {} });
+    const day = { dayNumber: 2, type: "consolidation", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1", "c2", "c3"] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "behind");
+  });
+
+  test("an ordinary (non-consolidation) day is unaffected by the consolidation branch — still judged per-chunk", () => {
+    const piece = basePiece({ progress: { __consolidation__: { doneDays: [2] }, c1: { doneDays: [] } } });
+    const day = { dayNumber: 2, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayCompletion(day, piece, 4), "behind", "an unrelated logged '__consolidation__' entry must not paper over a real ordinary day's incomplete chunk");
+  });
 });
 
 describe("Pass 70 — countBehindDays (day-count sibling to computeScheduleStatus's chunk-count missedCount)", () => {
@@ -1478,6 +1507,44 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
     const plans = planRescheduleForPieces({ finishedLongAgo });
     assert.equal(plans.length, 1, "no longer excluded — real work outstanding means it belongs in the bulk reschedule");
     assert.equal(plans[0].pieceId, "finishedLongAgo");
+  });
+
+  // A once-open question in docs/Decisions.md#open-questions, closed here:
+  // a piece that already went through the OLD "reschedule into current plan
+  // days" button while its plan was already fully elapsed used to be able
+  // to permanently drop out of "Reschedule all" — that button crams every
+  // remaining chunk onto the plan's last day (asOfDay clamped to
+  // timeline.days.length), and once no session gets logged after that, the
+  // old currentDay-only cutoff could never again see that last day as
+  // "behind," no matter how much more real time passed. `eligiblePieceContext`'s
+  // cutoffDay (Pass 70) turns out to already fix this — bumping the cutoff
+  // one past the plan's last day once the piece is genuinely past its own
+  // calendar makes the crammed-in chunks register as missed again — but
+  // nothing pinned this exact shape down as a regression test until now, so
+  // it was never cross-referenced back to close the open question.
+  // Confirmed by reproduction: reverting cutoffDay to the bare asOfDay
+  // clamp makes this test fail (plans.length becomes 0).
+  test("[regression] a piece already crammed onto its plan's last day by an old reschedule, still untouched long after, is not permanently dropped from 'Reschedule all'", () => {
+    const piece0 = basePiece({ name: "StuckPiece", daysToLearn: 10, startDate: startedDaysAgo(200) });
+    const chunkSet0 = generateAllChunks(piece0);
+    const timeline0 = computeTimeline(piece0, chunkSet0);
+
+    // Mimic the old "reschedule into current plan days" button: every
+    // remaining chunk crammed onto the plan's last day, no daysToLearn
+    // change, nothing logged since.
+    const piece = {
+      ...piece0,
+      rescheduleMarker: {
+        asOfDay: timeline0.days.length,
+        remainingChunkOrder: chunkSet0.practiceChunks.map((c) => c.id),
+        remainingConnectorIds: [],
+        previous: null,
+      },
+    };
+
+    const plans = planRescheduleForPieces({ stuck: piece });
+    assert.equal(plans.length, 1, "still real, untouched work — must not silently vanish from the bulk reschedule");
+    assert.ok(plans[0].missedCount > 0, "the crammed-in chunks must register as missed, not stuck at 0 forever");
   });
 
   test("[fix] a days-mode piece already past its own target date gets an `extend` patch, not just a repack", () => {

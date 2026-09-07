@@ -3,7 +3,10 @@ import { Trash2, Plus } from "lucide-react";
 export function RecordingsEditor({ draft, set }) {
   const addRecording = () =>
     set({
-      recordings: [...(draft.recordings || []), { id: `rec${Date.now()}`, label: "", url: "" }],
+      // Date.now() alone would collide if two rows were ever added in the
+      // same millisecond (docs/Decisions.md#open-questions) — same fix
+      // App.jsx's import-merge id and lib/works.js's workId already use.
+      recordings: [...(draft.recordings || []), { id: `rec${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, label: "", url: "" }],
     });
   const updateRecording = (i, patch) =>
     set({ recordings: draft.recordings.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) });

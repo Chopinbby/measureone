@@ -12,7 +12,10 @@ import { Trash2, Plus } from "lucide-react";
 export function DocumentsEditor({ draft, set }) {
   const addDocument = () =>
     set({
-      documents: [...(draft.documents || []), { id: `doc${Date.now()}`, label: "", url: "" }],
+      // Date.now() alone would collide if two rows were ever added in the
+      // same millisecond (docs/Decisions.md#open-questions) — same fix
+      // App.jsx's import-merge id and lib/works.js's workId already use.
+      documents: [...(draft.documents || []), { id: `doc${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, label: "", url: "" }],
     });
   const updateDocument = (i, patch) =>
     set({ documents: draft.documents.map((d, idx) => (idx === i ? { ...d, ...patch } : d)) });

@@ -71,6 +71,30 @@ const DEFAULT_LADDER_CONFIG = {
 // `ladderConfig.bpmSteps.pass/softMiss/fail` unconditionally, so a missing
 // `bpmSteps` throws on the very next logged session — a real crash on
 // real already-saved data, not just a theoretical gap.
+const DEFAULT_REVIVAL = {
+  active: false,
+  startedAt: null,
+  purpose: null,
+  tempoLadderStartFraction: 0.6,
+  reassessmentComplete: false,
+  plan: null,
+};
+
+// Same field-by-field reasoning as mergeLadderConfig below, applied to
+// piece.revival — `piece.revival || DEFAULT_REVIVAL` only backfills when
+// the whole object is missing, so a piece carrying a *partial* revival
+// object (a hand-edited backup, or one written by a version predating a
+// field like tempoLadderStartFraction, added after revival's initial
+// build) would otherwise keep that incomplete shape forever. Every current
+// reader already defends individually (`?? 0.6`, `revival.plan &&`), so
+// this isn't closing a live crash the way mergeLadderConfig's bpmSteps fix
+// was — it's pre-empting the same class of gap before a future reader
+// forgets to guard.
+export function mergeRevival(existing) {
+  if (!existing) return { ...DEFAULT_REVIVAL };
+  return { ...DEFAULT_REVIVAL, ...existing };
+}
+
 export function mergeLadderConfig(existing) {
   if (!existing) return DEFAULT_LADDER_CONFIG;
   return {
@@ -306,14 +330,7 @@ export function validateAndMigratePiece(piece) {
     // recordings above — see MERGE_FIELDS_HANDLED_SEPARATELY and the
     // mergeById call in mergeImportedPiece below.
     documents: piece.documents || [],
-    revival: piece.revival || {
-      active: false,
-      startedAt: null,
-      purpose: null,
-      tempoLadderStartFraction: 0.6,
-      reassessmentComplete: false,
-      plan: null,
-    },
+    revival: mergeRevival(piece.revival),
     memoryAnchors: piece.memoryAnchors || {},
     // Overall-piece confidence manual override (Pass 58) — same
     // undefined-and-null-both-mean-"auto" escape-hatch shape as each

@@ -189,7 +189,11 @@ export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft
       <div className="panel"><h3>Documents</h3><DocumentsEditor draft={editDraft} set={setEditDraft} /></div>
       <div className="edit-actions">
         <button className="ghost-btn" onClick={onDiscard}>Discard changes</button>
-        <button className="primary-btn" disabled={multiPart && !editDraft.workName.trim()} onClick={() => onSave(editDraft)}>
+        <button
+          className="primary-btn"
+          disabled={!(editDraft.name.trim().length > 0 && editDraft.totalMeasures > 0) || (multiPart && !editDraft.workName.trim())}
+          onClick={() => onSave(editDraft)}
+        >
           <Check size={15} /> Save changes
         </button>
       </div>

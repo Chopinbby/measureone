@@ -5642,52 +5642,60 @@ explicit same-session follow-up once asked for directly.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
-- **A piece that's already been rescheduled once via "cram it into what's
+- ~~**A piece that's already been rescheduled once via "cram it into what's
   left" while its own plan was already fully elapsed can permanently stop
   being recognized as behind schedule — and "Reschedule all" then silently
-  drops it forever, even though nothing about it ever got fixed.** Found
-  (not caused) while verifying the Pass 39 follow-up bulk-extend fix above,
-  by testing against pieces that had genuinely been through the *old*
-  "reschedule into current plan days" button while already past their own
-  plan. Root cause: that button packs every remaining chunk onto what's
-  effectively a single day (`asOfDay`, clamped to the plan's last day, since
-  `availableDays` floors at 1 once you're past the plan). From then on,
+  drops it forever, even though nothing about it ever got fixed.**~~
+  **Resolved — turns out already fixed by Pass 70, never cross-referenced
+  back to close this entry until a docs-accuracy pass caught the drift.**
+  Originally found (not caused) while verifying the Pass 39 follow-up
+  bulk-extend fix, by testing against pieces that had genuinely been
+  through the *old* "reschedule into current plan days" button while
+  already past their own plan. Root cause as originally diagnosed: that
+  button packs every remaining chunk onto what's effectively a single day
+  (`asOfDay`, clamped to the plan's last day), after which
   `computeScheduleStatus`'s "is this missed" test —
-  `timeline.introducedDay[id] < currentDay` — compares that same clamped
-  day to itself: `currentDay` (`getCurrentDay`, also clamped to the plan's
-  length) can never exceed it, so the comparison is never strictly true,
-  ever again, no matter how many more real days pass. `missedCount` reads
-  `0` permanently. `planRescheduleForPieces` requires `missedCount > 0` to
-  include a piece, so the piece silently stops qualifying for "Reschedule
-  all" from that point on — invisible to the bulk button, though still
-  fixable by opening the piece directly and clicking its own Reschedule
-  button (that path checks `remainingChunkIds.length`, built from
-  `doneDays`, not the broken `introducedDay`/`currentDay` comparison, so
-  it's unaffected).
-  - **Two-part fix proposed to the user; only the first part was asked
-    for.** (1) Stop the trap from being created going forward — the
-    single-piece dialog no longer offers "reschedule into current plan
-    days" once a piece's target date has already fully passed (**built,
-    see the decision above**), so no *new* piece can fall into this state
-    via that path again. (2) Make "Reschedule all" itself resilient to a
-    piece already stuck this way — for a piece whose plan has already
-    fully elapsed, trust the simpler, unbreakable "real work is still
-    untouched" signal (`remainingChunkIds.length > 0`, from `doneDays`)
-    instead of the day-by-day comparison that can get permanently stuck at
-    zero, rather than requiring `missedCount > 0` too. **The user chose
-    part (1) only** ("just 1") — part (2) is unbuilt and this issue stays
-    open until it (or some other repair) lands.
-  - **Still reachable today** by any piece that went through the old
-    "reschedule into current plan days" button while already past its own
-    plan, before this session's part-(1) fix existed — including, found
-    during this same testing, real pieces already sitting in this
-    session's own local test data. Not urgent (the single-piece escape
-    hatch still works), but a piece stuck this way will silently never
-    reappear in a bulk reschedule until a human notices and opens it
-    directly.
+  `timeline.introducedDay[id] < currentDay` — compared that same clamped
+  day to itself forever, so `missedCount` read `0` permanently and
+  `planRescheduleForPieces` (which requires `missedCount > 0`) silently
+  stopped including the piece.
+  - **At the time, the user chose only "stop the trap from being created
+    going forward"** (the single-piece dialog no longer offers "reschedule
+    into current plan days" once a target date has fully passed) and left
+    "make Reschedule all itself resilient to a piece already stuck this
+    way" unbuilt, with two candidate designs on the table: switch the
+    eligibility check to the simpler `remainingChunkIds.length > 0` signal,
+    or repair `missedCount` itself.
+  - **What actually shipped, one session later and for an unrelated
+    reason:** Pass 70 (see [Scheduling](#scheduling) above), reworking
+    "N chunks behind" into "N days behind," introduced
+    `eligiblePieceContext`'s `cutoffDay` — bumping the eligibility cutoff
+    one day past the plan's last day specifically once the piece is
+    genuinely past its own calendar (`elapsedDay(piece) >
+    timeline.days.length`). That's the second candidate design: it repairs
+    `missedCount` at the source rather than switching what
+    `planRescheduleForPieces` checks, so `missedCount`'s other consumers
+    (the furthest-behind-first sort, the per-piece display) keep working
+    correctly too, not just the boolean inclusion check. Nothing about
+    Pass 70's own stated scope named this open question, so it was never
+    linked back here.
+  - **Confirmed by direct reproduction, not just re-reading the code:**
+    rebuilt the exact scenario (a piece holding an old-style cram marker,
+    200 days past a 10-day plan, nothing logged since) — with `cutoffDay`
+    reverted to the bare `asOfDay` clamp, `planRescheduleForPieces` excludes
+    it (`plans.length: 0`, reproducing the original bug exactly); with the
+    real code restored, it's included with a genuine nonzero `missedCount`.
+    Pinned down as a permanent regression test
+    (`test/scheduling.test.mjs`, "a piece already crammed onto its plan's
+    last day…") that didn't exist before this pass, which is exactly why
+    the fix landing in Pass 70 was never connected back to closing this
+    entry — nothing forced the connection to be checked.
+  - **Nothing to migrate:** `eligiblePieceContext` is recomputed fresh on
+    every read, never cached — a real piece already sitting in this state
+    from before Pass 70 shipped self-heals the next time it's evaluated,
+    no data fix required.
   - See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
-    for `computeScheduleStatus`, and the three decisions immediately above
-    this section for the fixes that did ship this session.
+    for `computeScheduleStatus`.
 - ~~Should Revival's "performance tempo override" field move into Settings
   (reusing the piece's existing target tempo) instead of living at the top
   of the Revival tab, and should "tempo ladder starting point" move to
@@ -5702,19 +5710,22 @@ oversight to silently fix; surface it instead.
   setup time) and stays editable afterward from `RevivalTab`'s "Revival
   settings" panel — see the Pass 35 decision above for the mechanics, and
   [Algorithms.md](Algorithms.md#revival) for how the field is read.
-- **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
-  `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
-  resolution, so two rows added in the same millisecond would share an id.**
-  Surfaced in code review of Pass 24 (which copied the pattern faithfully
-  from the pre-existing `RecordingsEditor`, so this isn't new to that pass —
-  just now in two places instead of one). Not currently reachable through
-  normal clicking (the two add-buttons aren't rapid-fire in practice), and
-  `updateDocument`/`removeDocument`/their recordings equivalents operate by
-  array index, not by matching id, so a collision wouldn't corrupt data —
-  the only consequence would be React's `key` prop misrendering the two
-  rows if it ever happened. Low severity, narrow trigger; not fixed.
-  Worth switching to a proper unique-id generator if a third list ever
-  copies this pattern, rather than propagating it a third time.
+- ~~**`RecordingsEditor` and `DocumentsEditor` generate each new row's id
+  from `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
+  resolution, so two rows added in the same millisecond would share an
+  id.**~~ **Resolved.** Both now append a random suffix —
+  `` `rec${Date.now()}_${Math.random().toString(36).slice(2, 8)}` `` /
+  the `doc` equivalent — the same pattern already used elsewhere in this
+  codebase for exactly this concern (`App.jsx`'s import-merge id,
+  `lib/works.js`'s `workId`). No lib-level regression test: both editors
+  are `components/`, which the test suite can't reach (CLAUDE.md), and the
+  change itself is a one-line id-format swap with no branching logic to
+  exercise. **Not fixed as part of this pass, left as a known related
+  gap:** `SectionsEditor`'s `addSection` (`` `s${Date.now()}` ``) and
+  `BpmZonesEditor`'s single-add `addZone` (`` `bz${Date.now()}` `` — its
+  own bulk-add path already appends an index suffix, per that file's own
+  comment) share the identical narrow collision risk and weren't in this
+  open question's original scope, so weren't swept in with it.
 - **Should a piece in maintenance get a genuinely forward-looking week, and
   therefore the due-in-N-days query that was scoped out?** Surfaced by
   Pass 22's week view (see the two decisions in [UX](#ux) above). Inside a
@@ -5843,25 +5854,23 @@ oversight to silently fix; surface it instead.
     original design. Nothing in Pass 83 built a persisted mode/stage field
     or a Settings control for it.
 
-- **`piece.revival` is restored all-or-nothing on load, unlike
-  `ladderConfig` — the same shape-gap that caused a documented P1 crash.**
-  `validateAndMigratePiece` (`lib/storage.js`) does
-  `revival: piece.revival || { …defaults }`, so a saved piece carrying a
-  *partial* revival object never gets its missing sub-fields filled in.
-  This is precisely the pattern `mergeLadderConfig` exists to fix for
-  ladder settings ("a missing `bpmSteps` throws on the very next logged
-  session — a real crash on real already-saved data"), and revival was
-  never given the same field-by-field treatment. Surfaced in review of the
-  Pass 19 follow-up above, because that change made `isInRevival` (and
-  therefore `computeDueReviews`) read `revival.active` where the
-  maintenance query previously read `revival.startedAt` — so for a piece
-  carrying only one of the two, suppression behaviour changes. Normal use
-  never produces that shape (both fields are set and cleared together), so
-  this is reachable only via externally-produced data: a hand-edited
-  backup, or a piece written by an app version predating one of the
-  fields. **Not fixed** — it's migration code touching every saved piece,
-  and the safe fix (mirror `mergeLadderConfig`) deserves its own pass with
-  its own verification rather than being folded into a UI change.
+- ~~**`piece.revival` is restored all-or-nothing on load, unlike
+  `ladderConfig` — the same shape-gap that caused a documented P1
+  crash.**~~ **Resolved.** `mergeRevival` (`lib/storage.js`) now merges
+  `DEFAULT_REVIVAL` into whatever a piece already has field by field, the
+  same way `mergeLadderConfig` already did for ladder settings, so a piece
+  carrying a *partial* revival object (a hand-edited backup, or one saved
+  by a version predating a field like `tempoLadderStartFraction`) no
+  longer keeps that incomplete shape forever. Worth noting for anyone
+  reading the original report literally: unlike `ladderConfig`'s
+  `bpmSteps`, nothing currently reads a revival field unconditionally
+  (every call site already falls back — `?? 0.6`, `revival.plan &&`), so
+  this was never a live crash risk the way the ladder-config gap was —
+  it's a pre-emptive fix for the same class of gap, not a rescue from an
+  active bug. Verified with three new regression tests
+  (`test/storage.test.mjs`, "mergeRevival" describe block), including one
+  confirmed to fail against the pre-fix `piece.revival || {…defaults}`
+  code before the fix was applied.
 - **Graduation's tempo-floor check uses `practiceBPM` from *before* the
   current session, even when that same session's demonstrated-tempo
   override (see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder))
@@ -5946,18 +5955,20 @@ oversight to silently fix; surface it instead.
   user, who judged it not worth chasing given how narrow the trigger is.
   Worth unifying if `preferByRecency` and `diffImportedPiece` are ever
   revisited together, rather than independently again.
-- **`hasClimbingTempo` (Pass 30) can silently miss a real climb if a
-  session's `bpm` is `NaN`.** Found in critical review after the pass
-  shipped, not fixed. The function's `typeof s.bpm === "number"` guard lets
-  `NaN` through (`typeof NaN` really is `"number"`), and `NaN` comparisons
-  are always `false` — so a `NaN` landing at the start or end of the
-  trailing window can neither register as a dip nor contribute to a real
-  rise, silently suppressing the marker rather than showing a false
-  positive. Not reachable through the app's own UI (`NumberInput` never
-  commits a non-numeric BPM), only through hand-edited or corrupted
-  `localStorage` data. Wrong-but-conservative, not wrong-and-misleading; not
-  urgent, but worth a defensive `Number.isFinite` check if this function is
-  touched again.
+- ~~**`hasClimbingTempo` (Pass 30) can silently miss a real climb if a
+  session's `bpm` is `NaN`.**~~ **Resolved.** `hasClimbingTempo`
+  (`lib/confidence.js`) now filters on `Number.isFinite(s.bpm)` instead of
+  `typeof s.bpm === "number"`, which let `NaN` through (`typeof NaN` really
+  is `"number"`). Verified with a new regression test
+  (`test/confidence.test.mjs`) placing a `NaN` at the start of the trailing
+  window specifically — that's the shape that actually suppressed a real
+  climb (`recent[last].bpm - recent[0].bpm` becomes `NaN`, always failing
+  the `>= MIN_RISE_BPM` check, even with genuine rising BPMs elsewhere in
+  the window); confirmed to fail against the pre-fix `typeof` guard, pass
+  with `Number.isFinite`. Still only reachable via hand-edited/corrupted
+  data, never through the app's own UI (`NumberInput` never commits a
+  non-numeric BPM) — low severity, but cheap and safe to close outright
+  rather than leave flagged.
 - **The tempo-climbing marker (Pass 30) doesn't know about a pending
   provisional session (Pass 29 follow-up) on the same chunk.** Found in the
   same review. `hasClimbingTempo` reads `loggedSessions`, which correctly
@@ -5979,20 +5990,27 @@ oversight to silently fix; surface it instead.
   session history. Not a correctness question, a performance one — worth
   measuring if it's ever revisited, but not urgent enough to have gated
   landing the correctness fix itself.
-- **Settings' "Save changes" isn't gated on piece name or total measures
+- ~~**Settings' "Save changes" isn't gated on piece name or total measures
   being present/non-zero, the way the Wizard's "Next" already was before
-  this session and still is.** Surfaced while adding the work-title
-  requirement to both surfaces (see
-  [Multi-movement works](#multi-movement-works)) — that fix only closed the
-  one gap it was asked to close (a blank work title while "Multiple
-  movements" is selected); it didn't touch, and this session wasn't asked
-  to touch, whether Settings should also require the fields the Wizard
-  already treats as mandatory. Not urgent (clearing a piece's name or
-  measures in Settings isn't a normal editing action, and nothing currently
-  demonstrates a user actually hitting this), but a real, asymmetric gap
-  between the two surfaces that
-  [UX-Principles.md](UX-Principles.md#editors-are-shared-so-the-ui-cant-drift-from-itself)
-  says to treat as a bug, not a stylistic choice. Not started.
+  this session and still is.**~~ **Resolved.** `SettingsTab`'s "Save
+  changes" button now disables on the same condition Wizard's step-0
+  `canAdvance()` already used —
+  `!(editDraft.name.trim().length > 0 && editDraft.totalMeasures > 0)` —
+  alongside the pre-existing multi-movement work-title check, matching
+  [UX-Principles.md](UX-Principles.md#editors-are-shared-so-the-ui-cant-drift-from-itself).
+  Verified live in the browser: clearing the piece name disables Save
+  changes; restoring it re-enables. The `totalMeasures` half of the
+  condition mirrors the Wizard's but isn't independently reachable through
+  either surface's UI — `NumberInput`'s own `commit()` (`components/
+  NumberInput.jsx`) refuses to commit an empty/`NaN` value at all, snapping
+  back to the last committed number instead — so it's a safety net for
+  parity with the Wizard's condition, not a gap that was ever actually
+  clickable. No lib-level regression test: this is JSX gating logic living
+  directly in the component's `disabled` prop, the same place the Wizard's
+  equivalent check already lives, and CLAUDE.md's testing rule
+  ("logic that needs a regression test belongs in `src/lib/`") reserves the
+  test suite for the lib layer since there's no rendering harness for
+  `components/`.
 - **Should Archive have its own path for a piece the learner has genuinely
   abandoned mid-plan, distinct from "the plan is done"?** Raised directly
   by the user while gating Archive behind `isPlanActuallyComplete` (see
@@ -6016,17 +6034,31 @@ oversight to silently fix; surface it instead.
   surfaces should suppress itself during revival, or whether all of them
   referencing the original plan is actually fine since revival doesn't
   replace that history. Not started.
-- **A consolidation day's logged run-through doesn't satisfy
-  `classifyDayCompletion`'s (Pass 45) per-chunk check.** The consolidation
-  day's `reviewChunkIds` lists every practice chunk, but
-  `handleLogRunThrough` only writes the synthetic `"__consolidation__"`
-  progress entry, never each chunk's own `doneDays` — so a logged
-  consolidation day still classifies as "behind" on Overview's first-week
-  list, and, **since Pass 46, on Timeline too.** See
+- ~~**A consolidation day's logged run-through doesn't satisfy
+  `classifyDayCompletion`'s (Pass 45) per-chunk check.**~~ **Resolved, the
+  user's direct call:** logging a consolidation day's run-through now
+  satisfies that day's schedule outright. `classifyDayCompletion`
+  special-cases `day.type === "consolidation"` to check
+  `piece.progress["__consolidation__"].doneDays` for that exact day number,
+  instead of the per-chunk check every other day type still uses (the
+  consolidation day's `reviewChunkIds` — every practice chunk, regardless
+  of ladder state — is otherwise unrelated to what `handleLogRunThrough`
+  actually writes). Applies for free everywhere `classifyDayCompletion` is
+  read (Overview's first-week list, Timeline, Week view, Master Agenda) —
+  one shared function, no per-surface change needed. Verified with 4 new
+  regression tests (`test/scheduling.test.mjs`), one of which is confirmed
+  to fail against the pre-fix code. **Not independently confirmed live in
+  the browser**, on top of the lib-level tests: reproducing a genuinely
+  "past" consolidation day requires either a piece already through at
+  least one reschedule that extended `daysToLearn` past its original
+  consolidation day (so that day is no longer the timeline's literal last
+  day — the only way it can register as "past" the clamped `currentDay`
+  at all, since a fresh, never-extended timeline's consolidation day is by
+  construction always the last day, and `getCurrentDay` never clamps past
+  `timeline.days.length`), which is a materially bigger setup than this fix
+  warranted on its own. See
   [Algorithms.md](Algorithms.md#behind-schedule-detection) and
-  [UX](#ux). Fixing it means deciding whether `classifyDayCompletion`
-  should also accept `"__consolidation__"`'s `doneDays` as satisfying a
-  consolidation day's practice-chunk ids — not decided. Not started.
+  [UX](#ux).
 - **Should section-pair run-throughs (`kind: "section-transition"`,
   "Sections combined") get the same repeating due/locked-preview gate
   single-section run-throughs got in Pass 49, once a pair first unlocks?**

@@ -447,7 +447,11 @@ rescheduled once via "cram into what's left" while fully past its own plan
 can permanently stop being recognized as behind schedule at all, which
 silently drops it from "Reschedule all" forever after — see
 [`docs/Decisions.md`](docs/Decisions.md#scheduling) for the mechanism and
-why only half of the two-part fix shipped this session.
+why only half of the two-part fix shipped this session. **Resolved by
+Pass 70**, for an unrelated reason (the "N days behind" display rework
+needed the same cutoff fix) — see
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
+after-the-fact confirmation.
 
 **In the same session as Pass 42 (below), several smaller fixes also
 shipped, none individually pass-numbered:** `ChecklistItem`'s practice
@@ -542,14 +546,17 @@ shipped the other way first and was corrected once the struck-through
 "Nothing scheduled" row was pointed out — see
 [`docs/Decisions.md`](docs/Decisions.md#ux)). Today's row also gets a
 "(behind N chunks)" note, reusing `computeScheduleStatus`'s existing
-`missedCount` rather than a new count. Two gaps flagged, not fixed: a
-consolidation day's logged run-through doesn't satisfy the per-chunk
-`doneDays` check `classifyDayCompletion` does (so a logged consolidation
-day still reads `"behind"`), and neither this note nor the graying is
-revival-aware — a piece mid-revival can show "(behind N chunks)" against
-its *original*, pre-revival plan, not the revival plan actually being
-followed. See [`docs/Decisions.md`](docs/Decisions.md#open-questions) for
-both.
+`missedCount` rather than a new count. Two gaps flagged at the time, not
+fixed in this pass: a consolidation day's logged run-through didn't
+satisfy the per-chunk `doneDays` check `classifyDayCompletion` does (so a
+logged consolidation day still read `"behind"`) — **resolved in a later
+session, on direct request: `classifyDayCompletion` now checks
+`"__consolidation__"`'s own `doneDays` for a consolidation day instead of
+the per-chunk list, see [`docs/Decisions.md`](docs/Decisions.md#scheduling)**
+— and neither this note nor the graying is revival-aware — a piece
+mid-revival can show "(behind N chunks)" against its *original*,
+pre-revival plan, not the revival plan actually being followed, **still
+open** — see [`docs/Decisions.md`](docs/Decisions.md#open-questions).
 
 **Since Pass 46**, the Timeline tab applies Pass 45's
 `classifyDayCompletion` to every day card: a past day grays out, and a

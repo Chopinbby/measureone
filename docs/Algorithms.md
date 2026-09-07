@@ -1909,9 +1909,17 @@ function, not a replacement — a *per-day* completion status rather than a
 piece-wide missed count. Returns `"future"` for `day.dayNumber >=
 currentDay`; otherwise `"empty"` if the day's `newChunkIds` +
 `specialChunkIds` + `reviewChunkIds` are all empty (nothing was ever
-scheduled there — a rest day, or any other empty day); otherwise `"done"`
-if every one of those ids has `day.dayNumber` in its own `doneDays`, else
-`"behind"`. Written standalone, off the same `timeline.days[]` shape
+scheduled there — a rest day, or any other empty day); otherwise, for a
+consolidation day specifically (`day.type === "consolidation"`), `"done"`
+if `piece.progress["__consolidation__"].doneDays` includes
+`day.dayNumber`, else `"behind"` — a consolidation day's `reviewChunkIds`
+blankets every practice chunk regardless of ladder state (see
+`computeTimeline` above), which is unrelated to what logging its
+run-through (`handleLogRunThrough`, App.jsx) actually writes, so it's
+judged by its own synthetic progress key instead of the per-chunk check
+every other day type gets; for every other day type, `"done"` if every one
+of those ids has `day.dayNumber` in its own `doneDays`, else `"behind"`.
+Written standalone, off the same `timeline.days[]` shape
 `computeScheduleStatus` reads, specifically so it wouldn't need
 duplicating elsewhere — and it hasn't been: **since Pass 46**, the
 Timeline tab's day-card grid reuses the exact same call for its own

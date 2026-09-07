@@ -448,6 +448,49 @@ describe("mergeLadderConfig — the P1 crash fix (field-by-field merge, not all-
   });
 });
 
+describe("mergeRevival — same field-by-field merge as mergeLadderConfig, applied to piece.revival", () => {
+  // Closes a once-open question (docs/Decisions.md#open-questions):
+  // `revival: piece.revival || {...defaults}` only backfilled when the
+  // whole object was missing, so a piece carrying a partial revival object
+  // (e.g. saved before tempoLadderStartFraction was added) kept that
+  // incomplete shape forever.
+  test("a piece with an existing but INCOMPLETE revival object (missing tempoLadderStartFraction) gets it merged in", () => {
+    const partiallyMigrated = {
+      ...fresh,
+      id: "p_partial_revival",
+      revival: { active: true, startedAt: Date.now(), reassessmentComplete: false, plan: null },
+    };
+    const m = validateAndMigratePiece(partiallyMigrated);
+    assert.equal(m.revival.tempoLadderStartFraction, 0.6, "missing field should be backfilled, not left undefined");
+    assert.equal(m.revival.active, true, "existing fields must survive the merge unchanged");
+    assert.equal(m.revival.reassessmentComplete, false);
+  });
+
+  test("a customized revival sub-field is preserved, not overwritten by the default", () => {
+    const custom = {
+      ...fresh,
+      id: "p_custom_revival",
+      revival: { active: true, startedAt: Date.now(), tempoLadderStartFraction: 0.4, reassessmentComplete: true, plan: null },
+    };
+    const m = validateAndMigratePiece(custom);
+    assert.equal(m.revival.tempoLadderStartFraction, 0.4);
+    assert.equal(m.revival.reassessmentComplete, true);
+  });
+
+  test("a piece with no revival object at all still gets the full default shape", () => {
+    const noRevival = { ...fresh, id: "p_no_revival", revival: undefined };
+    const m = validateAndMigratePiece(noRevival);
+    assert.deepEqual(m.revival, {
+      active: false,
+      startedAt: null,
+      purpose: null,
+      tempoLadderStartFraction: 0.6,
+      reassessmentComplete: false,
+      plan: null,
+    });
+  });
+});
+
 describe("Import path — validateAndMigratePiece protects imported pieces too", () => {
   test("parseBackupPieces reads a standard export file shape", () => {
     const text = JSON.stringify({ exportedAt: new Date().toISOString(), version: 1, pieces: [fresh] });

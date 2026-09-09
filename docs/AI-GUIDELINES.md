@@ -399,6 +399,33 @@ and potentially building on a wrong premise. The third would have meant
 telling the user their actual complaint was imaginary. Check all three kinds
 the same way.
 
+**The same risk applies to a claim written in a code comment, not just in
+`docs/`.** A comment asserting "X still happens, it's just harmless" is
+exactly as unverified as a doc saying the same thing — it just lives in a
+different file.
+
+Worked example (Pass 85): a `SettingsTab.jsx` comment claimed that a
+disabled `.ghost-btn` still shows the brass `:hover` tint (since
+`.ghost-btn:hover`, unlike `.primary-btn`/`.danger-btn`'s hover rules,
+isn't guarded with `:not(:disabled)`), calling it "a minor, harmless
+cosmetic quirk." That comment was about to be deleted anyway as part of an
+unrelated cleanup (removing a now-redundant inline style once
+`.ghost-btn:disabled` finally got a shared CSS rule) — rather than just
+trusting and discarding the claim, a real mouse hover (`computer` tool,
+not a scripted `dispatchEvent` — see the entry above on why that
+distinction matters) on an actual disabled button in the test browser
+showed no visual change at all, despite `:hover` technically matching
+(`el.matches(':hover')` → `true`). Cross-checked against hovering an
+*enabled* ghost-btn in the same session to rule out "the hover tool isn't
+working" as the explanation — it worked correctly there (border and
+background both changed as expected), so the disabled button's lack of
+change was real, not a tooling artifact. The claim, at least in the one
+browser tested, didn't hold up. Not treated as a universal fact either —
+only one browser engine was checked, and nothing was changed as a result
+(the un-guarded hover rule was out of this pass's scope regardless) — but
+worth knowing before citing that old "harmless quirk" claim again. See
+[Decisions.md](Decisions.md#ux) for the full writeup.
+
 ## Your own hedged claim in a review is a claim too — verify it, don't just state it more carefully
 
 When a self-review turns up a risk you didn't fully check ("I believe X

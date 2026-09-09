@@ -4476,6 +4476,72 @@ the real current day.**
   against a fresh piece's actual empty state (not just a compiled-output
   check) — see [Open questions](#open-questions) below.
 
+**Decision (Pass 85): `.ghost-btn:disabled` gets a real visual treatment —
+`{ opacity: 0.45; cursor: not-allowed; }` (`App.jsx` CSS) — matching the
+existing `.primary-btn`/`.danger-btn:disabled` pattern exactly.**
+
+- **Why:** the request named one symptom (the Interleaved practice button
+  looking identical whether enabled or disabled), but the actual gap was
+  that `.ghost-btn` itself had no `:disabled` rule anywhere in the shared
+  stylesheet — a class-level bug, not a one-button bug. Fixed at the
+  class level rather than patching the Interleaved button alone.
+- **Audit (asked for, not exhaustive rework):** grepped every `ghost-btn`
+  use for a conditional `disabled` prop and found exactly three real
+  sites — not just the one named. (1) The Interleaved practice button
+  (`TodayTab.jsx`, `interleaveItems.length < 2`, untouched gating logic
+  from Pass 69). (2) Revival reassessment's chunk-nav "Previous" button
+  (`PieceMapTab.jsx`, `sequentialMode`, disabled on the first item) — had
+  *no* prior styling at all, same bug as the Interleaved button, previously
+  unnoticed. (3) Settings' "Archive piece" button — already had a bespoke
+  inline-style workaround for this exact gap (see the follow-up below).
+  Every other `disabled` button in the app is a `.primary-btn`,
+  `.danger-btn`, or `.icon-btn`, all already styled — unaffected.
+- **0.45, not 0.4:** `.primary-btn:disabled` uses `0.45`, `.danger-btn:disabled`
+  uses `0.4` — two slightly different existing values to choose between.
+  Picked `0.45` specifically to match the Archive button's own pre-existing
+  inline workaround exactly (see below), so that button's look doesn't
+  shift at all once the workaround is removed.
+- **Verified:** `npm test`: 592/592 (pure CSS, no logic touched). Live in
+  the browser: the Interleaved button confirmed disabled+grayed with 0
+  graduated chunks *and* with exactly 1 (Pass 69's `< 2` threshold means 1
+  must still be disabled, not just 0 — checked both, not only the
+  boundary's obvious side), then confirmed fully enabled-looking at 2.
+  The Revival "Previous" button confirmed grayed on item 1 of a real
+  reassessment flow, normal on item 2. All via actual computed
+  `opacity`/`cursor`/`disabled` reads, not just a screenshot glance.
+- **Same-session follow-up, once asked for explicitly:** Settings'
+  "Archive piece" button had a bespoke `ARCHIVE_LOCKED_STYLE = { opacity:
+  0.45, cursor: "not-allowed" }` inline-style constant (`SettingsTab.jsx`)
+  — a manual workaround for exactly this gap, predating this fix. Now
+  redundant, since the new shared rule produces an identical result.
+  Removed the constant and both `style={...}` props referencing it,
+  keeping only `ARCHIVE_LOCKED_TITLE` (the tooltip text, unrelated to the
+  visual fix). Re-verified live, both places this button renders (piece
+  "active" and "paused" status): still grays identically, now via the CSS
+  class alone (`hasInlineStyle: false`), tooltip text still present. This
+  button was the subject of a past documented regression (Pass 43/45 —
+  `pointerEvents: "none"` silently killing the tooltip, see the entry
+  above and [AI-GUIDELINES.md](AI-GUIDELINES.md)) — confirmed that fix
+  wasn't undone by this cleanup.
+- **A real, hedged finding from testing, not just inherited belief:** the
+  removed `SettingsTab.jsx` comment used to claim `.ghost-btn:hover`
+  (unlike `.primary-btn:hover:not(:disabled)`/`.danger-btn:hover:not(:disabled)`,
+  it has no `:not(:disabled)` guard) still shows the brass hover tint on a
+  disabled button, calling it "a minor, harmless cosmetic quirk." A real
+  mouse hover on a disabled ghost-btn in this session's test browser
+  (`computer` tool, not a scripted `dispatchEvent`) showed `:hover`
+  technically matching (`btn.matches(':hover')` → `true`) but *no* visual
+  change at all — border-color and background stayed at their non-hover
+  defaults. Cross-checked against hovering an *enabled* ghost-btn in the
+  same session to confirm the hover mechanism itself works (it does: brass
+  border, tinted background). So the old "harmless quirk" doesn't actually
+  reproduce in this browser — genuinely verified, not assumed. **Not
+  fixed anyway, and not claimed to be universally true:** only checked in
+  one browser engine; `.ghost-btn:hover` was deliberately left without a
+  `:not(:disabled)` guard either way, since the fix requested was styling
+  the disabled state, not auditing the hover rule. See
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#a-docs-claim-about-existing-behavior-is-a-claim-not-a-fact--check-it).
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as

@@ -1038,3 +1038,25 @@ handful of code-comment-only mentions (`PieceCheckRow.jsx`,
 `ScheduleBanner.jsx`, `lib/chunking.js`, `lib/history.js`,
 `lib/scheduling.js`) are still unrenamed — not user-visible, low priority,
 see [`docs/Decisions.md`](docs/Decisions.md#open-questions).
+
+**Since Pass 85**, `.ghost-btn:disabled` finally has a real visual
+treatment (`{ opacity: 0.45; cursor: not-allowed; }`, `App.jsx` CSS) —
+matching the existing `.primary-btn`/`.danger-btn:disabled` pattern. Before
+this, a disabled ghost-btn looked pixel-identical to an enabled one. A
+quick audit (not just the Interleaved button named in the request) found
+three real sites this affects: the Interleaved practice button
+(`TodayTab.jsx`), Revival reassessment's chunk-nav "Previous" button
+(`PieceMapTab.jsx`, `sequentialMode`), and Settings' "Archive piece"
+button. The Archive button already had a bespoke inline-style workaround
+for this exact gap (`ARCHIVE_LOCKED_STYLE`, `SettingsTab.jsx`) — a
+same-session follow-up removed it once it became redundant, keeping only
+the `title` tooltip text. See
+[`docs/Decisions.md`](docs/Decisions.md#ux) for the full writeup,
+including a live-hover-tested finding worth knowing before touching
+`.ghost-btn` again: an old code comment claimed a disabled ghost-btn still
+shows the brass hover tint as a "harmless quirk" (since `.ghost-btn:hover`
+isn't guarded with `:not(:disabled)`, unlike the other two button
+classes) — a real mouse hover in this session's test browser showed no
+such tint despite `:hover` technically matching, so that quirk doesn't
+reproduce there. Not verified across other browsers, and the un-guarded
+hover rule itself was deliberately left untouched either way.

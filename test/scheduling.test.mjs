@@ -23,6 +23,7 @@ import {
   computeRemainingConnectorIds,
   isDayFullySwept,
   withLiveReviewStatus,
+  computeAbandonedPlanReminder,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "../src/lib/utils.js";
 
@@ -858,6 +859,99 @@ describe("isPlanActuallyComplete — Pass 39: what 'the plan is actually finishe
       const timeline = getEffectiveTimeline(piece, chunkSet);
       assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false);
     });
+  });
+});
+
+describe("computeAbandonedPlanReminder — a still-unfinished plan gone quiet for 14+ days, escalating weekly", () => {
+  const daysAgo = (n) => addDaysISO(todayISODate(), -n);
+  // Long enough plan that a piece can be 14-30+ days stale and still be
+  // well inside its own calendar window (targetDatePassed: false cases).
+  const midPlanPiece = (overrides) =>
+    basePiece({ daysToLearn: 100, startDate: daysAgo(40), lastLoggedAt: daysAgo(14), ...overrides });
+
+  test("returns null when fewer than 14 days have passed since lastLoggedAt", () => {
+    const piece = midPlanPiece({ lastLoggedAt: daysAgo(13) });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeAbandonedPlanReminder(piece, chunkSet, timeline), null);
+  });
+
+  test("fires at exactly 14 days stale, mid-plan (target date not yet passed)", () => {
+    const piece = midPlanPiece({ lastLoggedAt: daysAgo(14) });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const result = computeAbandonedPlanReminder(piece, chunkSet, timeline);
+    assert.equal(result.daysSinceLogged, 14);
+    assert.equal(result.milestoneDays, 14);
+    assert.equal(result.targetDatePassed, false);
+  });
+
+  // Message 2's literal ask: "fire this reminder every week after (21
+  // days, 28 days, etc)" — milestoneDays should hold at the same value for
+  // a whole week, then step, not creep up every single day.
+  for (const [daysSinceLogged, expectedMilestone] of [
+    [14, 14],
+    [15, 14],
+    [20, 14],
+    [21, 21],
+    [27, 21],
+    [28, 28],
+  ]) {
+    test(`daysSinceLogged=${daysSinceLogged} reports milestoneDays=${expectedMilestone}`, () => {
+      const piece = midPlanPiece({ lastLoggedAt: daysAgo(daysSinceLogged) });
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(computeAbandonedPlanReminder(piece, chunkSet, timeline).milestoneDays, expectedMilestone);
+    });
+  }
+
+  test("targetDatePassed is true once the plan's own day count has elapsed, with real work still left", () => {
+    const piece0 = basePiece({ daysToLearn: 10, startDate: daysAgo(20), lastLoggedAt: daysAgo(20) });
+    const chunkSet = generateAllChunks(piece0);
+    const timeline = getEffectiveTimeline(piece0, chunkSet);
+    // Nothing logged — isPlanActuallyComplete is false, so the reminder
+    // still applies; it just also reports the target date as passed.
+    const result = computeAbandonedPlanReminder(piece0, chunkSet, timeline);
+    assert.ok(result);
+    assert.equal(result.targetDatePassed, true);
+  });
+
+  test("returns null once the plan is actually complete — that's revival's staleness reason's territory instead", () => {
+    const piece0 = basePiece({ daysToLearn: 10, startDate: daysAgo(20), lastLoggedAt: daysAgo(20) });
+    const chunkSet = generateAllChunks(piece0);
+    const progress = Object.fromEntries(chunkSet.all.map((c) => [c.id, { doneDays: [1] }]));
+    const piece = { ...piece0, progress };
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), true);
+    assert.equal(computeAbandonedPlanReminder(piece, chunkSet, timeline), null);
+  });
+
+  test("returns null when lastLoggedAt is unset — a piece never logged at all is a different situation, not extended via createdAt", () => {
+    const piece = midPlanPiece({ lastLoggedAt: null });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeAbandonedPlanReminder(piece, chunkSet, timeline), null);
+  });
+
+  test("returns null for a paused piece", () => {
+    const piece = midPlanPiece({ status: "paused" });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeAbandonedPlanReminder(piece, chunkSet, timeline), null);
+  });
+
+  test("returns null for an archived piece", () => {
+    const piece = midPlanPiece({ status: "archived" });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeAbandonedPlanReminder(piece, chunkSet, timeline), null);
+  });
+
+  test("returns null for a piece mid-revival — revival is its own recovery flow with its own messaging", () => {
+    const piece = midPlanPiece({ revival: { active: true } });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.equal(computeAbandonedPlanReminder(piece, chunkSet, timeline), null);
   });
 });
 

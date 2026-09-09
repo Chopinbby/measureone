@@ -158,12 +158,18 @@ places.
 
 ## Pause / Archive (built)
 
-A piece can carry `piece.status: 'active' | 'paused' | 'archived'`, set only
-by the user from Settings ("Practice status") — never inferred. Both
-non-active states pull a piece off the Master Agenda and suppress the
-"behind schedule" banner (`computeScheduleStatus` forces `missedCount` to 0
-whenever `status !== 'active'`); the piece and every other tab stay fully
-reachable via the piece switcher, just no longer part of the daily rotation.
+A piece can carry `piece.status: 'active' | 'paused' | 'archived'`, always
+a direct user action (never inferred) that runs through the same
+`handleSetPieceStatus` handler (`App.jsx`) regardless of where it's
+triggered from. Originally reachable only from Settings ("Practice
+status"); **since Pass 83**, Overview's own abandoned-plan reminder (see
+"Revival auto-triggers" below) adds a second, one-click "Pause this plan"
+entry point offered right alongside "Reschedule remaining days" — no
+dialog, immediate. Both non-active states pull a piece off the Master
+Agenda and suppress the "behind schedule" banner (`computeScheduleStatus`
+forces `missedCount` to 0 whenever `status !== 'active'`); the piece and
+every other tab stay fully reachable via the piece switcher, just no
+longer part of the daily rotation.
 
 - **Paused** — for a piece mid-plan that the learner is deliberately setting
   aside. Nothing about the schedule or confidence math changes: the plan's
@@ -896,12 +902,13 @@ chunk-scoped, Revival's triggers are piece-wide).
 ### Revival auto-triggers
 
 **Implemented (Pass 7).** [Revival](#revival-built-mvp) above used to be
-entry-only manual; `computeRevivalTriggers(piece, chunkSet)`
+entry-only manual; `computeRevivalTriggers(piece, chunkSet, planComplete)`
 (`src/lib/revival.js`), called from `OverviewTab`, now checks three
 independent conditions on every render and surfaces a "This piece might be
 due for a revival" banner (with every condition that fired listed, not
-just the first) whenever any one of them is true and no revival is already
-active:
+just the first) whenever any one of them is true, no revival is already
+active, **and the piece's plan is actually complete** (`planComplete`,
+gated **since Pass 83** — see below):
 
 1. Stop count > 5 on a single logged run-through — reads
    `progress["__consolidation__"].sessions` (Pass 6, "Post-run-through
@@ -924,6 +931,23 @@ a piece nobody has touched in two months has no data to trip the other two
 even though it would almost certainly meet them if attempted. Kept as
 three separately-checked conditions, deliberately not unified into one
 formula.
+
+**Since Pass 83, none of the three fires unless the piece's plan is
+actually complete** (`isPlanActuallyComplete`, computed by `OverviewTab`
+and passed in as `planComplete`) — revival is for a piece already
+learned once, not one still mid-learning, so a rough run-through, a lost
+flag, or weeks of silence on an *unfinished* piece no longer suggests
+revival at all. Full mechanics, and the live-reproduced contradiction that
+motivated gating all three (not only the staleness one) in
+[Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83](Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83).
+The two "Start revival" entry points (`OverviewTab`'s title-card button and
+this banner's own button) are gated on the same `planComplete` condition,
+disabled with an explanatory title otherwise. A still-unfinished, quiet
+piece isn't left with no message at all — it gets a different one, from a
+new sibling function built the same pass:
+[`computeAbandonedPlanReminder`](Algorithms.md#the-abandoned-plan-reminder-pass-83)
+offers reschedule/pause instead of revival, since a piece that was never
+finished isn't a candidate for "relearn something you already knew."
 
 **Bug found and fixed while building condition 3:** `piece.lastLoggedAt`
 is recomputed fresh on every piece load (`computeLastLoggedAt`,

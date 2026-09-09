@@ -10,6 +10,7 @@ import {
   resolveRequiredReps,
 } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
+import { ReassessPanel } from "./ReassessPanel";
 
 // Fixed for this pass (Pass 29), graded by difficulty since Pass 69 — a
 // tuning choice, not a design one. Configurable-per-user rotation interval
@@ -33,6 +34,7 @@ export function InterleavePanel({
   onLogSession,
   onConfirmProvisionalSession,
   onDiscardProvisionalSession,
+  onReassessRange,
 }) {
   const [index, setIndex] = useState(0);
   const [running, setRunning] = useState(false);
@@ -214,6 +216,23 @@ export function InterleavePanel({
             <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
             <span className="conf-pill mono">{conf}%</span>
           </div>
+
+          {/* key forces a fresh instance whenever rotation moves to a new
+              chunk (auto-advance, skip, or log) — same fix Pass 76 needed
+              for PieceMapTab's identical reuse of this component: without
+              it, an opened-but-not-yet-Applied panel keeps the PREVIOUS
+              chunk's From/To values after rotation moves on, and Apply
+              would silently reassess the wrong measures. Prefixed (not a
+              bare key={chunk.id}) since that bare form is what collided
+              with a sibling's own key={selectedChunk.id} in PieceMapTab —
+              see that fix's comment for the full explanation. */}
+          <ReassessPanel
+            key={`reassess-${chunk.id}`}
+            piece={piece}
+            todaysRanges={[{ start: chunk.start, end: chunk.end }]}
+            onReassessRange={onReassessRange}
+          />
+
           <p className="tip-line">
             {practiceBPM != null
               ? `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} at ${practiceBPM}+ BPM to progress this chunk.`

@@ -1,5 +1,4 @@
 import { formatRange } from "../../../lib/utils";
-import { DIFFICULTY_META } from "../../../lib/constants";
 import { computeConfidence } from "../../../lib/confidence";
 
 export function FocusPanel({ piece, chunks, currentDay }) {
@@ -22,7 +21,6 @@ export function FocusPanel({ piece, chunks, currentDay }) {
             {chunk.kind !== "section" && (
               <span className="tag subtle">{chunk.kind === "combo" ? "Focus block" : "Review"}</span>
             )}
-            <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
             <span className="focus-conf mono">{conf}%</span>
           </div>
         ))}

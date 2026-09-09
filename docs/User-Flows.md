@@ -229,6 +229,21 @@ week-vs-all-time and heatmap-window choices.
 
    See [Decisions.md](Decisions.md#scheduling) for why these differ by
    `scheduleMode`.
+
+**Since Pass 83, a piece that's gone quiet — not necessarily "behind" in
+the day-by-day sense above, just untouched — gets its own banner on
+Overview**, distinct from `ScheduleBanner`: an active, non-revival piece
+with real practice history and at least 14 days since anything was
+logged, still with real work left in its plan, shows "No practice logged
+for '\<piece\>' in N days. Would you like to reschedule remaining
+practice items, or pause this plan?" with both actions offered directly —
+Reschedule opens the same dialog as item 3 above; Pause sets the piece to
+`"paused"` immediately, no dialog. The displayed day count holds steady
+for a week at a time (14, then 21, then 28, ...) rather than changing
+daily. This can appear alongside `ScheduleBanner` — they're independent
+conditions and a piece can meet both at once. See
+[Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83).
+
 4. Confirming sets `piece.rescheduleMarker` (and, when the dialog offered an
    extension, `daysToLearn`/`targetDate` too); `getEffectiveTimeline` then
    keeps every already-passed day as it stood the last time the schedule
@@ -285,6 +300,18 @@ persisted extension happens once that piece is opened directly. **Also
 since Pass 39**, "Log practice" and "Pick a random piece to practice" on
 Master Agenda land directly on Daily Practice for that piece rather than
 Piece Overview — see flow 6 below.
+
+**Since Pass 83, the individual "Past its target date" cards above also
+get an aggregate banner** above the Learning-phase list — "N piece(s)
+[has/have] passed [its/their] target date" — whenever one or more of them
+exist for today, with its own "Reschedule all" action (the same
+mechanism the "N pieces are behind schedule" banner below already uses).
+Deliberately a *separate* banner from that one, not merged into it, even
+though the two conditions usually overlap in practice — see
+[Decisions.md](Decisions.md#scheduling) for why (a piece already stuck by
+a documented reschedule-recognition bug can silently vanish from the
+"behind schedule" count specifically, so folding this into that count
+would hide it from both).
 
 **Since Pass 21, this also has a multi-piece form.** Master Agenda's
 Learning-phase tab shows a "Reschedule all" panel whenever one or more

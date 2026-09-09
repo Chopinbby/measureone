@@ -334,6 +334,22 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
   // button is clicked. See docs/Decisions.md#scheduling.
   const behindItems = learningItems.filter((item) => item.behindDaysCount > 0);
 
+  // Pieces whose entire plan calendar has already run out with real work
+  // still left (the same needsReschedule flag agendaData already computes
+  // above, per-piece — no new derivation). A stricter, more severe
+  // condition than "some days behind": behindItems can fire for a piece
+  // just a few days late and still well inside its own plan window,
+  // whereas this only fires once the whole window is gone — the same
+  // "calendar ran out" vs "a bit behind" distinction CLAUDE.md documents
+  // for isPlanActuallyComplete. Deliberately its own banner, gated
+  // independently of behindItems rather than folded into that banner's
+  // condition: docs/Decisions.md#scheduling documents a real, unfixed bug
+  // where a piece stuck in this exact state can read behindDaysCount === 0
+  // and silently drop out of behindItems entirely — gating this banner on
+  // behindItems.length > 0 too would hide exactly the piece most in need
+  // of it.
+  const pastTargetDateItems = learningItems.filter((item) => item.needsReschedule);
+
   // Anything with work attached today: a scheduled learning day or due
   // maintenance. Revival pieces are deliberately out, the same way they're
   // out of the "Total planned" banner — their work isn't scheduled to a day,
@@ -492,19 +508,43 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
         </button>
       </div>
 
+      {subTab === "learning" && isToday && pastTargetDateItems.length > 0 && onRescheduleAll && (
+        <div className="schedule-banner">
+          <div>
+            <p className="schedule-banner-title">
+              {pastTargetDateItems.length} piece{pastTargetDateItems.length === 1 ? " has" : "s have"} passed{" "}
+              {pastTargetDateItems.length === 1 ? "its" : "their"} target date
+            </p>
+            <p className="schedule-banner-sub">
+              The planned finish date has already come and gone with real work still left in the plan.
+              Reschedule to pack what's left into new days, or pause any piece you're setting aside.
+            </p>
+          </div>
+          <div className="schedule-banner-actions">
+            <button className="ghost-btn" onClick={onRescheduleAll}>
+              <RefreshCw size={14} /> Reschedule all
+            </button>
+          </div>
+        </div>
+      )}
+
       {subTab === "learning" && isToday && behindItems.length > 0 && onRescheduleAll && (
-        <div className="panel">
-          <h3>
-            {behindItems.length} piece{behindItems.length === 1 ? " is" : "s are"} behind schedule
-          </h3>
-          <p className="wizard-hint">
-            Rebalance what you haven't started yet across the days each plan has left — in one go, rather
-            than piece by piece. Chunks you've already practiced stay where they are, and every piece keeps
-            its own target date.
-          </p>
-          <button className="ghost-btn" onClick={onRescheduleAll}>
-            <RefreshCw size={14} /> Reschedule all
-          </button>
+        <div className="schedule-banner">
+          <div>
+            <p className="schedule-banner-title">
+              {behindItems.length} piece{behindItems.length === 1 ? " is" : "s are"} behind schedule
+            </p>
+            <p className="schedule-banner-sub">
+              Rebalance what you haven't started yet across the days each plan has left — in one go, rather
+              than piece by piece. Chunks you've already practiced stay where they are, and every piece keeps
+              its own target date.
+            </p>
+          </div>
+          <div className="schedule-banner-actions">
+            <button className="ghost-btn" onClick={onRescheduleAll}>
+              <RefreshCw size={14} /> Reschedule all
+            </button>
+          </div>
         </div>
       )}
 

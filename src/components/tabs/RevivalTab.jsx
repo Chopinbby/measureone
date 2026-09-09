@@ -23,11 +23,14 @@ export function RevivalTab({
   onReopenReassessment,
   onGeneratePlan,
   onSetTempoLadderFraction,
+  onReassessRange,
   onLogSession,
   onUnlogSession,
   onConfirmProvisionalSession,
   onDiscardProvisionalSession,
   onEndRevival,
+  onAssessmentTimerRiskChange,
+  onConfirmLeaveAssessmentTimer,
 }) {
   const revival = piece.revival || {};
   // The piece's own default target, for expressing the tempo ladder's
@@ -76,8 +79,9 @@ export function RevivalTab({
           />
           {!pieceTargetBPM && (
             <p className="tip-line">
-              This piece has no target tempo set, so there's nothing to start a fraction of — the
-              tempo ladder will start at a flat default instead.
+              The tempo ladder starts at a fraction of the target tempo. This piece has no given
+              target tempo, so there's nothing to start a fraction of. Set it in settings, or
+              practice tasks will suggest a flat default to start.
             </p>
           )}
         </label>
@@ -101,6 +105,10 @@ export function RevivalTab({
               onUpdateBPM={onUpdateBPM}
               onSetManualConfidence={onSetManualConfidence}
               onSetMemoryAnchor={onSetMemoryAnchor}
+              onReassessRange={onReassessRange}
+              onLogSession={onLogSession}
+              onAssessmentTimerRiskChange={onAssessmentTimerRiskChange}
+              onConfirmLeaveAssessmentTimer={onConfirmLeaveAssessmentTimer}
               sequentialMode
               initialSelectedId={firstUnratedId}
               onFinishSequential={onFinishReassessment}
@@ -167,6 +175,7 @@ export function RevivalTab({
                       onDiscardProvisionalSession={onDiscardProvisionalSession}
                       tempoLadder={ladder}
                       memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[combo.id]}
+                      onReassessRange={onReassessRange}
                     />
                   );
                 })}
@@ -206,6 +215,7 @@ export function RevivalTab({
                             onDiscardProvisionalSession={onDiscardProvisionalSession}
                             tempoLadder={ladder}
                             memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[id]}
+                            onReassessRange={onReassessRange}
                           />
                         );
                       })}

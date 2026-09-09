@@ -628,6 +628,38 @@ they were, uncommitted, for it to handle. See
 [CLAUDE.md](../CLAUDE.md)'s Pass 38 note for what that other session's
 changes turned out to be.
 
+## Gating a feature on an existing live derivation, instead of a not-yet-built persisted field, can silently fail to cover the same scenarios the original design was written for
+
+When an open question or a stalled roadmap item is blocked on "we'd need a
+new persisted field/state for this," it's tempting — and often genuinely
+correct — to route around the blocker by gating on an existing live
+derivation that answers a *similar* question instead. Do this, but before
+calling the original item resolved, re-read that item's own design
+paragraph for every scenario it was trying to cover, and check the
+substitute derivation's actual preconditions against each one individually
+— not just the one scenario currently being fixed.
+
+Worked example (Pass 83): "gate revival entry behind a piece being in
+maintenance" was blocked on a persisted `piece.stage` field that would let
+Settings manually mark a piece "finished away from the app" (i.e., known
+by the player without every chunk ever being logged in-app) as ready for
+revival. Rather than build that field, the actual fix gated "Start
+revival" and `computeRevivalTriggers` on the already-existing
+`isPlanActuallyComplete` live derivation — which correctly resolved the
+concrete contradiction being fixed (an unfinished, actively-behind piece
+suggesting revival). But `isPlanActuallyComplete`'s `"days"`-mode
+criterion requires *every* scheduled item to have at least one *logged*
+session — a precondition the original design's own "finished away from
+the app" scenario explicitly does not satisfy. The substitution silently
+turned "Start revival is always available" into "Start revival can become
+permanently unavailable" for exactly the piece shape the original design
+paragraph named, and this wasn't caught before shipping because
+verification focused on reproducing and closing the contradiction actually
+being fixed, not on stress-testing the substitute derivation against every
+scenario the open question it was closing had originally listed. See
+[Decisions.md](Decisions.md#open-questions)'s "Gate revival entry behind a
+piece being in maintenance" entry for the full account.
+
 ## A blocking native dialog isn't a dead end in the automated browser — read the console instead
 
 The in-session browser tool suppresses native `window.alert`/`window.confirm`

@@ -250,7 +250,7 @@ conditions and a piece can meet both at once. See
    was actually recomputed, and repacks only the untouched chunks into the
    days that remain. **Since Pass 48** (and, for Week view and Master
    Agenda too, **Pass 75**), a past day whose entire original task list
-   ended up moved by this repacking — Timeline, Today's Practice, Week
+   ended up moved by this repacking — Timeline, Daily Practice, Week
    view, and Master Agenda alike — collapses to a plain "Tasks rescheduled"
    line instead
    of re-showing content that's now a stale duplicate of wherever it
@@ -265,18 +265,19 @@ conditions and a piece can meet both at once. See
    [Decisions.md](Decisions.md#scheduling) for both mechanisms.
 
 **Since Pass 75, a stale review no longer just sits, unaddressed, on the
-past day it was originally placed on** — Timeline, Week view, Today's
+past day it was originally placed on** — Timeline, Week view, Daily
 Practice, and Master Agenda all stop listing a Tier 2 review there once
 it's overdue and wasn't logged that day, showing a short note instead
-("Now due — see today," or Today's own day view's longer "…now tracked as
-due — see Today's Practice") pointing at where it's actually live now.
+("Now due — see today," or Daily Practice's own day view's longer
+"…now tracked as due — see Daily Practice") pointing at where it's
+actually live now.
 Unrelated to rescheduling — this fires whether or not the piece has ever
 been rescheduled. A Tier 1 "first touch" review and a consolidation day are
 both untouched by this. See
 [Algorithms.md](Algorithms.md#timeline--scheduler) for the mechanism
 (`withLiveReviewStatus`).
 
-**Since Pass 39, Today's Practice can also show a second, separate banner**
+**Since Pass 39, Daily Practice can also show a second, separate banner**
 below the "N chunks behind schedule" one: a `"days"`-mode piece whose
 calendar has run out with real work still left, but where every *practice
 chunk* specifically has already been touched (only a transition or focus
@@ -297,7 +298,7 @@ its real, current scheduled content, computed live for display only
 (nothing written to storage from Master Agenda itself); the actual,
 persisted extension happens once that piece is opened directly. **Also
 since Pass 39**, "Log practice" and "Pick a random piece to practice" on
-Master Agenda land directly on Today's Practice for that piece rather than
+Master Agenda land directly on Daily Practice for that piece rather than
 Piece Overview — see flow 6 below.
 
 **Since Pass 83, the individual "Past its target date" cards above also
@@ -356,10 +357,10 @@ reachable from the switcher, the Overview top row, and Settings.
 argument. **Since Pass 39**, Master Agenda's "Log practice" (on any
 learning-phase, maintenance-due, or "needs reschedule" card) and "Pick a
 random piece to practice" pass `"today"` instead, landing directly on
-Today's Practice for that piece rather than the dashboard — you clicked
+Daily Practice for that piece rather than the dashboard — you clicked
 something that means "go practice," so you land where you'd actually log
 it. Revival's "Open piece →" button deliberately still lands on Overview,
-unchanged — a revival-mode piece has its own separate tab, and Today's
+unchanged — a revival-mode piece has its own separate tab, and Daily
 Practice isn't a meaningful destination for it mid-revival.
 
 **Since Pass 29 follow-up**, switching pieces (or navigating to a different

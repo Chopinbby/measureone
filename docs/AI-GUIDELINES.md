@@ -399,6 +399,33 @@ and potentially building on a wrong premise. The third would have meant
 telling the user their actual complaint was imaginary. Check all three kinds
 the same way.
 
+**The same risk applies to a claim written in a code comment, not just in
+`docs/`.** A comment asserting "X still happens, it's just harmless" is
+exactly as unverified as a doc saying the same thing — it just lives in a
+different file.
+
+Worked example (Pass 85): a `SettingsTab.jsx` comment claimed that a
+disabled `.ghost-btn` still shows the brass `:hover` tint (since
+`.ghost-btn:hover`, unlike `.primary-btn`/`.danger-btn`'s hover rules,
+isn't guarded with `:not(:disabled)`), calling it "a minor, harmless
+cosmetic quirk." That comment was about to be deleted anyway as part of an
+unrelated cleanup (removing a now-redundant inline style once
+`.ghost-btn:disabled` finally got a shared CSS rule) — rather than just
+trusting and discarding the claim, a real mouse hover (`computer` tool,
+not a scripted `dispatchEvent` — see the entry above on why that
+distinction matters) on an actual disabled button in the test browser
+showed no visual change at all, despite `:hover` technically matching
+(`el.matches(':hover')` → `true`). Cross-checked against hovering an
+*enabled* ghost-btn in the same session to rule out "the hover tool isn't
+working" as the explanation — it worked correctly there (border and
+background both changed as expected), so the disabled button's lack of
+change was real, not a tooling artifact. The claim, at least in the one
+browser tested, didn't hold up. Not treated as a universal fact either —
+only one browser engine was checked, and nothing was changed as a result
+(the un-guarded hover rule was out of this pass's scope regardless) — but
+worth knowing before citing that old "harmless quirk" claim again. See
+[Decisions.md](Decisions.md#ux) for the full writeup.
+
 ## Your own hedged claim in a review is a claim too — verify it, don't just state it more carefully
 
 When a self-review turns up a risk you didn't fully check ("I believe X
@@ -632,6 +659,36 @@ being fixed, not on stress-testing the substitute derivation against every
 scenario the open question it was closing had originally listed. See
 [Decisions.md](Decisions.md#open-questions)'s "Gate revival entry behind a
 piece being in maintenance" entry for the full account.
+
+## A blocking native dialog isn't a dead end in the automated browser — read the console instead
+
+The in-session browser tool suppresses native `window.alert`/`window.confirm`
+dialogs rather than letting them block the page — a click that triggers one
+returns immediately, with no visible change on screen and no dialog to
+interact with. That looks like the click did nothing. It didn't: the
+suppressed call, including its full argument string, is written to the
+console as a warning (`"Page dialog suppressed (alert): "<the exact
+text>"..."`). Reading it back via the console-messages tool confirms not
+just that the code path ran, but the literal string it produced — useful
+whenever the thing you're verifying is copy, not just a code path
+(confirming a renamed string reached every `window.alert` call site,
+for instance).
+
+Worked example (Pass 84): three `window.alert` calls (a single-piece
+reschedule dialog and both halves of a bulk "stuck pieces" message) had a
+tab name renamed inside their template strings. Rather than trusting the
+source-level rename, two of the three were fired for real — a throwaway
+piece was seeded directly into the exact state each alert's `if` branch
+requires (every practice chunk and connector logged, but the piece pushed
+behind schedule via a backdated `startDate`, cross-checked beforehand
+against the real `computeScheduleStatus`/`computeRemainingConnectorIds`/
+`isPlanActuallyComplete` functions to confirm the branch would actually
+fire) — and the console's suppressed-dialog warning was read back to
+confirm the new tab name was actually in the string the running app
+produced, not just in the source line that was edited. The console output
+is truncated past roughly 200 characters, so a long message needs its tail
+confirmed separately (here, by having already read the exact source line)
+rather than assumed complete from the console alone.
 
 ## When you're not sure
 

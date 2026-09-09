@@ -180,3 +180,16 @@ same-shaped day values that look interchangeable and aren't. Worth
 checking for on any future change in this neighborhood, alongside the
 three above. See [Architecture.md](Architecture.md#state-management) and
 [Decisions.md](Decisions.md#scheduling).
+
+**Since Pass 84, the same `isRealToday`-gates-a-display-element idiom got
+reused proactively, not to fix a leak.** Daily Practice's own `<h1>` now
+renders only when `isRealToday`, disappearing entirely on a browsed day —
+but unlike the three instances above, there was no live-computation-leaking-
+onto-a-browsed-day bug being fixed here; it's a plain heading, not a due-
+status query, and the request was cosmetic (stop restating "which tab this
+is" on every browsed day once the day-count line already says which day is
+showing). Worth knowing the idiom now has two different uses in this
+codebase — as the fix for the specific bug shape above, and as a general
+"only show this on real today" tool for ordinary display decisions — so
+finding it somewhere doesn't by itself imply a leak was being fixed there.
+See [Decisions.md](Decisions.md#ux).

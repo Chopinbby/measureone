@@ -624,9 +624,12 @@ gate, a fix made after the first cut used raw `sessions.length` the same
 way `isSectionLearned` still does (deliberately unchanged; the two
 functions now answer different questions and are allowed to disagree).
 Section-**pair** run-throughs (`kind: "section-transition"`, "Sections
-combined") are untouched — still the original one-time "unlock and stay"
-gate; whether they should get the same repeating treatment is an open
-question, not decided — see
+combined") were untouched by Pass 49 itself — still the original one-time
+"unlock and stay" gate at the time. **Resolved in a later session, on
+direct request:** once a pair clears its own separate first-unlock gate
+(unchanged), it now gets the same repeating due/locked-preview rhythm —
+`sectionPairRunThroughGate` (`lib/chunking.js`), sharing a private helper
+with `sectionRunThroughGate` — see
 [`docs/Decisions.md`](docs/Decisions.md#open-questions). See
 [`docs/Algorithms.md`](docs/Algorithms.md#section-run-throughs) for the
 full mechanics.

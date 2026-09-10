@@ -45,13 +45,60 @@ doesn't define them.
 See [Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs)
 for what each generated `kind` means.
 
+### Migrating orphaned progress after a chunk-id-shifting edit
+
+A practice chunk's id is `c${start}` — purely a function of where it
+starts, which is itself purely a function of `totalMeasures`/`chunkMode`/
+`customChunkSize` (chunking always restarts counting at measure 1). Edit
+any of those three fields and every chunk from the first boundary shift
+onward gets a **different id**, even though the underlying measures are
+the same piece — `piece.progress[oldId]` (sessions, ladder stage,
+`practiceBPM`, everything) no longer matches anything in the freshly
+generated chunk set. **The very first chunk (`start === 1`) always keeps
+id `"c1"` regardless of size changes** — only later chunks can actually
+become orphaned, and only when the new step size doesn't realign with the
+old start positions (e.g. an old size that evenly divides the new size
+orphans nothing at all).
+
+`migrateOrphanedProgress(oldPiece, newPiece)` (resolved from an open
+question — see [Decisions.md](Decisions.md#open-questions)) reattaches an
+orphaned entry
+to whichever *current* chunk overlaps its old measure range the most,
+instead of leaving it permanently stranded under a dead id. Called once,
+from `App.jsx`'s `handleSavePiece`, comparing the live (pre-edit) `piece`
+against the about-to-be-saved draft — a no-op (same object reference back)
+when the edit didn't touch any of the three id-affecting fields.
+
+It's a heuristic, not a guaranteed-correct remapping — there's often no
+single right answer once boundaries genuinely move. Three rules keep it
+from ever doing worse than simply leaving an entry orphaned (the
+pre-existing status quo):
+
+1. **Never overwrites a chunk that already has its own real progress** —
+   only ever attaches to a new id with no entry of its own yet.
+2. **Never lets two orphaned entries claim the same target** — if chunk
+   size grows enough that two old chunks collapse into one new one, the
+   earlier old chunk (by measure order) wins; the other stays orphaned
+   under its own old id, not discarded, not merged into the winner.
+3. **Matched by greatest measure-range overlap, ties broken by the
+   earliest-starting candidate** — a plain, explainable "most of this old
+   chunk's content is now in this new chunk" reading.
+
+Scoped to base practice chunks (`kind: "section"`) only. Transitions and
+combos derive their ids from practice-chunk ids
+(`` `t_${a.id}_${b.id}` ``/`` `x_${c.id}` ``) — remapping those too would
+mean running the same heuristic a second time over a dependent, derived id
+space, not attempted here; a connector's progress orphaned by the same
+edit stays orphaned exactly as it always has.
+
 ## Section run-throughs
 
 `computeSectionRunThroughs(piece, practiceChunks)` — computed live (not
 persisted, not part of `generateAllChunks`'s output), used only by
 `SectionRunThroughPanel`. A single-section run-through and a section-pair
-run-through are gated by two genuinely different mechanisms (Pass 49) — see
-the two subsections below.
+run-through differ in how they first become eligible (Pass 49) but now
+share the same repeating due/locked-preview gate once eligible — see the
+two subsections below.
 
 ### Single-section run-throughs: a repeating gate, not a one-time unlock
 
@@ -135,27 +182,38 @@ now always the real current day by construction). See
 be written literally before the component's `useMemo` call without
 breaking React's rules of hooks.
 
-### Section-pair run-throughs: still a one-time unlock
+### Section-pair run-throughs: a one-time unlock, then the same repeating gate
 
 A combined section-pair run-through (`kind: "section-transition"`) between
-two adjacent, already-learned sections unlocks only once **every practice
-chunk in the entire piece** has at least one logged session — deliberately
-a later-stage drill, not an early one, per the code comment at the top of
-the function — and, once unlocked, **stays available**, unlike the
-repeating gate above. This is the original, pre-Pass-49 mechanism, left
-untouched: `computeSectionRunThroughs` still gates it on
-`allChunksPracticed` (every chunk in the whole piece) plus `isSectionLearned`
-on both neighboring sections (the plain ">= 1 session per chunk" check,
-unaffected by `sectionRunThroughGate`), the same way it always has.
+two adjacent, already-learned sections still unlocks only once **every
+practice chunk in the entire piece** has at least one logged session —
+deliberately a later-stage drill, not an early one, per the code comment
+at the top of the function — via the original, unchanged first-unlock
+gate: `allChunksPracticed` (every chunk in the whole piece) plus
+`isSectionLearned` on both neighboring sections (the plain ">= 1 session
+per chunk" check, unaffected by `sectionRunThroughGate`).
 
-**Open question, deliberately not resolved by Pass 49:** whether section-pair
-run-throughs should get the same repeating threshold once they first
-unlock, or whether staying a one-time "unlock and forget" drill is actually
-right for them (arguably more defensible here — they're already a
-late-stage, whole-piece-touched drill, not an early check-in). Flagged for a
-product decision rather than guessed at — recorded in
-[Decisions.md](Decisions.md#open-questions), which whichever future pass
-resolves this should update alongside the actual change.
+**Once a pair clears that first unlock, it now gets the same repeating
+due/locked-preview rhythm single sections get** — resolved, on direct
+request, the open question Pass 49 deliberately left unanswered (the
+stated case for the alternative — a section-pair is already a late-stage,
+whole-piece-touched drill, so "repeat forever" might just be noise there —
+was considered and the repeating treatment chosen anyway, for consistency
+with the check-in rhythm a learner already expects from single sections).
+`sectionPairRunThroughGate(sectionA, sectionB, piece, bySectionId)`
+(`lib/chunking.js`) is the mechanism: the identical `{ minCount, due,
+lockedPreview }` computation `sectionRunThroughGate` uses (both now call a
+shared private helper, `runThroughGateFromChunks`, added specifically so
+the two didn't duplicate the same four lines), applied to the **union of
+both sections' assigned chunks** rather than one section's — the slowest
+chunk anywhere in the pair sets the pace, the pair-level equivalent of a
+single section's own "minimum across its chunks" rule.
+`computeSectionRunThroughs` includes a section-transition entry only when
+`gate.due || gate.lockedPreview` (previously: unconditionally, once first
+unlocked), and now carries the same `locked: gate.lockedPreview` field
+single-section entries already carry — `SectionRunThroughPanel` needed no
+change at all, since it already renders `item.locked` generically for
+whatever `computeSectionRunThroughs` returns, regardless of `kind`.
 
 ## Cold-Start check
 

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
-import { generateAllChunks } from "./lib/chunking";
+import { generateAllChunks, migrateOrphanedProgress } from "./lib/chunking";
 import { getEffectiveTimeline, withLiveReviewStatus, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
@@ -543,7 +543,16 @@ export default function App() {
   const handleSavePiece = (updated) => {
     // Typing a work title on a standalone piece promotes it into a work;
     // clearing it pulls the piece back out. See lib/works.js.
-    updatePiece(ensureWorkId({ ...updated, rescheduleMarker: null }));
+    //
+    // migrateOrphanedProgress (lib/chunking.js) reattaches any progress
+    // entry whose chunk id an edit just regenerated (totalMeasures/
+    // chunkMode/customChunkSize) onto whichever new chunk best overlaps
+    // the same measures — `piece` here is still the pre-edit state (this
+    // closure's own current value, not `updated`), so it's the "old" side
+    // of the comparison. A no-op, same object back, when nothing was
+    // actually orphaned by this edit.
+    const progress = migrateOrphanedProgress(piece, updated);
+    updatePiece(ensureWorkId({ ...updated, progress, rescheduleMarker: null }));
     setEditDraftState(null);
     setSettingsEditing(false);
   };

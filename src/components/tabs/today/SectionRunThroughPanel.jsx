@@ -61,8 +61,9 @@ export function SectionRunThroughPanel({ piece, practiceChunks, currentDay, isRe
         A single-section run-through is today's task once every chunk in that section has a logged
         session — then it comes due again every two sessions per chunk after that (a repeating
         check-in, not a one-time unlock), showing locked here the day before it's due. Combined
-        section run-throughs unlock once the whole piece has been practiced in chunks, and — unlike
-        single sections — stay available from then on.
+        section run-throughs first unlock once the whole piece has been practiced in chunks and both
+        sections in the pair are learned — after that first unlock, they get the same repeating
+        check-in rhythm.
       </p>
       <div className="checklist">
         {items.map((item) =>

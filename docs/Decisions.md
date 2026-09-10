@@ -5767,20 +5767,48 @@ oversight to silently fix; surface it instead.
   - See [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query)
     for the mechanism.
 
-- **Nothing prunes orphaned `piece.progress` entries after a piece edit, and
-  it's undecided whether anything should.** Surfaced in Pass 20 while fixing
-  the history crash (see [UX](#ux) above). Editing measures/sections/
-  difficulty regenerates chunk ids, leaving progress entries that no longer
-  match any chunk. Today they survive forever and Progress reports them
-  honestly as "N passages from an earlier version of this plan" — but they
-  also still count toward `allSessions` in the outcome breakdown and toward
-  the practiced-days set feeding the consistency stat, which is arguably
-  correct (the practice happened) or arguably double-counting against a plan
-  that no longer contains it. **Deliberately not resolved in Pass 20**,
-  which was a relocation pass: deciding this means deciding whether
-  orphaned history is data to preserve, migrate onto the new chunks, or
-  discard — a data-lifecycle question, and the discard option is
-  irreversible. Not urgent; the visible behavior is already honest.
+- ~~**Nothing prunes orphaned `piece.progress` entries after a piece edit,
+  and it's undecided whether anything should.**~~ **Resolved: migrate,
+  the option the discard/keep framing below flagged as most work but
+  never ruled out.** Surfaced in Pass 20 while fixing the history crash
+  (see [UX](#ux) above) — editing `totalMeasures`/`chunkMode`/
+  `customChunkSize` regenerates practice-chunk ids (`c${start}`,
+  `generatePracticeChunks`), leaving progress entries that no longer match
+  any current chunk. `migrateOrphanedProgress(oldPiece, newPiece)`
+  (`lib/chunking.js`) now runs on every Settings save
+  (`App.jsx`'s `handleSavePiece`, comparing the live piece against the
+  about-to-be-saved draft), reattaching an orphaned entry to whichever
+  current chunk best overlaps its old measure range — the exact same
+  object, just under the new id, so ladder state/sessions/BPM all survive
+  intact, not just a stat.
+  - **A heuristic, not a guaranteed-correct remapping — deliberately
+    conservative about it.** There often isn't one right answer (chunk
+    boundaries genuinely moved, so "the same content" can legitimately now
+    span two new chunks, or two old chunks can collapse into one new one).
+    Three rules keep it from ever doing worse than the pre-existing status
+    quo (an orphaned entry simply stays orphaned, exactly as before this
+    existed): never overwrite a new chunk that already has real progress
+    of its own; never let two orphaned entries both claim the same new
+    chunk (the earlier one by measure order wins, the loser stays
+    orphaned under its own old id — not discarded, not merged); match by
+    greatest measure-range overlap, ties broken by the earliest-starting
+    candidate.
+  - **Scoped to base practice chunks only** — transitions and combos
+    derive their ids from practice-chunk ids (`t_${a.id}_${b.id}` /
+    `x_${c.id}`), so remapping those too would mean applying the same
+    heuristic a second time over a dependent id space; not attempted.
+    Deliberate, bounded scope over solving everything at once.
+  - **Verified:** 5 new regression tests (`test/chunking.test.mjs`'s
+    `migrateOrphanedProgress` describe block), two confirmed to fail
+    against a stubbed-out no-op version of the function. Live in the
+    browser: a piece with `customChunkSize: 5` (chunks `c1`, `c6`, `c11`)
+    carrying real ladder progress on `c6` and `c11`, edited down to
+    `customChunkSize: 4` (chunks `c1`, `c5`, `c9`, `c13`) through the real
+    Settings "Edit piece" → "Save changes" flow — confirmed `c6`'s entry
+    reattached to `c5` and `c11`'s to `c13`, each with its original
+    `practiceBPM` and session history intact, exactly matching the
+    by-hand overlap calculation.
+  - See [Algorithms.md](Algorithms.md#chunking) for the mechanism.
 - ~~**Gate revival entry behind a piece being in maintenance — the
   practical contradiction is resolved (Pass 83); the originally-envisioned
   mechanism is not, and gating on the substitute has its own new gap.**~~
@@ -6117,21 +6145,27 @@ oversight to silently fix; surface it instead.
   warranted on its own. See
   [Algorithms.md](Algorithms.md#behind-schedule-detection) and
   [UX](#ux).
-- **Should section-pair run-throughs (`kind: "section-transition"`,
+- ~~**Should section-pair run-throughs (`kind: "section-transition"`,
   "Sections combined") get the same repeating due/locked-preview gate
-  single-section run-throughs got in Pass 49, once a pair first unlocks?**
-  Explicitly flagged rather than guessed at when the repeating gate was
-  built — the pass's own scope named single-section run-throughs
-  specifically. Left as the original one-time "unlock once every chunk in
-  the whole piece has a session, then stay available forever" gate. Case
-  for leaving it: a section-pair run-through is already a late-stage,
-  whole-piece-touched drill, not an early check-in, so "repeat forever"
-  may just be noise there in a way it wasn't for the early, per-section
-  case. Case for extending it: consistency — a learner who came to expect
-  the repeating check-in rhythm from single sections might reasonably
-  expect the same from combined ones. Not started. See
-  [Algorithms.md](Algorithms.md#section-run-throughs) and
-  [Scheduling](#scheduling) (Pass 49 decision).
+  single-section run-throughs got in Pass 49, once a pair first
+  unlocks?**~~ **Resolved: yes, on direct request, choosing consistency
+  over the case for leaving it alone.** Both readings were weighed
+  directly rather than one being silently favored: the case for leaving it
+  (a section-pair is already a late-stage, whole-piece-touched drill, so
+  "repeat forever" might just be noise there) lost to the case for
+  extending it (a learner who came to expect the repeating check-in rhythm
+  from single sections should get the same rhythm from combined ones).
+  `sectionPairRunThroughGate` (`lib/chunking.js`) applies the identical
+  `sectionRunThroughGate` computation (both now share a private
+  `runThroughGateFromChunks` helper) to the union of both sections'
+  chunks, so the slowest chunk anywhere in the pair sets the pace. The
+  pair's own separate **first-unlock** gate (every chunk in the whole
+  piece practiced, both sections individually learned) is unchanged —
+  only what happens *after* that first unlock changed, from "stays
+  available forever" to the same repeating rhythm. Verified with 4 new
+  regression tests (`test/chunking.test.mjs`), confirmed to fail against
+  the pre-fix code. See
+  [Algorithms.md](Algorithms.md#section-pair-run-throughs-a-one-time-unlock-then-the-same-repeating-gate).
 - **`ChecklistItem`'s tab order still isn't literally reps → BPM → Log,
   even after Pass 53's fix.** Pass 53 fixed the severe symptom — a
   disabled Log button gets skipped entirely in the browser's tab

@@ -780,10 +780,21 @@ reasons:
   progress entry under this id, but per the paragraph above it is *never* in
   `all`, on any piece. **This is not an edge case** — it happens the first
   time any user ticks off a section run-through.
-- **Genuinely stale ids** — editing measures, sections, or difficulty
-  regenerates chunk ids, orphaning progress entries logged before the edit.
-  Nothing prunes them, deliberately: they're the only record that the
-  practice happened.
+- **Genuinely stale ids** — editing `totalMeasures`/`chunkMode`/
+  `customChunkSize` regenerates chunk ids (sections/difficulty edits alone
+  don't — chunk ids only depend on those three fields), orphaning progress
+  entries logged before the edit. `migrateOrphanedProgress`
+  (`lib/chunking.js`, resolved from an open question — see
+  [Decisions.md](Decisions.md#open-questions)) now runs on every Settings
+  save and reattaches an orphaned entry to whichever current chunk best
+  overlaps its old measure range — but it's a best-effort heuristic, not
+  guaranteed to find a confident match (two old chunks collapsing into one
+  new one, or content genuinely removed), so a miss here is still
+  possible and this guard is still required. Nothing discards an
+  unmigrated entry either way: it's still the only record that the
+  practice happened. See
+  [Algorithms.md](Algorithms.md#migrating-orphaned-progress-after-a-chunk-id-shifting-edit)
+  for the mechanism.
 
 **Any code that iterates `piece.progress` keys and looks them up against the
 chunk set must handle a miss.** Code that iterates `timeline.days[]` ids

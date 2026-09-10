@@ -9,7 +9,13 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeSectionRunThroughs, sectionRunThroughGate, chunksBySectionId } from "../src/lib/chunking.js";
+import {
+  computeSectionRunThroughs,
+  sectionRunThroughGate,
+  sectionPairRunThroughGate,
+  chunksBySectionId,
+  migrateOrphanedProgress,
+} from "../src/lib/chunking.js";
 
 const chunk = (id, start, end) => ({ id, kind: "section", start, end });
 const sessions = (n) => Array.from({ length: n }, (_, i) => ({ day: i + 1 }));
@@ -214,26 +220,186 @@ describe("computeSectionRunThroughs — locked-preview state", () => {
   });
 });
 
-describe("computeSectionRunThroughs — section-transition (kind: section-transition) stays unaffected", () => {
-  // Deliberately a distinct, still one-time gate per Pass 49's scope — see
-  // docs/Algorithms.md#section-run-throughs for why this wasn't changed.
-  const sections = [
-    { id: "s1", name: "", start: 1, end: 4 },
-    { id: "s2", name: "", start: 5, end: 8 },
-  ];
-  const chunks = [chunk("c1", 1, 4), chunk("c2", 5, 8)];
+// Once-open question (docs/Decisions.md#open-questions), resolved on
+// direct request: yes, a section-PAIR run-through should get the same
+// repeating due/locked-preview rhythm single sections got in Pass 49, once
+// the pair has cleared its own separate one-time first-unlock gate. The
+// first-unlock gate itself (every chunk in the whole piece practiced, both
+// sections in the pair individually learned) is unchanged.
+describe("sectionPairRunThroughGate — the gating metric itself, across both sections combined", () => {
+  const sectionA = { id: "s1", name: "", start: 1, end: 8 };
+  const sectionB = { id: "s2", name: "", start: 9, end: 16 };
+  const chunks = [chunk("c1", 1, 4), chunk("c2", 5, 8), chunk("c3", 9, 12), chunk("c4", 13, 16)];
 
-  test("still waits for every chunk in the whole piece to have a session before appearing", () => {
-    const p = piece({ sections, progress: { c1: { sessions: sessions(3) } } }); // c2 untouched
-    const items = computeSectionRunThroughs(p, chunks);
-    assert.ok(!items.some((it) => it.kind === "section-transition"));
+  test("minCount is the minimum across BOTH sections' chunks combined, not just one section", () => {
+    const p = piece({
+      sections: [sectionA, sectionB],
+      progress: {
+        c1: { sessions: sessions(5) },
+        c2: { sessions: sessions(5) },
+        c3: { sessions: sessions(5) },
+        c4: { sessions: sessions(1) }, // the real bottleneck, in section B
+      },
+      totalMeasures: 16,
+    });
+    const bySectionId = chunksBySectionId(p, chunks);
+    assert.equal(sectionPairRunThroughGate(sectionA, sectionB, p, bySectionId).minCount, 1);
   });
 
-  test("stays available at an even session count, unlike a single-section run-through", () => {
-    const p = piece({ sections, progress: { c1: { sessions: sessions(4) }, c2: { sessions: sessions(4) } } });
+  test("due is true exactly when the combined minCount is odd", () => {
+    [0, 1, 2, 3, 4].forEach((n) => {
+      const p = piece({
+        sections: [sectionA, sectionB],
+        progress: { c1: { sessions: sessions(n) }, c2: { sessions: sessions(n) }, c3: { sessions: sessions(n) }, c4: { sessions: sessions(n) } },
+        totalMeasures: 16,
+      });
+      const bySectionId = chunksBySectionId(p, chunks);
+      const gate = sectionPairRunThroughGate(sectionA, sectionB, p, bySectionId);
+      assert.equal(gate.due, n % 2 === 1, `minCount=${n} due should be ${n % 2 === 1}`);
+    });
+  });
+});
+
+describe("computeSectionRunThroughs — section-pair (kind: section-transition) now repeats after its first unlock", () => {
+  const sectionA = { id: "s1", name: "", start: 1, end: 8 };
+  const sectionB = { id: "s2", name: "", start: 9, end: 16 };
+  const chunks = [chunk("c1", 1, 4), chunk("c2", 5, 8), chunk("c3", 9, 12), chunk("c4", 13, 16)];
+  const sections = [sectionA, sectionB];
+  const evenlyAt = (n) => ({
+    c1: { sessions: sessions(n) },
+    c2: { sessions: sessions(n) },
+    c3: { sessions: sessions(n) },
+    c4: { sessions: sessions(n) },
+  });
+
+  test("still waits for every chunk in the whole piece to have a session before ever appearing", () => {
+    const p = piece({ sections, progress: { c1: { sessions: sessions(3) }, c2: { sessions: sessions(3) }, c3: { sessions: sessions(3) } }, totalMeasures: 16 }); // c4 untouched
+    const items = computeSectionRunThroughs(p, chunks);
+    assert.ok(!items.some((it) => it.kind === "section-transition"), "the whole-piece-practiced precondition is unchanged by this fix");
+  });
+
+  test("[fix] disappears once the minimum moves off a threshold (goes even) — no longer stays available forever once unlocked", () => {
+    const p = piece({ sections, progress: evenlyAt(2), totalMeasures: 16 });
+    const items = computeSectionRunThroughs(p, chunks);
+    assert.ok(!items.some((it) => it.kind === "section-transition"), "an even combined count must not read as due, matching single sections' own rhythm");
+  });
+
+  test("[fix] reappears once the minimum reaches 3", () => {
+    const p = piece({ sections, progress: evenlyAt(3), totalMeasures: 16 });
     const items = computeSectionRunThroughs(p, chunks);
     const transition = items.find((it) => it.kind === "section-transition");
-    assert.ok(transition, "a section-transition must not vanish at an even count — it isn't gated by the new repeating threshold");
-    assert.equal(transition.locked, undefined, "section-transition items don't carry the locked field at all");
+    assert.ok(transition, "must come back due at minCount=3");
+    assert.equal(transition.locked, false);
+  });
+
+  test("[fix] shown locked when exactly one chunk anywhere in the pair is one session short of the next threshold", () => {
+    const p = piece({
+      sections,
+      progress: { c1: { sessions: sessions(3) }, c2: { sessions: sessions(3) }, c3: { sessions: sessions(3) }, c4: { sessions: sessions(2) } },
+      totalMeasures: 16,
+    });
+    const items = computeSectionRunThroughs(p, chunks);
+    const transition = items.find((it) => it.kind === "section-transition");
+    assert.ok(transition, "the locked preview means it's shown, just not loggable yet");
+    assert.equal(transition.locked, true);
+  });
+
+  test("the very first unlock (threshold 1) still requires both sections individually learned first", () => {
+    // Every chunk in the whole piece has exactly 1 real session — the
+    // pre-existing first-unlock gate (isLearned on both sections,
+    // allChunksPracticed) is satisfied, and the new repeating gate agrees
+    // (minCount=1, odd) — both conditions align at the very first unlock.
+    const p = piece({ sections, progress: evenlyAt(1), totalMeasures: 16 });
+    const items = computeSectionRunThroughs(p, chunks);
+    const transition = items.find((it) => it.kind === "section-transition");
+    assert.ok(transition);
+    assert.equal(transition.locked, false);
+  });
+});
+
+// Once-open question (docs/Decisions.md#open-questions), resolved on
+// direct request: orphaned progress (a chunk id an edit regenerated —
+// totalMeasures/chunkMode/customChunkSize changed) should be migrated onto
+// the new chunk that best covers the same measures, not left permanently
+// orphaned or discarded.
+//
+// Worth knowing before reading these fixtures: chunk ids are `c${start}`
+// (generatePracticeChunks, lib/chunking.js), and chunking always starts
+// fresh at measure 1 — so the very first chunk keeps id "c1" across *any*
+// customChunkSize/chunkMode change, no matter how much its own range
+// shifts. Only later chunks can actually become orphaned, and only when
+// the new step size doesn't realign with the old start positions. Every
+// fixture below is picked to land on a real orphaning case, not the "c1
+// silently keeps its id, no migration even attempted" non-case.
+describe("migrateOrphanedProgress — reattaching history after a chunk-id-shifting edit", () => {
+  function mkPiece({ totalMeasures, customChunkSize, progress = {} }) {
+    return {
+      totalMeasures,
+      measureDifficulty: Array(totalMeasures).fill(1),
+      chunkMode: "custom",
+      customChunkSize,
+      recurringMode: "none",
+      recurringMeasures: 0,
+      recurringPairs: [],
+      progress,
+    };
+  }
+  const richEntry = (n) => ({ sessions: sessions(n), doneDays: [1], stage: "settling", practiceBPM: 90 });
+
+  test("no chunk-id-affecting change at all: returns the exact same progress reference, no-op", () => {
+    const oldPiece = mkPiece({ totalMeasures: 16, customChunkSize: 4, progress: { c1: richEntry(2), c5: richEntry(1) } });
+    const newPiece = { ...oldPiece }; // e.g. only difficulty/notes changed elsewhere
+    const result = migrateOrphanedProgress(oldPiece, newPiece);
+    assert.equal(result, newPiece.progress, "same object reference — nothing to migrate");
+  });
+
+  test("[fix] a genuine boundary shift reattaches each orphaned chunk to whichever new chunk overlaps it most", () => {
+    // customChunkSize 5 -> 4, totalMeasures 15. Old starts 1,6,11 (c1 1-5,
+    // c6 6-10, c11 11-15); new starts 1,5,9,13 (c1 1-4, c5 5-8, c9 9-12,
+    // c13 13-15) — "c1" persists either way, but "c6" and "c11" don't
+    // exist in the new set at all. c6 (6-10) overlaps new c5 (5-8) by 3
+    // measures and new c9 (9-12) by 2 — c5 wins. c11 (11-15) overlaps new
+    // c9 by 2 and new c13 by 3 — c13 wins. No conflict between them (two
+    // different targets), so both migrate cleanly.
+    const oldPiece = mkPiece({ totalMeasures: 15, customChunkSize: 5, progress: { c6: richEntry(5), c11: richEntry(2) } });
+    const newPiece = mkPiece({ totalMeasures: 15, customChunkSize: 4, progress: oldPiece.progress });
+    const result = migrateOrphanedProgress(oldPiece, newPiece);
+    assert.deepEqual(Object.keys(result).sort(), ["c13", "c5"]);
+    assert.equal(result.c5, oldPiece.progress.c6, "old c6's entry reattaches to new c5 (best overlap), the exact same object");
+    assert.equal(result.c13, oldPiece.progress.c11, "old c11's entry reattaches to new c13 (best overlap)");
+  });
+
+  test("[fix] two orphaned chunks merging into one new chunk: the earlier one (by measure order) wins, the later stays orphaned, not discarded", () => {
+    // customChunkSize 4 -> 12, totalMeasures 12: old c1 (1-4, no progress
+    // here so the merged target starts out free), c5 (5-8), c9 (9-12) all
+    // collapse into a single new c1 (1-12). c5 and c9 are both orphaned
+    // and both fully overlap the one available target — only one can
+    // claim it.
+    const oldPiece = mkPiece({ totalMeasures: 12, customChunkSize: 4, progress: { c5: richEntry(3), c9: richEntry(7) } });
+    const newPiece = mkPiece({ totalMeasures: 12, customChunkSize: 12, progress: oldPiece.progress });
+    const result = migrateOrphanedProgress(oldPiece, newPiece);
+    assert.equal(result.c1, oldPiece.progress.c5, "c5 (earlier in measure order) claims the merged chunk");
+    assert.equal(result.c9, oldPiece.progress.c9, "c9 survives, unmigrated, under its own old id — not discarded, not overwritten");
+    assert.equal(Object.keys(result).length, 2);
+  });
+
+  test("[fix] never overwrites a new chunk that already carries its own real progress", () => {
+    // customChunkSize 4 -> 12, totalMeasures 12: old c1 (1-4, HAS its own
+    // progress) survives under the same id "c1", now covering the whole
+    // merged 1-12 range. Old c5 (5-8) is orphaned, and its only possible
+    // candidate is that same new c1 — but c1 is already taken by its own
+    // real data, so c5 must not be allowed to clobber it.
+    const oldPiece = mkPiece({ totalMeasures: 12, customChunkSize: 4, progress: { c1: richEntry(9), c5: richEntry(3) } });
+    const newPiece = mkPiece({ totalMeasures: 12, customChunkSize: 12, progress: oldPiece.progress });
+    const result = migrateOrphanedProgress(oldPiece, newPiece);
+    assert.equal(result.c1, oldPiece.progress.c1, "c1's own real progress is untouched");
+    assert.equal(result.c5, oldPiece.progress.c5, "c5 has nowhere safe to go — stays put under its own id, not lost");
+  });
+
+  test("content genuinely removed (totalMeasures shrinks past it): no candidate exists, stays orphaned", () => {
+    const oldPiece = mkPiece({ totalMeasures: 16, customChunkSize: 4, progress: { c13: richEntry(2) } });
+    const newPiece = mkPiece({ totalMeasures: 8, customChunkSize: 4, progress: oldPiece.progress });
+    const result = migrateOrphanedProgress(oldPiece, newPiece);
+    assert.equal(result.c13, oldPiece.progress.c13, "nothing to migrate onto — stays exactly as it was, not discarded");
   });
 });

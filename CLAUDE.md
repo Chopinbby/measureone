@@ -275,14 +275,17 @@ revival" buttons and all three of `computeRevivalTriggers`' conditions
 (`lib/revival.js`) are now gated on the already-existing live
 `isPlanActuallyComplete` derivation instead of a stored `piece.stage`
 field — see [`docs/Decisions.md`](docs/Decisions.md#revival). The original
-item's *other* half (a manual Settings control to move a piece "finished
-away from the app" into maintenance) is still unbuilt, and Pass 83's
-gate has a real consequence for exactly that piece: one whose plan was
-never actually tracked to completion in-app can never satisfy
-`isPlanActuallyComplete`, so its "Start revival" button stays permanently
-disabled unless it was created directly into revival at Setup — see
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
-still-open remainder of this item. See
+item's *other* half — a manual Settings control to move a piece "finished
+away from the app" into maintenance — **is now built too, in a later
+session, directly on request**: `piece.markedLearnedElsewhere` (Settings'
+"Mark as learned elsewhere") is an unconditional override
+`isPlanActuallyComplete` checks first, ahead of its normal calendar/
+per-chunk logic — so setting it unlocks Archive, "Start revival," and
+every other `isPlanActuallyComplete`-gated behavior at once, with no
+per-surface wiring needed, closing the regression Pass 83's gate had
+otherwise introduced for exactly this piece shape. See
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the full
+resolution. See
 [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
 for the "learned" rollup itself.
 **Don't confuse this with Pass 58's `computeOverallConfidence`** (see the

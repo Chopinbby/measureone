@@ -1560,10 +1560,36 @@ calendar date, so this answers correctly for a piece whose plan ran out
 weeks ago, which the bounded `days[]` array structurally cannot
 ([Timeline / scheduler](#timeline--scheduler) rule 4).
 
-**Strictly "due as of `asOfDate`" — there is no forward-looking window.** A
-chunk due tomorrow does not appear anywhere, and Master Agenda's date
-picker does not turn into an upcoming-due view (it only computes due items
-for the real today).
+**Strictly "due as of `asOfDate`"** — a chunk due tomorrow does not appear
+in *this* function's result, and Master Agenda's date picker does not turn
+into an upcoming-due view (it only computes due items for the real
+today). A genuine forward-looking window exists as a separate, narrower
+sibling function — see below.
+
+**`computeDueOnDate(piece, chunkSet, date)` (`lib/maintenance.js`)** answers
+a different question: not "everything due as of `date`" (accumulating,
+like the function above), but "what becomes newly due *on* `date`" — an
+exact `progress[id].nextDueDate === date` match. Same shape per item minus
+`daysOverdue` (meaningless for a day that hasn't arrived yet), same
+suppression rules (paused/archived, revival, `needsRelearning`). Built for
+`WeekView.jsx`'s maintenance-mode week (below) to show each of the next
+few days' own contribution without re-showing the accumulated backlog
+`computeDueReviews` already puts on today's cell — using `<=` instead of
+`===` here would make a single overdue chunk appear in every future cell
+forever, not just the day it's actually newly due. See
+[Decisions.md](Decisions.md#open-questions) for why this was scoped out
+originally (the massed-practice concern — showing "due Thursday" invites
+practising it Wednesday) and the direct request that overrode it.
+
+**`WeekView.jsx`'s maintenance-mode branch (`viewMode: "week"`, once
+`isPlanActuallyComplete`)** renders a real 7-day window instead of the
+single-day-only view it used to: today's cell reads the `dueItems` prop
+(`computeDueReviews`, passed down from `TodayTab`, the real backlog +
+anything due today), each of the 3 days after today calls
+`computeDueOnDate` directly for that exact date, and the 3 days before
+today stay `"—"` — a forward week doesn't imply a backward one, and
+what was due then either got logged or is already folded into today's own
+backlog.
 
 **Suppression** — returns `[]`, never null, for:
 

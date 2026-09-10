@@ -1257,6 +1257,15 @@ export default function App() {
     updatePiece((p) => ({ ...p, status }));
   };
 
+  // Manual escape hatch for a piece finished away from the app — see
+  // isPlanActuallyComplete's markedLearnedElsewhere check (lib/scheduling.js)
+  // for what this unlocks. Freely reversible, same low-ceremony pattern as
+  // handleSetPieceStatus above — no confirmation dialog, matching Pause/
+  // Archive's own precedent.
+  const handleSetMarkedLearnedElsewhere = (value) => {
+    updatePiece((p) => ({ ...p, markedLearnedElsewhere: value }));
+  };
+
   const handleUpdateRevival = (patch) => {
     updatePiece((p) => ({ ...p, revival: { ...(p.revival || {}), ...patch } }));
   };
@@ -2033,6 +2042,7 @@ export default function App() {
                 onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
+                onSetMarkedLearnedElsewhere={handleSetMarkedLearnedElsewhere}
               />
             )}
           </main>

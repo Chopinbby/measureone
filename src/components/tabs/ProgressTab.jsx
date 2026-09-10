@@ -1,7 +1,7 @@
 import { Sparkline } from "../Sparkline";
 import { NumberInput } from "../NumberInput";
 import { computePracticeHistory } from "../../lib/history";
-import { formatRange, loggedSessions } from "../../lib/utils";
+import { formatRange, loggedSessions, addDaysISO } from "../../lib/utils";
 import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
 import {
   computeConfidence,
@@ -176,7 +176,17 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
     projectionText = "No recent pace to project from yet — log a few sessions to see a projection.";
   } else {
     const projectedDay = currentDay + Math.ceil(remainingChunks / recentVelocity);
-    projectionText = `At your recent pace, full coverage projects to around day ${projectedDay}.`;
+    // Calendar date, not a bare day-number (Decisions.md#open-questions,
+    // resolved on direct request) — day 1 is piece.startDate, so day N's
+    // date is startDate + (N - 1). Same toLocaleDateString shape
+    // ScheduleFields.jsx already uses for target/estimated-finish dates,
+    // for consistency across the app's other calendar-date displays.
+    const projectedDate = new Date(`${addDaysISO(piece.startDate, projectedDay - 1)}T00:00:00`).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    projectionText = `At your recent pace, full coverage projects to around ${projectedDate}.`;
   }
 
   // Folded in from the former Analytics tab (Pass 20). Pure relocation —

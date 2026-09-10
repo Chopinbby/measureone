@@ -889,6 +889,44 @@ describe("isPlanActuallyComplete — Pass 39: what 'the plan is actually finishe
       assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false);
     });
   });
+
+  // Closes an open question (docs/Decisions.md#open-questions): a piece
+  // genuinely learned away from the app can never satisfy either branch
+  // above, since its practice never actually happened inside MeasureOne.
+  // markedLearnedElsewhere (set from Settings) is a manual, unconditional
+  // override — checked first, before even the calendar gate — so setting
+  // it unlocks every isPlanActuallyComplete-gated behavior (Archive, Start
+  // revival, the schedule banner) at once, the same way genuinely
+  // finishing the plan would.
+  describe("markedLearnedElsewhere — manual override for a piece finished away from the app", () => {
+    test("[fix] still within the plan, nothing logged at all: complete anyway, once the flag is set", () => {
+      const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(4), markedLearnedElsewhere: true }); // day 5 of 10
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), true, "the manual override bypasses the calendar gate, not just the per-chunk check");
+    });
+
+    test("[fix] past the target date with every chunk still untouched: complete anyway, once the flag is set", () => {
+      const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10), markedLearnedElsewhere: true });
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), true);
+    });
+
+    test("[fix] scheduleMode 'minutes', no chunk anywhere near Holding: complete anyway, once the flag is set", () => {
+      const piece = basePiece({ scheduleMode: "minutes", daysToLearn: 10, startDate: startedDaysAgo(10), markedLearnedElsewhere: true });
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), true);
+    });
+
+    test("false (the default) leaves every existing rule exactly as it was", () => {
+      const piece = basePiece({ daysToLearn: 10, startDate: startedDaysAgo(10), markedLearnedElsewhere: false });
+      const chunkSet = generateAllChunks(piece);
+      const timeline = getEffectiveTimeline(piece, chunkSet);
+      assert.equal(isPlanActuallyComplete(piece, chunkSet, timeline), false, "nothing logged, flag off — still not complete");
+    });
+  });
 });
 
 describe("computeAbandonedPlanReminder — a still-unfinished plan gone quiet for 14+ days, escalating weekly", () => {

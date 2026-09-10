@@ -1043,9 +1043,17 @@ a plan-day session does — no parallel logging mechanic.
 
 Three rules this obeys, each load-bearing:
 
-- **Strictly "due as of today."** No forward-looking window, no
-  due-in-N-days, no maintenance calendar. A chunk due in three days appears
-  nowhere until it's due.
+- **Strictly "due as of today" for the day-by-day due list itself**
+  (`computeDueReviews`/`DueReviewPanel`) — unchanged. A chunk due in three
+  days still appears nowhere in *that* list until it's due. **A genuine
+  forward-looking window now exists as a separate, narrower surface**,
+  built later on direct request despite the massed-practice concern this
+  rule was originally protecting against: `computeDueOnDate`
+  (`lib/maintenance.js`) powers `WeekView.jsx`'s maintenance-mode week,
+  showing each of the next few days' own newly-due items (not an
+  accumulating "due by then" list) — see
+  [Decisions.md](Decisions.md#open-questions) and
+  [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
 - **A review arriving late is schedule slack, never a failure.** Overdue
   items are stated plainly and sorted most-overdue-first, with no penalty
   styling and no effect on the ladder — and because the next due date is

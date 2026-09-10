@@ -491,6 +491,20 @@ describe("mergeRevival — same field-by-field merge as mergeLadderConfig, appli
   });
 });
 
+describe("markedLearnedElsewhere — manual escape hatch for a piece finished away from the app", () => {
+  test("a piece saved before this field existed defaults to false, not undefined", () => {
+    const preExisting = { ...fresh, id: "p_no_marked_flag" };
+    const m = validateAndMigratePiece(preExisting);
+    assert.equal(m.markedLearnedElsewhere, false);
+  });
+
+  test("an explicit true survives migration unchanged", () => {
+    const marked = { ...fresh, id: "p_marked", markedLearnedElsewhere: true };
+    const m = validateAndMigratePiece(marked);
+    assert.equal(m.markedLearnedElsewhere, true);
+  });
+});
+
 describe("Import path — validateAndMigratePiece protects imported pieces too", () => {
   test("parseBackupPieces reads a standard export file shape", () => {
     const text = JSON.stringify({ exportedAt: new Date().toISOString(), version: 1, pieces: [fresh] });

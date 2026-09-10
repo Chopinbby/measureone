@@ -53,6 +53,16 @@ piece = {
                          // for setting it to 'archived' specifically (not 'paused') is
                          // conditionally disabled — see Repertoire-Lifecycle.md and
                          // Decisions.md#lifecycle.
+  markedLearnedElsewhere, // boolean, default false — manual override for a piece
+                         // learned away from the app (Settings' "Mark as learned
+                         // elsewhere"). isPlanActuallyComplete (lib/scheduling.js)
+                         // treats this as unconditional, ahead of its normal
+                         // calendar/per-chunk checks — setting it unlocks every
+                         // behavior gated on that function at once (Archive, Start
+                         // revival, the schedule banner, bulk reschedule
+                         // eligibility), the same way genuinely finishing the plan
+                         // would. Freely reversible from the same Settings control.
+                         // See Decisions.md#open-questions.
   totalMeasures,         // number
   measureDifficulty,     // number[totalMeasures], each 1|2|3 (easy/medium/hard)
   diffMode,              // 'grid' | 'simple' — legacy; 'simple' (the quick-count

@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDaysISO, todayISODate, formatRange, mergeRanges, formatMinutes, clamp } from "../../../lib/utils";
-import { totalDueMinutes } from "../../../lib/maintenance";
+import { totalDueMinutes, computeDueOnDate } from "../../../lib/maintenance";
 import { isDayFullySwept } from "../../../lib/scheduling";
 
 /* ------------------------------------------------------------------ */
@@ -51,43 +51,47 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
   /*  Past the bounded plan: maintenance mode.                         */
   /* ---------------------------------------------------------------- */
   //
-  // Only *today* can be filled in here, and that is a real limit rather
-  // than an unfinished cell: computeDueReviews answers "what is due as of
-  // this date" and nothing in the app answers "what will be due on
-  // Thursday" — a forward-looking due window is explicitly scoped out in
-  // docs/Decisions.md. Rather than leave six cells looking empty (which
-  // would read as "nothing due Thursday" — a promise this data can't
-  // make), the days ahead are marked plainly as not-yet-known.
+  // Forward-looking, on direct request (docs/Decisions.md#open-questions)
+  // — the "due-in-N-days" query originally scoped out (the stated concern:
+  // showing "due Thursday" might invite practising it Wednesday, exactly
+  // the massed-practice pattern spacing exists to prevent) is built here
+  // via computeDueOnDate (lib/maintenance.js). Today's cell still uses the
+  // `dueItems` prop (computeDueReviews — the real backlog, everything due
+  // *as of* today); each day *after* today uses computeDueOnDate's exact
+  // nextDueDate match instead, so a real backlog doesn't silently
+  // re-count into every future cell too. Days *before* today are left as
+  // "—", same as before this — a forward week doesn't imply a backward
+  // one, and what was due then is either logged already or already folded
+  // into today's own backlog.
   if (pastPlan) {
     const today = todayISODate();
     const days = Array.from({ length: WINDOW }, (_, i) => addDaysISO(today, i - 3));
-    const dueRanges = mergedRangesFor(dueItems.map((i) => i.chunk.id));
+    const chunkSetShim = { all: chunks };
 
     return (
       <div className="panel">
         <h3>This week</h3>
         <p className="wizard-hint">
-          This piece has finished its bounded plan, so there's no day-by-day grid left to lay out —
-          maintenance reviews come due one day at a time.
+          This piece has finished its bounded plan — maintenance reviews now come due one day at a
+          time, on each chunk's own spaced-repetition schedule.
         </p>
         <div className="week-grid">
           {days.map((date, i) => {
             const isToday = i === 3;
-            const body = isToday ? (
-              dueItems.length ? (
-                <div className="day-card-group">
-                  <span className="day-card-tag review">Due</span>
-                  {dueRanges.map((r) => (
-                    <span key={`due-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
-                  ))}
-                </div>
-              ) : (
-                <p className="day-card-note">Nothing due</p>
-              )
+            const isPast = i < 3;
+            const dayItems = isPast ? [] : isToday ? dueItems : computeDueOnDate(piece, chunkSetShim, date);
+            const dayRanges = mergedRangesFor(dayItems.map((it) => it.chunk.id));
+            const body = isPast ? (
+              <p className="day-card-note" style={{ color: "var(--ink-faint)" }}>—</p>
+            ) : dayItems.length ? (
+              <div className="day-card-group">
+                <span className="day-card-tag review">Due</span>
+                {dayRanges.map((r) => (
+                  <span key={`due-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
+                ))}
+              </div>
             ) : (
-              <p className="day-card-note" style={{ color: "var(--ink-faint)" }}>
-                {i < 3 ? "—" : "Not due yet"}
-              </p>
+              <p className="day-card-note">Nothing due</p>
             );
 
             if (!isToday) {
@@ -95,6 +99,9 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
                 <div key={date} className="day-card" style={{ background: "var(--paper)" }}>
                   <div className="day-card-head">
                     <span className="mono">{formatCellDate(date)}</span>
+                    {!isPast && dayItems.length > 0 && (
+                      <span className="mono day-card-min">{formatMinutes(totalDueMinutes(dayItems))}</span>
+                    )}
                   </div>
                   {body}
                 </div>
@@ -119,7 +126,8 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
           })}
         </div>
         <p className="wizard-hint" style={{ marginTop: 12, marginBottom: 0 }}>
-          Days ahead fill in as reviews come due — nothing is hidden from you here.
+          Days ahead show what's newly due that day — anything already overdue stays counted in
+          today's total, not repeated into every day after it.
         </p>
       </div>
     );

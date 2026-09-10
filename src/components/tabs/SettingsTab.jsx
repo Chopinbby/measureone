@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2 } from "lucide-react";
 import { BasicsFields } from "../fields/BasicsFields";
 import { SectionsEditor } from "../fields/SectionsEditor";
 import { DifficultyEditor } from "../fields/DifficultyEditor";
@@ -26,7 +26,7 @@ import { formatMinutes } from "../../lib/utils";
 const ARCHIVE_LOCKED_STYLE = { opacity: 0.45, cursor: "not-allowed" };
 const ARCHIVE_LOCKED_TITLE = "Available once this piece's learning plan is actually finished";
 
-export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus }) {
+export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus, onSetMarkedLearnedElsewhere }) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
   // the toggle is on but the work title is blank (same rule as the Wizard,
@@ -106,6 +106,31 @@ export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft
               Archive unlocks once this piece's plan is actually finished — this one still has
               practicing left to do. Pause it instead if you want it off your daily agenda for now.
             </p>
+          )}
+          {!piece.markedLearnedElsewhere && !planComplete && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+              <p className="wizard-hint" style={{ marginBottom: 8 }}>
+                Already know this piece from before you started tracking it here — or learned it
+                away from the app entirely? You can mark it finished manually instead of logging
+                every chunk retroactively. This unlocks Archive and Start revival and stops the
+                schedule from flagging it as behind, the same as genuinely finishing the plan
+                would.
+              </p>
+              <button className="ghost-btn" onClick={() => onSetMarkedLearnedElsewhere(true)}>
+                <BadgeCheck size={14} /> Mark as learned elsewhere
+              </button>
+            </div>
+          )}
+          {piece.markedLearnedElsewhere && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+              <p className="wizard-hint" style={{ marginBottom: 8 }}>
+                Marked as learned elsewhere — this piece is treated as finished regardless of
+                what's actually logged in-app.
+              </p>
+              <button className="ghost-btn" onClick={() => onSetMarkedLearnedElsewhere(false)}>
+                <Undo2 size={14} /> Undo — treat as still in progress
+              </button>
+            </div>
           )}
         </div>
         <div className="panel">

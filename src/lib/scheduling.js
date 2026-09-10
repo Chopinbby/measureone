@@ -1089,7 +1089,19 @@ export function findStuckBehindPieces(pieces) {
 //     lib/ladder.js). See `computeMinutesModeAutoExtend` below for what
 //     keeps the plan itself growing to fit until that's true, instead of
 //     this ever reporting "finished" purely because the calendar ran out.
+// `markedLearnedElsewhere` is a manual, unconditional override (Settings —
+// "finished away from the app") for a piece genuinely learned outside
+// MeasureOne, which can otherwise never satisfy either branch below: a
+// "days" piece never gets every item logged, and a "minutes" piece never
+// reaches isPieceLearned's per-chunk Holding bar, if its practice never
+// actually happened inside the app. Checked first and short-circuits both
+// the calendar gate and the completeness check, so setting it flows the
+// piece into every isPlanActuallyComplete-gated behavior at once — Archive
+// unlocks, Start revival unlocks, the schedule banner and bulk reschedule
+// stop judging it — the same way genuinely finishing the plan would. See
+// docs/Decisions.md#open-questions.
 export function isPlanActuallyComplete(piece, chunkSet, timeline) {
+  if (piece.markedLearnedElsewhere) return true;
   if (elapsedDay(piece) <= timeline.days.length) return false;
   if (piece.scheduleMode === "minutes") return isPieceLearned(piece, chunkSet);
   return (chunkSet.all || []).every((c) => (((piece.progress[c.id] || {}).doneDays) || []).length > 0);

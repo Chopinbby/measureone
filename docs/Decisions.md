@@ -5726,30 +5726,46 @@ oversight to silently fix; surface it instead.
   own bulk-add path already appends an index suffix, per that file's own
   comment) share the identical narrow collision risk and weren't in this
   open question's original scope, so weren't swept in with it.
-- **Should a piece in maintenance get a genuinely forward-looking week, and
-  therefore the due-in-N-days query that was scoped out?** Surfaced by
-  Pass 22's week view (see the two decisions in [UX](#ux) above). Inside a
-  bounded plan the week is fully populated, because `timeline.days[]`
-  already holds every future day. Past the plan it structurally cannot be:
-  `computeDueReviews` is strictly "due as of this date," so six of the
-  seven cells can only say "not due yet." A learner in maintenance —
-  which is the *long-term* state of every piece they finish — therefore
-  gets a much thinner week than one still learning, exactly inverting who
-  benefits from planning ahead.
-  - **What it would take:** the forward-looking window deliberately ruled
-    out when the maintenance query was built. That exclusion was not an
-    oversight; the stated concern is that showing "due Thursday" invites
-    practising it Wednesday, which is precisely the massed-practice
-    behaviour spacing exists to prevent, and the ladder's due dates move
-    as sessions are logged, so a week-ahead forecast is a projection that
-    will often be wrong by the time it arrives.
-  - **The narrower version worth considering first:** not a full forecast,
-    but a count — "3 reviews expected in the next 7 days" — which conveys
-    load without naming a day to practise early. Undecided whether even
-    that crosses the line.
-  - **Not started.** Recorded because the honest-but-thin maintenance week
-    is the visible symptom of this, and a future pass looking at it should
-    know the emptiness is a decision, not a bug.
+- ~~**Should a piece in maintenance get a genuinely forward-looking week,
+  and therefore the due-in-N-days query that was scoped out?**~~
+  **Built, the user's explicit choice over the narrower count-only
+  alternative, despite the massed-practice concern that originally ruled
+  it out.** Surfaced by Pass 22's week view (see the two decisions in
+  [UX](#ux) above). Inside a bounded plan the week was already fully
+  populated, because `timeline.days[]` holds every future day; past the
+  plan it structurally couldn't be, since `computeDueReviews` only ever
+  answered "due as of this date."
+  - **The stated concern this overrides:** showing "due Thursday" invites
+    practising it Wednesday — precisely the massed-practice behaviour
+    spacing exists to prevent — and the ladder's due dates move as
+    sessions are logged, so a week-ahead forecast can go stale before it
+    arrives. Raised directly, not silently overridden: the user chose the
+    full week anyway. Nothing about how due dates are computed or moved
+    changed to accommodate this — the risk named above is accepted as-is,
+    not mitigated.
+  - **What shipped:** `computeDueOnDate(piece, chunkSet, date)`
+    (`lib/maintenance.js`) — the due-in-N-days query, deliberately an
+    *exact* `nextDueDate === date` match rather than `computeDueReviews`'s
+    accumulating `<= asOfDate` — so a real backlog surfaces once (folded
+    into today's cell, via the existing `computeDueReviews`) rather than
+    re-appearing in every future cell after it. `WeekView.jsx`'s
+    maintenance-mode branch now calls it for each of the 3 days after
+    today, showing the same exact measure-range chips the in-plan week
+    view already shows for New/Review — the full week, not a count. Days
+    *before* today are unchanged (still `"—"`) — not part of what was
+    asked; a forward week doesn't imply a backward one.
+  - **Verified:** 5 new regression tests
+    (`test/maintenance.test.mjs`'s `computeDueOnDate` describe block),
+    including one confirmed to fail against a naive `<=` version of the
+    query (proving the exact-match distinction actually matters, not just
+    asserted). Live in the browser: a piece with one overdue chunk, one
+    due today, and three due on the next three calendar days showed
+    exactly that spread across the week grid — today's cell merged the
+    overdue-plus-due-today ranges into one "Due" group, and each of the
+    next three days showed only its own newly-due range, with the three
+    days before today still reading `"—"`.
+  - See [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query)
+    for the mechanism.
 
 - **Nothing prunes orphaned `piece.progress` entries after a piece edit, and
   it's undecided whether anything should.** Surfaced in Pass 20 while fixing
@@ -5765,9 +5781,37 @@ oversight to silently fix; surface it instead.
   orphaned history is data to preserve, migrate onto the new chunks, or
   discard — a data-lifecycle question, and the discard option is
   irreversible. Not urgent; the visible behavior is already honest.
-- **Gate revival entry behind a piece being in maintenance — the practical
-  contradiction is resolved (Pass 83); the originally-envisioned mechanism
-  is not, and gating on the substitute has its own new gap.** Agreed in
+- ~~**Gate revival entry behind a piece being in maintenance — the
+  practical contradiction is resolved (Pass 83); the originally-envisioned
+  mechanism is not, and gating on the substitute has its own new gap.**~~
+  **The new gap is resolved too, directly on the user's request, with the
+  originally-envisioned mechanism itself** — a manual Settings control
+  (`piece.markedLearnedElsewhere`, "Mark as learned elsewhere") that
+  `isPlanActuallyComplete` (`lib/scheduling.js`) treats as an unconditional
+  override, checked first, ahead of both the calendar gate and the
+  per-chunk/`isPieceLearned` check. Because every behavior this session was
+  worried about — Archive, "Start revival," the schedule banner, bulk
+  reschedule eligibility, the Overview "Continue learning" →
+  "Continue maintenance" relabel — already reads `isPlanActuallyComplete`
+  (not a separate `piece.stage` field that would need threading through
+  each one individually), setting the flag makes all of them agree at
+  once: **the user's own framing, confirmed directly** — "the default
+  result of marking a piece learned manually should be that it
+  automatically enters maintenance mode, with the start revival button
+  unlocked" — falls out of that one check for free, no per-surface wiring
+  needed. Freely reversible from the same Settings control ("Undo — treat
+  as still in progress"), no confirmation dialog, matching Pause/Archive's
+  own low-ceremony precedent. Verified with 4 new regression tests
+  (`test/scheduling.test.mjs`'s `markedLearnedElsewhere` describe block,
+  confirmed to fail without the fix; `test/storage.test.mjs`'s migration
+  backfill) and live in the browser: setting the flag unlocked Archive and
+  "Start revival" and relabeled "Continue learning" to "Continue
+  maintenance"; Undo reverted all three. See
+  [Data-Model.md](Data-Model.md) for the field and
+  [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
+  for `isPlanActuallyComplete`. The rest of the original entry, now
+  historical context for why this took the shape it did:
+  Agreed in
   principle with the user (Pass 19 follow-up): the "Start revival" entry
   point should not be offered while a piece is still being learned.
   Revival would become reachable only once a piece is in maintenance; a
@@ -5818,41 +5862,39 @@ oversight to silently fix; surface it instead.
        finished) — this was the exact contradiction Pass 83 fixed, and the
        fix applies uniformly to all three conditions, not just the
        staleness one originally named here.
-  - **The new gap this substitution creates, not previously anticipated:**
-    `isPlanActuallyComplete`'s `"days"`-mode branch requires every item in
-    `chunkSet.all` to have `doneDays.length > 0` — at least one *logged*
-    session each. A piece "finished away from the app" in the sense this
-    open question's own design paragraph describes — created as an
-    ordinary (non-revival) piece, then genuinely learned/known by the
-    player without every single chunk ever being logged in MeasureOne —
-    can never satisfy that, and so can never pass `isPlanActuallyComplete`,
-    and so its "Start revival" button now stays **permanently** disabled,
-    with no escape hatch, unless it happens to have been created directly
-    into revival at Setup (case 1 above) instead. This is a real
-    regression risk for that specific piece shape, not a hypothetical:
-    before Pass 83, such a piece's "Start revival" button was always
-    clickable; after, it may never become so. Not caught before shipping
-    because verification focused on reproducing and closing the original
-    P2 contradiction (an *unfinished, actively behind* piece wrongly
-    suggesting revival), not on this *finished-but-under-logged* piece
-    shape, which is the opposite failure direction. **Not fixed — surfaced
-    here during a docs-accuracy pass, not decided.** Options for a future
-    pass: a manual Settings "mark as learned"/"finished elsewhere" override
-    (closest to the originally-envisioned mechanism above), loosening
-    `isPlanActuallyComplete`'s `"days"`-mode criterion itself (risks
-    weakening what "the plan is actually finished" means everywhere else
-    that function is read — see
+  - **The new gap this substitution created, not previously anticipated —
+    resolved above:** `isPlanActuallyComplete`'s `"days"`-mode branch
+    requires every item in `chunkSet.all` to have `doneDays.length > 0` —
+    at least one *logged* session each. A piece "finished away from the
+    app" in the sense this open question's own design paragraph describes
+    — created as an ordinary (non-revival) piece, then genuinely
+    learned/known by the player without every single chunk ever being
+    logged in MeasureOne — could never satisfy that, so its "Start
+    revival" button stayed **permanently** disabled with no escape hatch.
+    This was a real regression risk, not a hypothetical: before Pass 83,
+    such a piece's "Start revival" button was always clickable; after, it
+    could never become so. Not caught before Pass 83 shipped because
+    verification there focused on the original P2 contradiction (an
+    *unfinished, actively behind* piece wrongly suggesting revival), not
+    this *finished-but-under-logged* piece shape, the opposite failure
+    direction. Of the options considered at the time — a manual Settings
+    override (closest to the originally-envisioned mechanism), loosening
+    `isPlanActuallyComplete`'s `"days"`-mode criterion itself (rejected:
+    risks weakening what "the plan is actually finished" means everywhere
+    else that function is read — see
     [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
-    for every other load-bearing caller), or accepting the gap as a known
-    edge case and directing such a user toward the Wizard's
-    direct-to-revival path instead (awkward for a piece that already
-    exists).
-  - **Still queued, unbuilt:** the manual Settings maintenance-transition
-    control itself, and therefore the "a piece finished away from the app
-    would prompt the revival sequence on that transition, which is also
-    what would place it on Master Agenda under Revival" half of the
-    original design. Nothing in Pass 83 built a persisted mode/stage field
-    or a Settings control for it.
+    for every other load-bearing caller), or accepting the gap — the first
+    is what shipped, as `markedLearnedElsewhere`.
+  - **No longer queued — built:** the manual Settings control exists now
+    (`markedLearnedElsewhere`, above), closing the "a piece finished away
+    from the app would be moved into maintenance manually in Settings"
+    half of the original design. **Still genuinely not built:** the other
+    half — that transition automatically *prompting the revival sequence*
+    (opening `RevivalEntryModal`) rather than just unlocking the button for
+    the user to click themselves, and a dedicated Master Agenda placement
+    beyond what the unlocked button already produces. Not asked for when
+    this was built; the user's own framing ("the start revival button
+    unlocked") was satisfied without either.
 
 - ~~**`piece.revival` is restored all-or-nothing on load, unlike
   `ladderConfig` — the same shape-gap that caused a documented P1
@@ -5918,14 +5960,21 @@ oversight to silently fix; surface it instead.
 - ~~**Exact placement of the Analytics panels once folded into Progress**~~
   — **Resolved (Pass 20)**: pinned down and built. See the dedicated
   decision in [UX](#ux) above for the exact panel order and why.
-- **Should Progress's velocity-based "projected finish" stat (`ProgressTab`,
-  `projectedDay`) ever show a real calendar date instead of staying in
-  day-number terms?** Still open — day-number was chosen as the safer
-  default when the Progress redesign shipped. Note this is now inconsistent
-  with the Wizard's Timeline step, which *does* work in real calendar dates
-  (`piece.targetDate`, an estimated finish date in "minutes per day" mode —
-  see [Algorithms.md](Algorithms.md#timeline--scheduler)); worth revisiting
-  whether Progress should follow suit for consistency.
+- ~~**Should Progress's velocity-based "projected finish" stat
+  (`ProgressTab`, `projectedDay`) ever show a real calendar date instead
+  of staying in day-number terms?**~~ **Resolved: yes, on direct
+  request.** `ProgressTab` now converts `projectedDay` to a calendar date
+  (`addDaysISO(piece.startDate, projectedDay - 1)`) and formats it the same
+  way `ScheduleFields.jsx` already formats target/estimated-finish
+  dates elsewhere in the app (`toLocaleDateString` with a short
+  month/day) — plus an explicit year, a deliberate deviation from that
+  precedent: unlike a Wizard target date (always near-term, within the
+  setup flow), a slow-velocity projection can land many months or over a
+  year out, where a bare "Sep 13" would be ambiguous about which year.
+  Verified live in the browser: a test piece's projection read "At your
+  recent pace, full coverage projects to around Sep 13, 2026." No
+  lib-level test — pure display formatting inside `ProgressTab`
+  (`components/`), no branching logic to exercise.
 - **Is a single Tier 1 touch enough**, or does a chunk need a second short
   rung before Stabilizing's first real review reliably survives? Gated on
   fail-rate data once built, not decided preemptively. See
@@ -6017,10 +6066,19 @@ oversight to silently fix; surface it instead.
   [Lifecycle](#lifecycle)) — that gate has no way to distinguish "not done
   yet, still working on it" from "not done, and never going to be." Pause
   is the only thing available today for the second case, and its own
-  copy ("set aside for now") doesn't match that intent. Two directions
-  raised, neither decided: give Archive its own "abandon this" path
-  distinct from plan-completion, or lean on Pause as the real answer and
-  fix its copy/semantics to say so explicitly. Not started.
+  copy ("set aside for now") doesn't match that intent. **Decided, on
+  direct request: leave it as-is.** Of the two directions raised — give
+  Archive its own "abandon this" path, or lean on Pause and fix its
+  copy/semantics — neither is being built; Pause stays the answer for a
+  genuinely abandoned piece, copy unchanged. Some of the practical sting
+  this was raised over is already softened by a related, separately-built
+  feature: `computeAbandonedPlanReminder` (Pass 83,
+  `lib/scheduling.js`) surfaces an Overview banner after 14+ quiet days on
+  a piece with real work still outstanding, offering Reschedule *or*
+  Pause directly — see the Pass 83 entry in [Revival](#revival) above and
+  [Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83). That
+  banner doesn't rename or redefine Pause, though — it just surfaces the
+  existing action sooner. Revisit only if this comes up again.
 - **The "(behind N chunks)" note and graying on Overview's first-week list
   (Pass 45, `classifyDayCompletion`) aren't revival-aware.** A piece that's
   both mid-revival and behind on its *original* (pre-revival) schedule

@@ -5983,7 +5983,10 @@ oversight to silently fix; surface it instead.
   spaced-repetition ladder's `stage`, as of Pass 6 — see
   [Decisions.md](Decisions.md#spaced-repetition--maintenance)) and can
   still disagree. It's not decided whether that's intentional (Overview
-  wants something coarser) or drift that should be resolved. See
+  wants something coarser) or drift that should be resolved. **Raised
+  directly with the user during a docs-open-questions pass; explicitly
+  deferred, not decided either way** — skipped in favor of the other items
+  in that same batch. See
   [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
 - ~~**Exact placement of the Analytics panels once folded into Progress**~~
   — **Resolved (Pass 20)**: pinned down and built. See the dedicated
@@ -6088,14 +6091,14 @@ oversight to silently fix; surface it instead.
   ("logic that needs a regression test belongs in `src/lib/`") reserves the
   test suite for the lib layer since there's no rendering harness for
   `components/`.
-- **Should Archive have its own path for a piece the learner has genuinely
-  abandoned mid-plan, distinct from "the plan is done"?** Raised directly
-  by the user while gating Archive behind `isPlanActuallyComplete` (see
-  [Lifecycle](#lifecycle)) — that gate has no way to distinguish "not done
-  yet, still working on it" from "not done, and never going to be." Pause
-  is the only thing available today for the second case, and its own
-  copy ("set aside for now") doesn't match that intent. **Decided, on
-  direct request: leave it as-is.** Of the two directions raised — give
+- ~~**Should Archive have its own path for a piece the learner has
+  genuinely abandoned mid-plan, distinct from "the plan is done"?**~~
+  Raised directly by the user while gating Archive behind
+  `isPlanActuallyComplete` (see [Lifecycle](#lifecycle)) — that gate has
+  no way to distinguish "not done yet, still working on it" from "not
+  done, and never going to be." Pause is the only thing available today
+  for the second case, and its own copy ("set aside for now") doesn't
+  match that intent. **Decided, on direct request: leave it as-is.** Of the two directions raised — give
   Archive its own "abandon this" path, or lean on Pause and fix its
   copy/semantics — neither is being built; Pause stays the answer for a
   genuinely abandoned piece, copy unchanged. Some of the practical sting

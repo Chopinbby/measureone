@@ -108,7 +108,9 @@ export function LadderConfigEditor({ draft, set }) {
       <SubHeading>Holding</SubHeading>
       <p className="wizard-hint">
         The resting stage — no further stage to graduate to, so review intervals keep expanding
-        instead (capped at the maximum below), and the tempo floor climbs a little with each pass.
+        instead (capped at the maximum below). Every 4th logged review since a chunk's most recent
+        entry into Holding asks for one extra clean rep, reverting to the usual requirement
+        otherwise.
       </p>
       <div className="field-row">
         <label className="field">
@@ -125,32 +127,6 @@ export function LadderConfigEditor({ draft, set }) {
             value={config.holding.maxIntervalDays}
             min={1}
             onCommit={(n) => updateStage("holding", { maxIntervalDays: n })}
-          />
-        </label>
-      </div>
-      <div className="field-row">
-        <label className="field">
-          <span>Tempo floor, starting fraction</span>
-          <NumberInput
-            value={config.holding.tempoFloorStartFraction}
-            min={0}
-            onCommit={(n) => updateStage("holding", { tempoFloorStartFraction: n })}
-          />
-        </label>
-        <label className="field">
-          <span>Tempo floor, step per pass</span>
-          <NumberInput
-            value={config.holding.tempoFloorStepFraction}
-            min={0}
-            onCommit={(n) => updateStage("holding", { tempoFloorStepFraction: n })}
-          />
-        </label>
-        <label className="field">
-          <span>Tempo floor, cap fraction</span>
-          <NumberInput
-            value={config.holding.tempoFloorCapFraction}
-            min={0}
-            onCommit={(n) => updateStage("holding", { tempoFloorCapFraction: n })}
           />
         </label>
       </div>

@@ -66,13 +66,10 @@ export function defaultPiece() {
     ladderConfig: {
       stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
       settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
-      holding: {
-        startIntervalDays: 14,
-        maxIntervalDays: 70,
-        tempoFloorStartFraction: 0.85,
-        tempoFloorStepFraction: 0.05,
-        tempoFloorCapFraction: 1,
-      },
+      // tempoFloorStartFraction/StepFraction/CapFraction removed — Holding's
+      // escalating tempo floor was retired outright in Pass 61. See
+      // storage.js's DEFAULT_LADDER_CONFIG for the full removal note.
+      holding: { startIntervalDays: 14, maxIntervalDays: 70 },
       bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
       // Pass 59 — the gap-proportional tempo-ratchet rate/cap. Must stay
       // mirrored here alongside bpmSteps above: this object is used as-is

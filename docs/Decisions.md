@@ -6010,12 +6010,23 @@ oversight to silently fix; surface it instead.
   rung before Stabilizing's first real review reliably survives? Gated on
   fail-rate data once built, not decided preemptively. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2).
-- **How does maintenance surface in the UI** — folded into Master Agenda
-  and the per-piece Today tab (most likely), a new tab, or something else?
-  Not designed; also has a real data-plumbing consequence (a live
-  "what's due" query replacing `timeline.days[]` indexing) that isn't
-  designed either. See
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
+- ~~**How does maintenance surface in the UI** — folded into Master Agenda
+  and the per-piece Today tab (most likely), a new tab, or something
+  else?~~ **Stale entry, closed out: this was already built (Pass 8),
+  just never cross-referenced back here.** Found during a docs-accuracy
+  pass — the same class of staleness as the "Reschedule all" open
+  question resolved earlier in this same file (Pass 70's `cutoffDay`).
+  `Repertoire-Lifecycle.md`'s own "How maintenance surfaces in the UI
+  (built)" section independently confirms the "most likely" guess this
+  entry made is exactly what shipped: a "Maintenance due" subtab on Master
+  Agenda (a per-piece summary card) and the per-piece Today tab relabeling
+  to "Plan complete — maintenance, day N" with the day checklist replaced
+  by the due list — both reading from one shared query,
+  `computeDueReviews` (`lib/maintenance.js`), which is exactly the "live
+  'what's due' query replacing `timeline.days[]` indexing" this entry
+  named as undesigned. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#how-maintenance-surfaces-in-the-ui-built)
+  and [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
 - **On an exact `updatedAt` tie during import merge, ladder state and
   status/BPM/confidence resolve in opposite directions.** Found in code
   review after Pass 13 shipped `diffImportedPiece` (see
@@ -6187,8 +6198,10 @@ oversight to silently fix; surface it instead.
   changing the card's layout, which wasn't asked for; giving those two
   controls `tabIndex={-1}` would fix the sequence but make them permanently
   unreachable by keyboard, an accessibility regression nothing asked for
-  either. Not started — a product call on whether strict adjacency is
-  worth one of those costs, not a technical gap.
+  either. **Re-reviewed directly with the user in a later session
+  (shown a screenshot of the exact card), the explicit call: leave it.**
+  All three fixes still cost something real for what remains a cosmetic
+  gap. Not started — revisit only if this comes up again.
 - **What "a chunk in tempo maintenance mode stops counting toward the plan
   being not done yet" actually means is genuinely undefined (Pass 60).**
   The user has said explicitly they'll define this once they reach it —
@@ -6201,17 +6214,31 @@ oversight to silently fix; surface it instead.
   that nudge no longer applies to it. See
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
   60 decision).
-- **(Pass 61) Holding's retired tempo-floor config fields are still live,
-  editable, and silently inert.** `ladderConfig.holding.tempoFloorStartFraction`/
-  `tempoFloorStepFraction`/`tempoFloorCapFraction` are still part of the
-  saved schema and still exposed, correctly labeled, under
-  `LadderConfigEditor`'s "Holding" heading — but `clearsStageFloor` no
-  longer reads any of them for Holding. A user can "tune" a setting with
-  zero effect and get no indication it's inert. Not started — neither
-  `storage.js`'s config defaults nor `LadderConfigEditor.jsx` were in Pass
-  61's Touches list for removal, and removing a saved/editable config
-  field is a bigger, more deliberate call than this pass was scoped to
-  make unilaterally. See
+- ~~**(Pass 61) Holding's retired tempo-floor config fields are still
+  live, editable, and silently inert.**~~ **Resolved: removed, on direct
+  request, once clarified that this doesn't touch the tempo-climbing
+  behavior the user was actively testing.** The user's live testing
+  concern turned out to be about a completely different, still-fully-active
+  mechanism — the Tempo Ratchet (Pass 59, `ladderConfig.tempoRatchet`),
+  which climbs `practiceBPM` toward target on every logged session and has
+  no connection to these three fields at all. Once that was clarified,
+  `tempoFloorStartFraction`/`tempoFloorStepFraction`/`tempoFloorCapFraction`
+  were removed from `DEFAULT_LADDER_CONFIG` (`lib/storage.js`) and
+  `defaultPiece()` (`Wizard.jsx`), and `LadderConfigEditor`'s three
+  corresponding number fields were removed along with the "Holding" panel's
+  intro paragraph, which had kept describing the retired escalating-floor
+  behavior ("the tempo floor climbs a little with each pass") rather than
+  what Holding actually does since Pass 61 (the periodic every-4th-review
+  extra-rep check). A piece already saved with these fields keeps them as
+  harmless dormant data — same precedent as `piece.revival.purpose` (Pass
+  55) — no migration/stripping added. The retired mechanism's exact design
+  (85% start, 5%-per-pass step, capped at 100%) stays fully documented
+  here and in
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built),
+  and its implementation is fully recoverable from the Pass 61 commit if
+  ever worth rebuilding some version of it. Verified live in the browser:
+  Settings' Holding panel now shows only "Starting interval (days)" /
+  "Maximum interval (days)" and the corrected description. See
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
   61 decision).
 - ~~`countBehindDays`'s "N days behind" figure doesn't know about Pass 48's

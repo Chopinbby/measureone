@@ -34,13 +34,19 @@ const CURRENT_SCHEMA_VERSION = 1;
 const DEFAULT_LADDER_CONFIG = {
   stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
   settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
-  holding: {
-    startIntervalDays: 14,
-    maxIntervalDays: 70,
-    tempoFloorStartFraction: 0.85,
-    tempoFloorStepFraction: 0.05,
-    tempoFloorCapFraction: 1,
-  },
+  // tempoFloorStartFraction/tempoFloorStepFraction/tempoFloorCapFraction
+  // used to live here — Holding's escalating tempo floor, retired outright
+  // in Pass 61 (clearsStageFloor's Holding branch always returns true now,
+  // replaced by holdingReviewCount's periodic extra-rep check below).
+  // Removed from the schema on direct request, once confirmed a piece
+  // already saved with those fields keeps them as harmless dormant data —
+  // same "dormant, not removed" precedent as piece.revival.purpose (Pass
+  // 55). The design itself (85% start, 5%-per-pass step, capped at 100%)
+  // stays fully written up in Repertoire-Lifecycle.md and Decisions.md,
+  // and the retired implementation is fully recoverable from git history
+  // (the Pass 61 commit), if it's ever worth rebuilding some version of
+  // this. See docs/Decisions.md#open-questions.
+  holding: { startIntervalDays: 14, maxIntervalDays: 70 },
   bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
   // Pass 59 — the tempo-ratchet's default adaptive rate and its per-session
   // BPM cap. Replaces the flat bpmSteps.pass/softMiss deltas above with a

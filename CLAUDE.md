@@ -556,10 +556,15 @@ logged consolidation day still read `"behind"`) — **resolved in a later
 session, on direct request: `classifyDayCompletion` now checks
 `"__consolidation__"`'s own `doneDays` for a consolidation day instead of
 the per-chunk list, see [`docs/Decisions.md`](docs/Decisions.md#scheduling)**
-— and neither this note nor the graying is revival-aware — a piece
-mid-revival can show "(behind N chunks)" against its *original*,
-pre-revival plan, not the revival plan actually being followed, **still
-open** — see [`docs/Decisions.md`](docs/Decisions.md#open-questions).
+— and neither this note nor the graying was revival-aware — a piece
+mid-revival could show "(behind N chunks)" against its *original*,
+pre-revival plan, not the revival plan actually being followed. **The
+note half is resolved, also in a later session, on direct request:**
+`OverviewTab` now suppresses it while `isInRevival(piece)`. The "graying"
+half turned out not to be a distinct, separately-suppressable thing —
+Overview/Timeline gray any non-`"future"` day identically, `"behind"` and
+`"empty"` alike, so there's nothing behind-specific to hide beyond the
+text note. See [`docs/Decisions.md`](docs/Decisions.md#open-questions).
 
 **Since Pass 46**, the Timeline tab applies Pass 45's
 `classifyDayCompletion` to every day card: a past day grays out, and a

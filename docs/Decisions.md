@@ -6121,19 +6121,30 @@ oversight to silently fix; surface it instead.
   [Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83). That
   banner doesn't rename or redefine Pause, though — it just surfaces the
   existing action sooner. Revisit only if this comes up again.
-- **The "(behind N chunks)" note and graying on Overview's first-week list
-  (Pass 45, `classifyDayCompletion`) aren't revival-aware.** A piece that's
-  both mid-revival and behind on its *original* (pre-revival) schedule
-  still shows this note and graying against that original plan — not the
-  revival plan actually being followed. See [UX](#ux) for the mechanism.
-  Not a new problem on its own (`ScheduleBanner` already surfaces original-
-  plan "behind schedule" messaging during revival today), but this adds a
-  second surface carrying it — **and since Pass 46, a third: the Timeline
-  tab's own past-day graying/check mark reuses the same
-  `classifyDayCompletion` call.** Worth deciding whether any of these
-  surfaces should suppress itself during revival, or whether all of them
-  referencing the original plan is actually fine since revival doesn't
-  replace that history. Not started.
+- ~~**The "(behind N chunks)" note and graying on Overview's first-week
+  list (Pass 45, `classifyDayCompletion`) aren't revival-aware.**~~
+  **The note is resolved — suppressed during revival, on direct request.**
+  `OverviewTab`'s "(behind N days)" text now also requires `!revivalActive`
+  (it already had that variable in scope), so a piece mid-revival no
+  longer shows schedule pressure judged against the *original*, pre-revival
+  plan it's no longer actually following. Verified live: a 3-days-behind
+  piece showed "(behind 3 days)" before starting revival, and showed
+  nothing once `revival.active` was set — the day labels also correctly
+  relabeled to "Revive"/"Reconsolidate" at the same time (pre-existing
+  behavior, confirming the fixture was genuinely in revival mode). No
+  lib-level test — a one-line JSX condition in `components/`, same
+  precedent as the Settings Save-button gating fix earlier this session.
+  **The "graying" half is not actually a distinct thing to suppress**, on
+  closer look: Overview/Timeline gray *any* non-future day identically
+  (`completion !== "future"`) regardless of whether it's `"behind"`,
+  `"empty"`, or (unless struck-through/checked) simply not `"done"` — there
+  is no behind-specific visual treatment separate from "not yet checked
+  off," so there's nothing to selectively hide here beyond the text note
+  already fixed. A revival-era day on the original plan will still read as
+  visually un-checked (since revival logs against different progress, not
+  that original day's own items) — the same pre-existing, already-accepted
+  nuance `ScheduleBanner` has always had during revival, untouched by this
+  fix and out of its scope.
 - ~~**A consolidation day's logged run-through doesn't satisfy
   `classifyDayCompletion`'s (Pass 45) per-chunk check.**~~ **Resolved, the
   user's direct call:** logging a consolidation day's run-through now

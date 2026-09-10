@@ -265,7 +265,13 @@ export function OverviewTab({
               }
             }
             const completion = classifyDayCompletion(d, piece, currentDay);
-            if (d.dayNumber === currentDay && missedCount > 0) {
+            // Suppressed during an active revival, on direct request
+            // (docs/Decisions.md#open-questions): missedCount/behindDays
+            // are judged against the piece's *original*, pre-revival plan
+            // — showing schedule pressure against a plan that's no longer
+            // the one actually being followed. Revival has its own,
+            // separate pacing; this note isn't about that.
+            if (d.dayNumber === currentDay && missedCount > 0 && !revivalActive) {
               desc += ` (behind ${behindDays} day${behindDays === 1 ? "" : "s"})`;
             }
             return (

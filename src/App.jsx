@@ -2429,10 +2429,7 @@ const CSS = `
 .map-cell-kind { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); }
 .map-cell-range { font-size: 12.5px; font-weight: 600; }
 .map-cell-conf { font-size: 15px; font-weight: 600; color: var(--ink); display: flex; align-items: center; }
-.map-cell-diff-dot { position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; }
-.diff-dot-easy { background: var(--teal); }
-.diff-dot-medium { background: var(--brass); }
-.diff-dot-hard { background: var(--brick); }
+.map-cell-diff-icon { position: absolute; top: 10px; right: 10px; color: var(--ink-faint); }
 .map-cell-recurring { position: absolute; bottom: 10px; right: 10px; font-size: 13px; color: var(--ink-faint); }
 .map-cell-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; }
 .map-cell-flag.flag-rough { color: var(--brass); }

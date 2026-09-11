@@ -918,7 +918,7 @@ real schema surface for a case the existing marker pattern already
 handles cleanly with none.
 
 **Placement note:** the Piece Map tile already uses all four corner slots
-(`map-cell-diff-dot` top-right, `map-cell-recurring` bottom-right,
+(`map-cell-diff-icon` top-right, `map-cell-recurring` bottom-right,
 `map-cell-flag` bottom-left, `map-cell-relearning` top-left) — there was no
 fifth open corner to give this marker the same `position: absolute`
 treatment those four use. It's inline instead, in the same flow position

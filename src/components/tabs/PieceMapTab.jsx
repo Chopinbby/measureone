@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome, AlertTriangle } from "lucide-react";
+import { X, Pencil, Flag, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome, AlertTriangle, SignalLow, SignalMedium, SignalHigh } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
 import { clamp, formatRange, formatDuration, todayISODate, findRelatedChunks } from "../../lib/utils";
@@ -27,6 +27,12 @@ const FLAG_LABEL = {
   untouched: "Mark rough or lost",
   rough: "Rough — tap for lost",
   lost: "Lost — tap to clear",
+};
+
+const DIFFICULTY_SIGNAL_ICON = {
+  easy: SignalLow,
+  medium: SignalMedium,
+  hard: SignalHigh,
 };
 
 export function PieceMapTab({
@@ -272,6 +278,7 @@ export function PieceMapTab({
           const needsRelearning = (piece.progress[c.id] || {}).needsRelearning;
           const climbingTempo = hasClimbingTempo(piece.progress[c.id]);
           const tier = conf >= 67 ? "teal" : conf >= 34 ? "brass" : "brick";
+          const DiffSignalIcon = DIFFICULTY_SIGNAL_ICON[c.difficultyLabel];
           return (
             <button
               key={c.id}
@@ -279,7 +286,7 @@ export function PieceMapTab({
               onClick={() => setSelected(selected === c.id ? null : c.id)}
             >
               {c.kind !== "section" && <span className="map-cell-kind">{c.kind === "combo" ? "Focus" : "Review"}</span>}
-              <span className={`map-cell-diff-dot diff-dot-${c.difficultyLabel}`} title={DIFFICULTY_META[c.difficultyLabel].label} />
+              <DiffSignalIcon size={12} className="map-cell-diff-icon" title={DIFFICULTY_META[c.difficultyLabel].label} />
               <span className="map-cell-range mono">{formatRange(c.start, c.end)}</span>
               <span className="map-cell-conf mono">
                 {conf}%{manual && <Pencil size={9} className="manual-mark" title="Set manually" />}

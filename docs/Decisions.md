@@ -6072,15 +6072,35 @@ oversight to silently fix; surface it instead.
   chunk-detail modal (where the climbing suggestion shows) doesn't surface
   provisional confirm/discard UI at all, that's `ChecklistItem`-only — so
   the practical exposure is narrow today, but worth knowing about before
-  either feature is extended.
-- **The broadened piece-save effect (Pass 29 follow-up — see the
+  either feature is extended. **Raised directly with the user in a later
+  session; explicit call to leave it**, for exactly that reason — revisit
+  if either feature is ever extended to show both at once.
+- ~~**The broadened piece-save effect (Pass 29 follow-up — see the
   persistence-bug fix above) re-writes every piece to `localStorage` on any
-  single piece's change, not just the one that changed.** Untested at
-  scale: fine for the handful of pieces one musician realistically has
-  open, unverified against a large piece count or a piece with a very long
-  session history. Not a correctness question, a performance one — worth
-  measuring if it's ever revisited, but not urgent enough to have gated
-  landing the correctness fix itself.
+  single piece's change, not just the one that changed.**~~ **Measured, on
+  direct request: not actually a problem, even at extreme scale.** The
+  effect (`App.jsx`, `Object.entries(pieces).forEach(savePieceToStorage)`
+  on any `pieces` change) was timed live in a real browser against
+  synthetic pieces sized to simulate a heavy, long-history use case (16
+  chunks each, up to 100 logged sessions per chunk):
+
+  | Pieces | Sessions/chunk | Data/piece | Total save time |
+  |---|---|---|---|
+  | 5 | 20 | ~46 KB | 1.1 ms |
+  | 20 | 50 | ~107 KB | 5.7 ms |
+  | 50 | 100 | ~207 KB | 27.3 ms |
+  | 100 | 100 | ~207 KB | 48.1 ms |
+
+  Even 100 pieces × 1,600 logged sessions each (~20 MB total — an extreme
+  upper bound no realistic musician approaches) saves in 48ms, in a
+  background effect, not blocking any click. At that kind of scale the
+  actual limiting factor wouldn't be speed at all — it'd be `localStorage`'s
+  browser-enforced quota (typically ~5–10MB per origin), reached well
+  before performance would. That case is already handled, not a gap this
+  surfaced: `savePieceToStorage` (`lib/storage.js`) catches a write failure
+  and `App.jsx` surfaces a persistent banner until a save actually succeeds
+  again, so a quota error is visible, not a silently lost session. No code
+  change — this closes the question, not a fix.
 - ~~**Settings' "Save changes" isn't gated on piece name or total measures
   being present/non-zero, the way the Wizard's "Next" already was before
   this session and still is.**~~ **Resolved.** `SettingsTab`'s "Save

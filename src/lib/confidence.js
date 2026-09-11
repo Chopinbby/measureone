@@ -255,7 +255,14 @@ const CLIMBING_TEMPO_MIN_RISE_BPM = 4;
 // is what actually distinguishes the two.
 export function hasClimbingTempo(entry) {
   if (!entry) return false;
-  const bpmSessions = loggedSessions(entry.sessions).filter((s) => typeof s.bpm === "number");
+  // Number.isFinite, not `typeof s.bpm === "number"` — the latter lets NaN
+  // through (`typeof NaN === "number"` is true), and a NaN comparison is
+  // always false, so a NaN landing in the trailing window could neither
+  // register as a dip nor contribute to a real rise, silently suppressing
+  // the marker rather than showing a false positive. Only reachable via
+  // hand-edited/corrupted data — NumberInput never commits a non-numeric
+  // BPM through the app's own UI.
+  const bpmSessions = loggedSessions(entry.sessions).filter((s) => Number.isFinite(s.bpm));
   if (bpmSessions.length < CLIMBING_TEMPO_MIN_SESSIONS) return false;
   const recent = bpmSessions.slice(-CLIMBING_TEMPO_WINDOW);
   for (let i = 1; i < recent.length; i++) {

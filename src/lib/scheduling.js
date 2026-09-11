@@ -671,19 +671,24 @@ export function computeRemainingConnectorIds(piece, chunkSet) {
 // above does — a chunk logged on some other day still leaves this one
 // incomplete.
 //
-// Known gap, not fixed here: a consolidation day's reviewChunkIds lists
-// every practice chunk (never empty, so it can't land on the "empty"
-// branch), but logging that day's run-through (handleLogRunThrough,
-// App.jsx) only ever writes the synthetic "__consolidation__" progress
-// entry, never each individual chunk's own doneDays. So a past
-// consolidation day reads "behind" here even when its run-through was
-// logged, unless those same chunks also happen to have a same-day regular
-// practice session. Flagged for a human call, not resolved — no decision
-// recorded yet, so don't go looking for one in docs/Decisions.md.
+// A consolidation day's reviewChunkIds lists every practice chunk
+// (never empty, so it can't land on the "empty" branch below), but logging
+// that day's run-through (handleLogRunThrough, App.jsx) only ever writes
+// the synthetic "__consolidation__" progress entry, never each individual
+// chunk's own doneDays — so the per-chunk check below can't see it.
+// Resolved: the user's call is that logging the run-through satisfies that
+// day's schedule outright, the same as any other day's task list being
+// checked off, so a consolidation day is judged by "__consolidation__"'s
+// own doneDays instead of the individual chunk ids it blankets. See
+// docs/Decisions.md#scheduling.
 export function classifyDayCompletion(day, piece, currentDay) {
   if (day.dayNumber >= currentDay) return "future";
   const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
   if (!ids.length) return "empty";
+  if (day.type === "consolidation") {
+    const consolidationDoneDays = (piece.progress["__consolidation__"] || {}).doneDays || [];
+    return consolidationDoneDays.includes(day.dayNumber) ? "done" : "behind";
+  }
   const allDone = ids.every((id) => ((piece.progress[id] || {}).doneDays || []).includes(day.dayNumber));
   return allDone ? "done" : "behind";
 }
@@ -1084,7 +1089,19 @@ export function findStuckBehindPieces(pieces) {
 //     lib/ladder.js). See `computeMinutesModeAutoExtend` below for what
 //     keeps the plan itself growing to fit until that's true, instead of
 //     this ever reporting "finished" purely because the calendar ran out.
+// `markedLearnedElsewhere` is a manual, unconditional override (Settings —
+// "finished away from the app") for a piece genuinely learned outside
+// MeasureOne, which can otherwise never satisfy either branch below: a
+// "days" piece never gets every item logged, and a "minutes" piece never
+// reaches isPieceLearned's per-chunk Holding bar, if its practice never
+// actually happened inside the app. Checked first and short-circuits both
+// the calendar gate and the completeness check, so setting it flows the
+// piece into every isPlanActuallyComplete-gated behavior at once — Archive
+// unlocks, Start revival unlocks, the schedule banner and bulk reschedule
+// stop judging it — the same way genuinely finishing the plan would. See
+// docs/Decisions.md#open-questions.
 export function isPlanActuallyComplete(piece, chunkSet, timeline) {
+  if (piece.markedLearnedElsewhere) return true;
   if (elapsedDay(piece) <= timeline.days.length) return false;
   if (piece.scheduleMode === "minutes") return isPieceLearned(piece, chunkSet);
   return (chunkSet.all || []).every((c) => (((piece.progress[c.id] || {}).doneDays) || []).length > 0);

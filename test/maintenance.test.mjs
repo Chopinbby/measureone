@@ -15,7 +15,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateAllChunks } from "../src/lib/chunking.js";
-import { computeDueReviews, mergeLiveDueReviews } from "../src/lib/maintenance.js";
+import { computeDueReviews, mergeLiveDueReviews, computeDueOnDate } from "../src/lib/maintenance.js";
 
 function basePiece(overrides) {
   return {
@@ -148,5 +148,57 @@ describe("computeDueReviews reaches Today's Practice without the piece running o
     const merged = mergeLiveDueReviews(day, due);
     assert.equal(merged, day, "the exact same object comes back — no merge attempted on a consolidation day");
     assert.equal(merged.minutes, 30, "minutes stays exactly as computeTimeline set it, no silent inflation");
+  });
+});
+
+// The once-scoped-out "due-in-N-days" query (docs/Decisions.md#open-questions),
+// built on direct request to power a genuinely forward-looking maintenance
+// week (WeekView.jsx). Deliberately an *exact* nextDueDate match, not
+// "due by this date" — that distinction is the whole reason it's a
+// separate function from computeDueReviews rather than a thin wrapper
+// around it (see the function's own comment in lib/maintenance.js).
+describe("computeDueOnDate — a single future day's newly-due items, not the accumulated backlog", () => {
+  test("finds a chunk whose nextDueDate lands exactly on the given date", () => {
+    const piece = basePiece({ daysToLearn: 60, progress: { c1: ladderEntry({ nextDueDate: "2026-01-25" }) } });
+    const chunkSet = generateAllChunks(piece);
+    const due = computeDueOnDate(piece, chunkSet, "2026-01-25");
+    assert.deepEqual(due.map((d) => d.chunkId), ["c1"]);
+  });
+
+  test("a chunk overdue *before* the given date is not re-counted — exact match only, not <=", () => {
+    const piece = basePiece({ daysToLearn: 60, progress: { c1: ladderEntry({ nextDueDate: "2026-01-05" }) } });
+    const chunkSet = generateAllChunks(piece);
+    const due = computeDueOnDate(piece, chunkSet, "2026-01-25");
+    assert.deepEqual(due, [], "already overdue as of 1-05 — must not also appear as newly due on 1-25, or a real backlog would double-count into every future day");
+  });
+
+  test("a chunk due *after* the given date doesn't appear yet either", () => {
+    const piece = basePiece({ daysToLearn: 60, progress: { c1: ladderEntry({ nextDueDate: "2026-02-01" }) } });
+    const chunkSet = generateAllChunks(piece);
+    const due = computeDueOnDate(piece, chunkSet, "2026-01-25");
+    assert.deepEqual(due, []);
+  });
+
+  test("respects the same suppression rules as computeDueReviews: paused piece, revival, needsRelearning", () => {
+    const chunkSet0 = generateAllChunks(basePiece({ daysToLearn: 60 }));
+
+    const paused = basePiece({ daysToLearn: 60, status: "paused", progress: { c1: ladderEntry({ nextDueDate: "2026-01-25" }) } });
+    assert.deepEqual(computeDueOnDate(paused, chunkSet0, "2026-01-25"), []);
+
+    const reviving = basePiece({
+      daysToLearn: 60,
+      progress: { c1: ladderEntry({ nextDueDate: "2026-01-25" }) },
+      revival: { active: true, startedAt: Date.now(), reassessmentComplete: false, plan: null },
+    });
+    assert.deepEqual(computeDueOnDate(reviving, chunkSet0, "2026-01-25"), []);
+
+    const relearning = basePiece({ daysToLearn: 60, progress: { c1: ladderEntry({ nextDueDate: "2026-01-25", needsRelearning: true }) } });
+    assert.deepEqual(computeDueOnDate(relearning, chunkSet0, "2026-01-25"), []);
+  });
+
+  test("no piece/chunkSet/date returns [] without throwing", () => {
+    assert.deepEqual(computeDueOnDate(null, {}, "2026-01-25"), []);
+    assert.deepEqual(computeDueOnDate(basePiece({}), null, "2026-01-25"), []);
+    assert.deepEqual(computeDueOnDate(basePiece({}), {}, null), []);
   });
 });

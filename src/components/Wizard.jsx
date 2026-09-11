@@ -23,6 +23,14 @@ export function defaultPiece() {
     composer: "",
     notes: "",
     status: "active",   // 'active' | 'paused' | 'archived' — see Repertoire-Lifecycle.md
+    // Manual escape hatch for a piece finished away from the app (learned
+    // before ever logging every chunk in MeasureOne) — set from Settings,
+    // never by the app itself. isPlanActuallyComplete (lib/scheduling.js)
+    // treats this as an unconditional override, so setting it flips the
+    // piece into maintenance mode (Archive unlocks, Start revival unlocks,
+    // the schedule banner stops judging it) the same way genuinely
+    // finishing the plan would. See docs/Decisions.md#open-questions.
+    markedLearnedElsewhere: false,
     totalMeasures,
     measureDifficulty: Array(totalMeasures).fill(1),
     diffMode: "grid",
@@ -58,13 +66,10 @@ export function defaultPiece() {
     ladderConfig: {
       stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
       settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
-      holding: {
-        startIntervalDays: 14,
-        maxIntervalDays: 70,
-        tempoFloorStartFraction: 0.85,
-        tempoFloorStepFraction: 0.05,
-        tempoFloorCapFraction: 1,
-      },
+      // tempoFloorStartFraction/StepFraction/CapFraction removed — Holding's
+      // escalating tempo floor was retired outright in Pass 61. See
+      // storage.js's DEFAULT_LADDER_CONFIG for the full removal note.
+      holding: { startIntervalDays: 14, maxIntervalDays: 70 },
       bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
       // Pass 59 — the gap-proportional tempo-ratchet rate/cap. Must stay
       // mirrored here alongside bpmSteps above: this object is used as-is

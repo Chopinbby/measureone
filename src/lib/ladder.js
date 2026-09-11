@@ -170,9 +170,9 @@ export function isInTempoMaintenance(practiceBPM, targetBPM, ladderConfig) {
 // stop — the rep side alone (including the new periodic harder check,
 // resolveRequiredReps in lib/confidence.js) is sufficient on its own.
 // Stabilizing/Settling below are completely unchanged. The three
-// now-unread `ladderConfig.holding.tempoFloor*` fields themselves are left
-// in place, not removed — see this pass's summary for why that's flagged,
-// not silently cleaned up.
+// now-unread `ladderConfig.holding.tempoFloor*` fields themselves were
+// left in the schema for a while after this, then removed outright in a
+// later session, on direct request — see docs/Decisions.md#open-questions.
 function clearsStageFloor(stage, practiceBPM, targetBPM, ladderConfig) {
   if (stage === "holding") return true;
   if (targetBPM == null) return true;

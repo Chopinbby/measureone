@@ -22,9 +22,10 @@ import { isInRevival } from "./revival";
 /*  just renders less of the same result.                              */
 /* ------------------------------------------------------------------ */
 
-// Strictly "due as of asOfDate" — a chunk due tomorrow is not due, and
-// there is deliberately no forward-looking/upcoming window anywhere in
-// this pass (see Decisions.md's "Scoped out" note).
+// Strictly "due as of asOfDate" — a chunk due tomorrow is not due here;
+// that's what the forward-looking sibling computeDueOnDate (below) is for
+// (the once-scoped-out due-in-N-days query, built later — see
+// Decisions.md#open-questions).
 //
 // Suppression, both confirmed rather than assumed:
 //   * paused/archived pieces — pause/archive already means "off my daily
@@ -75,6 +76,47 @@ export function computeDueReviews(piece, chunkSet, asOfDate) {
   // thing most at risk. Ties fall back to measure order so the list reads
   // front-to-back through the piece.
   items.sort((a, b) => b.daysOverdue - a.daysOverdue || a.chunk.start - b.chunk.start);
+  return items;
+}
+
+// A single future calendar day's *newly* due items — an exact
+// `nextDueDate === date` match, not "due as of this date" the way
+// computeDueReviews answers for `asOfDate` (which folds in every earlier
+// day's backlog too, by design — a chunk overdue since Tuesday is still
+// due Wednesday). Built for WeekView.jsx's maintenance-mode week: once
+// today's own cell already shows the real backlog via computeDueReviews,
+// each cell *after* today should show only what that day itself adds, or
+// a real backlog would silently re-count into every future cell too.
+//
+// This is the once-scoped-out "due-in-N-days" query
+// (docs/Decisions.md#open-questions) — built on direct request. Same
+// suppression rules as computeDueReviews (paused/archived/revival,
+// needsRelearning), since it answers a narrower version of the identical
+// underlying question.
+export function computeDueOnDate(piece, chunkSet, date) {
+  if (!piece || !chunkSet || !date) return [];
+  if ((piece.status || "active") !== "active") return [];
+  if (isInRevival(piece)) return [];
+
+  const progress = piece.progress || {};
+  const items = [];
+
+  (chunkSet.all || []).forEach((chunk) => {
+    const entry = progress[chunk.id];
+    if (!entry || !entry.nextDueDate) return;
+    if (entry.needsRelearning) return;
+    if (entry.nextDueDate !== date) return;
+
+    items.push({
+      chunkId: chunk.id,
+      chunk,
+      dueDate: entry.nextDueDate,
+      stage: entry.stage || "stabilizing",
+      minutes: Math.round((chunk.effort || 1) * EFFORT_TO_MIN),
+    });
+  });
+
+  items.sort((a, b) => a.chunk.start - b.chunk.start);
   return items;
 }
 

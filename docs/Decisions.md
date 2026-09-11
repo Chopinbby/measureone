@@ -3560,8 +3560,9 @@ rep-only harder check every 4th review, tracked by a new
   `LadderConfigEditor.jsx` were in this pass's Touches list for removal.**
   A user can now "tune" a setting that has zero effect, with nothing in
   that UI indicating it's gone inert. Left as a flagged gap rather than
-  silently cleaned up or silently left undocumented. See
-  [Open questions](#open-questions) below.
+  silently cleaned up or silently left undocumented. **Removed outright, in
+  a later session, on direct request** — see [Open questions](#open-questions)
+  below for the resolution.
 - **Two more real gaps found in review, initially left unfixed (outside
   this pass's Touches list), then fixed the same session per direct
   request as an explicit same-session follow-up:**
@@ -4027,24 +4028,33 @@ into that day's own view. `components/tabs/today/WeekView.jsx`.
   class in `App.jsx`'s stylesheet rather than a third inline copy.
 
 **Decision (Pass 22): in maintenance mode the week shows only today, and
-says so — it does not leave the days ahead looking empty.**
+says so — it does not leave the days ahead looking empty.** **Superseded,
+in a later session, on direct request: the boundary below moved after
+all — see the resolved open question, [Open questions](#open-questions),
+"Should a piece in maintenance get a genuinely forward-looking week."**
+The reasoning immediately below explains why this was the right call *at
+the time*, not why the later reversal was wrong — kept for that context.
 
 Past the end of a bounded plan there are no plan days left, so the week
-view falls back to 7 calendar days around today. Only today's cell can
-carry content (the live due list); the days ahead read "Not due yet" and
-the panel states plainly that maintenance reviews come due one day at a
-time.
+view falls back to 7 calendar days around today. At the time, only today's
+cell could carry content (the live due list); the days ahead read "Not due
+yet" and the panel stated plainly that maintenance reviews come due one
+day at a time.
 
-- **Why it can't do better:** `computeDueReviews` answers "what is due as
-  of this date" and nothing answers "what will be due on Thursday" — a
-  forward-looking window is explicitly scoped out (see
+- **Why it couldn't do better, at the time:** `computeDueReviews` answers
+  "what is due as of this date" and nothing answered "what will be due on
+  Thursday" — a forward-looking window was explicitly scoped out (see
   [Spaced repetition & maintenance](#spaced-repetition--maintenance),
-  "Scoped out"). This is a design boundary, not an unfinished cell.
+  "Scoped out"). This was a deliberate design boundary, not an unfinished
+  cell — until the later session's `computeDueOnDate` addition gave the
+  days ahead something real to show.
 - **Why not just leave them blank:** a blank cell reads as "nothing due
   Thursday," which is a promise this data cannot make — the honest state is
   "not known yet." Same principle as the rest of the app: don't imply
-  information the model doesn't have. See the open question below on
-  whether that boundary should move.
+  information the model doesn't have. This reasoning is exactly why the
+  later fix computes each day's *own* newly-due items rather than an
+  accumulating "due by then" list — it still never implies more than it
+  knows.
 
 **Decision (Pass 23): learning-phase logging (`ChecklistItem`) gets an
 inline, editable free-text note per chunk, reusing `piece.memoryAnchors`
@@ -4219,12 +4229,16 @@ the logic.**
   `computeScheduleStatus`'s existing `missedCount` is nonzero — reused
   directly, not recomputed, per
   [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems).
-- **Known gap, not fixed:** a consolidation day's `reviewChunkIds` lists
-  every practice chunk, but logging that day's run-through
-  (`handleLogRunThrough`, `App.jsx`) only ever writes the synthetic
-  `"__consolidation__"` progress entry, never each individual chunk's own
-  `doneDays` — so a logged consolidation day still reads `"behind"` here.
-  See [Algorithms.md](Algorithms.md#behind-schedule-detection). **Since
+- **Known gap, fixed in a later session:** a consolidation day's
+  `reviewChunkIds` lists every practice chunk, but logging that day's
+  run-through (`handleLogRunThrough`, `App.jsx`) only ever writes the
+  synthetic `"__consolidation__"` progress entry, never each individual
+  chunk's own `doneDays` — so a logged consolidation day used to still read
+  `"behind"` here. **Resolved on direct request**: `classifyDayCompletion`
+  now checks `"__consolidation__"`'s own `doneDays` for a consolidation day
+  instead of the per-chunk list — see
+  [Open questions](#open-questions) for the resolution. See
+  [Algorithms.md](Algorithms.md#behind-schedule-detection). **Since
   Pass 46**, the Timeline tab reuses this same `classifyDayCompletion` call
   for its own past-day graying/check mark, so this gap now reads the same
   way on a third surface, not just Overview's first-week list. **Since
@@ -4240,16 +4254,20 @@ the logic.**
   it was done) — just a more visible instance of a gap that was already
   here, found during Pass 67's own review rather than newly introduced by
   it.
-- **Known gap, not fixed: not revival-aware.** A piece that's both
-  mid-revival and behind on its *original* (pre-revival) schedule still
-  shows the "(behind N chunks)" note and first-week graying against that
-  original plan, not the revival plan the learner is actually following.
-  Not a new inconsistency on its own — `ScheduleBanner` already shows "N
-  chunks behind schedule" during revival today — but it's a second surface
-  carrying the same one. **Since Pass 46, make that three surfaces**: the
-  Timeline tab's own past-day graying/check mark reuses the same
-  `classifyDayCompletion` call, with the same lack of revival-awareness.
-  See [Open questions](#open-questions).
+- **Known gap, the note half fixed in a later session: not revival-aware.**
+  A piece that's both mid-revival and behind on its *original*
+  (pre-revival) schedule used to still show the "(behind N chunks)" note
+  and first-week graying against that original plan, not the revival plan
+  the learner is actually following. Not a new inconsistency on its own —
+  `ScheduleBanner` already shows "N days behind schedule" during revival
+  today — but it's a second surface carrying the same one. **Since Pass
+  46, make that three surfaces**: the Timeline tab's own past-day
+  graying/check mark reuses the same `classifyDayCompletion` call, with
+  the same lack of revival-awareness. **Resolved, the text-note half, on
+  direct request**: `OverviewTab` now suppresses the note while
+  `isInRevival(piece)`. The "graying" half turned out not to be a
+  distinct, separately-suppressable thing on closer look — see
+  [Open questions](#open-questions) for the full resolution.
 
 **Decision (Pass 46): the Timeline tab gets completion states and its own
 reschedule entry point — a direct application of Pass 45's shared
@@ -5760,52 +5778,60 @@ explicit same-session follow-up once asked for directly.**
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
-- **A piece that's already been rescheduled once via "cram it into what's
+- ~~**A piece that's already been rescheduled once via "cram it into what's
   left" while its own plan was already fully elapsed can permanently stop
   being recognized as behind schedule — and "Reschedule all" then silently
-  drops it forever, even though nothing about it ever got fixed.** Found
-  (not caused) while verifying the Pass 39 follow-up bulk-extend fix above,
-  by testing against pieces that had genuinely been through the *old*
-  "reschedule into current plan days" button while already past their own
-  plan. Root cause: that button packs every remaining chunk onto what's
-  effectively a single day (`asOfDay`, clamped to the plan's last day, since
-  `availableDays` floors at 1 once you're past the plan). From then on,
+  drops it forever, even though nothing about it ever got fixed.**~~
+  **Resolved — turns out already fixed by Pass 70, never cross-referenced
+  back to close this entry until a docs-accuracy pass caught the drift.**
+  Originally found (not caused) while verifying the Pass 39 follow-up
+  bulk-extend fix, by testing against pieces that had genuinely been
+  through the *old* "reschedule into current plan days" button while
+  already past their own plan. Root cause as originally diagnosed: that
+  button packs every remaining chunk onto what's effectively a single day
+  (`asOfDay`, clamped to the plan's last day), after which
   `computeScheduleStatus`'s "is this missed" test —
-  `timeline.introducedDay[id] < currentDay` — compares that same clamped
-  day to itself: `currentDay` (`getCurrentDay`, also clamped to the plan's
-  length) can never exceed it, so the comparison is never strictly true,
-  ever again, no matter how many more real days pass. `missedCount` reads
-  `0` permanently. `planRescheduleForPieces` requires `missedCount > 0` to
-  include a piece, so the piece silently stops qualifying for "Reschedule
-  all" from that point on — invisible to the bulk button, though still
-  fixable by opening the piece directly and clicking its own Reschedule
-  button (that path checks `remainingChunkIds.length`, built from
-  `doneDays`, not the broken `introducedDay`/`currentDay` comparison, so
-  it's unaffected).
-  - **Two-part fix proposed to the user; only the first part was asked
-    for.** (1) Stop the trap from being created going forward — the
-    single-piece dialog no longer offers "reschedule into current plan
-    days" once a piece's target date has already fully passed (**built,
-    see the decision above**), so no *new* piece can fall into this state
-    via that path again. (2) Make "Reschedule all" itself resilient to a
-    piece already stuck this way — for a piece whose plan has already
-    fully elapsed, trust the simpler, unbreakable "real work is still
-    untouched" signal (`remainingChunkIds.length > 0`, from `doneDays`)
-    instead of the day-by-day comparison that can get permanently stuck at
-    zero, rather than requiring `missedCount > 0` too. **The user chose
-    part (1) only** ("just 1") — part (2) is unbuilt and this issue stays
-    open until it (or some other repair) lands.
-  - **Still reachable today** by any piece that went through the old
-    "reschedule into current plan days" button while already past its own
-    plan, before this session's part-(1) fix existed — including, found
-    during this same testing, real pieces already sitting in this
-    session's own local test data. Not urgent (the single-piece escape
-    hatch still works), but a piece stuck this way will silently never
-    reappear in a bulk reschedule until a human notices and opens it
-    directly.
+  `timeline.introducedDay[id] < currentDay` — compared that same clamped
+  day to itself forever, so `missedCount` read `0` permanently and
+  `planRescheduleForPieces` (which requires `missedCount > 0`) silently
+  stopped including the piece.
+  - **At the time, the user chose only "stop the trap from being created
+    going forward"** (the single-piece dialog no longer offers "reschedule
+    into current plan days" once a target date has fully passed) and left
+    "make Reschedule all itself resilient to a piece already stuck this
+    way" unbuilt, with two candidate designs on the table: switch the
+    eligibility check to the simpler `remainingChunkIds.length > 0` signal,
+    or repair `missedCount` itself.
+  - **What actually shipped, one session later and for an unrelated
+    reason:** Pass 70 (see [Scheduling](#scheduling) above), reworking
+    "N chunks behind" into "N days behind," introduced
+    `eligiblePieceContext`'s `cutoffDay` — bumping the eligibility cutoff
+    one day past the plan's last day specifically once the piece is
+    genuinely past its own calendar (`elapsedDay(piece) >
+    timeline.days.length`). That's the second candidate design: it repairs
+    `missedCount` at the source rather than switching what
+    `planRescheduleForPieces` checks, so `missedCount`'s other consumers
+    (the furthest-behind-first sort, the per-piece display) keep working
+    correctly too, not just the boolean inclusion check. Nothing about
+    Pass 70's own stated scope named this open question, so it was never
+    linked back here.
+  - **Confirmed by direct reproduction, not just re-reading the code:**
+    rebuilt the exact scenario (a piece holding an old-style cram marker,
+    200 days past a 10-day plan, nothing logged since) — with `cutoffDay`
+    reverted to the bare `asOfDay` clamp, `planRescheduleForPieces` excludes
+    it (`plans.length: 0`, reproducing the original bug exactly); with the
+    real code restored, it's included with a genuine nonzero `missedCount`.
+    Pinned down as a permanent regression test
+    (`test/scheduling.test.mjs`, "a piece already crammed onto its plan's
+    last day…") that didn't exist before this pass, which is exactly why
+    the fix landing in Pass 70 was never connected back to closing this
+    entry — nothing forced the connection to be checked.
+  - **Nothing to migrate:** `eligiblePieceContext` is recomputed fresh on
+    every read, never cached — a real piece already sitting in this state
+    from before Pass 70 shipped self-heals the next time it's evaluated,
+    no data fix required.
   - See [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
-    for `computeScheduleStatus`, and the three decisions immediately above
-    this section for the fixes that did ship this session.
+    for `computeScheduleStatus`.
 - ~~Should Revival's "performance tempo override" field move into Settings
   (reusing the piece's existing target tempo) instead of living at the top
   of the Revival tab, and should "tempo ladder starting point" move to
@@ -5820,61 +5846,136 @@ oversight to silently fix; surface it instead.
   setup time) and stays editable afterward from `RevivalTab`'s "Revival
   settings" panel — see the Pass 35 decision above for the mechanics, and
   [Algorithms.md](Algorithms.md#revival) for how the field is read.
-- **`RecordingsEditor` and `DocumentsEditor` generate each new row's id from
-  `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
-  resolution, so two rows added in the same millisecond would share an id.**
-  Surfaced in code review of Pass 24 (which copied the pattern faithfully
-  from the pre-existing `RecordingsEditor`, so this isn't new to that pass —
-  just now in two places instead of one). Not currently reachable through
-  normal clicking (the two add-buttons aren't rapid-fire in practice), and
-  `updateDocument`/`removeDocument`/their recordings equivalents operate by
-  array index, not by matching id, so a collision wouldn't corrupt data —
-  the only consequence would be React's `key` prop misrendering the two
-  rows if it ever happened. Low severity, narrow trigger; not fixed.
-  Worth switching to a proper unique-id generator if a third list ever
-  copies this pattern, rather than propagating it a third time.
-- **Should a piece in maintenance get a genuinely forward-looking week, and
-  therefore the due-in-N-days query that was scoped out?** Surfaced by
-  Pass 22's week view (see the two decisions in [UX](#ux) above). Inside a
-  bounded plan the week is fully populated, because `timeline.days[]`
-  already holds every future day. Past the plan it structurally cannot be:
-  `computeDueReviews` is strictly "due as of this date," so six of the
-  seven cells can only say "not due yet." A learner in maintenance —
-  which is the *long-term* state of every piece they finish — therefore
-  gets a much thinner week than one still learning, exactly inverting who
-  benefits from planning ahead.
-  - **What it would take:** the forward-looking window deliberately ruled
-    out when the maintenance query was built. That exclusion was not an
-    oversight; the stated concern is that showing "due Thursday" invites
-    practising it Wednesday, which is precisely the massed-practice
-    behaviour spacing exists to prevent, and the ladder's due dates move
-    as sessions are logged, so a week-ahead forecast is a projection that
-    will often be wrong by the time it arrives.
-  - **The narrower version worth considering first:** not a full forecast,
-    but a count — "3 reviews expected in the next 7 days" — which conveys
-    load without naming a day to practise early. Undecided whether even
-    that crosses the line.
-  - **Not started.** Recorded because the honest-but-thin maintenance week
-    is the visible symptom of this, and a future pass looking at it should
-    know the emptiness is a decision, not a bug.
+- ~~**`RecordingsEditor` and `DocumentsEditor` generate each new row's id
+  from `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
+  resolution, so two rows added in the same millisecond would share an
+  id.**~~ **Resolved.** Both now append a random suffix —
+  `` `rec${Date.now()}_${Math.random().toString(36).slice(2, 8)}` `` /
+  the `doc` equivalent — the same pattern already used elsewhere in this
+  codebase for exactly this concern (`App.jsx`'s import-merge id,
+  `lib/works.js`'s `workId`). No lib-level regression test: both editors
+  are `components/`, which the test suite can't reach (CLAUDE.md), and the
+  change itself is a one-line id-format swap with no branching logic to
+  exercise. **Not fixed as part of this pass, left as a known related
+  gap:** `SectionsEditor`'s `addSection` (`` `s${Date.now()}` ``) and
+  `BpmZonesEditor`'s single-add `addZone` (`` `bz${Date.now()}` `` — its
+  own bulk-add path already appends an index suffix, per that file's own
+  comment) share the identical narrow collision risk and weren't in this
+  open question's original scope, so weren't swept in with it.
+- ~~**Should a piece in maintenance get a genuinely forward-looking week,
+  and therefore the due-in-N-days query that was scoped out?**~~
+  **Built, the user's explicit choice over the narrower count-only
+  alternative, despite the massed-practice concern that originally ruled
+  it out.** Surfaced by Pass 22's week view (see the two decisions in
+  [UX](#ux) above). Inside a bounded plan the week was already fully
+  populated, because `timeline.days[]` holds every future day; past the
+  plan it structurally couldn't be, since `computeDueReviews` only ever
+  answered "due as of this date."
+  - **The stated concern this overrides:** showing "due Thursday" invites
+    practising it Wednesday — precisely the massed-practice behaviour
+    spacing exists to prevent — and the ladder's due dates move as
+    sessions are logged, so a week-ahead forecast can go stale before it
+    arrives. Raised directly, not silently overridden: the user chose the
+    full week anyway. Nothing about how due dates are computed or moved
+    changed to accommodate this — the risk named above is accepted as-is,
+    not mitigated.
+  - **What shipped:** `computeDueOnDate(piece, chunkSet, date)`
+    (`lib/maintenance.js`) — the due-in-N-days query, deliberately an
+    *exact* `nextDueDate === date` match rather than `computeDueReviews`'s
+    accumulating `<= asOfDate` — so a real backlog surfaces once (folded
+    into today's cell, via the existing `computeDueReviews`) rather than
+    re-appearing in every future cell after it. `WeekView.jsx`'s
+    maintenance-mode branch now calls it for each of the 3 days after
+    today, showing the same exact measure-range chips the in-plan week
+    view already shows for New/Review — the full week, not a count. Days
+    *before* today are unchanged (still `"—"`) — not part of what was
+    asked; a forward week doesn't imply a backward one.
+  - **Verified:** 5 new regression tests
+    (`test/maintenance.test.mjs`'s `computeDueOnDate` describe block),
+    including one confirmed to fail against a naive `<=` version of the
+    query (proving the exact-match distinction actually matters, not just
+    asserted). Live in the browser: a piece with one overdue chunk, one
+    due today, and three due on the next three calendar days showed
+    exactly that spread across the week grid — today's cell merged the
+    overdue-plus-due-today ranges into one "Due" group, and each of the
+    next three days showed only its own newly-due range, with the three
+    days before today still reading `"—"`.
+  - See [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query)
+    for the mechanism.
 
-- **Nothing prunes orphaned `piece.progress` entries after a piece edit, and
-  it's undecided whether anything should.** Surfaced in Pass 20 while fixing
-  the history crash (see [UX](#ux) above). Editing measures/sections/
-  difficulty regenerates chunk ids, leaving progress entries that no longer
-  match any chunk. Today they survive forever and Progress reports them
-  honestly as "N passages from an earlier version of this plan" — but they
-  also still count toward `allSessions` in the outcome breakdown and toward
-  the practiced-days set feeding the consistency stat, which is arguably
-  correct (the practice happened) or arguably double-counting against a plan
-  that no longer contains it. **Deliberately not resolved in Pass 20**,
-  which was a relocation pass: deciding this means deciding whether
-  orphaned history is data to preserve, migrate onto the new chunks, or
-  discard — a data-lifecycle question, and the discard option is
-  irreversible. Not urgent; the visible behavior is already honest.
-- **Gate revival entry behind a piece being in maintenance — the practical
-  contradiction is resolved (Pass 83); the originally-envisioned mechanism
-  is not, and gating on the substitute has its own new gap.** Agreed in
+- ~~**Nothing prunes orphaned `piece.progress` entries after a piece edit,
+  and it's undecided whether anything should.**~~ **Resolved: migrate,
+  the option the discard/keep framing below flagged as most work but
+  never ruled out.** Surfaced in Pass 20 while fixing the history crash
+  (see [UX](#ux) above) — editing `totalMeasures`/`chunkMode`/
+  `customChunkSize` regenerates practice-chunk ids (`c${start}`,
+  `generatePracticeChunks`), leaving progress entries that no longer match
+  any current chunk. `migrateOrphanedProgress(oldPiece, newPiece)`
+  (`lib/chunking.js`) now runs on every Settings save
+  (`App.jsx`'s `handleSavePiece`, comparing the live piece against the
+  about-to-be-saved draft), reattaching an orphaned entry to whichever
+  current chunk best overlaps its old measure range — the exact same
+  object, just under the new id, so ladder state/sessions/BPM all survive
+  intact, not just a stat.
+  - **A heuristic, not a guaranteed-correct remapping — deliberately
+    conservative about it.** There often isn't one right answer (chunk
+    boundaries genuinely moved, so "the same content" can legitimately now
+    span two new chunks, or two old chunks can collapse into one new one).
+    Three rules keep it from ever doing worse than the pre-existing status
+    quo (an orphaned entry simply stays orphaned, exactly as before this
+    existed): never overwrite a new chunk that already has real progress
+    of its own; never let two orphaned entries both claim the same new
+    chunk (the earlier one by measure order wins, the loser stays
+    orphaned under its own old id — not discarded, not merged); match by
+    greatest measure-range overlap, ties broken by the earliest-starting
+    candidate.
+  - **Scoped to base practice chunks only** — transitions and combos
+    derive their ids from practice-chunk ids (`t_${a.id}_${b.id}` /
+    `x_${c.id}`), so remapping those too would mean applying the same
+    heuristic a second time over a dependent id space; not attempted.
+    Deliberate, bounded scope over solving everything at once.
+  - **Verified:** 5 new regression tests (`test/chunking.test.mjs`'s
+    `migrateOrphanedProgress` describe block), two confirmed to fail
+    against a stubbed-out no-op version of the function. Live in the
+    browser: a piece with `customChunkSize: 5` (chunks `c1`, `c6`, `c11`)
+    carrying real ladder progress on `c6` and `c11`, edited down to
+    `customChunkSize: 4` (chunks `c1`, `c5`, `c9`, `c13`) through the real
+    Settings "Edit piece" → "Save changes" flow — confirmed `c6`'s entry
+    reattached to `c5` and `c11`'s to `c13`, each with its original
+    `practiceBPM` and session history intact, exactly matching the
+    by-hand overlap calculation.
+  - See [Algorithms.md](Algorithms.md#chunking) for the mechanism.
+- ~~**Gate revival entry behind a piece being in maintenance — the
+  practical contradiction is resolved (Pass 83); the originally-envisioned
+  mechanism is not, and gating on the substitute has its own new gap.**~~
+  **The new gap is resolved too, directly on the user's request, with the
+  originally-envisioned mechanism itself** — a manual Settings control
+  (`piece.markedLearnedElsewhere`, "Mark as learned elsewhere") that
+  `isPlanActuallyComplete` (`lib/scheduling.js`) treats as an unconditional
+  override, checked first, ahead of both the calendar gate and the
+  per-chunk/`isPieceLearned` check. Because every behavior this session was
+  worried about — Archive, "Start revival," the schedule banner, bulk
+  reschedule eligibility, the Overview "Continue learning" →
+  "Continue maintenance" relabel — already reads `isPlanActuallyComplete`
+  (not a separate `piece.stage` field that would need threading through
+  each one individually), setting the flag makes all of them agree at
+  once: **the user's own framing, confirmed directly** — "the default
+  result of marking a piece learned manually should be that it
+  automatically enters maintenance mode, with the start revival button
+  unlocked" — falls out of that one check for free, no per-surface wiring
+  needed. Freely reversible from the same Settings control ("Undo — treat
+  as still in progress"), no confirmation dialog, matching Pause/Archive's
+  own low-ceremony precedent. Verified with 4 new regression tests
+  (`test/scheduling.test.mjs`'s `markedLearnedElsewhere` describe block,
+  confirmed to fail without the fix; `test/storage.test.mjs`'s migration
+  backfill) and live in the browser: setting the flag unlocked Archive and
+  "Start revival" and relabeled "Continue learning" to "Continue
+  maintenance"; Undo reverted all three. See
+  [Data-Model.md](Data-Model.md) for the field and
+  [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
+  for `isPlanActuallyComplete`. The rest of the original entry, now
+  historical context for why this took the shape it did:
+  Agreed in
   principle with the user (Pass 19 follow-up): the "Start revival" entry
   point should not be offered while a piece is still being learned.
   Revival would become reachable only once a piece is in maintenance; a
@@ -5925,61 +6026,57 @@ oversight to silently fix; surface it instead.
        finished) — this was the exact contradiction Pass 83 fixed, and the
        fix applies uniformly to all three conditions, not just the
        staleness one originally named here.
-  - **The new gap this substitution creates, not previously anticipated:**
-    `isPlanActuallyComplete`'s `"days"`-mode branch requires every item in
-    `chunkSet.all` to have `doneDays.length > 0` — at least one *logged*
-    session each. A piece "finished away from the app" in the sense this
-    open question's own design paragraph describes — created as an
-    ordinary (non-revival) piece, then genuinely learned/known by the
-    player without every single chunk ever being logged in MeasureOne —
-    can never satisfy that, and so can never pass `isPlanActuallyComplete`,
-    and so its "Start revival" button now stays **permanently** disabled,
-    with no escape hatch, unless it happens to have been created directly
-    into revival at Setup (case 1 above) instead. This is a real
-    regression risk for that specific piece shape, not a hypothetical:
-    before Pass 83, such a piece's "Start revival" button was always
-    clickable; after, it may never become so. Not caught before shipping
-    because verification focused on reproducing and closing the original
-    P2 contradiction (an *unfinished, actively behind* piece wrongly
-    suggesting revival), not on this *finished-but-under-logged* piece
-    shape, which is the opposite failure direction. **Not fixed — surfaced
-    here during a docs-accuracy pass, not decided.** Options for a future
-    pass: a manual Settings "mark as learned"/"finished elsewhere" override
-    (closest to the originally-envisioned mechanism above), loosening
-    `isPlanActuallyComplete`'s `"days"`-mode criterion itself (risks
-    weakening what "the plan is actually finished" means everywhere else
-    that function is read — see
+  - **The new gap this substitution created, not previously anticipated —
+    resolved above:** `isPlanActuallyComplete`'s `"days"`-mode branch
+    requires every item in `chunkSet.all` to have `doneDays.length > 0` —
+    at least one *logged* session each. A piece "finished away from the
+    app" in the sense this open question's own design paragraph describes
+    — created as an ordinary (non-revival) piece, then genuinely
+    learned/known by the player without every single chunk ever being
+    logged in MeasureOne — could never satisfy that, so its "Start
+    revival" button stayed **permanently** disabled with no escape hatch.
+    This was a real regression risk, not a hypothetical: before Pass 83,
+    such a piece's "Start revival" button was always clickable; after, it
+    could never become so. Not caught before Pass 83 shipped because
+    verification there focused on the original P2 contradiction (an
+    *unfinished, actively behind* piece wrongly suggesting revival), not
+    this *finished-but-under-logged* piece shape, the opposite failure
+    direction. Of the options considered at the time — a manual Settings
+    override (closest to the originally-envisioned mechanism), loosening
+    `isPlanActuallyComplete`'s `"days"`-mode criterion itself (rejected:
+    risks weakening what "the plan is actually finished" means everywhere
+    else that function is read — see
     [Algorithms.md](Algorithms.md#detecting-that-a-piece-has-run-past-its-plan)
-    for every other load-bearing caller), or accepting the gap as a known
-    edge case and directing such a user toward the Wizard's
-    direct-to-revival path instead (awkward for a piece that already
-    exists).
-  - **Still queued, unbuilt:** the manual Settings maintenance-transition
-    control itself, and therefore the "a piece finished away from the app
-    would prompt the revival sequence on that transition, which is also
-    what would place it on Master Agenda under Revival" half of the
-    original design. Nothing in Pass 83 built a persisted mode/stage field
-    or a Settings control for it.
+    for every other load-bearing caller), or accepting the gap — the first
+    is what shipped, as `markedLearnedElsewhere`.
+  - **No longer queued — built:** the manual Settings control exists now
+    (`markedLearnedElsewhere`, above), closing the "a piece finished away
+    from the app would be moved into maintenance manually in Settings"
+    half of the original design. **Still genuinely not built:** the other
+    half — that transition automatically *prompting the revival sequence*
+    (opening `RevivalEntryModal`) rather than just unlocking the button for
+    the user to click themselves, and a dedicated Master Agenda placement
+    beyond what the unlocked button already produces. Not asked for when
+    this was built; the user's own framing ("the start revival button
+    unlocked") was satisfied without either.
 
-- **`piece.revival` is restored all-or-nothing on load, unlike
-  `ladderConfig` — the same shape-gap that caused a documented P1 crash.**
-  `validateAndMigratePiece` (`lib/storage.js`) does
-  `revival: piece.revival || { …defaults }`, so a saved piece carrying a
-  *partial* revival object never gets its missing sub-fields filled in.
-  This is precisely the pattern `mergeLadderConfig` exists to fix for
-  ladder settings ("a missing `bpmSteps` throws on the very next logged
-  session — a real crash on real already-saved data"), and revival was
-  never given the same field-by-field treatment. Surfaced in review of the
-  Pass 19 follow-up above, because that change made `isInRevival` (and
-  therefore `computeDueReviews`) read `revival.active` where the
-  maintenance query previously read `revival.startedAt` — so for a piece
-  carrying only one of the two, suppression behaviour changes. Normal use
-  never produces that shape (both fields are set and cleared together), so
-  this is reachable only via externally-produced data: a hand-edited
-  backup, or a piece written by an app version predating one of the
-  fields. **Not fixed** — it's migration code touching every saved piece,
-  and the safe fix (mirror `mergeLadderConfig`) deserves its own pass with
-  its own verification rather than being folded into a UI change.
+- ~~**`piece.revival` is restored all-or-nothing on load, unlike
+  `ladderConfig` — the same shape-gap that caused a documented P1
+  crash.**~~ **Resolved.** `mergeRevival` (`lib/storage.js`) now merges
+  `DEFAULT_REVIVAL` into whatever a piece already has field by field, the
+  same way `mergeLadderConfig` already did for ladder settings, so a piece
+  carrying a *partial* revival object (a hand-edited backup, or one saved
+  by a version predating a field like `tempoLadderStartFraction`) no
+  longer keeps that incomplete shape forever. Worth noting for anyone
+  reading the original report literally: unlike `ladderConfig`'s
+  `bpmSteps`, nothing currently reads a revival field unconditionally
+  (every call site already falls back — `?? 0.6`, `revival.plan &&`), so
+  this was never a live crash risk the way the ladder-config gap was —
+  it's a pre-emptive fix for the same class of gap, not a rescue from an
+  active bug. Verified with three new regression tests
+  (`test/storage.test.mjs`, "mergeRevival" describe block), including one
+  confirmed to fail against the pre-fix `piece.revival || {…defaults}`
+  code before the fix was applied.
 - **Graduation's tempo-floor check uses `practiceBPM` from *before* the
   current session, even when that same session's demonstrated-tempo
   override (see [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder))
@@ -6022,29 +6119,50 @@ oversight to silently fix; surface it instead.
   spaced-repetition ladder's `stage`, as of Pass 6 — see
   [Decisions.md](Decisions.md#spaced-repetition--maintenance)) and can
   still disagree. It's not decided whether that's intentional (Overview
-  wants something coarser) or drift that should be resolved. See
+  wants something coarser) or drift that should be resolved. **Raised
+  directly with the user during a docs-open-questions pass; explicitly
+  deferred, not decided either way** — skipped in favor of the other items
+  in that same batch. See
   [Data-Model.md](Data-Model.md#the-two-how-good-is-this-chunk-scores--dont-conflate-them).
 - ~~**Exact placement of the Analytics panels once folded into Progress**~~
   — **Resolved (Pass 20)**: pinned down and built. See the dedicated
   decision in [UX](#ux) above for the exact panel order and why.
-- **Should Progress's velocity-based "projected finish" stat (`ProgressTab`,
-  `projectedDay`) ever show a real calendar date instead of staying in
-  day-number terms?** Still open — day-number was chosen as the safer
-  default when the Progress redesign shipped. Note this is now inconsistent
-  with the Wizard's Timeline step, which *does* work in real calendar dates
-  (`piece.targetDate`, an estimated finish date in "minutes per day" mode —
-  see [Algorithms.md](Algorithms.md#timeline--scheduler)); worth revisiting
-  whether Progress should follow suit for consistency.
+- ~~**Should Progress's velocity-based "projected finish" stat
+  (`ProgressTab`, `projectedDay`) ever show a real calendar date instead
+  of staying in day-number terms?**~~ **Resolved: yes, on direct
+  request.** `ProgressTab` now converts `projectedDay` to a calendar date
+  (`addDaysISO(piece.startDate, projectedDay - 1)`) and formats it the same
+  way `ScheduleFields.jsx` already formats target/estimated-finish
+  dates elsewhere in the app (`toLocaleDateString` with a short
+  month/day) — plus an explicit year, a deliberate deviation from that
+  precedent: unlike a Wizard target date (always near-term, within the
+  setup flow), a slow-velocity projection can land many months or over a
+  year out, where a bare "Sep 13" would be ambiguous about which year.
+  Verified live in the browser: a test piece's projection read "At your
+  recent pace, full coverage projects to around Sep 13, 2026." No
+  lib-level test — pure display formatting inside `ProgressTab`
+  (`components/`), no branching logic to exercise.
 - **Is a single Tier 1 touch enough**, or does a chunk need a second short
   rung before Stabilizing's first real review reliably survives? Gated on
   fail-rate data once built, not decided preemptively. See
   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2).
-- **How does maintenance surface in the UI** — folded into Master Agenda
-  and the per-piece Today tab (most likely), a new tab, or something else?
-  Not designed; also has a real data-plumbing consequence (a live
-  "what's due" query replacing `timeline.days[]` indexing) that isn't
-  designed either. See
-  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#explicitly-not-designedbuilt-here).
+- ~~**How does maintenance surface in the UI** — folded into Master Agenda
+  and the per-piece Today tab (most likely), a new tab, or something
+  else?~~ **Stale entry, closed out: this was already built (Pass 8),
+  just never cross-referenced back here.** Found during a docs-accuracy
+  pass — the same class of staleness as the "Reschedule all" open
+  question resolved earlier in this same file (Pass 70's `cutoffDay`).
+  `Repertoire-Lifecycle.md`'s own "How maintenance surfaces in the UI
+  (built)" section independently confirms the "most likely" guess this
+  entry made is exactly what shipped: a "Maintenance due" subtab on Master
+  Agenda (a per-piece summary card) and the per-piece Today tab relabeling
+  to "Plan complete — maintenance, day N" with the day checklist replaced
+  by the due list — both reading from one shared query,
+  `computeDueReviews` (`lib/maintenance.js`), which is exactly the "live
+  'what's due' query replacing `timeline.days[]` indexing" this entry
+  named as undesigned. See
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#how-maintenance-surfaces-in-the-ui-built)
+  and [Algorithms.md](Algorithms.md#whats-due--the-live-maintenance-query).
 - **On an exact `updatedAt` tie during import merge, ladder state and
   status/BPM/confidence resolve in opposite directions.** Found in code
   review after Pass 13 shipped `diffImportedPiece` (see
@@ -6064,18 +6182,20 @@ oversight to silently fix; surface it instead.
   user, who judged it not worth chasing given how narrow the trigger is.
   Worth unifying if `preferByRecency` and `diffImportedPiece` are ever
   revisited together, rather than independently again.
-- **`hasClimbingTempo` (Pass 30) can silently miss a real climb if a
-  session's `bpm` is `NaN`.** Found in critical review after the pass
-  shipped, not fixed. The function's `typeof s.bpm === "number"` guard lets
-  `NaN` through (`typeof NaN` really is `"number"`), and `NaN` comparisons
-  are always `false` — so a `NaN` landing at the start or end of the
-  trailing window can neither register as a dip nor contribute to a real
-  rise, silently suppressing the marker rather than showing a false
-  positive. Not reachable through the app's own UI (`NumberInput` never
-  commits a non-numeric BPM), only through hand-edited or corrupted
-  `localStorage` data. Wrong-but-conservative, not wrong-and-misleading; not
-  urgent, but worth a defensive `Number.isFinite` check if this function is
-  touched again.
+- ~~**`hasClimbingTempo` (Pass 30) can silently miss a real climb if a
+  session's `bpm` is `NaN`.**~~ **Resolved.** `hasClimbingTempo`
+  (`lib/confidence.js`) now filters on `Number.isFinite(s.bpm)` instead of
+  `typeof s.bpm === "number"`, which let `NaN` through (`typeof NaN` really
+  is `"number"`). Verified with a new regression test
+  (`test/confidence.test.mjs`) placing a `NaN` at the start of the trailing
+  window specifically — that's the shape that actually suppressed a real
+  climb (`recent[last].bpm - recent[0].bpm` becomes `NaN`, always failing
+  the `>= MIN_RISE_BPM` check, even with genuine rising BPMs elsewhere in
+  the window); confirmed to fail against the pre-fix `typeof` guard, pass
+  with `Number.isFinite`. Still only reachable via hand-edited/corrupted
+  data, never through the app's own UI (`NumberInput` never commits a
+  non-numeric BPM) — low severity, but cheap and safe to close outright
+  rather than leave flagged.
 - **The tempo-climbing marker (Pass 30) doesn't know about a pending
   provisional session (Pass 29 follow-up) on the same chunk.** Found in the
   same review. `hasClimbingTempo` reads `loggedSessions`, which correctly
@@ -6088,78 +6208,145 @@ oversight to silently fix; surface it instead.
   chunk-detail modal (where the climbing suggestion shows) doesn't surface
   provisional confirm/discard UI at all, that's `ChecklistItem`-only — so
   the practical exposure is narrow today, but worth knowing about before
-  either feature is extended.
-- **The broadened piece-save effect (Pass 29 follow-up — see the
+  either feature is extended. **Raised directly with the user in a later
+  session; explicit call to leave it**, for exactly that reason — revisit
+  if either feature is ever extended to show both at once.
+- ~~**The broadened piece-save effect (Pass 29 follow-up — see the
   persistence-bug fix above) re-writes every piece to `localStorage` on any
-  single piece's change, not just the one that changed.** Untested at
-  scale: fine for the handful of pieces one musician realistically has
-  open, unverified against a large piece count or a piece with a very long
-  session history. Not a correctness question, a performance one — worth
-  measuring if it's ever revisited, but not urgent enough to have gated
-  landing the correctness fix itself.
-- **Settings' "Save changes" isn't gated on piece name or total measures
+  single piece's change, not just the one that changed.**~~ **Measured, on
+  direct request: not actually a problem, even at extreme scale.** The
+  effect (`App.jsx`, `Object.entries(pieces).forEach(savePieceToStorage)`
+  on any `pieces` change) was timed live in a real browser against
+  synthetic pieces sized to simulate a heavy, long-history use case (16
+  chunks each, up to 100 logged sessions per chunk):
+
+  | Pieces | Sessions/chunk | Data/piece | Total save time |
+  |---|---|---|---|
+  | 5 | 20 | ~46 KB | 1.1 ms |
+  | 20 | 50 | ~107 KB | 5.7 ms |
+  | 50 | 100 | ~207 KB | 27.3 ms |
+  | 100 | 100 | ~207 KB | 48.1 ms |
+
+  Even 100 pieces × 1,600 logged sessions each (~20 MB total — an extreme
+  upper bound no realistic musician approaches) saves in 48ms, in a
+  background effect, not blocking any click. At that kind of scale the
+  actual limiting factor wouldn't be speed at all — it'd be `localStorage`'s
+  browser-enforced quota (typically ~5–10MB per origin), reached well
+  before performance would. That case is already handled, not a gap this
+  surfaced: `savePieceToStorage` (`lib/storage.js`) catches a write failure
+  and `App.jsx` surfaces a persistent banner until a save actually succeeds
+  again, so a quota error is visible, not a silently lost session. No code
+  change — this closes the question, not a fix.
+- ~~**Settings' "Save changes" isn't gated on piece name or total measures
   being present/non-zero, the way the Wizard's "Next" already was before
-  this session and still is.** Surfaced while adding the work-title
-  requirement to both surfaces (see
-  [Multi-movement works](#multi-movement-works)) — that fix only closed the
-  one gap it was asked to close (a blank work title while "Multiple
-  movements" is selected); it didn't touch, and this session wasn't asked
-  to touch, whether Settings should also require the fields the Wizard
-  already treats as mandatory. Not urgent (clearing a piece's name or
-  measures in Settings isn't a normal editing action, and nothing currently
-  demonstrates a user actually hitting this), but a real, asymmetric gap
-  between the two surfaces that
-  [UX-Principles.md](UX-Principles.md#editors-are-shared-so-the-ui-cant-drift-from-itself)
-  says to treat as a bug, not a stylistic choice. Not started.
-- **Should Archive have its own path for a piece the learner has genuinely
-  abandoned mid-plan, distinct from "the plan is done"?** Raised directly
-  by the user while gating Archive behind `isPlanActuallyComplete` (see
-  [Lifecycle](#lifecycle)) — that gate has no way to distinguish "not done
-  yet, still working on it" from "not done, and never going to be." Pause
-  is the only thing available today for the second case, and its own
-  copy ("set aside for now") doesn't match that intent. Two directions
-  raised, neither decided: give Archive its own "abandon this" path
-  distinct from plan-completion, or lean on Pause as the real answer and
-  fix its copy/semantics to say so explicitly. Not started.
-- **The "(behind N chunks)" note and graying on Overview's first-week list
-  (Pass 45, `classifyDayCompletion`) aren't revival-aware.** A piece that's
-  both mid-revival and behind on its *original* (pre-revival) schedule
-  still shows this note and graying against that original plan — not the
-  revival plan actually being followed. See [UX](#ux) for the mechanism.
-  Not a new problem on its own (`ScheduleBanner` already surfaces original-
-  plan "behind schedule" messaging during revival today), but this adds a
-  second surface carrying it — **and since Pass 46, a third: the Timeline
-  tab's own past-day graying/check mark reuses the same
-  `classifyDayCompletion` call.** Worth deciding whether any of these
-  surfaces should suppress itself during revival, or whether all of them
-  referencing the original plan is actually fine since revival doesn't
-  replace that history. Not started.
-- **A consolidation day's logged run-through doesn't satisfy
-  `classifyDayCompletion`'s (Pass 45) per-chunk check.** The consolidation
-  day's `reviewChunkIds` lists every practice chunk, but
-  `handleLogRunThrough` only writes the synthetic `"__consolidation__"`
-  progress entry, never each chunk's own `doneDays` — so a logged
-  consolidation day still classifies as "behind" on Overview's first-week
-  list, and, **since Pass 46, on Timeline too.** See
+  this session and still is.**~~ **Resolved.** `SettingsTab`'s "Save
+  changes" button now disables on the same condition Wizard's step-0
+  `canAdvance()` already used —
+  `!(editDraft.name.trim().length > 0 && editDraft.totalMeasures > 0)` —
+  alongside the pre-existing multi-movement work-title check, matching
+  [UX-Principles.md](UX-Principles.md#editors-are-shared-so-the-ui-cant-drift-from-itself).
+  Verified live in the browser: clearing the piece name disables Save
+  changes; restoring it re-enables. The `totalMeasures` half of the
+  condition mirrors the Wizard's but isn't independently reachable through
+  either surface's UI — `NumberInput`'s own `commit()` (`components/
+  NumberInput.jsx`) refuses to commit an empty/`NaN` value at all, snapping
+  back to the last committed number instead — so it's a safety net for
+  parity with the Wizard's condition, not a gap that was ever actually
+  clickable. No lib-level regression test: this is JSX gating logic living
+  directly in the component's `disabled` prop, the same place the Wizard's
+  equivalent check already lives, and CLAUDE.md's testing rule
+  ("logic that needs a regression test belongs in `src/lib/`") reserves the
+  test suite for the lib layer since there's no rendering harness for
+  `components/`.
+- ~~**Should Archive have its own path for a piece the learner has
+  genuinely abandoned mid-plan, distinct from "the plan is done"?**~~
+  Raised directly by the user while gating Archive behind
+  `isPlanActuallyComplete` (see [Lifecycle](#lifecycle)) — that gate has
+  no way to distinguish "not done yet, still working on it" from "not
+  done, and never going to be." Pause is the only thing available today
+  for the second case, and its own copy ("set aside for now") doesn't
+  match that intent. **Decided, on direct request: leave it as-is.** Of the two directions raised — give
+  Archive its own "abandon this" path, or lean on Pause and fix its
+  copy/semantics — neither is being built; Pause stays the answer for a
+  genuinely abandoned piece, copy unchanged. Some of the practical sting
+  this was raised over is already softened by a related, separately-built
+  feature: `computeAbandonedPlanReminder` (Pass 83,
+  `lib/scheduling.js`) surfaces an Overview banner after 14+ quiet days on
+  a piece with real work still outstanding, offering Reschedule *or*
+  Pause directly — see the Pass 83 entry in [Revival](#revival) above and
+  [Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83). That
+  banner doesn't rename or redefine Pause, though — it just surfaces the
+  existing action sooner. Revisit only if this comes up again.
+- ~~**The "(behind N chunks)" note and graying on Overview's first-week
+  list (Pass 45, `classifyDayCompletion`) aren't revival-aware.**~~
+  **The note is resolved — suppressed during revival, on direct request.**
+  `OverviewTab`'s "(behind N days)" text now also requires `!revivalActive`
+  (it already had that variable in scope), so a piece mid-revival no
+  longer shows schedule pressure judged against the *original*, pre-revival
+  plan it's no longer actually following. Verified live: a 3-days-behind
+  piece showed "(behind 3 days)" before starting revival, and showed
+  nothing once `revival.active` was set — the day labels also correctly
+  relabeled to "Revive"/"Reconsolidate" at the same time (pre-existing
+  behavior, confirming the fixture was genuinely in revival mode). No
+  lib-level test — a one-line JSX condition in `components/`, same
+  precedent as the Settings Save-button gating fix earlier this session.
+  **The "graying" half is not actually a distinct thing to suppress**, on
+  closer look: Overview/Timeline gray *any* non-future day identically
+  (`completion !== "future"`) regardless of whether it's `"behind"`,
+  `"empty"`, or (unless struck-through/checked) simply not `"done"` — there
+  is no behind-specific visual treatment separate from "not yet checked
+  off," so there's nothing to selectively hide here beyond the text note
+  already fixed. A revival-era day on the original plan will still read as
+  visually un-checked (since revival logs against different progress, not
+  that original day's own items) — the same pre-existing, already-accepted
+  nuance `ScheduleBanner` has always had during revival, untouched by this
+  fix and out of its scope.
+- ~~**A consolidation day's logged run-through doesn't satisfy
+  `classifyDayCompletion`'s (Pass 45) per-chunk check.**~~ **Resolved, the
+  user's direct call:** logging a consolidation day's run-through now
+  satisfies that day's schedule outright. `classifyDayCompletion`
+  special-cases `day.type === "consolidation"` to check
+  `piece.progress["__consolidation__"].doneDays` for that exact day number,
+  instead of the per-chunk check every other day type still uses (the
+  consolidation day's `reviewChunkIds` — every practice chunk, regardless
+  of ladder state — is otherwise unrelated to what `handleLogRunThrough`
+  actually writes). Applies for free everywhere `classifyDayCompletion` is
+  read (Overview's first-week list, Timeline, Week view, Master Agenda) —
+  one shared function, no per-surface change needed. Verified with 4 new
+  regression tests (`test/scheduling.test.mjs`), one of which is confirmed
+  to fail against the pre-fix code. **Not independently confirmed live in
+  the browser**, on top of the lib-level tests: reproducing a genuinely
+  "past" consolidation day requires either a piece already through at
+  least one reschedule that extended `daysToLearn` past its original
+  consolidation day (so that day is no longer the timeline's literal last
+  day — the only way it can register as "past" the clamped `currentDay`
+  at all, since a fresh, never-extended timeline's consolidation day is by
+  construction always the last day, and `getCurrentDay` never clamps past
+  `timeline.days.length`), which is a materially bigger setup than this fix
+  warranted on its own. See
   [Algorithms.md](Algorithms.md#behind-schedule-detection) and
-  [UX](#ux). Fixing it means deciding whether `classifyDayCompletion`
-  should also accept `"__consolidation__"`'s `doneDays` as satisfying a
-  consolidation day's practice-chunk ids — not decided. Not started.
-- **Should section-pair run-throughs (`kind: "section-transition"`,
+  [UX](#ux).
+- ~~**Should section-pair run-throughs (`kind: "section-transition"`,
   "Sections combined") get the same repeating due/locked-preview gate
-  single-section run-throughs got in Pass 49, once a pair first unlocks?**
-  Explicitly flagged rather than guessed at when the repeating gate was
-  built — the pass's own scope named single-section run-throughs
-  specifically. Left as the original one-time "unlock once every chunk in
-  the whole piece has a session, then stay available forever" gate. Case
-  for leaving it: a section-pair run-through is already a late-stage,
-  whole-piece-touched drill, not an early check-in, so "repeat forever"
-  may just be noise there in a way it wasn't for the early, per-section
-  case. Case for extending it: consistency — a learner who came to expect
-  the repeating check-in rhythm from single sections might reasonably
-  expect the same from combined ones. Not started. See
-  [Algorithms.md](Algorithms.md#section-run-throughs) and
-  [Scheduling](#scheduling) (Pass 49 decision).
+  single-section run-throughs got in Pass 49, once a pair first
+  unlocks?**~~ **Resolved: yes, on direct request, choosing consistency
+  over the case for leaving it alone.** Both readings were weighed
+  directly rather than one being silently favored: the case for leaving it
+  (a section-pair is already a late-stage, whole-piece-touched drill, so
+  "repeat forever" might just be noise there) lost to the case for
+  extending it (a learner who came to expect the repeating check-in rhythm
+  from single sections should get the same rhythm from combined ones).
+  `sectionPairRunThroughGate` (`lib/chunking.js`) applies the identical
+  `sectionRunThroughGate` computation (both now share a private
+  `runThroughGateFromChunks` helper) to the union of both sections'
+  chunks, so the slowest chunk anywhere in the pair sets the pace. The
+  pair's own separate **first-unlock** gate (every chunk in the whole
+  piece practiced, both sections individually learned) is unchanged —
+  only what happens *after* that first unlock changed, from "stays
+  available forever" to the same repeating rhythm. Verified with 4 new
+  regression tests (`test/chunking.test.mjs`), confirmed to fail against
+  the pre-fix code. See
+  [Algorithms.md](Algorithms.md#section-pair-run-throughs-a-one-time-unlock-then-the-same-repeating-gate).
 - **`ChecklistItem`'s tab order still isn't literally reps → BPM → Log,
   even after Pass 53's fix.** Pass 53 fixed the severe symptom — a
   disabled Log button gets skipped entirely in the browser's tab
@@ -6178,8 +6365,10 @@ oversight to silently fix; surface it instead.
   changing the card's layout, which wasn't asked for; giving those two
   controls `tabIndex={-1}` would fix the sequence but make them permanently
   unreachable by keyboard, an accessibility regression nothing asked for
-  either. Not started — a product call on whether strict adjacency is
-  worth one of those costs, not a technical gap.
+  either. **Re-reviewed directly with the user in a later session
+  (shown a screenshot of the exact card), the explicit call: leave it.**
+  All three fixes still cost something real for what remains a cosmetic
+  gap. Not started — revisit only if this comes up again.
 - **What "a chunk in tempo maintenance mode stops counting toward the plan
   being not done yet" actually means is genuinely undefined (Pass 60).**
   The user has said explicitly they'll define this once they reach it —
@@ -6192,17 +6381,31 @@ oversight to silently fix; surface it instead.
   that nudge no longer applies to it. See
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
   60 decision).
-- **(Pass 61) Holding's retired tempo-floor config fields are still live,
-  editable, and silently inert.** `ladderConfig.holding.tempoFloorStartFraction`/
-  `tempoFloorStepFraction`/`tempoFloorCapFraction` are still part of the
-  saved schema and still exposed, correctly labeled, under
-  `LadderConfigEditor`'s "Holding" heading — but `clearsStageFloor` no
-  longer reads any of them for Holding. A user can "tune" a setting with
-  zero effect and get no indication it's inert. Not started — neither
-  `storage.js`'s config defaults nor `LadderConfigEditor.jsx` were in Pass
-  61's Touches list for removal, and removing a saved/editable config
-  field is a bigger, more deliberate call than this pass was scoped to
-  make unilaterally. See
+- ~~**(Pass 61) Holding's retired tempo-floor config fields are still
+  live, editable, and silently inert.**~~ **Resolved: removed, on direct
+  request, once clarified that this doesn't touch the tempo-climbing
+  behavior the user was actively testing.** The user's live testing
+  concern turned out to be about a completely different, still-fully-active
+  mechanism — the Tempo Ratchet (Pass 59, `ladderConfig.tempoRatchet`),
+  which climbs `practiceBPM` toward target on every logged session and has
+  no connection to these three fields at all. Once that was clarified,
+  `tempoFloorStartFraction`/`tempoFloorStepFraction`/`tempoFloorCapFraction`
+  were removed from `DEFAULT_LADDER_CONFIG` (`lib/storage.js`) and
+  `defaultPiece()` (`Wizard.jsx`), and `LadderConfigEditor`'s three
+  corresponding number fields were removed along with the "Holding" panel's
+  intro paragraph, which had kept describing the retired escalating-floor
+  behavior ("the tempo floor climbs a little with each pass") rather than
+  what Holding actually does since Pass 61 (the periodic every-4th-review
+  extra-rep check). A piece already saved with these fields keeps them as
+  harmless dormant data — same precedent as `piece.revival.purpose` (Pass
+  55) — no migration/stripping added. The retired mechanism's exact design
+  (85% start, 5%-per-pass step, capped at 100%) stays fully documented
+  here and in
+  [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built),
+  and its implementation is fully recoverable from the Pass 61 commit if
+  ever worth rebuilding some version of it. Verified live in the browser:
+  Settings' Holding panel now shows only "Starting interval (days)" /
+  "Maximum interval (days)" and the corrected description. See
   [Spaced repetition & maintenance](#spaced-repetition--maintenance) (Pass
   61 decision).
 - ~~`countBehindDays`'s "N days behind" figure doesn't know about Pass 48's

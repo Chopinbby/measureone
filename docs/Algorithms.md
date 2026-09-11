@@ -45,13 +45,60 @@ doesn't define them.
 See [Data-Model.md](Data-Model.md#practice-chunks-vs-sections-vs-transitions-vs-combos-vs-run-throughs)
 for what each generated `kind` means.
 
+### Migrating orphaned progress after a chunk-id-shifting edit
+
+A practice chunk's id is `c${start}` — purely a function of where it
+starts, which is itself purely a function of `totalMeasures`/`chunkMode`/
+`customChunkSize` (chunking always restarts counting at measure 1). Edit
+any of those three fields and every chunk from the first boundary shift
+onward gets a **different id**, even though the underlying measures are
+the same piece — `piece.progress[oldId]` (sessions, ladder stage,
+`practiceBPM`, everything) no longer matches anything in the freshly
+generated chunk set. **The very first chunk (`start === 1`) always keeps
+id `"c1"` regardless of size changes** — only later chunks can actually
+become orphaned, and only when the new step size doesn't realign with the
+old start positions (e.g. an old size that evenly divides the new size
+orphans nothing at all).
+
+`migrateOrphanedProgress(oldPiece, newPiece)` (resolved from an open
+question — see [Decisions.md](Decisions.md#open-questions)) reattaches an
+orphaned entry
+to whichever *current* chunk overlaps its old measure range the most,
+instead of leaving it permanently stranded under a dead id. Called once,
+from `App.jsx`'s `handleSavePiece`, comparing the live (pre-edit) `piece`
+against the about-to-be-saved draft — a no-op (same object reference back)
+when the edit didn't touch any of the three id-affecting fields.
+
+It's a heuristic, not a guaranteed-correct remapping — there's often no
+single right answer once boundaries genuinely move. Three rules keep it
+from ever doing worse than simply leaving an entry orphaned (the
+pre-existing status quo):
+
+1. **Never overwrites a chunk that already has its own real progress** —
+   only ever attaches to a new id with no entry of its own yet.
+2. **Never lets two orphaned entries claim the same target** — if chunk
+   size grows enough that two old chunks collapse into one new one, the
+   earlier old chunk (by measure order) wins; the other stays orphaned
+   under its own old id, not discarded, not merged into the winner.
+3. **Matched by greatest measure-range overlap, ties broken by the
+   earliest-starting candidate** — a plain, explainable "most of this old
+   chunk's content is now in this new chunk" reading.
+
+Scoped to base practice chunks (`kind: "section"`) only. Transitions and
+combos derive their ids from practice-chunk ids
+(`` `t_${a.id}_${b.id}` ``/`` `x_${c.id}` ``) — remapping those too would
+mean running the same heuristic a second time over a dependent, derived id
+space, not attempted here; a connector's progress orphaned by the same
+edit stays orphaned exactly as it always has.
+
 ## Section run-throughs
 
 `computeSectionRunThroughs(piece, practiceChunks)` — computed live (not
 persisted, not part of `generateAllChunks`'s output), used only by
 `SectionRunThroughPanel`. A single-section run-through and a section-pair
-run-through are gated by two genuinely different mechanisms (Pass 49) — see
-the two subsections below.
+run-through differ in how they first become eligible (Pass 49) but now
+share the same repeating due/locked-preview gate once eligible — see the
+two subsections below.
 
 ### Single-section run-throughs: a repeating gate, not a one-time unlock
 
@@ -135,27 +182,38 @@ now always the real current day by construction). See
 be written literally before the component's `useMemo` call without
 breaking React's rules of hooks.
 
-### Section-pair run-throughs: still a one-time unlock
+### Section-pair run-throughs: a one-time unlock, then the same repeating gate
 
 A combined section-pair run-through (`kind: "section-transition"`) between
-two adjacent, already-learned sections unlocks only once **every practice
-chunk in the entire piece** has at least one logged session — deliberately
-a later-stage drill, not an early one, per the code comment at the top of
-the function — and, once unlocked, **stays available**, unlike the
-repeating gate above. This is the original, pre-Pass-49 mechanism, left
-untouched: `computeSectionRunThroughs` still gates it on
-`allChunksPracticed` (every chunk in the whole piece) plus `isSectionLearned`
-on both neighboring sections (the plain ">= 1 session per chunk" check,
-unaffected by `sectionRunThroughGate`), the same way it always has.
+two adjacent, already-learned sections still unlocks only once **every
+practice chunk in the entire piece** has at least one logged session —
+deliberately a later-stage drill, not an early one, per the code comment
+at the top of the function — via the original, unchanged first-unlock
+gate: `allChunksPracticed` (every chunk in the whole piece) plus
+`isSectionLearned` on both neighboring sections (the plain ">= 1 session
+per chunk" check, unaffected by `sectionRunThroughGate`).
 
-**Open question, deliberately not resolved by Pass 49:** whether section-pair
-run-throughs should get the same repeating threshold once they first
-unlock, or whether staying a one-time "unlock and forget" drill is actually
-right for them (arguably more defensible here — they're already a
-late-stage, whole-piece-touched drill, not an early check-in). Flagged for a
-product decision rather than guessed at — recorded in
-[Decisions.md](Decisions.md#open-questions), which whichever future pass
-resolves this should update alongside the actual change.
+**Once a pair clears that first unlock, it now gets the same repeating
+due/locked-preview rhythm single sections get** — resolved, on direct
+request, the open question Pass 49 deliberately left unanswered (the
+stated case for the alternative — a section-pair is already a late-stage,
+whole-piece-touched drill, so "repeat forever" might just be noise there —
+was considered and the repeating treatment chosen anyway, for consistency
+with the check-in rhythm a learner already expects from single sections).
+`sectionPairRunThroughGate(sectionA, sectionB, piece, bySectionId)`
+(`lib/chunking.js`) is the mechanism: the identical `{ minCount, due,
+lockedPreview }` computation `sectionRunThroughGate` uses (both now call a
+shared private helper, `runThroughGateFromChunks`, added specifically so
+the two didn't duplicate the same four lines), applied to the **union of
+both sections' assigned chunks** rather than one section's — the slowest
+chunk anywhere in the pair sets the pace, the pair-level equivalent of a
+single section's own "minimum across its chunks" rule.
+`computeSectionRunThroughs` includes a section-transition entry only when
+`gate.due || gate.lockedPreview` (previously: unconditionally, once first
+unlocked), and now carries the same `locked: gate.lockedPreview` field
+single-section entries already carry — `SectionRunThroughPanel` needed no
+change at all, since it already renders `item.locked` generically for
+whatever `computeSectionRunThroughs` returns, regardless of `kind`.
 
 ## Cold-Start check
 
@@ -1142,16 +1200,21 @@ than the baseline requirement, reverting to baseline on every other review.
   whether an already-classified pass counts toward Holding's interval
   growth), and only the latter changed here.
 - **The old `ladderConfig.holding.tempoFloorStartFraction`/
-  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields are left in
-  place, not removed** — `clearsStageFloor` simply no longer reads them for
-  Holding. Flagged, not silently cleaned up: they're still part of the
-  saved schema, and still directly exposed and editable — correctly
-  labeled "Tempo floor, starting fraction" / "step per pass" / "cap
-  fraction" — under `LadderConfigEditor`'s "Holding" heading. A user can
-  find and "tune" a setting that now does nothing, with no indication
-  anywhere in that UI that it's gone inert. See
-  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the full
-  discovery.
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields** —
+  `clearsStageFloor` stopped reading them for Holding at the time this pass
+  shipped, but the fields themselves were left in the schema and still
+  directly editable for several sessions afterward, flagged as a known,
+  silently-inert loose end rather than cleaned up immediately. **Removed
+  outright, in a later session, on direct request**: gone from
+  `DEFAULT_LADDER_CONFIG` (`lib/storage.js`), `defaultPiece()`
+  (`Wizard.jsx`), and `LadderConfigEditor`'s "Holding" panel, whose intro
+  copy was also corrected — it had kept describing the retired
+  escalating-floor behavior rather than the periodic extra-rep check that
+  replaced it. A piece already saved with these fields keeps them as
+  harmless dormant data; no migration was needed. See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+  original discovery and [Decisions.md](Decisions.md#open-questions) for
+  the removal.
 
 ### Tempo ratchet (Pass 59)
 
@@ -1560,10 +1623,36 @@ calendar date, so this answers correctly for a piece whose plan ran out
 weeks ago, which the bounded `days[]` array structurally cannot
 ([Timeline / scheduler](#timeline--scheduler) rule 4).
 
-**Strictly "due as of `asOfDate`" — there is no forward-looking window.** A
-chunk due tomorrow does not appear anywhere, and Master Agenda's date
-picker does not turn into an upcoming-due view (it only computes due items
-for the real today).
+**Strictly "due as of `asOfDate`"** — a chunk due tomorrow does not appear
+in *this* function's result, and Master Agenda's date picker does not turn
+into an upcoming-due view (it only computes due items for the real
+today). A genuine forward-looking window exists as a separate, narrower
+sibling function — see below.
+
+**`computeDueOnDate(piece, chunkSet, date)` (`lib/maintenance.js`)** answers
+a different question: not "everything due as of `date`" (accumulating,
+like the function above), but "what becomes newly due *on* `date`" — an
+exact `progress[id].nextDueDate === date` match. Same shape per item minus
+`daysOverdue` (meaningless for a day that hasn't arrived yet), same
+suppression rules (paused/archived, revival, `needsRelearning`). Built for
+`WeekView.jsx`'s maintenance-mode week (below) to show each of the next
+few days' own contribution without re-showing the accumulated backlog
+`computeDueReviews` already puts on today's cell — using `<=` instead of
+`===` here would make a single overdue chunk appear in every future cell
+forever, not just the day it's actually newly due. See
+[Decisions.md](Decisions.md#open-questions) for why this was scoped out
+originally (the massed-practice concern — showing "due Thursday" invites
+practising it Wednesday) and the direct request that overrode it.
+
+**`WeekView.jsx`'s maintenance-mode branch (`viewMode: "week"`, once
+`isPlanActuallyComplete`)** renders a real 7-day window instead of the
+single-day-only view it used to: today's cell reads the `dueItems` prop
+(`computeDueReviews`, passed down from `TodayTab`, the real backlog +
+anything due today), each of the 3 days after today calls
+`computeDueOnDate` directly for that exact date, and the 3 days before
+today stay `"—"` — a forward week doesn't imply a backward one, and
+what was due then either got logged or is already folded into today's own
+backlog.
 
 **Suppression** — returns `[]`, never null, for:
 
@@ -1898,7 +1987,8 @@ the trigger for the reschedule banner.**
 If `piece.status` is anything other than `"active"` (i.e. `"paused"` or
 `"archived"`), `missedCount` is forced to 0 regardless of how many
 introduction days have passed — a paused/archived piece never shows the
-"N chunks behind schedule" banner or the Master Agenda "N behind" badge.
+"N days behind schedule" banner (a day-count since Pass 70, not the
+earlier chunk-count) or the Master Agenda "N behind" badge.
 `remainingChunkIds` is still computed either way, since `handleReschedule`
 needs it once the piece goes active again. See
 [Decisions.md](Decisions.md#lifecycle) and
@@ -1909,9 +1999,17 @@ function, not a replacement — a *per-day* completion status rather than a
 piece-wide missed count. Returns `"future"` for `day.dayNumber >=
 currentDay`; otherwise `"empty"` if the day's `newChunkIds` +
 `specialChunkIds` + `reviewChunkIds` are all empty (nothing was ever
-scheduled there — a rest day, or any other empty day); otherwise `"done"`
-if every one of those ids has `day.dayNumber` in its own `doneDays`, else
-`"behind"`. Written standalone, off the same `timeline.days[]` shape
+scheduled there — a rest day, or any other empty day); otherwise, for a
+consolidation day specifically (`day.type === "consolidation"`), `"done"`
+if `piece.progress["__consolidation__"].doneDays` includes
+`day.dayNumber`, else `"behind"` — a consolidation day's `reviewChunkIds`
+blankets every practice chunk regardless of ladder state (see
+`computeTimeline` above), which is unrelated to what logging its
+run-through (`handleLogRunThrough`, App.jsx) actually writes, so it's
+judged by its own synthetic progress key instead of the per-chunk check
+every other day type gets; for every other day type, `"done"` if every one
+of those ids has `day.dayNumber` in its own `doneDays`, else `"behind"`.
+Written standalone, off the same `timeline.days[]` shape
 `computeScheduleStatus` reads, specifically so it wouldn't need
 duplicating elsewhere — and it hasn't been: **since Pass 46**, the
 Timeline tab's day-card grid reuses the exact same call for its own

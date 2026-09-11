@@ -275,14 +275,17 @@ revival" buttons and all three of `computeRevivalTriggers`' conditions
 (`lib/revival.js`) are now gated on the already-existing live
 `isPlanActuallyComplete` derivation instead of a stored `piece.stage`
 field — see [`docs/Decisions.md`](docs/Decisions.md#revival). The original
-item's *other* half (a manual Settings control to move a piece "finished
-away from the app" into maintenance) is still unbuilt, and Pass 83's
-gate has a real consequence for exactly that piece: one whose plan was
-never actually tracked to completion in-app can never satisfy
-`isPlanActuallyComplete`, so its "Start revival" button stays permanently
-disabled unless it was created directly into revival at Setup — see
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
-still-open remainder of this item. See
+item's *other* half — a manual Settings control to move a piece "finished
+away from the app" into maintenance — **is now built too, in a later
+session, directly on request**: `piece.markedLearnedElsewhere` (Settings'
+"Mark as learned elsewhere") is an unconditional override
+`isPlanActuallyComplete` checks first, ahead of its normal calendar/
+per-chunk logic — so setting it unlocks Archive, "Start revival," and
+every other `isPlanActuallyComplete`-gated behavior at once, with no
+per-surface wiring needed, closing the regression Pass 83's gate had
+otherwise introduced for exactly this piece shape. See
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the full
+resolution. See
 [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
 for the "learned" rollup itself.
 **Don't confuse this with Pass 58's `computeOverallConfidence`** (see the
@@ -447,7 +450,11 @@ rescheduled once via "cram into what's left" while fully past its own plan
 can permanently stop being recognized as behind schedule at all, which
 silently drops it from "Reschedule all" forever after — see
 [`docs/Decisions.md`](docs/Decisions.md#scheduling) for the mechanism and
-why only half of the two-part fix shipped this session.
+why only half of the two-part fix shipped this session. **Resolved by
+Pass 70**, for an unrelated reason (the "N days behind" display rework
+needed the same cutoff fix) — see
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
+after-the-fact confirmation.
 
 **In the same session as Pass 42 (below), several smaller fixes also
 shipped, none individually pass-numbered:** `ChecklistItem`'s practice
@@ -542,14 +549,22 @@ shipped the other way first and was corrected once the struck-through
 "Nothing scheduled" row was pointed out — see
 [`docs/Decisions.md`](docs/Decisions.md#ux)). Today's row also gets a
 "(behind N chunks)" note, reusing `computeScheduleStatus`'s existing
-`missedCount` rather than a new count. Two gaps flagged, not fixed: a
-consolidation day's logged run-through doesn't satisfy the per-chunk
-`doneDays` check `classifyDayCompletion` does (so a logged consolidation
-day still reads `"behind"`), and neither this note nor the graying is
-revival-aware — a piece mid-revival can show "(behind N chunks)" against
-its *original*, pre-revival plan, not the revival plan actually being
-followed. See [`docs/Decisions.md`](docs/Decisions.md#open-questions) for
-both.
+`missedCount` rather than a new count. Two gaps flagged at the time, not
+fixed in this pass: a consolidation day's logged run-through didn't
+satisfy the per-chunk `doneDays` check `classifyDayCompletion` does (so a
+logged consolidation day still read `"behind"`) — **resolved in a later
+session, on direct request: `classifyDayCompletion` now checks
+`"__consolidation__"`'s own `doneDays` for a consolidation day instead of
+the per-chunk list, see [`docs/Decisions.md`](docs/Decisions.md#scheduling)**
+— and neither this note nor the graying was revival-aware — a piece
+mid-revival could show "(behind N chunks)" against its *original*,
+pre-revival plan, not the revival plan actually being followed. **The
+note half is resolved, also in a later session, on direct request:**
+`OverviewTab` now suppresses it while `isInRevival(piece)`. The "graying"
+half turned out not to be a distinct, separately-suppressable thing —
+Overview/Timeline gray any non-`"future"` day identically, `"behind"` and
+`"empty"` alike, so there's nothing behind-specific to hide beyond the
+text note. See [`docs/Decisions.md`](docs/Decisions.md#open-questions).
 
 **Since Pass 46**, the Timeline tab applies Pass 45's
 `classifyDayCompletion` to every day card: a past day grays out, and a
@@ -614,9 +629,12 @@ gate, a fix made after the first cut used raw `sessions.length` the same
 way `isSectionLearned` still does (deliberately unchanged; the two
 functions now answer different questions and are allowed to disagree).
 Section-**pair** run-throughs (`kind: "section-transition"`, "Sections
-combined") are untouched — still the original one-time "unlock and stay"
-gate; whether they should get the same repeating treatment is an open
-question, not decided — see
+combined") were untouched by Pass 49 itself — still the original one-time
+"unlock and stay" gate at the time. **Resolved in a later session, on
+direct request:** once a pair clears its own separate first-unlock gate
+(unchanged), it now gets the same repeating due/locked-preview rhythm —
+`sectionPairRunThroughGate` (`lib/chunking.js`), sharing a private helper
+with `sectionRunThroughGate` — see
 [`docs/Decisions.md`](docs/Decisions.md#open-questions). See
 [`docs/Algorithms.md`](docs/Algorithms.md#section-run-throughs) for the
 full mechanics.

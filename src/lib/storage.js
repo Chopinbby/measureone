@@ -34,13 +34,19 @@ const CURRENT_SCHEMA_VERSION = 1;
 const DEFAULT_LADDER_CONFIG = {
   stabilizing: { intervalDays: 4, graduationPasses: 4, tempoFloorFraction: null },
   settling: { intervalDays: 7, graduationPasses: 4, tempoFloorFraction: 0.7 },
-  holding: {
-    startIntervalDays: 14,
-    maxIntervalDays: 70,
-    tempoFloorStartFraction: 0.85,
-    tempoFloorStepFraction: 0.05,
-    tempoFloorCapFraction: 1,
-  },
+  // tempoFloorStartFraction/tempoFloorStepFraction/tempoFloorCapFraction
+  // used to live here — Holding's escalating tempo floor, retired outright
+  // in Pass 61 (clearsStageFloor's Holding branch always returns true now,
+  // replaced by holdingReviewCount's periodic extra-rep check below).
+  // Removed from the schema on direct request, once confirmed a piece
+  // already saved with those fields keeps them as harmless dormant data —
+  // same "dormant, not removed" precedent as piece.revival.purpose (Pass
+  // 55). The design itself (85% start, 5%-per-pass step, capped at 100%)
+  // stays fully written up in Repertoire-Lifecycle.md and Decisions.md,
+  // and the retired implementation is fully recoverable from git history
+  // (the Pass 61 commit), if it's ever worth rebuilding some version of
+  // this. See docs/Decisions.md#open-questions.
+  holding: { startIntervalDays: 14, maxIntervalDays: 70 },
   bpmSteps: { pass: 2, softMiss: -2, fail: -2 },
   // Pass 59 — the tempo-ratchet's default adaptive rate and its per-session
   // BPM cap. Replaces the flat bpmSteps.pass/softMiss deltas above with a
@@ -71,6 +77,30 @@ const DEFAULT_LADDER_CONFIG = {
 // `ladderConfig.bpmSteps.pass/softMiss/fail` unconditionally, so a missing
 // `bpmSteps` throws on the very next logged session — a real crash on
 // real already-saved data, not just a theoretical gap.
+const DEFAULT_REVIVAL = {
+  active: false,
+  startedAt: null,
+  purpose: null,
+  tempoLadderStartFraction: 0.6,
+  reassessmentComplete: false,
+  plan: null,
+};
+
+// Same field-by-field reasoning as mergeLadderConfig below, applied to
+// piece.revival — `piece.revival || DEFAULT_REVIVAL` only backfills when
+// the whole object is missing, so a piece carrying a *partial* revival
+// object (a hand-edited backup, or one written by a version predating a
+// field like tempoLadderStartFraction, added after revival's initial
+// build) would otherwise keep that incomplete shape forever. Every current
+// reader already defends individually (`?? 0.6`, `revival.plan &&`), so
+// this isn't closing a live crash the way mergeLadderConfig's bpmSteps fix
+// was — it's pre-empting the same class of gap before a future reader
+// forgets to guard.
+export function mergeRevival(existing) {
+  if (!existing) return { ...DEFAULT_REVIVAL };
+  return { ...DEFAULT_REVIVAL, ...existing };
+}
+
 export function mergeLadderConfig(existing) {
   if (!existing) return DEFAULT_LADDER_CONFIG;
   return {
@@ -306,14 +336,7 @@ export function validateAndMigratePiece(piece) {
     // recordings above — see MERGE_FIELDS_HANDLED_SEPARATELY and the
     // mergeById call in mergeImportedPiece below.
     documents: piece.documents || [],
-    revival: piece.revival || {
-      active: false,
-      startedAt: null,
-      purpose: null,
-      tempoLadderStartFraction: 0.6,
-      reassessmentComplete: false,
-      plan: null,
-    },
+    revival: mergeRevival(piece.revival),
     memoryAnchors: piece.memoryAnchors || {},
     // Overall-piece confidence manual override (Pass 58) — same
     // undefined-and-null-both-mean-"auto" escape-hatch shape as each
@@ -325,6 +348,9 @@ export function validateAndMigratePiece(piece) {
     manualOverallConfidence: piece.manualOverallConfidence !== undefined ? piece.manualOverallConfidence : null,
     // Pieces saved before pause/archive existed default to active.
     status: piece.status || "active",
+    // Pieces saved before the manual "finished elsewhere" override existed
+    // default to false — only ever set true explicitly, from Settings.
+    markedLearnedElsewhere: !!piece.markedLearnedElsewhere,
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.

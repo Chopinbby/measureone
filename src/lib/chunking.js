@@ -148,6 +148,76 @@ export function generateAllChunks(piece) {
   return { practiceChunks, transitions, combos, all: [...practiceChunks, ...transitions, ...combos] };
 }
 
+// Migrates piece.progress entries whose chunk id no longer exists in the
+// piece's current chunk set — an edit to totalMeasures/chunkMode/
+// customChunkSize regenerates ids from measure position (`c${start}`, see
+// generatePracticeChunks above), which can orphan every practice chunk's
+// history at once — onto whichever new chunk best covers the same measure
+// range, instead of leaving them permanently orphaned. Resolves an open
+// question (docs/Decisions.md#open-questions) on direct request: migrate,
+// don't discard or leave forever.
+//
+// Deliberately conservative — this is a heuristic, not a guaranteed-correct
+// remapping (there often isn't one: boundaries genuinely moved, so "the
+// same content" can legitimately now span two new chunks, or two old
+// chunks can collapse into one new one). Three rules keep it from ever
+// making things worse than the pre-existing status quo (an orphaned entry
+// simply stays orphaned, exactly as before this function existed):
+//   1. Only ever attaches an old entry to a new chunk that has NO progress
+//      of its own already — never overwrites real, existing history.
+//   2. Only ever claims a new chunk for ONE old entry — if two old chunks
+//      would both map to the same new one (chunk size grew, merging two
+//      old chunks into one new one), the old chunk earliest in measure
+//      order wins; the other stays orphaned rather than being silently
+//      discarded or guessed at.
+//   3. Matched by greatest measure-range overlap, ties broken by the
+//      earliest-starting candidate — a plain, explainable "most of this
+//      old chunk's content is now in this new chunk" reading, not the only
+//      defensible rule but a deterministic one.
+//
+// Scoped to base practice chunks (kind: "section") only — transitions and
+// combos derive their ids from practice-chunk ids (`t_${a.id}_${b.id}` /
+// `x_${c.id}`), so remapping those too would mean applying the same
+// heuristic a second time over a dependent, derived id space; not
+// attempted here. A connector's progress orphaned by the same edit stays
+// orphaned, exactly as it always has.
+//
+// `oldPiece` is the piece as it exists before the edit (its progress and
+// its still-current totalMeasures/chunkMode/customChunkSize); `newPiece`
+// is the edited draft about to be saved (new totalMeasures/chunkMode/
+// customChunkSize, but still carrying the *old*, unmigrated
+// `newPiece.progress` — editing a piece's schedule never touches progress
+// itself). Returns the progress object to actually save — the same
+// reference as `newPiece.progress` when there's nothing to migrate, a new
+// object otherwise.
+export function migrateOrphanedProgress(oldPiece, newPiece) {
+  const oldChunks = generatePracticeChunks(oldPiece);
+  const newChunks = generatePracticeChunks(newPiece);
+  const newById = new Set(newChunks.map((c) => c.id));
+  const progress = newPiece.progress || {};
+
+  const orphaned = oldChunks.filter((c) => progress[c.id] && !newById.has(c.id));
+  if (!orphaned.length) return progress;
+
+  const overlapAmount = (a, b) => Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start) + 1);
+  const claimed = new Set();
+  const migrated = { ...progress };
+
+  [...orphaned]
+    .sort((a, b) => a.start - b.start)
+    .forEach((oldChunk) => {
+      const candidate = newChunks
+        .filter((nc) => !claimed.has(nc.id) && !progress[nc.id] && overlapAmount(oldChunk, nc) > 0)
+        .sort((a, b) => overlapAmount(oldChunk, b) - overlapAmount(oldChunk, a) || a.start - b.start)[0];
+      if (!candidate) return;
+      claimed.add(candidate.id);
+      migrated[candidate.id] = migrated[oldChunk.id];
+      delete migrated[oldChunk.id];
+    });
+
+  return migrated;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Section run-throughs: unlike chunks/transitions/combos above,     */
 /*  these are NOT part of the precomputed timeline and carry no       */
@@ -156,7 +226,10 @@ export function generateAllChunks(piece) {
 /*  7, ... (sectionRunThroughGate, below) — not just "scheduled to be */
 /*  introduced" — so this is derived fresh from live progress on      */
 /*  every render and surfaced dynamically in Today's Practice, rather */
-/*  than pinned to a day the way transitions/combos are.              */
+/*  than pinned to a day the way transitions/combos are. A section-   */
+/*  PAIR run-through (sectionPairRunThroughGate, below) has its own   */
+/*  separate one-time first-unlock gate, but once unlocked gets the   */
+/*  same repeating rhythm.                                            */
 /* ------------------------------------------------------------------ */
 
 export function chunksBySectionId(piece, practiceChunks) {
@@ -213,8 +286,12 @@ export function isSectionLearned(section, piece, bySectionId) {
 // uniquely by one chunk — if two or more chunks tie for slowest, a session
 // on just one of them can't cross the section yet, so there is no single
 // "next session" that unlocks it.
-export function sectionRunThroughGate(section, piece, bySectionId) {
-  const assigned = bySectionId[section.id] || [];
+// Shared core of the repeating gate — takes whatever flat chunk list the
+// caller assembled (one section's, or a pair's two sections combined) and
+// answers the identical due/lockedPreview question off it. Pulled out once
+// sectionPairRunThroughGate (below) needed the exact same computation over
+// a different chunk list, rather than copying the four lines a second time.
+function runThroughGateFromChunks(assigned, piece) {
   if (!assigned.length) return { minCount: 0, due: false, lockedPreview: false };
   const counts = assigned.map((c) => loggedSessions((piece.progress[c.id] || {}).sessions).length);
   const minCount = Math.min(...counts);
@@ -222,6 +299,25 @@ export function sectionRunThroughGate(section, piece, bySectionId) {
   const atMin = counts.filter((n) => n === minCount).length;
   const lockedPreview = !due && atMin === 1;
   return { minCount, due, lockedPreview };
+}
+
+export function sectionRunThroughGate(section, piece, bySectionId) {
+  return runThroughGateFromChunks(bySectionId[section.id] || [], piece);
+}
+
+// The section-PAIR equivalent (Decisions.md#open-questions, resolved on
+// direct request: yes, once a pair first unlocks it should get the same
+// repeating due/locked-preview rhythm single sections got in Pass 49, for
+// consistency with the check-in rhythm a learner already expects). The
+// pair's own count is the minimum logged-session count across BOTH
+// sections' assigned chunks combined — the slowest chunk anywhere in the
+// pair sets the pace, same reasoning sectionRunThroughGate already applies
+// within one section. Only ever called once a pair has already cleared its
+// own one-time first-unlock gate (computeSectionRunThroughs, below) —
+// this governs re-due behavior *after* that, not the initial unlock.
+export function sectionPairRunThroughGate(sectionA, sectionB, piece, bySectionId) {
+  const assigned = [...(bySectionId[sectionA.id] || []), ...(bySectionId[sectionB.id] || [])];
+  return runThroughGateFromChunks(assigned, piece);
 }
 
 export function countLearnedSections(piece, practiceChunks) {
@@ -260,13 +356,14 @@ export function computeSectionRunThroughs(piece, practiceChunks) {
   });
 
   // Combined section-pair run-throughs wait until every chunk in the whole
-  // piece has been practiced at least once — these are meant as a late-stage
-  // "play through two sections back to back" drill, not an early one.
-  // Deliberately still the original one-time "unlocks once every chunk has
-  // a session, then stays available" gate, NOT the repeating threshold
-  // above — whether that repeating logic should also apply here once a
-  // pair first unlocks was flagged as an open question (Pass 49), not
-  // decided one way or the other. See docs/Algorithms.md#section-run-throughs.
+  // piece has been practiced at least once, AND both sections in the pair
+  // are individually learned — these are meant as a late-stage "play
+  // through two sections back to back" drill, not an early one. That's the
+  // one-time first-unlock gate. Once a pair clears it, it gets the same
+  // repeating due/lockedPreview rhythm single sections already have
+  // (sectionPairRunThroughGate, above) — resolved, no longer the original
+  // unlock-once-and-stay gate this used to be. See
+  // docs/Algorithms.md#section-run-throughs.
   const allChunksPracticed = practiceChunks.every((c) => ((piece.progress[c.id] || {}).sessions || []).length > 0);
   const transitions = [];
   if (allChunksPracticed) {
@@ -274,6 +371,8 @@ export function computeSectionRunThroughs(piece, practiceChunks) {
       const a = ordered[i];
       const b = ordered[i + 1];
       if (!isLearned(a) || !isLearned(b)) continue;
+      const gate = sectionPairRunThroughGate(a, b, piece, bySectionId);
+      if (!gate.due && !gate.lockedPreview) continue;
       const { avg, label } = weightedDifficultyFromArray(piece.measureDifficulty, a.start, b.end);
       transitions.push({
         id: `st_${a.id}_${b.id}`,
@@ -287,6 +386,10 @@ export function computeSectionRunThroughs(piece, practiceChunks) {
         recurring: false,
         recurringNote: null,
         linkedIds: [a.id, b.id],
+        // true on the day one chunk's next session would cross the pair
+        // into being newly due again — same rendered locked/grayed preview
+        // treatment single sections already get.
+        locked: gate.lockedPreview,
       });
     }
   }

@@ -808,6 +808,23 @@ describe("hasClimbingTempo — Pass 30's tempo-climbing trend detection", () => 
     };
     assert.equal(hasClimbingTempo(entry), true, "the bpm-less record is skipped over, not counted as a BPM of 0 (which would read as a huge dip)");
   });
+
+  // [fix] `typeof NaN === "number"` is true, so a bare `typeof s.bpm ===
+  // "number"` guard let a NaN bpm (only reachable via hand-edited/corrupted
+  // data, never through NumberInput) through into the window. With NaN at
+  // the *start* of the trailing window specifically, the final
+  // `recent[last].bpm - recent[0].bpm >= MIN_RISE_BPM` check becomes
+  // `NaN >= 4`, always false — silently suppressing a genuine climb in the
+  // rest of the window (86 - NaN = NaN, not 86 - 70 = 16), rather than
+  // showing a false positive. Number.isFinite excludes the NaN record the
+  // same way the pre-existing missing-bpm case above is already excluded,
+  // so the real climb underneath it is visible again.
+  test("[fix] a NaN bpm at the start of the trailing window no longer silently suppresses a genuine climb in the rest of it", () => {
+    const entry = {
+      sessions: [bpmSession(NaN, 1), bpmSession(70, 2), bpmSession(78, 3), bpmSession(86, 4)],
+    };
+    assert.equal(hasClimbingTempo(entry), true, "the NaN record is skipped over, leaving the genuine 70->78->86 climb visible");
+  });
 });
 
 // Overall piece confidence (Pass 58) — an effort-weighted average of

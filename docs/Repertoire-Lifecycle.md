@@ -70,17 +70,24 @@ the same way ladder `stage` itself has always been felt through its
 downstream effects (`practiceBPM`, which day a review lands on) rather
 than shown as a raw value.
 
-**Still queued behind this work, now unblocked but not built:** gating
-revival entry so a revival can only be started once a piece is in
-maintenance (i.e. learned), with a manual Settings transition for pieces
-finished away from the app. Agreed in principle, and no longer blocked on
-"there's no mode to gate on" — `isPieceLearned` is exactly that mode now —
-but this pass's Builds list didn't include wiring it into Revival entry,
-so that gate still doesn't exist. It also has to reconcile with the
-Wizard's start-directly-in-revival path and with the staleness
-auto-trigger, which fires for pieces *abandoned* mid-learning. Design it
-together with this state rather than bolting it on afterwards; full detail
-in [Decisions.md](Decisions.md#open-questions).
+**Both halves of what was queued behind this are now built, in later
+sessions — neither one by gating directly on `isPieceLearned`.** Gating
+revival entry so it's only reachable once a piece is genuinely done
+shipped in Pass 83, but on `isPlanActuallyComplete` (`lib/scheduling.js`)
+rather than this rollup — see [Stage 4 → Revival
+auto-triggers](#revival-auto-triggers) below and
+[Decisions.md](Decisions.md#revival). The manual Settings transition for a
+piece finished away from the app shipped later still, as
+`piece.markedLearnedElsewhere` ("Mark as learned elsewhere") — an
+unconditional override `isPlanActuallyComplete` checks first, so setting
+it unlocks Archive/Start revival/the Continue-maintenance relabel at once,
+without needing a first-class persisted `piece.stage` field the way this
+section originally envisioned. It also already reconciles cleanly with the
+Wizard's start-directly-in-revival path (unaffected by construction — that
+path sets `revival.active` immediately, never reaching this gate) and the
+staleness auto-trigger (also gated on the same `isPlanActuallyComplete`
+check, since Pass 83). Full detail, including what was tried and rejected
+along the way, in [Decisions.md](Decisions.md#open-questions).
 
 `computeProgressTier` (buckets a chunk into untouched/learned/comfortable/
 mastered) and `computeConfidence` (continuous 0–100 score) both continue
@@ -190,10 +197,12 @@ longer part of the daily rotation.
   until `isPlanActuallyComplete(piece, chunkSet, timeline)` (Pass 39) says
   the plan is actually finished, with an inline reason shown while it's
   locked. Pause is unaffected — still available any time, no condition.
-  See [Decisions.md](Decisions.md#lifecycle) for why, and
-  [Decisions.md](Decisions.md#open-questions) for the resulting gap (a
-  piece genuinely abandoned mid-plan, not finished and never going to be,
-  has no clean path to archive).
+  See [Decisions.md](Decisions.md#lifecycle) for why. This opened a real
+  gap — a piece genuinely abandoned mid-plan, not finished and never going
+  to be, has no clean path to archive — **decided, in a later session, on
+  direct request: leave it as-is.** Pause stays the answer for that piece
+  shape; no separate Archive path was built. See
+  [Decisions.md](Decisions.md#open-questions) for the full resolution.
 
 **Deliberately not this feature, still**: any scheduled maintenance-review
 mechanic — that's Stage 4 below, not this. Pause remains a pure manual
@@ -203,10 +212,12 @@ it now depends on a computed check, though the check is "is the plan
 actually finished," not "is this piece learned" in the Stage 3 sense —
 still not an automatic *detector* that decides archival on its own, just a
 gate on the learner's own manual action. Stage 4 is now mostly built (the
-ladder, Tier 1/2 scheduling, post-run-through logging, and Revival's
-auto-triggers are all live); what's still missing is a live "what's due"
-query that surfaces maintenance in the UI beyond the current plan's
-bounded length — see "Explicitly not designed/built here" below.
+ladder, Tier 1/2 scheduling, post-run-through logging, Revival's
+auto-triggers, and — since Pass 8 — the live "what's due" query that
+surfaces maintenance in the UI beyond the current plan's bounded length
+are all live; see [How maintenance surfaces in the UI](#how-maintenance-surfaces-in-the-ui-built)
+below). What's still missing is Stage 5 (repertoire rotation) — see
+"Explicitly not designed/built here" below.
 
 ## Stage 4 — Maintenance (mostly built)
 

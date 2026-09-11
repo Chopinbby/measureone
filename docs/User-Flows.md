@@ -36,11 +36,14 @@ lives inside `BasicsFields` so Settings gets it too (a standalone piece can be
 promoted into a work later by typing a work title there). Choosing "Multiple
 movements" makes the work title itself required to advance — `canAdvance()`
 blocks "Next" if it's blank, the same way a blank piece name or zero measures
-already did. Settings' "Save changes" enforces the identical rule when
-editing an existing piece. See
+already did. Settings' "Save changes" enforces the identical work-title
+rule when editing an existing piece — see
 [Decisions.md](Decisions.md#multi-movement-works) for why (clearing an
 existing multi-movement piece's title in Settings used to silently detach it
-from its work).
+from its work). **Since a later session, "Save changes" also mirrors the
+Wizard's other two `canAdvance()` conditions** — a blank piece name or zero
+total measures blocks saving there too, not just at setup time; see
+[Decisions.md](Decisions.md#open-questions).
 
 **Since Pass 24, step 1 also carries four optional extras that don't gate
 advancing past it:** target tempo (BPM) is now a `BasicsFields` field, so it
@@ -149,8 +152,13 @@ see [UX-Principles.md](UX-Principles.md#glanceable-state-vs-diagnostic-trend-are
   43/45: a "Continue learning" / "Continue maintenance" button under the
   title card jumps straight into practice (see flow 2 above); and the
   "first week" list grays out past days and strikes through only the ones
-  actually completed, with today's row noting "(behind N chunks)" when
-  applicable — see [Decisions.md](Decisions.md#ux).
+  actually completed, with today's row noting "(behind N days)" — a
+  day-count, not a chunk-count, **since Pass 70** — when applicable. **Since
+  a later session, that note is suppressed while a revival is active** —
+  it's judged against the piece's original, pre-revival plan, which isn't
+  the plan actually being followed mid-revival — see
+  [Decisions.md](Decisions.md#ux) and
+  [Decisions.md](Decisions.md#open-questions).
 - **Progress**: "how is it actually going" — **since Pass 58, a piece-level
   "Overall confidence" stat sits at the top of the tab**: an
   effort-weighted average of every practice chunk's confidence, with an
@@ -277,7 +285,8 @@ both untouched by this. See
 (`withLiveReviewStatus`).
 
 **Since Pass 39, Today's Practice can also show a second, separate banner**
-below the "N chunks behind schedule" one: a `"days"`-mode piece whose
+below the "N days behind schedule" one (a day-count since Pass 70, not the
+earlier chunk-count): a `"days"`-mode piece whose
 calendar has run out with real work still left, but where every *practice
 chunk* specifically has already been touched (only a transition or focus
 block is what's actually outstanding). In that narrower case there's

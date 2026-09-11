@@ -300,6 +300,19 @@ scripted interaction produces a surprising "it didn't work" result for
 anything touching commit-on-blur, changing the *input method* is worth
 trying before concluding the code is broken.
 
+**Recurred in a later session** (verifying `customChunkSize`'s `NumberInput`
+committed correctly): the exact same `input` + `blur` dispatch silently
+left the field showing the old value, with the Browser pane hidden so the
+`computer` tool's click/Tab path wasn't available either. The fix wasn't
+"use `computer`" (unavailable) but the other documented alternative —
+`KeyboardEvent('keydown', { key: 'Enter', bubbles: true })`, which
+`NumberInput`'s own `onKeyDown` handler reads directly and which *does*
+bubble natively, so the scripted dispatch worked on the first retry. Worth
+internalizing as the default now, not just a fallback to try after `blur`
+fails: when scripting a commit-on-blur field and a real click/Tab isn't
+available, reach for a `keydown Enter` dispatch first, skip the `blur`
+attempt entirely.
+
 ## A guard added for one navigation path needs auditing everywhere that path exists
 
 When you add a confirmation/guard before a state transition (leaving a
@@ -632,6 +645,57 @@ being fixed, not on stress-testing the substitute derivation against every
 scenario the open question it was closing had originally listed. See
 [Decisions.md](Decisions.md#open-questions)'s "Gate revival entry behind a
 piece being in maintenance" entry for the full account.
+
+**Resolved, in a later session, with the originally-envisioned mechanism
+after all:** once the gap above was surfaced back to the user directly,
+the answer wasn't to loosen `isPlanActuallyComplete`'s criteria (which
+would have weakened what "the plan is actually finished" means everywhere
+else that function is read) — it was to build the manual override the
+original design wanted all along (`piece.markedLearnedElsewhere`), as an
+unconditional early-return `isPlanActuallyComplete` checks *before* its
+normal logic. The lesson this reinforces: routing around a missing
+persisted field with a live derivation is often the right *interim* fix,
+but it doesn't retire the case for actually building the field/control the
+original design called for — surface the gap rather than treating the
+substitution as the final answer.
+
+## An open question marked "not fixed" can go stale the moment an unrelated later pass happens to satisfy it
+
+`Decisions.md`'s open questions accumulate across many passes, and nothing
+forces a cross-reference back when a *later, unrelated* pass's fix happens
+to resolve an earlier one's underlying mechanism as a side effect. Before
+reporting an open question as still unfixed — or working around it, or
+building a second fix for it — check the actual current code, not just the
+doc's own "not started"/"not fixed" claim, especially if real time (many
+passes) has elapsed since it was logged.
+
+Two confirmed instances in the same session, both caught only by actually
+testing rather than trusting the doc:
+
+- A piece stuck permanently "not behind" after an old-style reschedule was
+  logged as unfixed, with a proposed two-part fix of which only "part 1"
+  had shipped. Reproducing the exact scenario in a live script (construct
+  the stuck-piece marker, call the real function) showed it was already
+  fixed — `eligiblePieceContext`'s `cutoffDay` (`lib/scheduling.js`, added
+  much later for an *unrelated* reason: a "days behind" display rework)
+  happened to repair the identical root cause "part 2" was going to fix,
+  just via a different mechanism than either originally-proposed option.
+  Confirmed by reverting the fix and watching the reproduction fail again.
+- "How does maintenance surface in the UI" was logged as an open,
+  undesigned question. A separate doc, `Repertoire-Lifecycle.md`, already
+  had a section literally titled "...(built)" describing exactly this,
+  shipped many passes earlier — the open-questions entry had simply never
+  been linked back to it.
+
+Both were closed with a doc correction, not new code — the risk isn't just
+wasted effort re-solving a solved problem, it's actively **worse**: a
+second, redundant fix for an already-fixed bug can behave differently from
+the first (different mechanism, different edge cases), creating exactly
+the kind of two-competing-implementations drift this codebase's own "one
+implementation, not two" (mergeLadderConfig, `isInRevival`) precedent
+exists to prevent. When resolving an item from that list, the check is
+cheap (grep for the function name's later history, or just call it with
+the failing scenario) relative to the cost of either outcome.
 
 ## When you're not sure
 

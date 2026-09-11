@@ -3560,8 +3560,9 @@ rep-only harder check every 4th review, tracked by a new
   `LadderConfigEditor.jsx` were in this pass's Touches list for removal.**
   A user can now "tune" a setting that has zero effect, with nothing in
   that UI indicating it's gone inert. Left as a flagged gap rather than
-  silently cleaned up or silently left undocumented. See
-  [Open questions](#open-questions) below.
+  silently cleaned up or silently left undocumented. **Removed outright, in
+  a later session, on direct request** — see [Open questions](#open-questions)
+  below for the resolution.
 - **Two more real gaps found in review, initially left unfixed (outside
   this pass's Touches list), then fixed the same session per direct
   request as an explicit same-session follow-up:**
@@ -4027,24 +4028,33 @@ into that day's own view. `components/tabs/today/WeekView.jsx`.
   class in `App.jsx`'s stylesheet rather than a third inline copy.
 
 **Decision (Pass 22): in maintenance mode the week shows only today, and
-says so — it does not leave the days ahead looking empty.**
+says so — it does not leave the days ahead looking empty.** **Superseded,
+in a later session, on direct request: the boundary below moved after
+all — see the resolved open question, [Open questions](#open-questions),
+"Should a piece in maintenance get a genuinely forward-looking week."**
+The reasoning immediately below explains why this was the right call *at
+the time*, not why the later reversal was wrong — kept for that context.
 
 Past the end of a bounded plan there are no plan days left, so the week
-view falls back to 7 calendar days around today. Only today's cell can
-carry content (the live due list); the days ahead read "Not due yet" and
-the panel states plainly that maintenance reviews come due one day at a
-time.
+view falls back to 7 calendar days around today. At the time, only today's
+cell could carry content (the live due list); the days ahead read "Not due
+yet" and the panel stated plainly that maintenance reviews come due one
+day at a time.
 
-- **Why it can't do better:** `computeDueReviews` answers "what is due as
-  of this date" and nothing answers "what will be due on Thursday" — a
-  forward-looking window is explicitly scoped out (see
+- **Why it couldn't do better, at the time:** `computeDueReviews` answers
+  "what is due as of this date" and nothing answered "what will be due on
+  Thursday" — a forward-looking window was explicitly scoped out (see
   [Spaced repetition & maintenance](#spaced-repetition--maintenance),
-  "Scoped out"). This is a design boundary, not an unfinished cell.
+  "Scoped out"). This was a deliberate design boundary, not an unfinished
+  cell — until the later session's `computeDueOnDate` addition gave the
+  days ahead something real to show.
 - **Why not just leave them blank:** a blank cell reads as "nothing due
   Thursday," which is a promise this data cannot make — the honest state is
   "not known yet." Same principle as the rest of the app: don't imply
-  information the model doesn't have. See the open question below on
-  whether that boundary should move.
+  information the model doesn't have. This reasoning is exactly why the
+  later fix computes each day's *own* newly-due items rather than an
+  accumulating "due by then" list — it still never implies more than it
+  knows.
 
 **Decision (Pass 23): learning-phase logging (`ChecklistItem`) gets an
 inline, editable free-text note per chunk, reusing `piece.memoryAnchors`
@@ -4219,12 +4229,16 @@ the logic.**
   `computeScheduleStatus`'s existing `missedCount` is nonzero — reused
   directly, not recomputed, per
   [AI-GUIDELINES.md](AI-GUIDELINES.md#prefer-extending-existing-systems-over-creating-parallel-systems).
-- **Known gap, not fixed:** a consolidation day's `reviewChunkIds` lists
-  every practice chunk, but logging that day's run-through
-  (`handleLogRunThrough`, `App.jsx`) only ever writes the synthetic
-  `"__consolidation__"` progress entry, never each individual chunk's own
-  `doneDays` — so a logged consolidation day still reads `"behind"` here.
-  See [Algorithms.md](Algorithms.md#behind-schedule-detection). **Since
+- **Known gap, fixed in a later session:** a consolidation day's
+  `reviewChunkIds` lists every practice chunk, but logging that day's
+  run-through (`handleLogRunThrough`, `App.jsx`) only ever writes the
+  synthetic `"__consolidation__"` progress entry, never each individual
+  chunk's own `doneDays` — so a logged consolidation day used to still read
+  `"behind"` here. **Resolved on direct request**: `classifyDayCompletion`
+  now checks `"__consolidation__"`'s own `doneDays` for a consolidation day
+  instead of the per-chunk list — see
+  [Open questions](#open-questions) for the resolution. See
+  [Algorithms.md](Algorithms.md#behind-schedule-detection). **Since
   Pass 46**, the Timeline tab reuses this same `classifyDayCompletion` call
   for its own past-day graying/check mark, so this gap now reads the same
   way on a third surface, not just Overview's first-week list. **Since
@@ -4240,16 +4254,20 @@ the logic.**
   it was done) — just a more visible instance of a gap that was already
   here, found during Pass 67's own review rather than newly introduced by
   it.
-- **Known gap, not fixed: not revival-aware.** A piece that's both
-  mid-revival and behind on its *original* (pre-revival) schedule still
-  shows the "(behind N chunks)" note and first-week graying against that
-  original plan, not the revival plan the learner is actually following.
-  Not a new inconsistency on its own — `ScheduleBanner` already shows "N
-  chunks behind schedule" during revival today — but it's a second surface
-  carrying the same one. **Since Pass 46, make that three surfaces**: the
-  Timeline tab's own past-day graying/check mark reuses the same
-  `classifyDayCompletion` call, with the same lack of revival-awareness.
-  See [Open questions](#open-questions).
+- **Known gap, the note half fixed in a later session: not revival-aware.**
+  A piece that's both mid-revival and behind on its *original*
+  (pre-revival) schedule used to still show the "(behind N chunks)" note
+  and first-week graying against that original plan, not the revival plan
+  the learner is actually following. Not a new inconsistency on its own —
+  `ScheduleBanner` already shows "N days behind schedule" during revival
+  today — but it's a second surface carrying the same one. **Since Pass
+  46, make that three surfaces**: the Timeline tab's own past-day
+  graying/check mark reuses the same `classifyDayCompletion` call, with
+  the same lack of revival-awareness. **Resolved, the text-note half, on
+  direct request**: `OverviewTab` now suppresses the note while
+  `isInRevival(piece)`. The "graying" half turned out not to be a
+  distinct, separately-suppressable thing on closer look — see
+  [Open questions](#open-questions) for the full resolution.
 
 **Decision (Pass 46): the Timeline tab gets completion states and its own
 reschedule entry point — a direct application of Pass 45's shared

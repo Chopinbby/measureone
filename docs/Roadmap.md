@@ -23,13 +23,18 @@ field in the chunk-detail modal reaches those instead, as clickable links
 that open each one's own detail in turn), Today's Practice (timer,
 reps/BPM/effectiveness logging — **since Pass 22** also a read-only "Week"
 view alongside Day view/View all, see
-[Decisions.md](Decisions.md#ux); **since Pass 23** a free-text note per
+[Decisions.md](Decisions.md#ux) — **and, in a later session, genuinely
+forward-looking once a piece is past its bounded plan**: `computeDueOnDate`
+(`lib/maintenance.js`) shows each of the next few days' own newly-due
+reviews instead of the flat "today only" placeholder the week view used to
+fall back to; **since Pass 23** a free-text note per
 chunk, editable inline during logging, not just from the Piece Map), Progress
 tab (rolling-window consistency, consistency heatmap, actual-vs-planned,
 **since Pass 51** an estimated-vs-actual practice time panel (every
 recently-practiced chunk/transition/combo/section-run-through, paired
 against `EFFORT_TO_MIN`-based estimate — see
-[Decisions.md](Decisions.md#scheduling)), projected finish, tempo trend,
+[Decisions.md](Decisions.md#scheduling)), projected finish (a calendar
+date, not a bare day-number, as of a later session), tempo trend,
 effectiveness calibration — plus, as of Pass
 20, confidence-by-difficulty, folded in when the separate Analytics tab was
 removed; see [Decisions.md](Decisions.md#ux). The other folded-in panel,
@@ -93,9 +98,11 @@ Pause is unconditional, still scoped to "take this off my daily agenda"
 regardless of plan state. **Archive is not, as of the same session as Pass
 43/45**: it's now disabled until `isPlanActuallyComplete` says the piece's
 plan is actually finished (see
-[Decisions.md](Decisions.md#lifecycle)) — a real, deliberately unresolved
-gap this opened is that a piece genuinely abandoned mid-plan (not finished,
-never going to be) can't be archived under this rule; see
+[Decisions.md](Decisions.md#lifecycle)) — a real gap this opened is that a
+piece genuinely abandoned mid-plan (not finished, never going to be) can't
+be archived under this rule. **Decided, in a later session, on direct
+request: leave it as-is** — Pause stays the answer for an abandoned piece,
+no separate Archive path built; see
 [Decisions.md](Decisions.md#open-questions).
 
 **Since Pass 29**, Today's Practice has a fourth view mode, **Interleaved
@@ -287,17 +294,19 @@ assuming this section is stale.
    Agenda, the schedule-behind banner, bulk "Reschedule all" eligibility).
    See
    [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
-   and [Decisions.md](Decisions.md#scheduling) for the mechanics, and
-   [Decisions.md](Decisions.md#open-questions) for what's still queued
-   behind it — a first-class *persisted* "learned" state. **As of Pass 83,
-   this no longer strictly blocks "gate revival entry behind
-   maintenance"** (the live `isPlanActuallyComplete` derivation turned out
-   to be enough to fix that item's actual contradiction — see
-   [Decisions.md](Decisions.md#revival)) — but the persisted state is
-   still genuinely missing for that item's *other* half (a manual Settings
-   transition for a piece finished away from the app), and gating on the
-   live derivation instead has its own new consequence for exactly that
-   piece shape; see [Decisions.md](Decisions.md#open-questions).
+   and [Decisions.md](Decisions.md#scheduling) for the mechanics. There is
+   still no first-class *persisted* "learned" state on `piece` itself —
+   `isPieceLearned` stays a live derivation — but **as of Pass 83, that no
+   longer blocks "gate revival entry behind maintenance"** (the live
+   `isPlanActuallyComplete` derivation was enough to fix that item's actual
+   contradiction — see [Decisions.md](Decisions.md#revival)), **and the
+   manual Settings transition this once needed for a piece "finished away
+   from the app" is now built too** (a later session,
+   `piece.markedLearnedElsewhere` — "Mark as learned elsewhere" — an
+   unconditional override `isPlanActuallyComplete` checks first, so setting
+   it unlocks Archive/Start revival/the Continue-maintenance relabel at
+   once, no persisted `piece.stage` field needed after all); see
+   [Decisions.md](Decisions.md#open-questions) for the full resolution.
    Repertoire rotation (multiple pieces
    competing for daily practice time while in maintenance) remains
    genuinely undesigned — see

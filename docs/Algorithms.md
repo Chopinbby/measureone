@@ -1200,16 +1200,21 @@ than the baseline requirement, reverting to baseline on every other review.
   whether an already-classified pass counts toward Holding's interval
   growth), and only the latter changed here.
 - **The old `ladderConfig.holding.tempoFloorStartFraction`/
-  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields are left in
-  place, not removed** — `clearsStageFloor` simply no longer reads them for
-  Holding. Flagged, not silently cleaned up: they're still part of the
-  saved schema, and still directly exposed and editable — correctly
-  labeled "Tempo floor, starting fraction" / "step per pass" / "cap
-  fraction" — under `LadderConfigEditor`'s "Holding" heading. A user can
-  find and "tune" a setting that now does nothing, with no indication
-  anywhere in that UI that it's gone inert. See
-  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the full
-  discovery.
+  `tempoFloorStepFraction`/`tempoFloorCapFraction` fields** —
+  `clearsStageFloor` stopped reading them for Holding at the time this pass
+  shipped, but the fields themselves were left in the schema and still
+  directly editable for several sessions afterward, flagged as a known,
+  silently-inert loose end rather than cleaned up immediately. **Removed
+  outright, in a later session, on direct request**: gone from
+  `DEFAULT_LADDER_CONFIG` (`lib/storage.js`), `defaultPiece()`
+  (`Wizard.jsx`), and `LadderConfigEditor`'s "Holding" panel, whose intro
+  copy was also corrected — it had kept describing the retired
+  escalating-floor behavior rather than the periodic extra-rep check that
+  replaced it. A piece already saved with these fields keeps them as
+  harmless dormant data; no migration was needed. See
+  [Decisions.md](Decisions.md#spaced-repetition--maintenance) for the
+  original discovery and [Decisions.md](Decisions.md#open-questions) for
+  the removal.
 
 ### Tempo ratchet (Pass 59)
 
@@ -1982,7 +1987,8 @@ the trigger for the reschedule banner.**
 If `piece.status` is anything other than `"active"` (i.e. `"paused"` or
 `"archived"`), `missedCount` is forced to 0 regardless of how many
 introduction days have passed — a paused/archived piece never shows the
-"N chunks behind schedule" banner or the Master Agenda "N behind" badge.
+"N days behind schedule" banner (a day-count since Pass 70, not the
+earlier chunk-count) or the Master Agenda "N behind" badge.
 `remainingChunkIds` is still computed either way, since `handleReschedule`
 needs it once the piece goes active again. See
 [Decisions.md](Decisions.md#lifecycle) and

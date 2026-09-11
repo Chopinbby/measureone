@@ -528,10 +528,10 @@ ChunkProgress = {
                                  // 12th... since that fresh entry), the required-clean-reps
                                  // threshold for that one session is baseline + 1, reverting to
                                  // baseline every other review — replaces Holding's old escalating
-                                 // tempo floor (ladderConfig.holding.tempoFloor*, below — now
-                                 // unread for Holding, though the fields themselves are still saved
-                                 // and still editable in Settings, an intentionally-flagged loose
-                                 // end, not an oversight) outright; meeting the rep requirement is
+                                 // tempo floor (ladderConfig.holding.tempoFloor* — retired in Pass
+                                 // 61, and the three now-dead fields themselves removed from the
+                                 // schema and Settings entirely in a later session, see below)
+                                 // outright; meeting the rep requirement is
                                  // now sufficient on its own for a Holding pass to count toward
                                  // interval growth, no tempo condition attached. Backfills to null
                                  // (not 0), same false-import-conflict reasoning as tempoRatchetK
@@ -582,10 +582,7 @@ ladderConfig = {
   settling: { intervalDays, graduationPasses, tempoFloorFraction },
   // intervalDays: 7. graduationPasses: 4. tempoFloorFraction: 0.7 — a
   // hand-picked point within the doc's ~70–75%-of-target range.
-  holding: {
-    startIntervalDays, maxIntervalDays,
-    tempoFloorStartFraction, tempoFloorStepFraction, tempoFloorCapFraction,
-  },
+  holding: { startIntervalDays, maxIntervalDays },
   // startIntervalDays: 14. maxIntervalDays: 70 (10 weeks) — hand-picked
   // point within the doc's ~8–12-week cap range. No growth-rate field here
   // — Holding's interval growth is computed entirely from the same
@@ -594,16 +591,20 @@ ladderConfig = {
   // duplicated copy of the multiplier itself now, per the doc's "not a
   // second multiplier system" instruction — see
   // Decisions.md#spaced-repetition--maintenance.
-  // tempoFloorStartFraction: 0.85, tempoFloorStepFraction: 0.05, tempoFloorCapFraction: 1
-  // — **retired as of Pass 61**: clearsStageFloor's Holding branch
-  // (lib/ladder.js) no longer reads any of these three fields; a Holding
-  // pass counts toward interval growth as soon as it meets the rep
-  // requirement, full stop (see progress[id].holdingReviewCount above for
-  // the periodic rep-only harder check that replaced this). The three
-  // fields themselves are left in the schema and stay directly editable
-  // in LadderConfigEditor under "Holding" — a deliberately flagged loose
-  // end (a user can "tune" a setting that now does nothing), not an
-  // oversight — see Decisions.md#spaced-repetition--maintenance.
+  // Used to also carry tempoFloorStartFraction/tempoFloorStepFraction/
+  // tempoFloorCapFraction (0.85/0.05/1) — Holding's escalating tempo floor,
+  // **retired as of Pass 61**: clearsStageFloor's Holding branch
+  // (lib/ladder.js) stopped reading them, replaced by
+  // progress[id].holdingReviewCount's periodic rep-only harder check (see
+  // above). The three fields sat in the schema and stayed directly
+  // editable, doing nothing, as a deliberately flagged loose end through
+  // several sessions — **removed outright from the schema and
+  // LadderConfigEditor in a later session**, once confirmed this
+  // wouldn't touch the still-fully-active Tempo Ratchet (below) the user
+  // was actually testing. A piece already saved with these fields keeps
+  // them as harmless dormant data — same precedent as
+  // piece.revival.purpose (Pass 55) — no migration added. See
+  // Decisions.md#open-questions.
   bpmSteps: { pass, softMiss, fail },
   // pass: 2, softMiss: -2, fail: -2 — how much practiceBPM moves per
   // outcome on a chunk with no targetBPM to be gap-proportional against

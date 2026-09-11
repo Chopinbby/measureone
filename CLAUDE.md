@@ -1097,3 +1097,48 @@ than merged into it, since a stuck piece (see the reschedule open question
 above) can read `behindDaysCount === 0` and silently drop out of that
 banner's count. See
 [`docs/Algorithms.md`](docs/Algorithms.md#the-abandoned-plan-reminder-pass-83).
+
+**Since Pass 84**, the "today" tab is relabeled **Daily Practice**
+everywhere it's named — the sidebar nav item (`NAV_BASE`, `App.jsx`) and
+the three reschedule alert/confirm strings that reference it by name. Its
+own `<h1>` now renders only on the real current day (`isRealToday`,
+gating the element the same way Pass 68 gated `SectionRunThroughPanel`),
+disappearing entirely — no empty gap, nothing left in its place — when
+browsing to any other day via day-nav or Timeline; the "Day X of Y" line
+right below it lost its `" (viewing)"` suffix at the same time; that line
+alone still shows on a browsed day, just without the qualifier, since the
+heading's own absence already signals "not today." Every earlier "Since
+Pass N" entry above still says "Today's Practice" — that's accurate
+history (it was called that at the time), not a leftover to fix. Only
+`App.jsx`/`TodayTab.jsx` were touched by the pass itself; two same-session
+follow-ups renamed the remaining user-visible mentions the pass had left
+out of its stated scope — `DayChecklist.jsx`'s two "see Today's Practice"
+stale-review notes, then `ProgressTab.jsx`'s two "check items off in
+Today's Practice" empty-state hints (the second one found only while
+verifying the first) — so those all now say "Daily Practice" too. A
+handful of code-comment-only mentions (`PieceCheckRow.jsx`,
+`ScheduleBanner.jsx`, `lib/chunking.js`, `lib/history.js`,
+`lib/scheduling.js`) are still unrenamed — not user-visible, low priority,
+see [`docs/Decisions.md`](docs/Decisions.md#open-questions).
+
+**Since Pass 85**, `.ghost-btn:disabled` finally has a real visual
+treatment (`{ opacity: 0.45; cursor: not-allowed; }`, `App.jsx` CSS) —
+matching the existing `.primary-btn`/`.danger-btn:disabled` pattern. Before
+this, a disabled ghost-btn looked pixel-identical to an enabled one. A
+quick audit (not just the Interleaved button named in the request) found
+three real sites this affects: the Interleaved practice button
+(`TodayTab.jsx`), Revival reassessment's chunk-nav "Previous" button
+(`PieceMapTab.jsx`, `sequentialMode`), and Settings' "Archive piece"
+button. The Archive button already had a bespoke inline-style workaround
+for this exact gap (`ARCHIVE_LOCKED_STYLE`, `SettingsTab.jsx`) — a
+same-session follow-up removed it once it became redundant, keeping only
+the `title` tooltip text. See
+[`docs/Decisions.md`](docs/Decisions.md#ux) for the full writeup,
+including a live-hover-tested finding worth knowing before touching
+`.ghost-btn` again: an old code comment claimed a disabled ghost-btn still
+shows the brass hover tint as a "harmless quirk" (since `.ghost-btn:hover`
+isn't guarded with `:not(:disabled)`, unlike the other two button
+classes) — a real mouse hover in this session's test browser showed no
+such tint despite `:hover` technically matching, so that quirk doesn't
+reproduce there. Not verified across other browsers, and the un-guarded
+hover rule itself was deliberately left untouched either way.

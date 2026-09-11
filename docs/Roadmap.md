@@ -20,7 +20,7 @@ Setup wizard, chunking/timeline engine, Piece Map (**since Pass 50** its
 grid is filtered to base practice chunks only, running the piece's full
 length with no gaps and no transition/combo tiles; a "Related chunks"
 field in the chunk-detail modal reaches those instead, as clickable links
-that open each one's own detail in turn), Today's Practice (timer,
+that open each one's own detail in turn), Daily Practice (timer,
 reps/BPM/effectiveness logging — **since Pass 22** also a read-only "Week"
 view alongside Day view/View all, see
 [Decisions.md](Decisions.md#ux) — **and, in a later session, genuinely
@@ -48,7 +48,7 @@ doesn't fit the days left now offers a concrete way out inline — extend the
 target date, or extend the plan directly in "minutes per day" mode — rather
 than just a warning, see [Decisions.md](Decisions.md#scheduling); **since
 Pass 46–48**, the Timeline tab shows completion states and its own
-reschedule entry point, Today's Practice has an alternative "go to the
+reschedule entry point, Daily Practice has an alternative "go to the
 earliest unfinished day" action alongside Reschedule, a fully-rescheduled
 day collapses instead of showing its stale task list, and rescheduling the
 same piece more than once now correctly chains through its whole history
@@ -105,7 +105,7 @@ request: leave it as-is** — Pause stays the answer for an abandoned piece,
 no separate Archive path built; see
 [Decisions.md](Decisions.md#open-questions).
 
-**Since Pass 29**, Today's Practice has a fourth view mode, **Interleaved
+**Since Pass 29**, Daily Practice has a fourth view mode, **Interleaved
 practice** — rotates chunks that have graduated past Stabilizing
 (settling/holding), reusing the existing logging path; a "skip" action
 saves time without marking a day done or touching the ladder; an
@@ -171,7 +171,7 @@ computes off the result yet. See
 [Algorithms.md](Algorithms.md#cold-start-check) and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#cold-start-check-built-pass-56).
 
-**Since Pass 57**, Today's Practice has its own `RandomStartPanel` —
+**Since Pass 57**, Daily Practice has its own `RandomStartPanel` —
 `RandomStartPanel` (previously Revival/Master-Agenda-only) pooling every
 chunk/transition/combo in the current piece with 2+ logged sessions, so a
 practice session doesn't always start from the same place. Hidden below
@@ -290,7 +290,7 @@ assuming this section is stale.
    it to decide whether a `scheduleMode: "minutes"` piece should keep
    auto-extending its own plan or finally read as complete, and the same
    function replaced the old calendar-only "has this piece run past its
-   plan" check everywhere that question is asked (Today's Practice, Master
+   plan" check everywhere that question is asked (Daily Practice, Master
    Agenda, the schedule-behind banner, bulk "Reschedule all" eligibility).
    See
    [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)

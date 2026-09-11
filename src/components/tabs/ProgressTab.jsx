@@ -365,7 +365,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
       <div className="panel">
         <h3>Outcome breakdown</h3>
         {allSessions.length === 0 ? (
-          <p className="wizard-hint">Nothing logged yet — check items off in Today's Practice.</p>
+          <p className="wizard-hint">Nothing logged yet — check items off in Daily Practice.</p>
         ) : (
           <div className="analytics-bars">
             {outcomeBreakdown.map((o) => (
@@ -401,7 +401,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
       <div className="panel">
         <h3>Recent practice history</h3>
         {history.length === 0 ? (
-          <p className="wizard-hint">Nothing logged yet — check items off in Today's Practice.</p>
+          <p className="wizard-hint">Nothing logged yet — check items off in Daily Practice.</p>
         ) : (
           <div className="history-list">
             {history.map(({ day, label }) => (

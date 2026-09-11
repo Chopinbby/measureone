@@ -99,7 +99,7 @@ export function DayChecklist({
   const staleReviewNote = day.staleReviewIds && day.staleReviewIds.length > 0 && (
     <p className="wizard-hint" style={{ fontStyle: "italic", margin: "8px 0 0" }}>
       {day.staleReviewIds.length === 1 ? "1 review" : `${day.staleReviewIds.length} reviews`} originally scheduled
-      here {day.staleReviewIds.length === 1 ? "is" : "are"} now tracked as due — see Today's Practice.
+      here {day.staleReviewIds.length === 1 ? "is" : "are"} now tracked as due — see Daily Practice.
     </p>
   );
 
@@ -108,7 +108,7 @@ export function DayChecklist({
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
         <p className="wizard-hint" style={{ margin: 0 }}>
-          {staleReviewNote ? <em>Already due — see Today's Practice</em> : "Nothing scheduled."}
+          {staleReviewNote ? <em>Already due — see Daily Practice</em> : "Nothing scheduled."}
         </p>
       </div>
     );

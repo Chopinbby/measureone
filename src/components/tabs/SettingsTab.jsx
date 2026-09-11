@@ -15,15 +15,13 @@ import { autoChunkSize } from "../../lib/chunking";
 import { isPlanActuallyComplete } from "../../lib/scheduling";
 import { formatMinutes } from "../../lib/utils";
 
-// Matches .primary-btn:disabled's look (App.jsx CSS) — .ghost-btn itself has
-// no :disabled rule anywhere in the shared stylesheet, so the grayed-out
-// treatment for the plan-incomplete Archive button is applied inline here
-// rather than via a shared class. No pointerEvents: "none" — that would also
-// remove the button from :hover hit-testing, which silently kills the title
-// tooltip below (confirmed: disabled alone already blocks clicks/keyboard,
-// so it isn't needed for that). The un-guarded .ghost-btn:hover border/
-// background tint still shows on hover as a minor, harmless cosmetic quirk.
-const ARCHIVE_LOCKED_STYLE = { opacity: 0.45, cursor: "not-allowed" };
+// The grayed-out look for the plan-incomplete Archive button comes from the
+// shared .ghost-btn:disabled rule (App.jsx CSS, Pass 85) — this used to need
+// an inline style here because that rule didn't exist yet. No
+// pointerEvents: "none" on the button below — that would also remove it
+// from :hover hit-testing, which silently kills this title tooltip
+// (confirmed: disabled alone already blocks clicks/keyboard, so it isn't
+// needed for that).
 const ARCHIVE_LOCKED_TITLE = "Available once this piece's learning plan is actually finished";
 
 export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus, onSetMarkedLearnedElsewhere }) {
@@ -71,7 +69,6 @@ export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft
                 <button
                   className="ghost-btn"
                   disabled={!planComplete}
-                  style={planComplete ? undefined : ARCHIVE_LOCKED_STYLE}
                   title={planComplete ? undefined : ARCHIVE_LOCKED_TITLE}
                   onClick={() => onSetStatus("archived")}
                 >
@@ -87,7 +84,6 @@ export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft
                 <button
                   className="ghost-btn"
                   disabled={!planComplete}
-                  style={planComplete ? undefined : ARCHIVE_LOCKED_STYLE}
                   title={planComplete ? undefined : ARCHIVE_LOCKED_TITLE}
                   onClick={() => onSetStatus("archived")}
                 >

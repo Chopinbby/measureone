@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2 } from "lucide-react";
+import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { SectionsEditor } from "../fields/SectionsEditor";
 import { DifficultyEditor } from "../fields/DifficultyEditor";
@@ -13,6 +14,7 @@ import { DocumentsEditor } from "../fields/DocumentsEditor";
 import { DocumentsList } from "../fields/DocumentsList";
 import { autoChunkSize } from "../../lib/chunking";
 import { isPlanActuallyComplete } from "../../lib/scheduling";
+import { isInRevival } from "../../lib/revival";
 import { formatMinutes } from "../../lib/utils";
 
 // The grayed-out look for the plan-incomplete Archive button comes from the
@@ -24,7 +26,7 @@ import { formatMinutes } from "../../lib/utils";
 // needed for that).
 const ARCHIVE_LOCKED_TITLE = "Available once this piece's learning plan is actually finished";
 
-export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus, onSetMarkedLearnedElsewhere }) {
+export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus, onSetMarkedLearnedElsewhere, onSetTempoLadderFraction }) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
   // the toggle is on but the work title is blank (same rule as the Wizard,
@@ -129,6 +131,28 @@ export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft
             </div>
           )}
         </div>
+        {isInRevival(piece) && (
+          <div className="panel">
+            <h3>Revival settings</h3>
+            <label className="field">
+              <span>Tempo ladder starting point (BPM)</span>
+              <NumberInput
+                value={piece.targetBPM ? Math.round((piece.revival.tempoLadderStartFraction ?? 0.6) * piece.targetBPM) : ""}
+                min={piece.targetBPM ? Math.round(piece.targetBPM * 0.1) : 20}
+                max={piece.targetBPM ? Math.round(piece.targetBPM * 0.95) : 400}
+                onCommit={(n) => onSetTempoLadderFraction(piece.targetBPM ? n / piece.targetBPM : 0.6)}
+                placeholder={piece.targetBPM ? undefined : "e.g. 88"}
+              />
+              {!piece.targetBPM && (
+                <p className="tip-line">
+                  The tempo ladder starts at a fraction of the target tempo. This piece has no given
+                  target tempo, so there's nothing to start a fraction of. Set it below, or practice
+                  tasks will suggest a flat default to start.
+                </p>
+              )}
+            </label>
+          </div>
+        )}
         <div className="panel">
           <h3>Backup & restore</h3>
           <p className="wizard-hint" style={{ marginBottom: 12 }}>

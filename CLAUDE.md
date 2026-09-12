@@ -156,10 +156,12 @@ chunking, scheduling, and confidence are actually computed, see
 - **Piece Map's grid shows only base practice chunks — this is deliberate,
   not a bug to "fix" by restoring transitions/combos to it.** Reach those
   through the chunk-detail modal's "Related chunks" field instead (Pass
-  50). The one exception: `PieceMapTab`'s `sequentialMode` (Revival's
-  reassessment pass) renders the grid unfiltered on purpose, since it walks
-  a different, transition-inclusive list via its own Previous/Next — don't
-  filter that branch too.
+  50). `PieceMapTab` is ordinary (non-revival) Piece Map only, as of Pass
+  87 — Revival's reassessment pass no longer shares this component at all
+  (it used to, via a `sequentialMode` prop that rendered this same grid
+  unfiltered underneath its own modal; that's retired in favor of a
+  dedicated `ReassessSequencePanel`, see the Revival section below), so
+  there's no second caller of this grid to keep in sync with anymore.
 - **Section run-throughs must stay a computed-fresh-every-render gate, not
   a persisted "unlocked" flag.** As of Pass 49, `sectionRunThroughGate`
   (`lib/chunking.js`) recomputes due/locked state from live session counts
@@ -1142,3 +1144,62 @@ classes) — a real mouse hover in this session's test browser showed no
 such tint despite `:hover` technically matching, so that quirk doesn't
 reproduce there. Not verified across other browsers, and the un-guarded
 hover rule itself was deliberately left untouched either way.
+
+**Since Pass 87**, Revival's reassessment phase no longer reuses
+`PieceMapTab` at all — the old `sequentialMode` prop (grid hidden behind a
+mode flag, one-chunk detail wrapped in a modal layered over that hidden
+grid, its own Previous/Next/Finish footer and assessment timer) is gone.
+`PieceMapTab` is ordinary (non-revival) Piece Map only now, and is
+meaningfully smaller for it — every sequentialMode-only branch, prop, and
+piece of state (the assessment timer, `bpmOverrideOpen`, the leaving-timer
+guard, `onReassessRange`/`onLogSession`/`onAssessmentTimerRiskChange`/
+`onConfirmLeaveAssessmentTimer`) is gone from this file, not just disabled.
+In its place, a new dedicated component,
+`ReassessSequencePanel` (`components/tabs/revival/`), owns the whole
+reassessment UI: one chunk shown inline in a `.panel` at a time (no grid
+underneath, no modal-over-grid layering), with its own "Reassess" header,
+an "N of M rated" count next to a real per-chunk segmented bar (one small
+gray block per chunk, filled once that chunk is rated — not a smooth
+percentage-width bar), and a small grid-icon button that opens a separate
+"Progress" modal (a real floating overlay, `.modal-overlay`/`.modal`, not
+another grid-under-a-modal) — one square per chunk, difficulty-tinted,
+black-checkmarked once rated, faded when not, hover-only for the measure
+range (no in-cell numbers, one consistent rule regardless of piece size —
+see [`docs/Decisions.md`](docs/Decisions.md#revival)). Clicking a square
+jumps straight to that chunk and closes the modal, through the same
+timer-leaving guard Previous/Next/Finish already use. Every other carried-
+over control (Quick rate, the per-chunk difficulty-reassess panel, Current/
+Target BPM including the override flow, Related chunks, Notes, the
+collapsible Chunk Info stats, the climbing-tempo hint, Previous/Next/
+Finish reassessment) behaves exactly as it did inside `PieceMapTab`'s old
+`sequentialMode` branch — this was a relocation, not a redesign of any of
+those controls. **One pre-existing gap carried over unfixed, not
+introduced by this pass:** the "Clear, resume review" button on a
+`needsRelearning` chunk has been a silent no-op during reassessment since
+before this pass — `RevivalTab` has never threaded an `onClearRelearning`
+handler through to this part of the UI, old `sequentialMode` branch
+included. `ReassessSequencePanel` reproduces this exactly (same
+do-nothing default) rather than silently fixing or silently dropping the
+button — flagged here as a real, pre-existing bug worth a decision, not
+fixed as a drive-by. See
+[`docs/Decisions.md`](docs/Decisions.md#revival) for the full design
+writeup, including why the new panel's visual grid/bar styling is inline
+CSS rather than new `App.jsx` CSS-string rules.
+
+**Same-session follow-up, per direct request:** the "Revival settings"
+card (the tempo ladder's starting-BPM field) is gone from `RevivalTab`
+entirely — that value is now collected once, at revival entry
+(`RevivalEntryModal`, unchanged), and from then on is only editable from
+Settings' new "Revival settings" panel (`SettingsTab.jsx`, shown only
+while `isInRevival(piece)`), not from the Revival tab itself. Same
+`onSetTempoLadderFraction` handler (`App.jsx`'s `handleUpdateRevival`),
+just re-threaded to `SettingsTab` instead of `RevivalTab`. Also fixed in
+the same pass: `ReassessSequencePanel`'s intro line ("Play through the
+piece from beginning to end...") moved inside the "Reassess" card itself
+instead of sitting as bare, card-less text above it — a visual
+inconsistency with every other section on the tab, introduced by Pass 87
+and caught on review, not shipped as originally designed. And
+`ReassessSequencePanel` now falls back to the list's first chunk
+(`chunks[0]`) if the currently selected chunk's id ever stops resolving,
+instead of silently rendering nothing with no way back in — closes a
+fragility gap Pass 87 flagged but didn't fix.

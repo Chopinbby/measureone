@@ -5329,6 +5329,98 @@ plan actually being complete (`isPlanActuallyComplete`).**
   a piece "finished away from the app" that was never fully logged in
   this app.
 
+**Decision (Pass 87): Revival's reassessment phase gets its own dedicated
+component (`ReassessSequencePanel`) instead of continuing to share
+`PieceMapTab` via a `sequentialMode` prop.**
+
+- **Why retire the sharing:** `sequentialMode` had grown into roughly a
+  dozen conditional branches inside `PieceMapTab` (Quick rate, the
+  reassess-difficulty panel, the assessment timer and its whole leaving-
+  guard/cross-tab-risk apparatus, the BPM-override toggle, the collapsed
+  Chunk Info section, the Previous/Next/Finish footer — see the "Since
+  Pass 37/54/68/76/77" entries in [CLAUDE.md](../CLAUDE.md) for how each
+  was added incrementally) layered on top of a component whose other
+  caller (ordinary Piece Map) never used any of them. Every one of those
+  branches was a place a future change to either mode could silently leak
+  into the other. Splitting them into two components with no shared prop
+  surface removes that risk structurally rather than relying on continued
+  discipline about which branch to touch.
+- **What actually moved vs. what's new:** every carried-over control
+  (Quick rate, the reassess-difficulty panel, the assessment timer,
+  Current/Target BPM including the override flow, Related chunks, Notes,
+  the collapsible Chunk Info stats, the climbing-tempo hint, Previous/
+  Next/Finish) is the same code, relocated — not rebuilt. What's actually
+  new is the segmented per-chunk progress bar and the "Progress" modal
+  (grid of difficulty-tinted, checkmark-when-rated squares) — see
+  [Algorithms.md](Algorithms.md#the-reassessment-panel-pass-87) for both.
+- **In-cell numbers in the Progress modal — resolved with the user before
+  building:** the originating request said "no in-cell numbers once the
+  piece has enough chunks to make them illegible," which read as
+  potentially wanting numbers to show below some chunk-count threshold.
+  Asked directly rather than picking a threshold unilaterally; the answer
+  was to omit in-cell numbers unconditionally and rely on a hover tooltip
+  (`title={formatRange(...)}`) instead — one consistent rule with no
+  piece-size branch, rather than an arbitrary cutoff that would need
+  picking and then explaining.
+- **Styling is inline, not new `App.jsx` CSS-string rules — a scope
+  decision, not a design one:** this codebase keeps all CSS in one
+  hand-written string inside `App.jsx` (see `CLAUDE.md`'s Tech stack
+  section) — the only place new visual rules could normally go. This
+  pass's stated touched-file list did not include `App.jsx`, unlike Pass
+  86 immediately before it (a much smaller visual change) which did. Two
+  genuinely new visual elements needed *some* styling to be usable at all
+  — the segmented bar and the Progress-modal grid of squares — so rather
+  than either reading that omission as silent permission to add `App.jsx`
+  CSS anyway, or leaving new UI completely unstyled, both were built with
+  inline `style={{...}}` props scoped entirely to the new component file,
+  matching a pattern this codebase already uses in a few places (e.g.
+  `RandomStartPanel.jsx`'s one-off inline styles) rather than always
+  reaching for a new global class. Flagged explicitly rather than folded
+  in silently: a future pass should decide whether these inline styles
+  get promoted into `App.jsx`'s CSS string for consistency with the rest
+  of the app's styling approach, or whether inline styles are fine to
+  leave as-is for a component this self-contained.
+- **A pre-existing bug found, not fixed:** `RevivalTab` has never threaded
+  an `onClearRelearning` handler down into the reassessment UI — the
+  "Clear, resume review" button on a `needsRelearning` chunk has been a
+  silent no-op there since before this pass (`PieceMapTab`'s old
+  `sequentialMode` branch had the identical gap: `onClearRelearning`
+  defaulted to a no-op and nothing passed a real one from `RevivalTab`).
+  `ReassessSequencePanel` reproduces this exactly rather than silently
+  fixing it (which would need `App.jsx` wiring outside this pass's
+  touched-file list) or silently dropping the button (an unrequested
+  behavior change either way). Flagged here for a human decision on
+  whether it's worth a follow-up pass — someone using "Clear, resume
+  review" mid-reassessment today gets no feedback that the click did
+  nothing.
+
+**Decision (same-session follow-up to Pass 87, on direct request): the
+tempo ladder's starting-BPM control moves off the Revival tab entirely —
+set once at revival entry, editable afterward only from Settings.**
+
+- **Why:** the "Revival settings" card sitting above the reassessment
+  panel on every visit to the Revival tab was judged unnecessary
+  clutter on a screen whose actual job is working through chunks one at a
+  time — a mid-revival tempo-ladder tweak is a rare, deliberate action, not
+  something that needs a permanent home on the main tab.
+- **What moved where:** `RevivalEntryModal` (revival entry) is completely
+  unchanged — it already collected this value before this decision, and
+  still does. The mid-revival *editing* UI (same BPM field, same
+  min/max-from-target-BPM bounds, same flat-0.6-fallback-with-tip-line
+  behavior when the piece has no `targetBPM`) moved verbatim into
+  `SettingsTab.jsx`'s top-level (non-editing) view, as its own "Revival
+  settings" panel gated on `isInRevival(piece)` — visible only while a
+  revival is actually active, same spirit as the existing "Mark as learned
+  elsewhere" panel just above it. `App.jsx` re-threads the same
+  `onSetTempoLadderFraction` handler (`handleUpdateRevival`) to
+  `SettingsTab` instead of `RevivalTab`; nothing about how the value is
+  stored or consumed downstream (`computeTempoLadder` and everything built
+  on it) changed at all.
+- **Why Settings and not, say, a modal from the Revival tab:** Settings
+  already holds every other "occasional, not core-loop" piece-level
+  control (Pause/Archive, Mark as learned elsewhere, editing the piece
+  itself) — this is the same category of action, not a new pattern.
+
 ## Lifecycle
 
 **Decision — superseded for Archive specifically (see below): pause/archive

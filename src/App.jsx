@@ -1976,7 +1976,6 @@ export default function App() {
                 onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
                 onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
                 onGeneratePlan={handleGenerateRevivalPlan}
-                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
                 onReassessRange={handleReassessRange}
                 onLogSession={handleLogSession}
                 onUnlogSession={handleUnlogSession}
@@ -2052,6 +2051,7 @@ export default function App() {
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
                 onSetMarkedLearnedElsewhere={handleSetMarkedLearnedElsewhere}
+                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
               />
             )}
           </main>

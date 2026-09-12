@@ -1,12 +1,11 @@
 import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
-import { NumberInput } from "../NumberInput";
 import { formatMinutes, formatRange } from "../../lib/utils";
 import { isManualConfidence } from "../../lib/confidence";
 import { getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
-import { PieceMapTab } from "./PieceMapTab";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { RandomStartPanel } from "./revival/RandomStartPanel";
+import { ReassessSequencePanel } from "./revival/ReassessSequencePanel";
 
 /* ------------------------------------------------------------------ */
 /*  Revival: recover a piece that was learned once but has gone stale */
@@ -22,7 +21,6 @@ export function RevivalTab({
   onFinishReassessment,
   onReopenReassessment,
   onGeneratePlan,
-  onSetTempoLadderFraction,
   onReassessRange,
   onLogSession,
   onUnlogSession,
@@ -33,11 +31,6 @@ export function RevivalTab({
   onConfirmLeaveAssessmentTimer,
 }) {
   const revival = piece.revival || {};
-  // The piece's own default target, for expressing the tempo ladder's
-  // starting point as a straight BPM instead of asking for a percentage —
-  // distinct from the per-chunk `targetBPM` resolved further below via
-  // getRevivalTargetBPM.
-  const pieceTargetBPM = piece.targetBPM || null;
   const revivalItems = useMemo(() => [...chunkSet.practiceChunks, ...chunkSet.transitions], [chunkSet]);
   // Combos aren't part of revivalItems (they're not reassessed/rated or
   // given their own base-plan task — see computeRevivalPlan), but an
@@ -49,7 +42,6 @@ export function RevivalTab({
   );
   const ratedCount = revivalItems.filter((c) => isManualConfidence(c, piece.progress)).length;
   const flagged = revivalItems.filter((c) => (piece.progress[c.id] || {}).flag);
-  const firstUnratedId = (revivalItems.find((c) => !isManualConfidence(c, piece.progress)) || revivalItems[0] || {}).id || null;
   // Combos whose underlying content (anchor chunk, or an overlapping
   // neighbor) has produced a real fail since this revival run started —
   // see computeComboEscalations for why this is computed live rather than
@@ -66,56 +58,23 @@ export function RevivalTab({
         <button className="ghost-btn" onClick={onEndRevival}>End revival</button>
       </div>
 
-      <div className="panel">
-        <h3>Revival settings</h3>
-        <label className="field">
-          <span>Tempo ladder starting point (BPM)</span>
-          <NumberInput
-            value={pieceTargetBPM ? Math.round((revival.tempoLadderStartFraction ?? 0.6) * pieceTargetBPM) : ""}
-            min={pieceTargetBPM ? Math.round(pieceTargetBPM * 0.1) : 20}
-            max={pieceTargetBPM ? Math.round(pieceTargetBPM * 0.95) : 400}
-            onCommit={(n) => onSetTempoLadderFraction(pieceTargetBPM ? n / pieceTargetBPM : 0.6)}
-            placeholder={pieceTargetBPM ? undefined : "e.g. 88"}
-          />
-          {!pieceTargetBPM && (
-            <p className="tip-line">
-              The tempo ladder starts at a fraction of the target tempo. This piece has no given
-              target tempo, so there's nothing to start a fraction of. Set it in settings, or
-              practice tasks will suggest a flat default to start.
-            </p>
-          )}
-        </label>
-      </div>
-
       {!revival.reassessmentComplete ? (
-        <div className="panel">
-          <h3>Reassess where things stand</h3>
-          <p className="wizard-hint">
-            Play through the piece from beginning to end. Rate your confidence on each chunk to set a
-            fresh baseline for practice.
-          </p>
-          <p className="derived-stat" style={{ marginBottom: 14 }}>
-            <strong className="mono">{ratedCount}</strong> of <strong className="mono">{revivalItems.length}</strong> rated
-          </p>
-          {revivalItems.length > 0 && (
-            <PieceMapTab
-              piece={piece}
-              chunks={revivalItems}
-              currentDay={currentDay}
-              onUpdateBPM={onUpdateBPM}
-              onSetManualConfidence={onSetManualConfidence}
-              onSetMemoryAnchor={onSetMemoryAnchor}
-              onReassessRange={onReassessRange}
-              onLogSession={onLogSession}
-              onAssessmentTimerRiskChange={onAssessmentTimerRiskChange}
-              onConfirmLeaveAssessmentTimer={onConfirmLeaveAssessmentTimer}
-              sequentialMode
-              initialSelectedId={firstUnratedId}
-              onFinishSequential={onFinishReassessment}
-              hideHeader
-            />
-          )}
-        </div>
+        revivalItems.length > 0 && (
+          <ReassessSequencePanel
+            piece={piece}
+            chunks={revivalItems}
+            currentDay={currentDay}
+            ratedCount={ratedCount}
+            onUpdateBPM={onUpdateBPM}
+            onSetManualConfidence={onSetManualConfidence}
+            onSetMemoryAnchor={onSetMemoryAnchor}
+            onReassessRange={onReassessRange}
+            onLogSession={onLogSession}
+            onAssessmentTimerRiskChange={onAssessmentTimerRiskChange}
+            onConfirmLeaveAssessmentTimer={onConfirmLeaveAssessmentTimer}
+            onFinishReassessment={onFinishReassessment}
+          />
+        )
       ) : (
         <>
           <div className="panel">

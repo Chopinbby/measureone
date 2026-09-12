@@ -2649,9 +2649,10 @@ a combo relearns through its underlying content, which is already in this
 list as ordinary practice chunks), sorted flagged-first (rough or lost —
 `progress[id].flag`, as of Pass 6; was `weakSpot` before) then
 lowest-confidence-first. This sort itself is untouched by Pass 54, which
-only changed *where* `flag` can be set from — the toggle is hidden on the
-`sequentialMode` reassessment card now (ordinary Piece Map only), so a
-chunk reaches this sort's flagged branch only if it was flagged outside
+only changed *where* `flag` can be set from — the flag toggle never
+rendered on the reassessment card (`ReassessSequencePanel` as of Pass 87,
+`PieceMapTab`'s `sequentialMode` branch before it — ordinary Piece Map
+only, both before and after), so a chunk reaches this sort's flagged branch only if it was flagged outside
 revival; a "Lost" quick-rate during reassessment reaches the front of the
 plan through the confidence tiebreaker instead, unassisted. Greedily
 packed into days against
@@ -2701,6 +2702,55 @@ practice decay) stays correct. There is intentionally no revival-specific
 session-day numbering — see
 [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about) generally for why this
 codebase avoids parallel data model concepts.
+
+#### The reassessment panel (Pass 87)
+
+`ReassessSequencePanel` (`components/tabs/revival/`) is the whole UI for
+"rate your confidence on each chunk" — `RevivalTab` renders it, passing
+`revivalItems` (practice chunks + transitions, the same list
+`computeRevivalPlan` above reads) as `chunks`. It owns its own selection
+state (`selected`, initialized to the first not-yet-rated chunk via the
+same `isManualConfidence` check `RevivalTab` uses for `ratedCount`) and
+shows exactly one chunk's detail at a time — no grid of cells, no
+modal-over-grid. Before Pass 87 this same one-chunk-at-a-time UI was a mode
+flag (`sequentialMode`) threaded through `PieceMapTab`, the ordinary Piece
+Map component, sharing (and conditionally hiding) most of its markup; that
+sharing is gone. `PieceMapTab` no longer accepts `sequentialMode`,
+`initialSelectedId`, `onFinishSequential`, or `hideHeader` at all.
+
+Two small pieces of UI exist only here, not in `PieceMapTab`:
+
+- A **segmented progress bar** — one small block per chunk in `chunks`,
+  rendered directly (not derived through any new helper function): filled
+  when `isManualConfidence(c, piece.progress)`, unfilled otherwise. This is
+  the same boolean `ratedCount`/`firstUnratedId` already check, just
+  applied per-chunk instead of summed — deliberately a real per-chunk
+  grid, not a percentage-width bar, so "which specific chunks are left" is
+  legible from the bar itself, not just the count next to it.
+- A **"Progress" modal** — a second, independent `.modal-overlay`/`.modal`
+  (not layered over any grid), opened by a small grid-icon button next to
+  the bar. One square per chunk, background `DIFFICULTY_META[c.
+  difficultyLabel].color` (the same per-difficulty color used by
+  `Manuscript.jsx`'s strip and the Wizard/Settings difficulty grid — see
+  [`CLAUDE.md`](../CLAUDE.md)'s Pass 52 entry for why that's a color, not
+  the neutral-gray Pass 86 icon), full opacity plus a black checkmark once
+  rated, the same color at reduced opacity with no checkmark when not.
+  Deliberately no in-cell measure-range numbers at any chunk count — the
+  range is available on hover (`title={formatRange(...)}`) instead, one
+  rule regardless of piece size rather than a size-dependent threshold.
+  Clicking a square calls the same `changeSelected` used by Previous/Next/
+  Related-chunk links, so the assessment-timer leaving-guard (next
+  paragraph) fires before the jump, and closes the modal only if the guard
+  actually allows the jump to happen.
+
+The assessment timer (Pass 76), its cross-tab risk reporting
+(`onAssessmentTimerRiskChange`) and the leaving-guard it feeds
+(`onConfirmLeaveAssessmentTimer`, owned by `App.jsx`) are unchanged in
+mechanism — they just live in `ReassessSequencePanel` now instead of
+`PieceMapTab`'s `sequentialMode` branch. See
+[Decisions.md](Decisions.md#revival) for the full design writeup on this
+pass, including a pre-existing gap (an unwired "Clear, resume review"
+button) that was found and deliberately reproduced rather than fixed.
 
 #### Surfacing revival on Master Agenda (highest-priority items)
 

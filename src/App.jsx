@@ -12,7 +12,6 @@ import {
   ChevronDown,
   GripVertical,
   Pencil,
-  RefreshCw,
   Upload,
   Download,
   X,
@@ -57,7 +56,6 @@ import { TimelineTab } from "./components/tabs/TimelineTab";
 import { PieceMapTab } from "./components/tabs/PieceMapTab";
 import { TodayTab } from "./components/tabs/TodayTab";
 import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
-import { RevivalTab } from "./components/tabs/RevivalTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
 import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
@@ -75,7 +73,6 @@ const NAV_BASE = [
   { key: "progress", label: "Progress", icon: LineChart },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
-const REVIVAL_NAV_ITEM = { key: "revival", label: "Revival", icon: RefreshCw };
 
 // Renders nothing for an active piece — there's no badge for the default
 // state, only for the two that pull a piece off the daily agenda.
@@ -119,8 +116,8 @@ export default function App() {
   const [interleaveRisk, setInterleaveRisk] = useState(null);
   // Same idea as interleaveRisk immediately above, for a second, unrelated
   // kind of unsaved work: Revival's per-chunk assessment timer
-  // (PieceMapTab's sequentialMode instance, rendered inside RevivalTab).
-  // Reported by PieceMapTab itself (it owns the timer state) via
+  // (ReassessSequencePanel, rendered inside Today's Practice as of Pass 88).
+  // Reported by that component itself (it owns the timer state) via
   // onAssessmentTimerRiskChange, so App.jsx can gate navigation that
   // component has no say over — see guardLeavingActiveWork below, which
   // checks both risks through one call instead of every gate point having
@@ -282,13 +279,6 @@ export default function App() {
     if (extension) updatePiece((p) => ({ ...p, ...extension }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, piece, chunkSet, timeline, settingsEditing]);
-
-  const navItems = useMemo(() => {
-    if (!isInRevival(piece)) return NAV_BASE;
-    const items = [...NAV_BASE];
-    items.splice(items.findIndex((n) => n.key === "progress"), 0, REVIVAL_NAV_ITEM);
-    return items;
-  }, [isInRevival(piece)]);
 
   // `tab` defaults to "overview" (every call site before Master Agenda's
   // "Log practice"/"Pick a random piece" below), which land on Today's
@@ -1279,8 +1269,11 @@ export default function App() {
     updatePiece((p) => ({ ...p, revival: { ...(p.revival || {}), ...patch } }));
   };
 
+  // Pass 88 — Revival no longer has its own tab; a piece already in
+  // revival routes to Today's Practice, which renders the reassessment
+  // panel or the plan itself depending on revival.reassessmentComplete.
   const handleOpenRevival = () => {
-    if (isInRevival(piece)) setActiveTab("revival");
+    if (isInRevival(piece)) setActiveTab("today");
     else setRevivalModalOpen(true);
   };
 
@@ -1301,7 +1294,7 @@ export default function App() {
       },
     }));
     setRevivalModalOpen(false);
-    setActiveTab("revival");
+    setActiveTab("today");
   };
 
   const closeRescheduleModal = () => {
@@ -1410,10 +1403,10 @@ export default function App() {
 
   const handleEndRevival = () => {
     // This button lives on the same screen the assessment timer runs on
-    // (Revival's reassessment pass, PieceMapTab's sequentialMode instance)
-    // — ending revival unmounts it exactly like a tab/piece switch would,
-    // so it needs the same guard those get, checked before the "end this
-    // cycle?" confirm below rather than after (declining because of
+    // (Revival's reassessment pass, rendered inside Today's Practice as of
+    // Pass 88) — ending revival unmounts it exactly like a tab/piece switch
+    // would, so it needs the same guard those get, checked before the "end
+    // this cycle?" confirm below rather than after (declining because of
     // unlogged timer work shouldn't still prompt to end the cycle).
     if (!guardLeavingActiveWork()) return;
     if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
@@ -1429,10 +1422,6 @@ export default function App() {
       },
     }));
     setActiveTab("overview");
-  };
-
-  const handleGenerateRevivalPlan = () => {
-    handleUpdateRevival({ plan: computeRevivalPlan(piece, chunkSet, currentDay) });
   };
 
   const handleReassessRange = (from, to, level) => {
@@ -1886,7 +1875,7 @@ export default function App() {
             </div>
 
             <div className="nav-list">
-              {navItems.map((n) => {
+              {NAV_BASE.map((n) => {
                 const Icon = n.icon;
                 return (
                   <button
@@ -1965,32 +1954,11 @@ export default function App() {
                 onClearRelearning={handleClearRelearning}
               />
             )}
-            {activeTab === "revival" && isInRevival(piece) && (
-              <RevivalTab
-                piece={piece}
-                chunkSet={chunkSet}
-                currentDay={currentDay}
-                onUpdateBPM={handleUpdateBPM}
-                onSetManualConfidence={handleSetManualConfidence}
-                onSetMemoryAnchor={handleSetMemoryAnchor}
-                onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
-                onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
-                onGeneratePlan={handleGenerateRevivalPlan}
-                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
-                onReassessRange={handleReassessRange}
-                onLogSession={handleLogSession}
-                onUnlogSession={handleUnlogSession}
-                onConfirmProvisionalSession={handleConfirmProvisionalSession}
-                onDiscardProvisionalSession={handleDiscardProvisionalSession}
-                onEndRevival={handleEndRevival}
-                onAssessmentTimerRiskChange={setAssessmentTimerRisk}
-                onConfirmLeaveAssessmentTimer={confirmLeavingAssessmentTimer}
-              />
-            )}
             {activeTab === "today" && (
               <TodayTab
                 piece={piece}
                 chunks={chunks}
+                chunkSet={chunkSet}
                 timeline={timeline}
                 currentDay={currentDay}
                 realCurrentDay={realCurrentDay}
@@ -2011,7 +1979,15 @@ export default function App() {
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onInterleaveRiskChange={setInterleaveRisk}
                 onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
-                onOpenRevival={handleOpenRevival}
+                onUpdateBPM={handleUpdateBPM}
+                onSetManualConfidence={handleSetManualConfidence}
+                onFinishReassessment={() =>
+                  handleUpdateRevival({ reassessmentComplete: true, plan: computeRevivalPlan(piece, chunkSet, currentDay) })
+                }
+                onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
+                onEndRevival={handleEndRevival}
+                onAssessmentTimerRiskChange={setAssessmentTimerRisk}
+                onConfirmLeaveAssessmentTimer={confirmLeavingAssessmentTimer}
               />
             )}
             {activeTab === "progress" && (
@@ -2052,6 +2028,7 @@ export default function App() {
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
                 onSetMarkedLearnedElsewhere={handleSetMarkedLearnedElsewhere}
+                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
               />
             )}
           </main>
@@ -2429,10 +2406,7 @@ const CSS = `
 .map-cell-kind { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); }
 .map-cell-range { font-size: 12.5px; font-weight: 600; }
 .map-cell-conf { font-size: 15px; font-weight: 600; color: var(--ink); display: flex; align-items: center; }
-.map-cell-diff-dot { position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; }
-.diff-dot-easy { background: var(--teal); }
-.diff-dot-medium { background: var(--brass); }
-.diff-dot-hard { background: var(--brick); }
+.map-cell-diff-icon { position: absolute; top: 10px; right: 10px; color: var(--ink-faint); }
 .map-cell-recurring { position: absolute; bottom: 10px; right: 10px; font-size: 13px; color: var(--ink-faint); }
 .map-cell-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; }
 .map-cell-flag.flag-rough { color: var(--brass); }

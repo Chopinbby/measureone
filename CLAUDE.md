@@ -156,10 +156,12 @@ chunking, scheduling, and confidence are actually computed, see
 - **Piece Map's grid shows only base practice chunks — this is deliberate,
   not a bug to "fix" by restoring transitions/combos to it.** Reach those
   through the chunk-detail modal's "Related chunks" field instead (Pass
-  50). The one exception: `PieceMapTab`'s `sequentialMode` (Revival's
-  reassessment pass) renders the grid unfiltered on purpose, since it walks
-  a different, transition-inclusive list via its own Previous/Next — don't
-  filter that branch too.
+  50). `PieceMapTab` is ordinary (non-revival) Piece Map only, as of Pass
+  87 — Revival's reassessment pass no longer shares this component at all
+  (it used to, via a `sequentialMode` prop that rendered this same grid
+  unfiltered underneath its own modal; that's retired in favor of a
+  dedicated `ReassessSequencePanel`, see the Revival section below), so
+  there's no second caller of this grid to keep in sync with anymore.
 - **Section run-throughs must stay a computed-fresh-every-render gate, not
   a persisted "unlocked" flag.** As of Pass 49, `sectionRunThroughGate`
   (`lib/chunking.js`) recomputes due/locked state from live session counts
@@ -245,8 +247,20 @@ chunking, scheduling, and confidence are actually computed, see
 ## Revival
 
 MeasureOne includes a Revival workflow — recovering a piece that was
-learned once and has gone stale (entry point on Piece Overview →
-`RevivalTab`).
+learned once and has gone stale. **As of Pass 88, Revival has no tab of
+its own** — entry point is Piece Overview's "Start/Continue revival"
+button, and while `isInRevival(piece)` is true, `TodayTab.jsx` (Daily
+Practice) renders the whole thing itself: the reassessment phase
+(`ReassessSequencePanel`, `components/tabs/revival/`) while
+`!revival.reassessmentComplete`, then the generated plan (Random start,
+Flagged chunks, the "Needs another look" combo-escalation panel, the
+day-by-day plan list) once it's true. The ordinary calendar-driven view
+(Day/Week/Interleaved/All Tasks, `ScheduleBanner`, the past-target-date
+nudge) doesn't render at all during a revival — none of it applies without
+a calendar. `RevivalTab.jsx` is gone; there is no `activeTab === "revival"`
+value and no sidebar nav item for it, matching how Interleaved mode has
+never had its own nav item either.
+
 It's built additively on top of the existing data model, not a parallel
 one: reassessment **is** `progress[id].manualConfidence` (exposed through a
 fast preset UI), weak-spot flagging is a new `progress[id].weakSpot`
@@ -1142,3 +1156,247 @@ classes) — a real mouse hover in this session's test browser showed no
 such tint despite `:hover` technically matching, so that quirk doesn't
 reproduce there. Not verified across other browsers, and the un-guarded
 hover rule itself was deliberately left untouched either way.
+
+**Since Pass 87**, Revival's reassessment phase no longer reuses
+`PieceMapTab` at all — the old `sequentialMode` prop (grid hidden behind a
+mode flag, one-chunk detail wrapped in a modal layered over that hidden
+grid, its own Previous/Next/Finish footer and assessment timer) is gone.
+`PieceMapTab` is ordinary (non-revival) Piece Map only now, and is
+meaningfully smaller for it — every sequentialMode-only branch, prop, and
+piece of state (the assessment timer, `bpmOverrideOpen`, the leaving-timer
+guard, `onReassessRange`/`onLogSession`/`onAssessmentTimerRiskChange`/
+`onConfirmLeaveAssessmentTimer`) is gone from this file, not just disabled.
+In its place, a new dedicated component,
+`ReassessSequencePanel` (`components/tabs/revival/`), owns the whole
+reassessment UI: one chunk shown inline in a `.panel` at a time (no grid
+underneath, no modal-over-grid layering), with its own "Reassess" header,
+an "N of M rated" count next to a real per-chunk segmented bar (one small
+gray block per chunk, filled once that chunk is rated — not a smooth
+percentage-width bar), and a small grid-icon button that opens a separate
+"Progress" modal (a real floating overlay, `.modal-overlay`/`.modal`, not
+another grid-under-a-modal) — one square per chunk, difficulty-tinted,
+black-checkmarked once rated, faded when not, hover-only for the measure
+range (no in-cell numbers, one consistent rule regardless of piece size —
+see [`docs/Decisions.md`](docs/Decisions.md#revival)). Clicking a square
+jumps straight to that chunk and closes the modal, through the same
+timer-leaving guard Previous/Next/Finish already use. Every other carried-
+over control (Quick rate, the per-chunk difficulty-reassess panel, Current/
+Target BPM including the override flow, Related chunks, Notes, the
+collapsible Chunk Info stats, the climbing-tempo hint, Previous/Next/
+Finish reassessment) behaves exactly as it did inside `PieceMapTab`'s old
+`sequentialMode` branch — this was a relocation, not a redesign of any of
+those controls. **One pre-existing gap carried over unfixed, not
+introduced by this pass:** the "Clear, resume review" button on a
+`needsRelearning` chunk has been a silent no-op during reassessment since
+before this pass — `RevivalTab` has never threaded an `onClearRelearning`
+handler through to this part of the UI, old `sequentialMode` branch
+included. `ReassessSequencePanel` reproduces this exactly (same
+do-nothing default) rather than silently fixing or silently dropping the
+button — flagged here as a real, pre-existing bug worth a decision, not
+fixed as a drive-by. See
+[`docs/Decisions.md`](docs/Decisions.md#revival) for the full design
+writeup, including why the new panel's visual grid/bar styling is inline
+CSS rather than new `App.jsx` CSS-string rules.
+
+**Same-session follow-up, per direct request — superseded by Pass 88
+below, kept here as accurate history of that session rather than rewritten:**
+the "Revival settings" card (the tempo ladder's starting-BPM field) is gone
+from `RevivalTab` entirely — that value is now collected once, at revival
+entry (`RevivalEntryModal`, unchanged), and from then on is only editable
+from Settings' new "Revival settings" panel (`SettingsTab.jsx`, shown only
+while `isInRevival(piece)`), not from the Revival tab itself. Same
+`onSetTempoLadderFraction` handler (`App.jsx`'s `handleUpdateRevival`),
+just re-threaded to `SettingsTab` instead of `RevivalTab`. **Pass 88 removed
+this Settings panel too, then a later same-session follow-up put it back**
+— see both entries below; net result as of the most recent one, it's in
+Settings, same as described in this paragraph. Also fixed in
+the same pass: `ReassessSequencePanel`'s intro line ("Play through the
+piece from beginning to end...") moved inside the "Reassess" card itself
+instead of sitting as bare, card-less text above it — a visual
+inconsistency with every other section on the tab, introduced by Pass 87
+and caught on review, not shipped as originally designed. And
+`ReassessSequencePanel` now falls back to the list's first chunk
+(`chunks[0]`) if the currently selected chunk's id ever stops resolving,
+instead of silently rendering nothing with no way back in — closes a
+fragility gap Pass 87 flagged but didn't fix.
+
+**Since Pass 88**, Revival is folded entirely into Daily Practice —
+`RevivalTab.jsx` is deleted, there is no `"revival"` `activeTab` value, and
+the sidebar has no Revival nav item at all (the `REVIVAL_NAV_ITEM`/
+`navItems` splice that used to insert one while a revival was active is
+gone; the sidebar is just `NAV_BASE`, always). This matches the precedent
+Interleaved mode already set — a mode reached from *within* a tab, never
+its own nav entry. `handleOpenRevival` (`App.jsx`) still opens the
+start-revival modal for a piece not yet in revival; for a piece already in
+revival it now calls `setActiveTab("today")` instead of `"revival"`, and
+`handleStartRevival` does the same once a fresh revival begins. Every
+existing caller (Overview's "Start/Continue revival" button and its
+`revivalTriggers` banner, both already just calling `onStartRevival`)
+needed no changes — confirmed live, not assumed, since the copy ("Start
+revival"/"Continue revival") reads exactly as true pointing at Today's
+Practice as it did pointing at a dedicated tab.
+
+`TodayTab.jsx` now renders the actual revival content instead of the old
+Pass 78 "set aside, go to Revival" redirect card: while
+`isInRevival(piece)`, it returns a `Revival` header (piece name, "Returning
+to its former glory," "End revival") followed by either
+`ReassessSequencePanel` (while `!revival.reassessmentComplete`) or the
+generated plan (Random start, Flagged chunks, the "Needs another look"
+combo-escalation panel, the day-by-day `revival.plan.days` checklist) —
+all lifted verbatim from the retired `RevivalTab.jsx`, not redesigned. The
+ordinary view (Day/Week/Interleaved/All Tasks selector, `ScheduleBanner`,
+the past-target-date nudge, `FocusPanel`, everything) never renders during
+a revival, same early-return mechanism the old redirect used, just with
+real content instead of a link elsewhere. `TodayTab` gained a `chunkSet`
+prop (the real one from `App.jsx`, replacing a locally-reconstructed
+partial `{ all, practiceChunks }` shape that lacked `.transitions`/
+`.combos` — revival needs both) and several new props
+(`onUpdateBPM`/`onSetManualConfidence`/`onFinishReassessment`/
+`onReopenReassessment`/`onEndRevival`/`onAssessmentTimerRiskChange`/
+`onConfirmLeaveAssessmentTimer`) that used to go straight to `RevivalTab`
+from `App.jsx`; `onOpenRevival` (the redirect button's only consumer) is
+gone, since there's nothing left in `TodayTab` for it to do.
+
+**Resolved, per direct follow-up in the same pass: finishing reassessment
+now generates the plan in the same action, not as a separate manual
+step.** `onFinishReassessment` (`App.jsx`) is now
+`handleUpdateRevival({ reassessmentComplete: true, plan:
+computeRevivalPlan(piece, chunkSet, currentDay) })` — one `updatePiece`
+call, not two. This also covers a redo: `onReopenReassessment` only ever
+sets `reassessmentComplete: false`, so finishing again after a "Redo
+reassessment" runs through the exact same `onFinishReassessment` path and
+computes a fresh plan the same way — verified live by redoing and
+re-finishing a real revival, not just reasoned through. The old
+"Reassessment complete" interstitial panel (rated-count summary, "Redo
+reassessment," "Generate/Regenerate revival plan") is gone — there's no
+state anymore where `reassessmentComplete` is true but `revival.plan` is
+still null, so nothing needs to gate that gap. `handleGenerateRevivalPlan`
+(`App.jsx`) had no caller left and was deleted rather than kept dead.
+**"Redo reassessment" itself wasn't dropped** — relocated to `TodayTab`'s
+new Revival header, next to "End revival," shown only once
+`reassessmentComplete` is true; this placement wasn't specified by the
+request and is a judgment call, flagged as such rather than assumed
+obviously correct. The rated-count summary text that panel also used to
+show ("N of M rated, N flagged rough or lost") has no replacement anywhere
+in the plan view — a deliberate simplification, not an oversight, but
+worth knowing if it's missed.
+
+**Resolved, per direct follow-up at the time: the tempo-ladder-starting-point
+control is gone from the app entirely, not relocated — including out of
+Settings, superseding the same-session follow-up entry just above this
+one, which had put it there one session earlier.** `piece.revival.tempoLadderStartFraction`
+keeps its existing stored value and `?? 0.6` fallback everywhere
+`computeTempoLadder` reads it — only the on-page control to change it
+disappeared. Collection at revival entry (`RevivalEntryModal`) is
+completely unchanged; that's the only place this value is ever set now.
+`onSetTempoLadderFraction` had no caller left (removed from both
+`RevivalTab` and `SettingsTab`) and was deleted from `App.jsx` rather than
+left dead. **Reversed in turn, later the same session, on direct
+request** — see the "six UI adjustments" entry near the end of this
+Roadmap section: the Settings panel is back, `onSetTempoLadderFraction` is
+back. Both this paragraph and the one above it are accurate history of
+what was true when each was written, not a contradiction to resolve —
+just don't take either one, on its own, as describing where this control
+lives *now* without checking the entry that comes after it.
+
+**Confirmed, not assumed:** Master Agenda's Learning/Maintenance/Revival
+piece grouping (`MasterAgendaTab.jsx`'s `subTab === "revival"`) is a filter
+over `revival.active`, not a link to a screen — its "Open piece →" button
+calls `switchToPiece(pieceId)` with no second argument, which defaults to
+`"overview"`. It never referenced the retired `"revival"` `activeTab`
+value and needed no changes; verified live by opening a mid-revival piece
+from that subtab and confirming it lands on Piece Overview, not a blank
+screen. A stale status string in that same subtab ("Reassessment complete
+— plan not generated yet") describes a state that can no longer occur now
+that finishing reassessment always generates a plan in the same step —
+left as-is since `MasterAgendaTab.jsx` isn't touched by this pass; flagged
+for whoever next touches that file.
+
+**Same-session follow-up, per direct request — six UI adjustments to the
+Pass 88 revival flow, none touching data shape or scheduling logic:**
+
+- **The tempo-ladder-starting-point control is back in Settings**,
+  reversing the "gone entirely, not relocated" half of Pass 88's own
+  decision from earlier the same session — put back exactly as it was
+  (same field, same `isInRevival(piece)` gate, same `onSetTempoLadderFraction`
+  wiring) once asked directly. The lesson from Pass 88's own writeup
+  still holds for the *next* time this kind of call gets made: a
+  same-session UI decision can be revisited by a later, more specific
+  request in the same session without it being a sign anything was wrong
+  the first time.
+- **Per-card "Reassess difficulty" buttons are gone from the revival
+  plan's `ChecklistItem` cards** (both the day-by-day list and the "Needs
+  another look" combo-escalation list) — `onReassessRange` is no longer
+  passed to either. In its place, one shared `ReassessPanel` sits at the
+  very bottom of the plan view, exactly mirroring how `DayChecklist`/
+  `DueReviewPanel` already work in ordinary (non-revival) Daily Practice.
+  `RandomStartPanel` moved to sit just above it, also now at the bottom —
+  it used to sit between "Flagged chunks" and "Needs another look."
+  `ChecklistItem`'s own `onReassessRange` opt-in (`components/tabs/
+  today/ChecklistItem.jsx`) is untouched and still works for any future
+  caller that wants a per-item control again; nothing currently passes it.
+- **`ReassessPanel` (`components/tabs/today/ReassessPanel.jsx`) gained an
+  opt-in `compact` prop**, default `false` — every existing caller
+  (ordinary Daily Practice's own bottom panel, the new revival-plan bottom
+  panel above) is unaffected. `compact` drops the wrapping `.panel
+  reassess-panel` card and the collapsed-state explanatory blurb, leaving
+  just a bare "Reassess difficulty" button; the expanded form itself is
+  identical either way. `ReassessSequencePanel` (Pass 87) is the only
+  caller that passes it, and also moved its own reassess control from the
+  middle of the card (right after Quick rate) down to the bottom, right
+  before the Previous/Next/Finish footer.
+- **`ReassessSequencePanel`'s "Log assessed time" button is gone** —
+  stopping the timer now logs it directly (`toggleTimer`, replacing the
+  old separate `logAssessedTime`): starting the timer starts it, stopping
+  it stops *and* logs in one action, since (per direct request) the two
+  were "essentially the same thing" already. Always actually stops
+  (`setTimerRunning(false)` runs unconditionally) even on a near-instant
+  start/stop with nothing worth logging, so the button can never get
+  stuck reading "Stop timer." `hasAssessmentTimerRisk`'s reporting up to
+  `App.jsx` (the cross-tab leaving-guard) is unchanged and, if anything,
+  simpler now — a "stopped but not yet logged" limbo state can no longer
+  happen via this button at all, only via still-running-when-you-navigate-
+  away, which was already covered.
+- **`ReassessSequencePanel`'s Notes field collapses to a "+ Add a note"
+  button when empty**, matching the identical pattern `ChecklistItem`'s
+  own note field already used elsewhere in this app — an always-open empty
+  textarea was eating card space for a field most chunks don't need. Same
+  `noteOpen`-resets-on-chunk-switch pattern the existing `bpmOverrideOpen`
+  state already used in this file.
+
+**Same-session follow-up, per direct request — more small adjustments to
+the same reassessment panel, plus one scope change to what reassessment
+itself covers:**
+
+- **The intro copy dropped "from beginning to end"** — now just "Play
+  through the piece. Rate your confidence on each chunk to set a fresh
+  baseline for practice."
+- **The timer field moved above Quick rate** (previously below it), and
+  its label changed from "Assessment timer" to **"Log time"** — copy
+  only; nothing about `toggleTimer`, `hasAssessmentTimerRisk`, or the
+  cross-tab leaving-guard changed.
+- **The difficulty signal-bar icon next to the chunk header is bigger** —
+  `size={13}` → `size={14}`, matching `.hero-sub`'s own 14px font-size it
+  sits inline with (it read as too small next to the text it labels).
+- **Revival's reassessment sequence now walks base practice chunks
+  only** — a transition (labelled "Review" elsewhere in this same UI) is
+  no longer something you individually Quick-rate during reassessment,
+  raised directly after one showed up mid-sequence. `TodayTab.jsx` gained
+  `revivalBaseChunks` (`chunkSet.practiceChunks`, no transitions) and
+  passes it as `ReassessSequencePanel`'s `chunks`/the `ratedCount` it
+  drives. The broader `revivalItems` (practice chunks + transitions)
+  keeps doing exactly what it did before everywhere else: the generated
+  day-by-day plan (a transition still gets scheduled there for practice),
+  Random start, and the ad hoc "Reassess difficulty" quick-pick panel at
+  the bottom of the plan view.
+- **"Related chunks" was briefly relocated into a new "Chunk Info"
+  dropdown earlier in this same round of changes, then removed outright,
+  same session, on direct follow-up request** ("for now" — read as
+  temporary, not a permanent call that this field has no value here; a
+  future request could bring it back). `ReassessSequencePanel` no longer
+  imports `findRelatedChunks`, computes a `relatedChunks` list, or accepts
+  a `relatedChunkPool` prop; `TodayTab.jsx` no longer passes one.
+  `PieceMapTab`'s own "Related chunks" field (ordinary, non-revival Piece
+  Map) is completely unaffected — a separate render path, never a shared
+  component. See [`docs/Decisions.md`](docs/Decisions.md#revival) for the
+  full writeup.

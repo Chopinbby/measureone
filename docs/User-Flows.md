@@ -187,8 +187,9 @@ first answer too: a "View all pieces" button on Progress opens
 `AllPiecesTab`** — one row per piece (progress %, confidence %, days since
 last touched, time practiced *this week*), a this-week-total stat, and a
 14-day cross-piece consistency heatmap (any piece touched counts that
-day). Not a sidebar tab — reached only from that button, same pattern the
-Revival tab uses; a "Back to {current piece}" button in its own header
+day). Not a sidebar tab — reached only from that button (the old Revival
+tab worked the same way, before Pass 88 folded revival into Daily
+Practice itself — see [Decisions.md](Decisions.md#revival)); a "Back to {current piece}" button in its own header
 returns the way you'd expect. Clicking a row calls `switchToPiece`,
 landing on that piece's Overview. See
 [Decisions.md](Decisions.md#cross-piece-views) for what this still
@@ -342,9 +343,10 @@ still left out) and the storage-safety fix behind it.
 switches the active piece to a random one that has real work today
 (scheduled learning or a due maintenance review) — offered only once two or
 more pieces qualify. The Maintenance-due tab has a parallel "Random start"
-panel (the same mechanism `RevivalTab` already used to suggest a starting
-point) pooling every due spot across every piece, so a review session
-doesn't always start at the top of the same list.
+panel (the same mechanism revival's own plan view uses to suggest a
+starting point — see flow 8 below) pooling every due spot across every
+piece, so a review session doesn't always start at the top of the same
+list.
 
 ## 5. Reassessing difficulty mid-practice
 
@@ -368,9 +370,13 @@ learning-phase, maintenance-due, or "needs reschedule" card) and "Pick a
 random piece to practice" pass `"today"` instead, landing directly on
 Daily Practice for that piece rather than the dashboard — you clicked
 something that means "go practice," so you land where you'd actually log
-it. Revival's "Open piece →" button deliberately still lands on Overview,
-unchanged — a revival-mode piece has its own separate tab, and Daily
-Practice isn't a meaningful destination for it mid-revival.
+it. Master Agenda's Revival subtab is the exception: its "Open piece →"
+still lands on Overview, not Daily Practice — unchanged by Pass 88, which
+folded revival's actual content *into* Daily Practice (see flow 8 below).
+That makes this button inconsistent with the other two subtabs' own
+"land where you'd act on it" reasoning above; not fixed here — see
+[Decisions.md](Decisions.md#open-questions) for why it wasn't treated as
+an obvious bug to silently correct.
 
 **Since Pass 29 follow-up**, switching pieces (or navigating to a different
 sidebar tab, or clicking "Edit piece") while the piece you're leaving has
@@ -407,3 +413,62 @@ offers a "keep what's here" / "use the imported order" choice for switcher
 order — one pick for the whole import, not per piece, shown only when at
 least one candidate actually matches something already here. See
 [Decisions.md](Decisions.md#ux).
+
+## 8. Revival
+
+Entry: Piece Overview's "Start/Continue revival" button (a `primary-btn`),
+enabled once a piece's plan is actually complete (`isPlanActuallyComplete`)
+— disabled with an inline reason before that, since revival is for a piece
+already learned, not one still mid-plan. Also auto-suggested via a banner
+on Overview whenever `computeRevivalTriggers` fires (a rough run-through's
+high stop count, a chunk or combo flagged "lost," or 60+ days since
+anything was logged — see
+[Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83)).
+Starting one opens `RevivalEntryModal` — collects the tempo ladder's
+starting point as a straight BPM value — and "Begin revival" sets
+`piece.revival.active`.
+
+**Since Pass 88, revival has no tab of its own.** While
+`piece.revival.active` is true, the sidebar's "Daily Practice" item
+renders the entire revival flow itself, in place of its ordinary
+Day/Week/Interleaved/All Tasks view (which doesn't apply — a revival plan
+isn't scheduled to a calendar):
+
+1. **Reassessment** (while `!revival.reassessmentComplete`):
+   `ReassessSequencePanel` walks every base practice chunk in the piece
+   (transitions/combos are not part of this pass — see
+   [Decisions.md](Decisions.md#revival)), one at a time: a "Log time"
+   timer (stopping it logs the time in one action, no separate log step),
+   Quick rate (five presets, Lost through Solid), Current/Target BPM, an
+   optional note (collapsed to "+ Add a note" until opened), and a
+   collapsible "Chunk Info" stats dropdown. An "N of M rated" count and a
+   grid-icon button (opens a "Progress" modal — a difficulty-tinted,
+   checkmark-when-rated grid, click a square to jump to it) track progress
+   through the pass. Previous/Next move between chunks; "Finish
+   reassessment" generates the plan immediately, no separate step, whether
+   this is the first pass or a redo.
+2. **The plan** (once reassessment is complete): a "Flagged chunks"
+   summary (from ordinary, non-revival Piece Map's rough/lost flag —
+   revival's own reassessment can't set that field), a "Needs another
+   look" panel for any combo whose underlying content has failed recently,
+   then the day-by-day suggested list itself (`revival.plan.days`,
+   flagged-then-weakest-confidence first) — its day numbers are pacing
+   buckets, not calendar days, and every item is loggable on any visit
+   regardless of which suggested day it's under. Below that: "Random
+   start" (jump to a spot you wouldn't have picked yourself) and a shared
+   "Reassess difficulty" quick-pick panel for re-rating any item — chunk,
+   transition, or combo — on the fly, separate from and unscoped by the
+   reassessment pass above. "Redo reassessment" (once reassessment is
+   complete) and "End revival" sit in the header throughout.
+
+`piece.revival.tempoLadderStartFraction` is editable after entry only from
+Settings' own "Revival settings" panel, shown while a revival is active —
+nowhere inside the revival flow itself. Ending revival (`onEndRevival`)
+resets `piece.revival` to its inactive defaults; flags and manual
+confidence set during the run are **not** cleared — they're durable chunk
+metadata, not scoped to a single revival cycle.
+
+See [Algorithms.md](Algorithms.md#revival) and
+[Decisions.md](Decisions.md#revival) for the full mechanics and design
+history, including everything this flow used to look like as a standalone
+tab before Pass 88.

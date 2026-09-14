@@ -754,6 +754,72 @@ is truncated past roughly 200 characters, so a long message needs its tail
 confirmed separately (here, by having already read the exact source line)
 rather than assumed complete from the console alone.
 
+## A console error right after a sequence of edits may be a stale HMR artifact, not a live bug
+
+Vite's dev server hot-reloads on every file save, and the in-session
+browser tool's console-message log is cumulative — it can still be holding
+an error thrown during a *transitional* state between two of your edits
+(an import removed one call before its last usage was removed, for
+instance), not the file's current, fully-consistent state. Seeing an error
+in the log is not the same as the error being live right now.
+
+Worked example (same session, twice): removing a "Related chunks" field
+from `ReassessSequencePanel.jsx` took five sequential edits — dropping the
+`findRelatedChunks` import first, then the prop, a comment, the
+computation, and finally the JSX block that used it. Reading the console
+after all five edits landed showed `ReferenceError: findRelatedChunks is
+not defined`, thrown from the exact component just edited — looked like a
+real regression. It wasn't: `grep`ping the finished file for the name
+found zero references, `npm run build` succeeded cleanly, and a live
+screenshot showed the panel rendering correctly with no crash overlay.
+Reloading the page and re-triggering the same code path reproduced the
+*identical* cached error (same file-revision timestamp in the stack
+trace) rather than a fresh one — confirming it was a leftover log entry
+from the moment between "import removed" and "usage removed," not
+anything currently reproducing. This exact pattern recurred several times
+earlier in the same broader session (`NumberInput is not defined`,
+`navItems is not defined`, `revivalTodaysRanges is not defined`), each
+time costing a full re-verification cycle before being recognized as
+stale.
+
+The generalizable habit: when a console error appears right after a batch
+of edits to the same file, don't treat it as proven live before
+cross-checking against the file's *current, saved* state — `grep` for the
+symbol, confirm the build succeeds, and take a fresh screenshot/interact
+with the actual feature. Only escalate to "this is a real bug" once the
+error reproduces against code you've re-read and confirmed is what's
+currently on disk.
+
+## Before narrowing what a shared variable contains, check every other consumer of that same variable
+
+When a variable, prop, or list is read for more than one purpose within
+the same component or module, changing what it contains to fix one of
+those purposes can silently break the others — especially when the
+breakage is a *value*, not a crash (an empty list, a `null` lookup that
+falls back quietly), so nothing errors and the change looks finished.
+`grep` every read of the variable you're about to narrow before treating
+the narrowing as safe, not just the one call site the request is actually
+about.
+
+Worked example (same session): asked to scope revival's reassessment
+sequence down to base practice chunks only (excluding transitions),
+`ReassessSequencePanel`'s `chunks` prop was the obvious thing to narrow —
+it fed the walk-through list, the "N of M rated" count, *and* (unnoticed
+at first) a `findRelatedChunks(selectedChunk, chunks)` call for the
+"Related chunks" field. Narrowing `chunks` without checking that third
+consumer would have made "Related chunks" always return empty — base
+practice chunks never overlap each other's measure ranges by
+construction, so a search restricted to that same narrowed list can never
+find anything, ever, for any chunk. Caught only because the field was
+manually checked in-browser after the change, not assumed safe from
+reading the diff. Fixed by giving the unrelated consumer its own,
+separately-scoped input (a `relatedChunkPool` prop, left at the broader
+list) instead of sharing the one variable being narrowed for a different
+reason. (The field was later removed outright in the same session on
+direct follow-up request — the pool-scoping bug and its fix are still
+worth knowing, since a future re-add of a similar field would reintroduce
+the identical trap.)
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

@@ -54,6 +54,10 @@ it:
 - The Reassess-difficulty panel's "Apply" both commits the change and closes
   the panel in one action — it used to be two separate steps and that read
   as unfinished rather than deliberate.
+- Revival reassessment's timer works the same way: stopping it logs the
+  time directly, rather than requiring a separate "Log assessed time"
+  button afterward — the two actions were "essentially the same thing"
+  already (direct user feedback), so they collapsed into one.
 
 The test for "should this collapse into one action": would a second step
 ever change the user's mind, or is it just friction restating what they
@@ -72,6 +76,27 @@ only while a provisional is actually pending, never on ordinary
 navigation with nothing at stake — so the common case still gets zero
 friction. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+## A mode lives inside its tab, not a standing nav entry
+
+When a piece enters a special way of practicing — Interleaved rotation,
+or a full Revival — that mode renders from *within* Daily Practice,
+gated on live state (`viewMode === "interleaved"`, `isInRevival(piece)`),
+rather than getting its own sidebar item that appears and disappears
+depending on whether the mode happens to be active right now. Interleaved
+mode set this precedent first; Revival explicitly followed it as of Pass
+88, when the standalone Revival tab was retired and its whole
+reassessment/plan flow moved into Daily Practice's own render tree
+instead — a deliberate, named-as-precedent choice, not an incidental
+side effect of the rewrite (see [Decisions.md](Decisions.md#revival)).
+
+The test: if the thing you're building only exists for a piece in a
+particular state, and that state already has a natural "home" tab (Daily
+Practice, for anything about what to actually practice right now), route
+it through that tab's own render branch instead of reaching for a new
+`activeTab` value or nav item. A nav item that blinks in and out of the
+sidebar depending on background state is a worse experience than one tab
+that knows how to show more than one thing.
 
 ## Detail-on-demand uses a real modal, not inline expansion
 

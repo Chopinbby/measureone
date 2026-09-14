@@ -1769,10 +1769,17 @@ cutoff `computeComboEscalations` uses to decide which logged sessions
 belong to the current run, and that function still reads it directly — as
 a timestamp, not as a flag. Each field now does only what it is for.
 
-Every boolean revival gate routes through this function: `App.jsx` (nav
-item, revival tab render, `handleOpenRevival`), `OverviewTab`, `TodayTab`,
-`MasterAgendaTab`, `computeDueReviews`, `getRevivalTargetBPM`, and
-`storage.js`'s `mergeImportedPiece`. Behaviour is unchanged at every one.
+Every boolean revival gate routes through this function: `App.jsx`'s
+`handleOpenRevival` (redirects to Daily Practice if a piece is already in
+revival — there's no more nav item or `activeTab === "revival"` branch to
+gate either one, both retired by Pass 88), `OverviewTab`, `TodayTab`
+(both its own ordinary-view suppression and the revival branch it
+suppresses in favor of, since Pass 88), `MasterAgendaTab` (excluding
+revival pieces from its other two subtabs, and including them in its
+own), `SettingsTab` (gating the "Revival settings" panel), `computeDueReviews`
+(`lib/maintenance.js`), `withLiveReviewStatus`/`eligiblePieceContext`/
+`computeAbandonedPlanReminder` (`lib/scheduling.js`), `getRevivalTargetBPM`,
+and `storage.js`'s `mergeImportedPiece`. Behaviour is unchanged at every one.
 See [Decisions.md](Decisions.md#revival).
 
 **Since Pass 78, `TodayTab` reads this function at the top level of its own

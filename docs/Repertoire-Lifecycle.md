@@ -150,8 +150,11 @@ Automatic entry triggers (rather than manual-only, as it was before Pass
 below.
 
 **Since Pass 37**, the reassessment card (the embedded `PieceMapTab` modal,
-`sequentialMode`) looks different from ordinary Piece Map's chunk-detail
-card, not just narrower: stats (difficulty/confidence/sessions/stage) move
+`sequentialMode`, at the time — relocated wholesale into its own dedicated
+component, `ReassessSequencePanel`, by Pass 87; see
+[Architecture.md](Architecture.md) and
+[Decisions.md](Decisions.md#revival)) looks different from ordinary Piece
+Map's chunk-detail card, not just narrower: stats (difficulty/confidence/sessions/stage) move
 into a collapsed "Chunk Info" section at the bottom instead of sitting at
 the top; Target BPM shows as a read-only "N BPM — set at piece setup" line
 with a "Change for this chunk" button, rather than an always-open input,
@@ -744,7 +747,12 @@ doesn't distinguish which):
   `flag`. `computeRevivalPlan`'s flagged-first sort and `RevivalTab`'s
   "Flagged chunks" panel (below) still read the same field, unchanged —
   they just won't have anything to show unless a chunk was flagged outside
-  of revival. See [Decisions.md](Decisions.md#revival).
+  of revival. See [Decisions.md](Decisions.md#revival). **`RevivalTab`
+  itself is gone as of Pass 88** (revival folded into Daily Practice,
+  no standalone tab) — the "Flagged chunks" panel this paragraph describes
+  now renders from `TodayTab.jsx`'s revival branch instead, reading the
+  exact same `flag` field the same way; nothing about this mechanism
+  changed, only which file renders it.
 - **Confidence cap, not a `stage`/ladder read.** Rough/lost flags must
   immediately affect displayed confidence everywhere it shows (Overview,
   Progress — including its confidence-by-difficulty bars — Piece Map, and
@@ -983,8 +991,10 @@ neighbors, so this is partial territory in both, not just the anchor;
 `findComboUnderlyingChunks`, `src/lib/revival.js`, computes this fresh via
 `rangesOverlap` rather than trusting `combo.linkedIds`, which only stores
 the anchor). If any of that underlying content produces a real fail during
-revival, the combo escalates into its own explicit revival task, shown in
-`RevivalTab.jsx` as a "Needs another look" panel. If everything relearns
+revival, the combo escalates into its own explicit revival task, shown as
+a "Needs another look" panel (`RevivalTab.jsx` originally; `TodayTab.jsx`'s
+revival branch as of Pass 88, same panel, no mechanism change — see
+[Decisions.md](Decisions.md#revival)). If everything relearns
 cleanly, no combo-specific task is ever generated. **Resolved: escalation
 fires on a single real fail**, not the ladder's two-consecutive-fails
 threshold — confirmed with the user: revival is already "something's

@@ -648,6 +648,28 @@ export function computeRemainingConnectorIds(piece, chunkSet) {
   return [...chunkSet.transitions, ...chunkSet.combos].filter(untouched).map((x) => x.id);
 }
 
+// What a fresh rescheduleMarker should look like right now for the active
+// piece, given what's genuinely still untouched — the exact computation
+// handleReschedule (App.jsx) uses to decide both its confirmation message
+// and the marker it saves, extracted so a second call site (handleSavePiece,
+// for a pacing-only Settings edit — see below) can reuse the identical
+// "what's actually left" logic instead of drifting from it over time.
+// `marker` is null when there's nothing to protect (every practice chunk
+// introduced and no connector both untouched and overdue) — the same
+// condition handleReschedule's dialog already declines to open for.
+export function computeRescheduleRemainder(piece, chunkSet, timeline, realCurrentDay) {
+  const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, realCurrentDay);
+  const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+  const qualifyingConnectorIds = remainingConnectorIds.filter(
+    (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < realCurrentDay
+  );
+  const marker =
+    status.remainingChunkIds.length > 0 || qualifyingConnectorIds.length > 0
+      ? { asOfDay: realCurrentDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null }
+      : null;
+  return { remainingChunkIds: status.remainingChunkIds, remainingConnectorIds, qualifyingConnectorIds, marker };
+}
+
 // Per-day completion status for a single timeline day, relative to
 // currentDay: "future" | "done" | "behind" | "empty". Pure and side-effect
 // free, written once (Pass 45) specifically so Pass 46 (Timeline tab) can

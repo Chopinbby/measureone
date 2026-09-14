@@ -20,7 +20,7 @@ import {
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
 import { generateAllChunks, migrateOrphanedProgress } from "./lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, computeScheduleStatus, computeRemainingConnectorIds, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -72,6 +72,21 @@ const NAV_BASE = [
   { key: "today", label: "Daily Practice", icon: ListChecks },
   { key: "progress", label: "Progress", icon: LineChart },
   { key: "settings", label: "Settings", icon: SettingsIcon },
+];
+
+// Fields that regenerate practice-chunk identity (mirrors ScheduleFields.jsx's
+// own chunkSet-recompute dependency list exactly). Anything outside this list
+// — targetDate, minutesPerDay, practiceDaysPerWeek, scheduleMode, startDate —
+// only changes pacing, never which chunks exist. handleSavePiece uses this to
+// tell a pure pacing edit apart from one that also touched chunk structure.
+const CHUNK_STRUCTURE_FIELDS = [
+  "totalMeasures",
+  "measureDifficulty",
+  "chunkMode",
+  "customChunkSize",
+  "recurringMode",
+  "recurringMeasures",
+  "recurringPairs",
 ];
 
 // Renders nothing for an active piece — there's no badge for the default
@@ -542,7 +557,30 @@ export default function App() {
     // of the comparison. A no-op, same object back, when nothing was
     // actually orphaned by this edit.
     const progress = migrateOrphanedProgress(piece, updated);
-    updatePiece(ensureWorkId({ ...updated, progress, rescheduleMarker: null }));
+    // A save that only touched pacing (target date, minutes/day, practice
+    // days/week, schedule mode, start date) — not anything that regenerates
+    // chunk identity — used to still always drop rescheduleMarker to null,
+    // same as every other edit, falling back to a from-scratch
+    // computeTimeline on the next render. That function has no notion of
+    // piece.progress at all: it freely re-labels every practice chunk "new"
+    // by where it lands in the newly spread schedule, regardless of
+    // doneDays — so simply retyping the target date here (including via the
+    // reschedule dialog's own "Set new target date" escape hatch, which
+    // lands on this exact save path) could make an already-practiced chunk
+    // read as brand new. computeRescheduleRemainder is the same "what's
+    // actually still untouched" computation handleReschedule's own button
+    // already trusts — reusing it here keeps that distinction intact for
+    // this entry point too, chained onto any existing reschedule history the
+    // same way. Only applies when nothing chunk-structural changed; an edit
+    // that also touched measures/difficulty/chunking falls through to the
+    // pre-existing behavior, since chunk ids may not mean the same thing
+    // anymore anyway (migrateOrphanedProgress, above, is what handles that
+    // case).
+    const scheduleOnlyEdit = CHUNK_STRUCTURE_FIELDS.every((f) => updated[f] === piece[f]);
+    const rescheduleMarker = scheduleOnlyEdit
+      ? computeRescheduleRemainder(piece, chunkSet, timeline, realCurrentDay).marker
+      : null;
+    updatePiece(ensureWorkId({ ...updated, progress, rescheduleMarker }));
     setEditDraftState(null);
     setSettingsEditing(false);
   };
@@ -1461,24 +1499,16 @@ export default function App() {
     // against the real current day regardless of what's on screen. Reported
     // live as a marker anchored to a browsed past day (e.g. day 19 while
     // real-today was day 29) instead of today.
-    const status = computeScheduleStatus(piece, practiceChunks, timeline, realCurrentDay);
     // Pass 73 follow-up to Pass 65: a transition/combo's own logged status
     // was never checked directly anywhere in the reschedule mechanism —
     // computeEffectiveTimeline could only infer it indirectly from whether
     // a flanking/linked practice chunk was still untouched, so a connector
     // whose neighbors were BOTH already practiced was invisible to every
     // reschedule, forever, no matter how many times the piece was
-    // rescheduled again (confirmed, reported precisely). This checks the
-    // connector directly instead of guessing from its neighbors.
-    const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
-    // A connector only overrides the alert once its own scheduled day has
-    // actually passed — the same introducedDay < currentDay gate
-    // missedCount applies to practice chunks — so one that simply hasn't
-    // been introduced yet (not overdue, just not due) doesn't count.
-    const qualifyingConnectorIds = remainingConnectorIds.filter(
-      (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < realCurrentDay
-    );
-    if (status.remainingChunkIds.length === 0 && qualifyingConnectorIds.length === 0) {
+    // rescheduled again (confirmed, reported precisely). computeRescheduleRemainder
+    // checks the connector directly instead of guessing from its neighbors.
+    const { remainingChunkIds, remainingConnectorIds, marker } = computeRescheduleRemainder(piece, chunkSet, timeline, realCurrentDay);
+    if (!marker) {
       // Genuinely nothing to do: every practice chunk has been introduced
       // AND no connector is both untouched and overdue. isPlanActuallyComplete's
       // "days"-mode bar also covers transitions/combos (chunkSet.all), so
@@ -1496,7 +1526,7 @@ export default function App() {
       practiceChunks,
       timeline,
       realCurrentDay,
-      status.remainingChunkIds
+      remainingChunkIds
     );
 
     const dayWord = (n) => (n === 1 ? "day" : "days");
@@ -1506,7 +1536,7 @@ export default function App() {
     // (zero untouched practice chunks, one or more stuck transitions/focus
     // blocks) used to say "This will rebalance the 0 chunk(s)...", which
     // is both confusing and literally wrong about what's about to happen.
-    const chunkCount = status.remainingChunkIds.length;
+    const chunkCount = remainingChunkIds.length;
     const connectorCount = remainingConnectorIds.length;
     let message =
       chunkCount > 0 && connectorCount > 0
@@ -1571,8 +1601,9 @@ export default function App() {
           // reschedule (or null, its first) — see computeEffectiveTimeline
           // (lib/scheduling.js) for why a second reschedule needs that
           // chain instead of always re-deriving from the raw, never-
-          // rescheduled schedule.
-          marker: { asOfDay: realCurrentDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
+          // rescheduled schedule. Already baked into `marker` by
+          // computeRescheduleRemainder above.
+          marker,
         },
       ],
       "Reschedule remaining chunks?",

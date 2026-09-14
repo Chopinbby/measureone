@@ -21,6 +21,7 @@ import {
   countBehindDays,
   findStuckBehindPieces,
   computeRemainingConnectorIds,
+  computeRescheduleRemainder,
   isDayFullySwept,
   withLiveReviewStatus,
   computeAbandonedPlanReminder,
@@ -2013,11 +2014,85 @@ describe("reconcileMinutesPerDaySchedule — rescheduleMarker floor", () => {
     assert.equal(reconciled.daysToLearn, neededAtSlowerPace);
   });
 
-  test("clearing rescheduleMarker (a Settings save, per App.jsx's handleSavePiece) drops the floor immediately", () => {
+  test("clearing rescheduleMarker (a Settings save that also changes chunk structure, per App.jsx's handleSavePiece) drops the floor immediately", () => {
     const piece = basePiece({ scheduleMode: "minutes", minutesPerDay: 30 });
     const needed = computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 30, 7);
     const extendedNoLongerMarked = { ...piece, daysToLearn: needed + 50, rescheduleMarker: null };
     const reconciled = reconcileMinutesPerDaySchedule(extendedNoLongerMarked);
     assert.equal(reconciled.daysToLearn, needed);
+  });
+});
+
+describe("[regression] a schedule-only Settings save (e.g. changing the target date) must not re-label an already-practiced chunk as new", () => {
+  // Reported live: rescheduling via "set a new target date" started showing
+  // chunks as brand-new tasks despite having real sessions logged against
+  // them already. Root cause: App.jsx's handleSavePiece used to always drop
+  // rescheduleMarker to null on every save — including a pure pacing edit
+  // (target date, minutes/day, practice days/week, schedule mode) that
+  // doesn't touch chunk structure at all. With no marker, getEffectiveTimeline
+  // falls back to a from-scratch computeTimeline, which has zero awareness
+  // of piece.progress: it freely re-spreads and re-labels every practice
+  // chunk "new" by where it lands in the freshly recomputed schedule.
+  // computeRescheduleRemainder — the same "what's genuinely still untouched"
+  // computation handleReschedule's own button already trusted — is what
+  // handleSavePiece now uses instead, for a schedule-only edit.
+  test("computeRescheduleRemainder's marker excludes a touched chunk from the remainder and includes untouched ones", () => {
+    const piece = basePiece({
+      totalMeasures: 12, customChunkSize: 4, daysToLearn: 20,
+      progress: { c9: { doneDays: [7], sessions: [] } }, // c9 practiced once already
+    });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const { marker } = computeRescheduleRemainder(piece, chunkSet, timeline, 10);
+    assert.ok(marker, "there's real untouched work (c1, c5), so a marker should be built");
+    assert.ok(!marker.remainingChunkOrder.includes("c9"), "c9 already has a logged session — it must not be swept into the remainder");
+    assert.ok(marker.remainingChunkOrder.includes("c1") && marker.remainingChunkOrder.includes("c5"), "c1 and c5 are genuinely untouched — they belong in the remainder");
+  });
+
+  test("[fails without the fix] a touched chunk never lands in newChunkIds on today or later after a target-date-style edit; a bare rescheduleMarker: null does put it there", () => {
+    // c9 (not c1) deliberately: c1 is measure-order-first, so the spread in
+    // computeTimeline always seeds it onto the very first front day
+    // regardless of daysToLearn — it could never demonstrate this bug. c9 is
+    // effort-last, so extending daysToLearn pushes its *fresh* placement
+    // later — empirically day 7 under daysToLearn: 20, day 14 under
+    // daysToLearn: 40 (both computed by generateAllChunks/computeTimeline
+    // directly, not asserted a priori) — landing on/after realCurrentDay,
+    // which is exactly the "today's task list" surface the bug report was
+    // about.
+    const before = basePiece({
+      totalMeasures: 12, customChunkSize: 4, daysToLearn: 20,
+      progress: { c9: { doneDays: [7], sessions: [] } },
+    });
+    const chunkSet = generateAllChunks(before);
+    const beforeTimeline = getEffectiveTimeline(before, chunkSet);
+    const realCurrentDay = 10;
+    const { marker } = computeRescheduleRemainder(before, chunkSet, beforeTimeline, realCurrentDay);
+
+    // Simulates changing the target date in Settings: same piece, same
+    // progress, a materially different daysToLearn (chunkSet is unaffected —
+    // totalMeasures/chunkMode/etc. didn't change).
+    const after = { ...before, daysToLearn: 40 };
+    const newOnOrAfterToday = (tl, id) =>
+      tl.days.some((d) => d.dayNumber >= realCurrentDay && d.newChunkIds.includes(id));
+
+    const withoutFix = getEffectiveTimeline({ ...after, rescheduleMarker: null }, chunkSet);
+    assert.equal(
+      newOnOrAfterToday(withoutFix, "c9"),
+      true,
+      "test setup sanity check: a bare rescheduleMarker: null really does re-label the already-practiced c9 as new, on or after today, in the fresh schedule"
+    );
+
+    const withFix = getEffectiveTimeline({ ...after, rescheduleMarker: marker }, chunkSet);
+    assert.equal(
+      newOnOrAfterToday(withFix, "c9"),
+      false,
+      "with the marker applied, c9 must never appear in newChunkIds on or after today — it's already been practiced"
+    );
+    // A day strictly before today (asOfDay) is a historical record, computed
+    // fresh against the new daysToLearn like any other day in that range —
+    // untouched by this fix on purpose. A stale reappearance there is a
+    // separate, already-solved concern (isDayFullySwept's own "done
+    // elsewhere" check, independent of remainingChunkOrder — see its comment
+    // above), not this fix's job.
   });
 });

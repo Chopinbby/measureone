@@ -251,20 +251,26 @@ learned once and has gone stale. **As of Pass 88, Revival has no tab of
 its own** — entry point is Piece Overview's "Start/Continue revival"
 button, and while `isInRevival(piece)` is true, `TodayTab.jsx` (Daily
 Practice) renders the whole thing itself: the reassessment phase
-(`ReassessSequencePanel`, `components/tabs/revival/`) while
-`!revival.reassessmentComplete`, then the generated plan (Random start,
-Flagged chunks, the "Needs another look" combo-escalation panel, the
-day-by-day plan list) once it's true. The ordinary calendar-driven view
-(Day/Week/Interleaved/All Tasks, `ScheduleBanner`, the past-target-date
-nudge) doesn't render at all during a revival — none of it applies without
-a calendar. `RevivalTab.jsx` is gone; there is no `activeTab === "revival"`
-value and no sidebar nav item for it, matching how Interleaved mode has
-never had its own nav item either.
+(`ReassessSequencePanel`, `components/tabs/revival/` — **since a
+same-session follow-up, walks base practice chunks only, not
+transitions**) while `!revival.reassessmentComplete`, then the generated
+plan (Random start, Flagged chunks, the "Needs another look"
+combo-escalation panel, the day-by-day plan list — transitions are still
+scheduled here for practice, just not individually reassessed above) once
+it's true. The ordinary calendar-driven view (Day/Week/Interleaved/All
+Tasks, `ScheduleBanner`, the past-target-date nudge) doesn't render at all
+during a revival — none of it applies without a calendar. `RevivalTab.jsx`
+is gone; there is no `activeTab === "revival"` value and no sidebar nav
+item for it, matching how Interleaved mode has never had its own nav item
+either.
 
 It's built additively on top of the existing data model, not a parallel
 one: reassessment **is** `progress[id].manualConfidence` (exposed through a
-fast preset UI), weak-spot flagging is a new `progress[id].weakSpot`
-boolean, and `computeRevivalPlan` is a distinct function from
+fast preset UI), weak-spot flagging **is** `progress[id].flag`
+(`undefined | 'rough' | 'lost'` — a tri-state, not the boolean `weakSpot`
+this paragraph used to name; that field was replaced back in Pass 6 and is
+now migration-only, read forward from old saves in `storage.js` but never
+written), and `computeRevivalPlan` is a distinct function from
 `computeTimeline` (revival has no "introduction" concept, so it doesn't
 reuse that scheduler — see [`docs/Decisions.md`](docs/Decisions.md#revival)
 for why). New `piece` fields: `lastPlayedDate`, `memoryAnchors`, `revival`.
@@ -662,12 +668,16 @@ selected one, as clickable links that open that chunk's own detail in the
 same modal — including *its* related chunks in turn, so navigating never
 dead-ends. `findRelatedChunks` (`lib/utils.js`) is
 `findComboUnderlyingChunks` (`lib/revival.js`) run in reverse. **The grid
-filter is skipped when `sequentialMode` is set** (Revival's reassessment
-pass, embedded in `RevivalTab`, which walks a deliberately different,
-unfiltered chunk list including transitions via its own Previous/Next) —
-filtering unconditionally would have silently dropped transitions from
-that flow. If you touch `PieceMapTab`'s grid again, preserve that
-`sequentialMode` branch.
+filter was skipped when `sequentialMode` was set** (Revival's reassessment
+pass, embedded in `RevivalTab` at the time, which walked a deliberately
+different, unfiltered chunk list including transitions via its own
+Previous/Next) — filtering unconditionally would have silently dropped
+transitions from that flow. **As of Pass 87, this no longer applies**:
+`sequentialMode` is gone from `PieceMapTab` entirely (revival's
+reassessment moved to its own dedicated component,
+`ReassessSequencePanel` — see the Revival section below), so there is no
+branch left to preserve here. `PieceMapTab`'s grid filter is now
+unconditional.
 
 **Since Pass 51**, Progress has an "Estimated vs. actual practice time"
 panel: for every item with a logged session in the last N days (same

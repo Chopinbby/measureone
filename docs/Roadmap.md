@@ -70,8 +70,10 @@ fingerings — same shape and pattern as recordings; see
 (movements as self-contained sibling pieces sharing a `workId` — see
 [Decisions.md](Decisions.md#multi-movement-works)), backup export/import,
 `computeConfidenceAsOf` (used by Progress's "most improved" stat), Revival
-(MVP slice — entry flow, chunk/transition reassessment reusing
-`manualConfidence`, manual flagging (a boolean `weakSpot` at the time;
+(MVP slice — entry flow, base-chunk reassessment reusing
+`manualConfidence` (transitions were also individually reassessed
+through Pass 88; narrowed to base chunks only on a same-session
+follow-up — see [Decisions.md](Decisions.md#revival)), manual flagging (a boolean `weakSpot` at the time;
 merged into Pass 6's tri-state rough/lost `progress[id].flag` — see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging);
 **as of Pass 54, only settable from ordinary Piece Map, not from
@@ -133,11 +135,11 @@ suggestion overlay only, doesn't touch scoring or the ladder. See
 `ChecklistItem` — see
 [Product-Principles.md](Product-Principles.md#recommend-the-highest-impact-next-action).
 **Since Pass 38**, the Overview "Start/Continue revival" button is
-promoted to a `primary-btn`, and revival-mode copy across Overview,
-Revival, and Master Agenda was reworked to read less clinically — see
-[Decisions.md](Decisions.md#revival) for what that dropped (the revival
-tab no longer surfaces why a revival was started or when the piece was
-last played, anywhere).
+promoted to a `primary-btn`, and revival-mode copy across Overview, the
+Revival tab (retired by Pass 88 — see below), and Master Agenda was
+reworked to read less clinically — see [Decisions.md](Decisions.md#revival)
+for what that dropped (why a revival was started, or when the piece was
+last played, is still surfaced nowhere).
 
 **Since Pass 32a**, the sidebar piece switcher is user-reorderable
 (persisted `piece.sortOrder`, up/down controls per row, whole-work blocks
@@ -224,6 +226,24 @@ originally assumed, but gating on `isPlanActuallyComplete` as a
 substitute has a newly-surfaced consequence for a piece "finished away
 from the app" that was never fully logged in-app — see that Decisions.md
 entry for the gap.
+
+> Passes 84-88 shipped a substantial amount too — the Daily Practice
+> rename, a real disabled-state for `.ghost-btn`, Piece Map's difficulty
+> icon, and, biggest of all, **Revival losing its standalone tab
+> entirely**: Pass 87 retired `PieceMapTab`'s shared `sequentialMode`
+> embed in favor of a dedicated `ReassessSequencePanel`, and Pass 88
+> deleted `RevivalTab.jsx` outright, folding the whole reassessment/plan
+> flow into Daily Practice itself (rendered only while a revival is
+> active, same "mode within a tab, not a standing nav entry" precedent
+> Interleaved mode already set) — plus several same-session follow-ups on
+> direct request (the tempo-ladder-starting-point control relocating more
+> than once before settling back in Settings; per-card reassess buttons
+> replaced by one shared bottom panel; the reassessment sequence itself
+> narrowed to base practice chunks only, not transitions). See
+> [CLAUDE.md](../CLAUDE.md)'s own changelog and
+> [Decisions.md](Decisions.md#revival) for the full detail this list
+> wasn't kept current enough to carry — same gap, same reason, as the note
+> above.
 
 ## Immediate next action
 

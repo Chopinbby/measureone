@@ -6072,9 +6072,17 @@ oversight to silently fix; surface it instead.
   Pass 35 (see the decision above), not relocated — there's no field left
   to move into Settings. The second half is exactly what Pass 35 did:
   `tempoLadderStartFraction` is collected at `RevivalEntryModal` (revival
-  setup time) and stays editable afterward from `RevivalTab`'s "Revival
-  settings" panel — see the Pass 35 decision above for the mechanics, and
+  setup time) and stays editable afterward from a "Revival settings"
+  panel — see the Pass 35 decision above for the mechanics, and
   [Algorithms.md](Algorithms.md#revival) for how the field is read.
+  **Where that panel itself lives moved twice more since, both same-session
+  follow-ups on direct request, after this entry was originally written:**
+  `RevivalTab` (true when this entry was written) → `SettingsTab` alongside
+  Pass 87 → removed from the app entirely for one pass (Pass 88's original
+  cut) → back in `SettingsTab`, where it stays currently (see
+  [Revival](#revival) above for the full blow-by-blow). `RevivalTab.jsx`
+  no longer exists at all (deleted, Pass 88) — current reality is
+  `SettingsTab`, not this entry's original wording.
 - ~~**`RecordingsEditor` and `DocumentsEditor` generate each new row's id
   from `` `rec${Date.now()}` `` / `` `doc${Date.now()}` `` — millisecond
   resolution, so two rows added in the same millisecond would share an
@@ -6849,3 +6857,26 @@ oversight to silently fix; surface it instead.
   later: leave it as-is permanently, or give a browsed day some lightweight
   heading of its own (e.g. "Day N" itself, or the piece name) instead of
   none. Not fixed — flagged only.
+- **Master Agenda's Revival subtab "Open piece →" button lands on Piece
+  Overview, not Daily Practice — a reasonable-when-written choice whose
+  own stated reason no longer holds.** `switchToPiece(pieceId)` is called
+  with no second argument (defaults to `"overview"`), untouched by Pass
+  88 — confirmed deliberately unchanged at the time (see
+  [Revival](#revival) above, the "Confirmed, not assumed" paragraph),
+  since the button still worked (landed somewhere real, not a blank
+  screen) and wasn't in that pass's stated scope. But the *reason* this
+  was originally right — a revival-mode piece had its own separate tab,
+  reachable only via Overview's "Continue revival" button, so Overview
+  was the necessary first stop — is gone now that revival's actual
+  content lives inside Daily Practice itself. Master Agenda's other two
+  subtabs (Learning phase, Maintenance due) already land their
+  equivalent buttons directly on Daily Practice, on the explicit
+  Pass-39 reasoning "you clicked something that means go practice, land
+  where you'd actually log it" (see
+  [User-Flows.md](User-Flows.md#6-multi-piece-switching)) — the Revival
+  subtab's button is now the only one of the three that doesn't match
+  that pattern, and arrives at the actual revival content one extra
+  click later (via Overview's "Continue revival") instead of directly.
+  Not fixed here — changing it is a product call (does landing on
+  Overview first still have value, e.g. surfacing revival progress stats
+  before diving back in?), not an obvious bug to silently correct.

@@ -923,10 +923,13 @@ revival = {
                               // this doesn't change what happens to old data.
   tempoLadderStartFraction,  // number, default 0.6 — starting point for computeTempoLadder,
                               // as a fraction of target BPM. Collected at revival entry
-                              // (RevivalEntryModal) and editable afterward from RevivalTab's
-                              // "Revival settings" panel — see Algorithms.md#revival
-  reassessmentComplete,      // boolean — gates the RevivalTab UI between the reassessment
-                              // pass and the generated plan
+                              // (RevivalEntryModal) and editable afterward from SettingsTab's
+                              // "Revival settings" panel (shown only while isInRevival(piece);
+                              // RevivalTab's own panel of the same name before Pass 88, which
+                              // deleted RevivalTab.jsx) — see Algorithms.md#revival
+  reassessmentComplete,      // boolean — gates whether TodayTab's revival branch (Pass 88;
+                              // RevivalTab before it) shows the reassessment pass or the
+                              // generated plan
   plan,                      // null | { days: [{ dayNumber, itemIds, minutes }], totalItems,
                               //          generatedAt } — see computeRevivalPlan, Algorithms.md#revival
 }
@@ -937,12 +940,6 @@ when a piece-wide tempo override existed — left stored-but-unread rather than
 migrated away (non-destructive; nothing reads it). New and freshly-defaulted
 `revival` objects (`defaultPiece()` in Wizard.jsx, and storage.js's
 fallback for a piece with no `revival` object at all) no longer include it.
-  reassessmentComplete,      // boolean — gates the RevivalTab UI between the reassessment
-                              // pass and the generated plan
-  plan,                      // null | { days: [{ dayNumber, itemIds, minutes }], totalItems,
-                              //          generatedAt } — see computeRevivalPlan, Algorithms.md#revival
-}
-```
 
 `handleEndRevival` resets this object back to its `active: false` defaults
 (clearing `startedAt` in the same write); it does **not** clear

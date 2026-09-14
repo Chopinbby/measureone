@@ -263,12 +263,14 @@ export function ChecklistItem({
           <span className="conf-pill mono">{conf}%</span>
         </div>
 
-        {/* Opt-in: only rendered where a caller passes onReassessRange —
-            currently RevivalTab's post-reassessment plan/escalation cards.
-            TodayTab's own day checklist and DueReviewPanel don't pass this
-            prop, so they keep their existing single, shared "today's
-            ranges" ReassessPanel at the bottom of the day instead of
-            gaining a second, per-item one. Unlike PieceMapTab/InterleavePanel
+        {/* Opt-in: only rendered where a caller passes onReassessRange — no
+            current caller does (revival's post-reassessment plan/escalation
+            cards passed it through Pass 88, then stopped: moved to one
+            shared, bottom-of-plan ReassessPanel instead, mirroring how
+            TodayTab's own day checklist and DueReviewPanel already worked).
+            Left in place rather than removed — a future caller wanting a
+            per-item reassess control still has a working opt-in to reach
+            for. Unlike PieceMapTab/InterleavePanel
             (one stateful "current chunk" slot reused across Previous/Next
             or rotation), each ChecklistItem here is already keyed to one
             stable chunk by its own list .map() — there's no cross-chunk

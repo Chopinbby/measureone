@@ -2639,9 +2639,12 @@ may still carry that field, but nothing reads it.)
 `targetBPM` itself, inclusive. Rounding can collapse steps together when
 `startFraction` is close to 1; the result is deduplicated rather than
 showing a misleading run of repeated values. `tempoLadderStartFraction` is
-collected once at revival entry (`RevivalEntryModal`) and stays editable
-afterward from a "Revival settings" panel in `RevivalTab` — see
-[Decisions.md](Decisions.md#revival).
+collected once at revival entry (`RevivalEntryModal`) and, as of Pass 88,
+has no on-page control to change it afterward at all — an editable
+"Revival settings" panel existed briefly (first in `RevivalTab`, then
+relocated to Settings for one session) and was removed outright, not
+relocated a third time. The stored value and its `?? 0.6` fallback are
+otherwise completely unchanged — see [Decisions.md](Decisions.md#revival).
 
 `computeRevivalPlan(piece, chunkSet, currentDay)` builds the ordered
 day-by-day revival plan: practice chunks and transitions (**not** combos —
@@ -2672,7 +2675,8 @@ explicit task — a combo whose anchor chunk or an overlapping neighbor
 `piece.revival.startedAt`. This is a pure derivation off `piece.progress`,
 recomputed on every render (same pattern as `chunkSet`/`timeline`) rather
 than a task written into and later cleared from `revival.plan` — which is
-exactly what let `computeRevivalPlan` above stay static. `RevivalTab`
+exactly what let `computeRevivalPlan` above stay static. `TodayTab.jsx`
+(Pass 88 — this content used to live in the now-retired `RevivalTab.jsx`)
 renders any escalated combos as a separate "Needs another look" panel, not
 folded into the day-by-day list. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance) and
@@ -2694,29 +2698,48 @@ or `getEffectiveTimeline` directly.
 
 A revival plan's `dayNumber` is a **suggested pacing bucket only** — it does
 not map onto the main timeline's day numbers, and logging a revival item
-does not require "being on" its suggested day. `RevivalTab` passes the
-piece's real `currentDay` (the same value `TodayTab` uses) to every
-`ChecklistItem` it renders, regardless of which plan day that item sits
-under, so session recency math (`computeAutoConfidence`'s day-since-last-
-practice decay) stays correct. There is intentionally no revival-specific
+does not require "being on" its suggested day. `TodayTab.jsx`'s revival
+branch passes the piece's real `currentDay` (the same value its ordinary,
+non-revival rendering uses) to every `ChecklistItem` it renders, regardless
+of which plan day that item sits under, so session recency math
+(`computeAutoConfidence`'s day-since-last-practice decay) stays correct.
+There is intentionally no revival-specific
 session-day numbering — see
 [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about) generally for why this
 codebase avoids parallel data model concepts.
 
-#### The reassessment panel (Pass 87)
+#### The reassessment panel (Pass 87, folded into Today's Practice by Pass 88)
 
 `ReassessSequencePanel` (`components/tabs/revival/`) is the whole UI for
-"rate your confidence on each chunk" — `RevivalTab` renders it, passing
-`revivalItems` (practice chunks + transitions, the same list
-`computeRevivalPlan` above reads) as `chunks`. It owns its own selection
-state (`selected`, initialized to the first not-yet-rated chunk via the
-same `isManualConfidence` check `RevivalTab` uses for `ratedCount`) and
-shows exactly one chunk's detail at a time — no grid of cells, no
-modal-over-grid. Before Pass 87 this same one-chunk-at-a-time UI was a mode
+"rate your confidence on each chunk" — `TodayTab.jsx`'s revival branch
+renders it (`RevivalTab.jsx` rendered it through Pass 87; that component no
+longer exists), passing `chunks={revivalBaseChunks}` — practice chunks
+only, **not** the broader `revivalItems` (practice chunks + transitions)
+`computeRevivalPlan` above still reads. A transition still gets scheduled
+for practice in the generated plan; it's just not individually walked and
+Quick-rated during reassessment — a same-session follow-up, once it came up
+that a transition (labelled "Review" elsewhere in this same UI) was showing
+up as something to rate, which wasn't the intent. See
+[Decisions.md](Decisions.md#revival) for the full reasoning, including a
+related-but-separate bug this surfaced and fixed along the way (a
+`relatedChunkPool` prop feeding a "Related chunks" field) before that field
+was itself removed outright, same session, on direct follow-up — this
+panel has no "Related chunks" field at all as of that follow-up; ordinary
+(non-revival) Piece Map's own field of the same name is a separate render
+path, untouched either way. It owns its own selection state (`selected`, initialized to the
+first not-yet-rated chunk via the same `isManualConfidence` check
+`TodayTab` uses for `ratedCount`, itself also now computed off
+`revivalBaseChunks`) and shows exactly one chunk's detail at a time — no
+grid of cells, no modal-over-grid. Before Pass 87 this same one-chunk-at-a-time UI was a mode
 flag (`sequentialMode`) threaded through `PieceMapTab`, the ordinary Piece
 Map component, sharing (and conditionally hiding) most of its markup; that
 sharing is gone. `PieceMapTab` no longer accepts `sequentialMode`,
 `initialSelectedId`, `onFinishSequential`, or `hideHeader` at all.
+`onFinishReassessment` (`App.jsx`) computes and stores the revival plan in
+the same call as of Pass 88 — see that pass's entry in `CLAUDE.md`'s
+Roadmap section for the mechanics; nothing about this panel's own props or
+behavior changed to make that true, it's purely a change to what its
+`onFinishReassessment` callback does.
 
 Two small pieces of UI exist only here, not in `PieceMapTab`:
 
@@ -2774,8 +2797,10 @@ ranges.
 Which plan it reads depends on whether one exists yet:
 
 - **Plan generated** → the **stored** `piece.revival.plan.days`, so Master
-  Agenda agrees with what `RevivalTab` displays rather than silently
-  diverging if progress has moved on since the plan was generated.
+  Agenda agrees with what Today's Practice's revival branch displays
+  (`RevivalTab.jsx` through Pass 87; folded into `TodayTab.jsx` by Pass 88)
+  rather than silently diverging if progress has moved on since the plan
+  was generated.
 - **Mid-reassessment** (no plan yet) → a live `computeRevivalPlan(piece,
   chunkSet, currentDay)` call. This works because that function is a pure
   function of `progress` + `chunkSet` and never reads `revival.plan`, so
@@ -2788,13 +2813,12 @@ work, and revival items are explicitly not scheduled to a day. Showing a
 time would imply a commitment the plan does not make.
 
 Reassessment itself does not have a dedicated compute function — it *is*
-`progress[id].manualConfidence`, set through `PieceMapTab`'s existing
-confidence-override UI (extended with `CONFIDENCE_PRESETS`, a 5-button fast
-path over the same 0-100 field, plus a `sequentialMode` Prev/Next/Finish
-flow so the same grid-and-modal component can be stepped through
-chunk-by-chunk instead of reopened per cell). See
-[Decisions.md](Decisions.md#revival) for why this reuses `manualConfidence`
-rather than introducing a separate scale.
+`progress[id].manualConfidence`, set through `ReassessSequencePanel`'s
+"Quick rate" row (`CONFIDENCE_PRESETS`, a 5-button fast path over the same
+0-100 field) while stepping chunk-by-chunk via Previous/Next/Finish, scoped
+to base practice chunks only as of the same-session follow-up described
+above. See [Decisions.md](Decisions.md#revival) for why this reuses
+`manualConfidence` rather than introducing a separate scale.
 
 ### Revival auto-triggers (Pass 7, gated on plan completion since Pass 83)
 

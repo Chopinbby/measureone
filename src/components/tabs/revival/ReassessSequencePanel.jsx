@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, ChevronLeft, ChevronRight, RotateCcw, TrendingUp, Metronome, AlertTriangle, LayoutGrid, Check, SignalLow, SignalMedium, SignalHigh } from "lucide-react";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
-import { clamp, formatRange, formatDuration, todayISODate, findRelatedChunks } from "../../../lib/utils";
+import { clamp, formatRange, formatDuration, todayISODate } from "../../../lib/utils";
 import { DIFFICULTY_META, CONFIDENCE_PRESETS, ROLE_LABEL } from "../../../lib/constants";
 import { computeConfidence, isManualConfidence, getDefaultTargetBPM, formatLadderStatus, hasClimbingTempo } from "../../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../../lib/ladder";
@@ -80,6 +80,13 @@ export function ReassessSequencePanel({
   const [bpmOverrideOpen, setBpmOverrideOpen] = useState(false);
   useEffect(() => setBpmOverrideOpen(false), [selected]);
 
+  // Notes collapses to a "+ Add a note" button when empty, same pattern
+  // ChecklistItem's own note field already uses — an always-open empty
+  // textarea was eating card space for a field most chunks don't need.
+  // Resets on chunk switch for the same reason bpmOverrideOpen above does.
+  const [noteOpen, setNoteOpen] = useState(false);
+  useEffect(() => setNoteOpen(false), [selected]);
+
   // Per-chunk assessment timer — carried over unchanged from PieceMapTab's
   // old sequentialMode branch (Pass 76), same wall-clock reconciliation
   // pattern (timerStartRef captures the real start moment; each tick
@@ -105,15 +112,27 @@ export function ReassessSequencePanel({
     setDurationSeconds(0);
   }, [selected]);
 
-  const logAssessedTime = () => {
-    const finalDurationSeconds =
-      timerRunning && timerStartRef.current
-        ? Math.max(0, timerStartRef.current.baseSeconds + Math.floor((Date.now() - timerStartRef.current.startedAt) / 1000))
-        : durationSeconds;
-    if (finalDurationSeconds <= 0) return;
-    onLogSession(selectedChunk.id, currentDay, { skipped: true, durationSeconds: finalDurationSeconds });
+  // Stopping the timer *is* logging it — there's no separate "Log assessed
+  // time" step (there used to be a second button gating on
+  // hasAssessmentTimerRisk below this; removed per direct request, since
+  // stop-and-log are the same action here). Always actually stops
+  // (setTimerRunning(false) runs unconditionally) even when there's
+  // nothing worth logging yet (a near-instant start/stop), so the button
+  // can never get stuck reading "Stop timer" with a click that does
+  // nothing.
+  const toggleTimer = () => {
+    if (!timerRunning) {
+      setTimerRunning(true);
+      return;
+    }
+    const finalDurationSeconds = timerStartRef.current
+      ? Math.max(0, timerStartRef.current.baseSeconds + Math.floor((Date.now() - timerStartRef.current.startedAt) / 1000))
+      : durationSeconds;
     setTimerRunning(false);
     setDurationSeconds(0);
+    if (finalDurationSeconds > 0) {
+      onLogSession(selectedChunk.id, currentDay, { skipped: true, durationSeconds: finalDurationSeconds });
+    }
   };
 
   const hasAssessmentTimerRisk = timerRunning || durationSeconds > 0;
@@ -129,7 +148,7 @@ export function ReassessSequencePanel({
 
   // Shared by every way this panel can leave the current chunk while
   // assessment-timer work is unlogged: Previous, Next, Finish reassessment,
-  // Related-chunks links, and Progress-modal square clicks.
+  // and Progress-modal square clicks.
   const guardLeavingChunkTimer = () => {
     if (!hasAssessmentTimerRisk) return true;
     return typeof onConfirmLeaveAssessmentTimer === "function" ? onConfirmLeaveAssessmentTimer() : true;
@@ -140,7 +159,6 @@ export function ReassessSequencePanel({
     setProgressModalOpen(false);
   };
 
-  const relatedChunks = selectedChunk ? findRelatedChunks(selectedChunk, chunks) : [];
   const relatedChunkLabel = (c) => (c.kind === "section" ? "Chunk" : ROLE_LABEL[c.kind] || c.kind);
 
   const detailStats = selectedChunk && (
@@ -180,6 +198,7 @@ export function ReassessSequencePanel({
 
   if (!selectedChunk) return null;
   const DiffSignalIcon = DIFFICULTY_SIGNAL_ICON[selectedChunk.difficultyLabel];
+  const noteText = (piece.memoryAnchors && piece.memoryAnchors[selectedChunk.id]) || "";
 
   return (
     <div className="panel">
@@ -187,14 +206,14 @@ export function ReassessSequencePanel({
         <div>
           <h3 style={{ marginBottom: 2 }}>Reassess</h3>
           <p className="hero-sub mono" style={{ margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
-            <DiffSignalIcon size={13} style={{ color: "var(--ink-faint)" }} title={DIFFICULTY_META[selectedChunk.difficultyLabel].label} />
+            <DiffSignalIcon size={14} style={{ color: "var(--ink-faint)" }} title={DIFFICULTY_META[selectedChunk.difficultyLabel].label} />
             {relatedChunkLabel(selectedChunk)} — {formatRange(selectedChunk.start, selectedChunk.end)}
           </p>
         </div>
       </div>
       <p className="wizard-hint" style={{ marginTop: 12 }}>
-        Play through the piece from beginning to end. Rate your confidence on each chunk to set a
-        fresh baseline for practice.
+        Play through the piece. Rate your confidence on each chunk to set a fresh baseline for
+        practice.
       </p>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
         <p className="derived-stat" style={{ margin: 0 }}>
@@ -210,19 +229,6 @@ export function ReassessSequencePanel({
           <LayoutGrid size={16} />
         </button>
       </div>
-
-      {relatedChunks.length > 0 && (
-        <div className="field">
-          <span>Related chunks</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-            {relatedChunks.map((rc) => (
-              <button type="button" key={rc.id} className="link-btn" onClick={() => changeSelected(rc.id)}>
-                {relatedChunkLabel(rc)} — {formatRange(rc.start, rc.end)}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {selectedEntry.needsRelearning && (
         <div className="field">
@@ -240,6 +246,20 @@ export function ReassessSequencePanel({
       )}
 
       <div className="field">
+        <span>Log time</span>
+        <div className="timer-row">
+          <button
+            type="button"
+            className={`timer-btn ${timerRunning ? "running" : ""}`}
+            onClick={toggleTimer}
+          >
+            {timerRunning ? "Stop" : "Start"} timer
+          </button>
+          <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
+        </div>
+      </div>
+
+      <div className="field">
         <span>Quick rate</span>
         <div className="segmented">
           {CONFIDENCE_PRESETS.map((p) => (
@@ -252,30 +272,6 @@ export function ReassessSequencePanel({
             </button>
           ))}
         </div>
-      </div>
-
-      <ReassessPanel
-        key={`reassess-${selectedChunk.id}`}
-        piece={piece}
-        todaysRanges={[{ start: selectedChunk.start, end: selectedChunk.end }]}
-        onReassessRange={onReassessRange}
-      />
-
-      <div className="field">
-        <span>Assessment timer</span>
-        <div className="timer-row">
-          <button
-            type="button"
-            className={`timer-btn ${timerRunning ? "running" : ""}`}
-            onClick={() => setTimerRunning((r) => !r)}
-          >
-            {timerRunning ? "Stop" : "Start"} timer
-          </button>
-          <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
-        </div>
-        <button type="button" className="ghost-btn" disabled={!hasAssessmentTimerRisk} onClick={logAssessedTime}>
-          Log assessed time
-        </button>
       </div>
 
       {selectedIsManual && (
@@ -358,11 +354,21 @@ export function ReassessSequencePanel({
         </>
       )}
 
-      <MemoryAnchorField
-        key={selectedChunk.id}
-        value={piece.memoryAnchors && piece.memoryAnchors[selectedChunk.id]}
-        onCommit={(text) => onSetMemoryAnchor(selectedChunk.id, text)}
-      />
+      {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
+      {noteOpen ? (
+        <MemoryAnchorField
+          key={selectedChunk.id}
+          value={noteText}
+          onCommit={(text) => {
+            if (text !== noteText) onSetMemoryAnchor(selectedChunk.id, text);
+            setNoteOpen(false);
+          }}
+        />
+      ) : (
+        <button type="button" className="link-btn" style={{ alignSelf: "flex-start" }} onClick={() => setNoteOpen(true)}>
+          {noteText ? "Edit note" : "+ Add a note"}
+        </button>
+      )}
 
       <details className="chunk-info">
         <summary>
@@ -371,6 +377,16 @@ export function ReassessSequencePanel({
         </summary>
         {detailStats}
       </details>
+
+      <div style={{ marginTop: 18 }}>
+        <ReassessPanel
+          key={`reassess-${selectedChunk.id}`}
+          piece={piece}
+          todaysRanges={[{ start: selectedChunk.start, end: selectedChunk.end }]}
+          onReassessRange={onReassessRange}
+          compact
+        />
+      </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
         <button className="ghost-btn" disabled={selectedIdx <= 0} onClick={() => changeSelected(chunks[selectedIdx - 1].id)}>

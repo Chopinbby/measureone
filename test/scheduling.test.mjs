@@ -87,6 +87,124 @@ describe("[regression] new-chunk introduction spreads overflow evenly, not onto 
     const chunkSet = generateAllChunks(piece);
     const timeline = computeTimeline(piece, chunkSet);
     assert.ok(timeline.days[0].newChunkIds.length > 0, "day one has no new chunks introduced despite material and days being available");
+    // Re-verified under Pass 89's difficulty-first reorder: this fixture's
+    // measureDifficulty is flat (all 1s, from basePiece), so every chunk is
+    // "easy" and lands in tier 3 — the sort is a no-op here and day one
+    // still gets whichever chunk sorts first under the new priority, which
+    // for an all-tier-3 piece is still c1, its raw first chunk by measure
+    // order (the stable secondary key). This is checking the *reason* stays
+    // correct under the new sort, not just that the old literal answer
+    // happens to still hold.
+    assert.equal(timeline.days[0].newChunkIds[0], "c1", "with no hard chunks in this fixture, tier-3 ties fall back to measure order, so day one's first chunk is still c1");
+  });
+});
+
+describe("[Pass 89] difficulty-first introduction order — sortPracticeChunksForIntroduction, applied before the placement loop", () => {
+  // 40 measures / customChunkSize 4 -> 10 practice chunks: c1, c5, c9, c13,
+  // c17, c21, c25, c29, c33, c37 (raw measure order). Only measures 25-28
+  // (c25) are hard; everything else is flat difficulty 1 (easy). c25 sits
+  // 7th of 10 in raw measure order — squarely in the back half of the
+  // piece — so under the old measure-order-only placement it would have
+  // been introduced well after day one. Under the new tier sort it should
+  // move to the very front, and its immediate array-neighbors (c21, c29)
+  // should move up too, ahead of easier chunks that come earlier in raw
+  // measure order (c1, c5, c9, c13, c17).
+  function hardChunkFixture() {
+    const measureDifficulty = Array(40).fill(1);
+    for (let m = 25; m <= 28; m++) measureDifficulty[m - 1] = 3; // -> avg 3, "hard"
+    const piece = basePiece({
+      totalMeasures: 40,
+      measureDifficulty,
+      customChunkSize: 4,
+      daysToLearn: 16,
+    });
+    const chunkSet = generateAllChunks(piece);
+    return { piece, chunkSet };
+  }
+
+  test("a hard chunk in the back half of raw measure order (and its immediate neighbors) are introduced earlier than easier material that comes before it", () => {
+    const { piece, chunkSet } = hardChunkFixture();
+    assert.equal(chunkSet.practiceChunks.length, 10);
+    assert.equal(chunkSet.practiceChunks[6].id, "c25", "test setup sanity check: c25 is the hard chunk, 7th of 10 in raw measure order");
+    assert.equal(chunkSet.practiceChunks[6].difficultyLabel, "hard");
+
+    const timeline = computeTimeline(piece, chunkSet);
+
+    // The hard chunk itself lands on day one — the front of the queue.
+    assert.equal(timeline.introducedDay.c25, 1, "the hard chunk should be introduced first, despite sitting 7th of 10 in raw measure order");
+
+    // Its immediate measure-neighbors (c21 before it, c29 after it) are
+    // introduced ahead of easier chunks that come earlier in raw measure
+    // order (c1, c5, c9, c13, c17) — the whole point of tier 2.
+    ["c1", "c5", "c9", "c13", "c17"].forEach((earlierEasyId) => {
+      assert.ok(
+        timeline.introducedDay.c21 < timeline.introducedDay[earlierEasyId],
+        `c21 (a neighbor of the hard chunk) should be introduced before ${earlierEasyId}, which comes earlier in raw measure order but isn't hard or adjacent to a hard chunk`
+      );
+      assert.ok(
+        timeline.introducedDay.c29 < timeline.introducedDay[earlierEasyId],
+        `c29 (a neighbor of the hard chunk) should be introduced before ${earlierEasyId}, which comes earlier in raw measure order but isn't hard or adjacent to a hard chunk`
+      );
+    });
+
+    // And the hard chunk itself is introduced before every one of those,
+    // including the piece's own literal first chunk (c1).
+    assert.ok(timeline.introducedDay.c25 < timeline.introducedDay.c1, "the hard chunk should be introduced before the piece's raw-first (but easy) chunk");
+  });
+
+  test("introductionTierById reflects the 4-tier priority (tier 0 always empty for now, tier 1 hard, tier 2 neighbors, tier 3 everything else)", () => {
+    const { piece, chunkSet } = hardChunkFixture();
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.equal(timeline.introductionTierById.c25, 1, "the hard chunk itself is tier 1");
+    assert.equal(timeline.introductionTierById.c21, 2, "the chunk immediately before the hard chunk is tier 2");
+    assert.equal(timeline.introductionTierById.c29, 2, "the chunk immediately after the hard chunk is tier 2");
+    ["c1", "c5", "c9", "c13", "c17", "c33", "c37"].forEach((id) => {
+      assert.equal(timeline.introductionTierById[id], 3, `${id} is neither hard nor adjacent to a hard chunk, so it's tier 3`);
+    });
+    // Tier 0 (trouble-spot-resolved) has no data source yet — nothing can
+    // ever be assigned it today, by design (see the comment on
+    // sortPracticeChunksForIntroduction in src/lib/scheduling.js).
+    assert.ok(!Object.values(timeline.introductionTierById).includes(0), "tier 0 is a real slot but must stay empty until the Trouble-spot pass populates it");
+  });
+
+  test("the transitions loop still schedules purely off each transition's own flanking chunks' introducedDay — no index-based spread reappeared, even though chunk order changed", () => {
+    const { piece, chunkSet } = hardChunkFixture();
+    const timeline = computeTimeline(piece, chunkSet);
+
+    const t_c21_c25 = chunkSet.transitions.find((t) => t.linkedIds.includes("c21") && t.linkedIds.includes("c25"));
+    const t_c25_c29 = chunkSet.transitions.find((t) => t.linkedIds.includes("c25") && t.linkedIds.includes("c29"));
+    assert.ok(t_c21_c25 && t_c25_c29, "test setup sanity check: both transitions flanking the hard chunk exist");
+
+    // Each transition's day must equal snapCapped(max(both flanks' own
+    // introducedDay) + 1) — computed purely from its own two linkedIds,
+    // never from the transition's position in the transitions array.
+    const expectedDay = (t) => Math.max(...t.linkedIds.map((id) => timeline.introducedDay[id])) + 1;
+    assert.equal(timeline.introducedDay[t_c21_c25.id], expectedDay(t_c21_c25));
+    assert.equal(timeline.introducedDay[t_c25_c29.id], expectedDay(t_c25_c29));
+
+    // Spot-check every other transition too, generically — this is the
+    // regression CLAUDE.md/Decisions.md#scheduling warns about: an
+    // `i % backSpan`-style offset creeping back onto this loop instead of
+    // staying purely readyDay-driven.
+    chunkSet.transitions.forEach((t) => {
+      const readyDay = Math.max(...t.linkedIds.map((id) => timeline.introducedDay[id] || timeline.halfPoint));
+      const day = timeline.introducedDay[t.id];
+      assert.ok(day >= readyDay + 1 || day === timeline.learningDays, `${t.id} should land at or after readyDay+1 (or be capped at the last learning day)`);
+    });
+  });
+
+  test("a combo anchored to the hard chunk (now introduced on day one) still lands in the back half, never earlier than sectionsEndDay", () => {
+    const { piece, chunkSet } = hardChunkFixture();
+    const timeline = computeTimeline(piece, chunkSet);
+
+    const combo = chunkSet.combos.find((c) => c.linkedIds[0] === "c25");
+    assert.ok(combo, "test setup sanity check: a combo anchored to the hard chunk exists");
+
+    assert.equal(timeline.introducedDay.c25, 1, "test setup sanity check: the anchor chunk really is introduced on day one now");
+    assert.ok(
+      timeline.introducedDay[combo.id] > timeline.halfPoint,
+      "the combo must still land after sectionsEndDay (halfPoint), even though its anchor chunk is now introduced far earlier than sectionsEndDay itself"
+    );
   });
 });
 

@@ -141,6 +141,51 @@ export function adaptiveReviewOffsets(chunk, progress) {
   return REVIEW_OFFSETS.map((o) => Math.max(1, Math.round(o * factor)));
 }
 
+// Pass 89 — difficulty-first introduction order. Before the placement loop
+// below decides *which day* a chunk lands on, this decides what *order*
+// practiceChunks are fed into that loop in, so hard material (and its
+// immediate neighbors) reach the front of the queue instead of waiting on
+// raw measure position. Four tiers, highest priority first:
+//   0. A chunk whose trouble spots just resolved. No data source for this
+//      exists yet (the Trouble-spot pass hasn't shipped) — troubleSpotIds is
+//      always empty for now, so this tier is a real slot in the ordering
+//      that currently produces no reordering on its own. Once that pass
+//      exists, it only needs to populate troubleSpotIds; nothing here needs
+//      to change.
+//   1. Hard chunks (difficultyLabel === "hard").
+//   2. Direct one-degree measure-neighbors of a hard chunk — the chunk
+//      immediately before/after it in practiceChunks' own array order,
+//      which is already how this codebase defines chunk adjacency
+//      elsewhere (generateComboChunks' prev/next in lib/chunking.js uses
+//      the identical i-1/i+1 relationship to build a combo around a hard
+//      chunk).
+//   3. Everything else.
+// Ties within a tier keep practiceChunks' own order (measure order) as the
+// stable secondary key — Array.prototype.sort is a stable sort, so this
+// falls out for free from sorting a copy of the array in tier order alone.
+//
+// The one-degree-further transition-clustering gap this leaves (a hard
+// chunk's neighbor's own neighbor stays at tier 3) is a deliberately
+// accepted limit, not chased here — see docs/Decisions.md#scheduling.
+function sortPracticeChunksForIntroduction(practiceChunks, troubleSpotResolvedIds) {
+  const troubleSpotIds = troubleSpotResolvedIds || new Set();
+  const hardIds = new Set(practiceChunks.filter((c) => c.difficultyLabel === "hard").map((c) => c.id));
+  const neighborIds = new Set();
+  practiceChunks.forEach((c, i) => {
+    if (!hardIds.has(c.id)) return;
+    const prev = practiceChunks[i - 1];
+    const next = practiceChunks[i + 1];
+    if (prev) neighborIds.add(prev.id);
+    if (next) neighborIds.add(next.id);
+  });
+  const tierById = {};
+  practiceChunks.forEach((c) => {
+    tierById[c.id] = troubleSpotIds.has(c.id) ? 0 : hardIds.has(c.id) ? 1 : neighborIds.has(c.id) ? 2 : 3;
+  });
+  const order = [...practiceChunks].sort((a, b) => tierById[a.id] - tierById[b.id]);
+  return { order, tierById };
+}
+
 // Rule: the whole piece gets introduced within the first half of the
 // learning days. The back half mixes review, seam transitions, and
 // hard-section focus blocks (entered from a different point than the
@@ -226,13 +271,17 @@ export function computeTimeline(piece, chunkSet) {
   // midpoint comparison can push even the first chunk past day one's
   // boundary and leave it empty, found while testing this fix (a 3-chunk
   // piece spread across 7 front days left day one with nothing introduced
-  // at all). Order (measure order) is preserved — this only changes which
-  // day a chunk lands on, never the sequence.
+  // at all). This boundary math is untouched by which order chunks are fed
+  // into it — as of Pass 89, that's introOrder (difficulty-first, see
+  // sortPracticeChunksForIntroduction above), not raw measure order; this
+  // loop only decides which day a chunk lands on, never the sequence it's
+  // considered in.
   const totalNewEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
   const numFrontDays = frontDays.length;
+  const { order: introOrder, tierById: introductionTierById } = sortPracticeChunksForIntroduction(practiceChunks);
   let dayIdx = 0;
   let runningEffort = 0;
-  practiceChunks.forEach((chunk) => {
+  introOrder.forEach((chunk) => {
     while (dayIdx < numFrontDays - 1 && runningEffort >= (totalNewEffort * (dayIdx + 1)) / numFrontDays) {
       dayIdx++;
     }
@@ -409,7 +458,7 @@ export function computeTimeline(piece, chunkSet) {
     d.minutes = d.type === "consolidation" ? Number(piece.minutesPerDay || 30) : d.type === "rest" ? 0 : Math.round(minutesFor(d));
   });
 
-  return { days, learningDays, consolidationDays, halfPoint, introducedDay };
+  return { days, learningDays, consolidationDays, halfPoint, introducedDay, introductionTierById };
 }
 
 // Rescheduling a piece a *second* time used to discard the first

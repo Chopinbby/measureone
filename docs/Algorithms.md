@@ -367,9 +367,57 @@ for those days (0 minutes, nothing scheduled) alongside the existing
 [Decisions.md](Decisions.md#scheduling) for why this lives inside
 `computeTimeline` rather than in `getCurrentDay`.
 
+**Introduction order is difficulty-first, not raw measure order** (Pass 89
+— `sortPracticeChunksForIntroduction`, run once, immediately before rule 1
+below's effort-spreading loop even sees `practiceChunks`). The loop itself
+(the boundary math rule 1 describes) is completely untouched — this only
+changes what order chunks are *fed into* it. `practiceChunks` is sorted
+into 4 priority tiers; ties within a tier keep the array's own (measure)
+order as a stable secondary key (JS's `Array.prototype.sort` is stable, so
+this falls out of sorting a copy of the array by tier alone):
+
+- **Tier 0** — a chunk whose trouble spots just resolved. No data source
+  for this exists yet (the Trouble-spot pass hasn't shipped), so this tier
+  is a real slot in the ordering that currently produces no reordering on
+  its own — always empty. Built now so that pass only needs to populate
+  the set it's keyed off of, not touch this sort again.
+- **Tier 1** — hard chunks (`difficultyLabel === "hard"`).
+- **Tier 2** — a hard chunk's direct one-degree measure-neighbors: the
+  chunk immediately before or after it in `practiceChunks`' own array
+  order. This is the same adjacency `generateComboChunks` (Pass 5,
+  `lib/chunking.js`) already uses to build a combo around a hard chunk
+  (its `prev`/`next` via `practiceChunks[i-1]`/`practiceChunks[i+1]`) —
+  confirmed to match before building this, not a new adjacency rule
+  invented for this pass.
+- **Tier 3** — everything else.
+
+Transitions' and combos' own placement (rules 2 and 3 below) are
+unaffected by this reorder, since both are driven purely by `introducedDay`
+lookups on their linked chunk(s) — never by chunk-array position — so a
+combo anchored to a hard chunk that's now introduced on day one still lands
+correctly in the back half, never earlier than `sectionsEndDay`.
+
+**Accepted, not chased:** a hard chunk's neighbor's own neighbor (one
+degree further out) stays at tier 3 — see
+[Decisions.md](Decisions.md#scheduling).
+
+**Deliberate UX consequence:** a piece with a hard passage well into its
+raw measure order will now show that passage (and its immediate neighbors)
+on day one, ahead of easier material that comes earlier in the piece — day
+one no longer means "the piece's literal beginning."
+
+The resolved tier for each chunk is threaded out on
+`timeline.introductionTierById` (a plain `{chunkId: 0|1|2|3}` map), for a
+future smoothing pass to read — `computeTimeline` doesn't otherwise persist
+any per-chunk metadata beyond `introducedDay`, so this is new. Regression
+tests: `test/scheduling.test.mjs`, describe block "[Pass 89] difficulty-first
+introduction order."
+
 Key scheduling rules, deliberately encoded as constraints rather than "just
 spread everything evenly" (all of them now operate in terms of practice-day
-positions within `learningDaysCalendar`, not raw calendar offsets):
+positions within `learningDaysCalendar`, not raw calendar offsets — and, as
+of Pass 89, `practiceChunks` itself has already been reordered by the
+difficulty-first sort above before rule 1 ever sees it):
 
 1. **The entire piece is introduced within the first half of the learning
    days** (`halfPoint`). New-chunk introduction is spread **evenly by total

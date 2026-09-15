@@ -75,6 +75,48 @@ introduced, not batched into the back half.**
   the *combos* loop — if it reappears on the *transitions* loop, that's the
   bug returning. See [Algorithms.md](Algorithms.md#timeline--scheduler).
 
+**Decision (Pass 89): introduction order is difficulty-first, not raw
+measure order — hard chunks and their immediate measure-neighbors move to
+the front of the introduction queue, ahead of easier material that comes
+earlier in the piece.**
+
+- **Why:** A hard passage sitting late in a piece's raw measure order used
+  to wait its turn behind everything before it, regardless of difficulty —
+  so the material most likely to need the most repetitions got the least
+  runway before the plan's own deadline. Front-loading it instead gives it
+  more total practice time across the plan.
+- **Mechanism:** `sortPracticeChunksForIntroduction`
+  (`lib/scheduling.js`) sorts a copy of `practiceChunks` into 4 tiers
+  before the existing effort-spreading placement loop (the loop itself is
+  untouched — only the order it's fed changes): tier 0 (a chunk whose
+  trouble spots just resolved — no data source yet, since the Trouble-spot
+  pass hasn't shipped, so this tier is always empty for now, built early so
+  that pass doesn't need to touch this sort again), tier 1 (hard chunks),
+  tier 2 (a hard chunk's immediate array-neighbor — one measure-chunk
+  before or after it), tier 3 (everything else). Ties within a tier keep
+  measure order via a stable sort.
+- **Neighbor definition confirmed, not assumed:** tier 2's "immediate
+  measure-neighbor" is `practiceChunks[i-1]`/`practiceChunks[i+1]` — the
+  same adjacency `generateComboChunks` (`lib/chunking.js`) already uses to
+  build a combo around a hard chunk. Checked against that function before
+  building this, rather than inventing a second definition of adjacency.
+- **Accepted, not chased:** a hard chunk's neighbor's own neighbor (one
+  degree further out) stays at tier 3 — this pass only reaches one degree
+  out, not a wider blast radius around each hard chunk.
+- **Deliberate UX consequence:** day one of a plan no longer necessarily
+  shows the piece's literal opening measures — it shows whichever material
+  is highest-priority under this order, which can be a hard passage from
+  anywhere in the piece. A learner expecting "day one starts at the
+  beginning" will see something different for a piece with hard material
+  later on.
+- **Scope, deliberately bounded:** this pass only reorders *which day a
+  chunk is introduced on* — it doesn't touch daily-load balancing (a
+  separate, later smoothing pass) and doesn't change transitions' or
+  combos' own placement logic, which already depend only on
+  `introducedDay` lookups (never chunk-array position) and so need no
+  changes to keep working correctly under the new order.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler).
+
 **Decision: add a bounded review-load smoothing pass to the scheduler.**
 
 - **Why:** Fixed-offset spaced review (`[1,3,7,14]` days after introduction)

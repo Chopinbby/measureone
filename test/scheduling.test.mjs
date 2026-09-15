@@ -25,6 +25,9 @@ import {
   isDayFullySwept,
   withLiveReviewStatus,
   computeAbandonedPlanReminder,
+  smoothOverloadedDays,
+  scheduleBand,
+  bandOvershoot,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "../src/lib/utils.js";
 
@@ -208,6 +211,220 @@ describe("[Pass 89] difficulty-first introduction order — sortPracticeChunksFo
   });
 });
 
+describe("[Pass 90] scheduleBand / bandOvershoot — the scheduleMode-aware acceptable-load band", () => {
+  test("days-mode bands ceiling/floor off the given average (125% / 80%)", () => {
+    const band = scheduleBand({ scheduleMode: "days" }, 100);
+    assert.equal(band.ceiling, 125);
+    assert.equal(band.floor, 80);
+  });
+
+  test("minutes-mode bands ceiling/floor off piece.minutesPerDay, ignoring the given average (110% / 90%)", () => {
+    const band = scheduleBand({ scheduleMode: "minutes", minutesPerDay: 60 }, 999999);
+    assert.equal(band.ceiling, 66);
+    assert.equal(band.floor, 54);
+  });
+
+  test("a piece with no scheduleMode set defaults to days-mode band math, matching every other scheduleMode check in this file", () => {
+    const band = scheduleBand({}, 100);
+    assert.equal(band.ceiling, 125);
+    assert.equal(band.floor, 80);
+  });
+
+  test("bandOvershoot: 0 inside the band, positive distance past whichever edge is violated", () => {
+    assert.equal(bandOvershoot(100, 80, 125), 0);
+    assert.equal(bandOvershoot(80, 80, 125), 0, "the floor itself counts as in-band");
+    assert.equal(bandOvershoot(125, 80, 125), 0, "the ceiling itself counts as in-band");
+    assert.equal(bandOvershoot(130, 80, 125), 5);
+    assert.equal(bandOvershoot(70, 80, 125), 10);
+  });
+});
+
+describe("[Pass 90] smoothOverloadedDays — the unified daily-workload smoothing pass", () => {
+  // Shared harness: a plain in-memory day-load table, driven entirely by
+  // the callbacks smoothOverloadedDays actually calls — no piece/chunkSet
+  // involved, so every threshold/tie-break/priority claim can be checked
+  // with exact, hand-picked numbers instead of fighting real chunk-effort
+  // arithmetic to hit a specific percentage.
+  function run({ dayNumbers, load, items, ceiling, floor }) {
+    const moves = [];
+    smoothOverloadedDays({
+      dayNumbers,
+      items,
+      loadFor: (d) => load[d],
+      ceiling,
+      floor,
+      hasItem: (d, id) => false,
+      moveItem: (item, from, to) => {
+        load[from] -= item.size;
+        load[to] += item.size;
+        moves.push({ id: item.id, from, to });
+      },
+    });
+    return { load, moves };
+  }
+
+  test("a day at 130% of average (days-mode): its item moves to a lighter day, both end up in band", () => {
+    const band = scheduleBand({ scheduleMode: "days" }, 100); // ceiling 125, floor 80
+    const { load, moves } = run({
+      dayNumbers: [1, 2],
+      load: { 1: 130, 2: 90 },
+      items: [{ id: "x", day: 1, minDay: 1, priority: 3, size: 20 }],
+      ceiling: band.ceiling,
+      floor: band.floor,
+    });
+    assert.deepEqual(moves, [{ id: "x", from: 1, to: 2 }]);
+    assert.ok(load[1] <= band.ceiling && load[1] >= band.floor, `day 1 (${load[1]}) must land in band`);
+    assert.ok(load[2] <= band.ceiling && load[2] >= band.floor, `day 2 (${load[2]}) must land in band`);
+  });
+
+  test("a day at 115% of target (minutes-mode, minutesPerDay 60): its item moves to a lighter day, using the minutes-mode threshold", () => {
+    const band = scheduleBand({ scheduleMode: "minutes", minutesPerDay: 60 }, 999999); // ceiling 66, floor 54
+    const { load, moves } = run({
+      dayNumbers: [1, 2],
+      load: { 1: 69, 2: 50 }, // 69 == 115% of 60
+      items: [{ id: "x", day: 1, minDay: 1, priority: 3, size: 15 }],
+      ceiling: band.ceiling,
+      floor: band.floor,
+    });
+    assert.deepEqual(moves, [{ id: "x", from: 1, to: 2 }]);
+    assert.ok(load[1] <= band.ceiling && load[1] >= band.floor, `day 1 (${load[1]}) must land in band`);
+    assert.ok(load[2] <= band.ceiling && load[2] >= band.floor, `day 2 (${load[2]}) must land in band`);
+  });
+
+  test("a day already at 85% (days-mode) is left alone — the stop condition doesn't chase an already-in-band day", () => {
+    const band = scheduleBand({ scheduleMode: "days" }, 100);
+    const { load, moves } = run({
+      dayNumbers: [1],
+      load: { 1: 85 },
+      items: [{ id: "x", day: 1, minDay: 1, priority: 3, size: 10 }],
+      ceiling: band.ceiling,
+      floor: band.floor,
+    });
+    assert.deepEqual(moves, [], "85% is inside [80%, 125%] — never treated as a source needing relief");
+    assert.equal(load[1], 85);
+  });
+
+  test("a day already at 92% of target (minutes-mode, minutesPerDay 100) is left alone", () => {
+    const band = scheduleBand({ scheduleMode: "minutes", minutesPerDay: 100 }, 999999); // ceiling 110, floor 90
+    const { load, moves } = run({
+      dayNumbers: [1],
+      load: { 1: 92 },
+      items: [{ id: "x", day: 1, minDay: 1, priority: 3, size: 10 }],
+      ceiling: band.ceiling,
+      floor: band.floor,
+    });
+    assert.deepEqual(moves, [], "92% is inside [90%, 110%] — never treated as a source needing relief");
+    assert.equal(load[1], 92);
+  });
+
+  test("priority wins outright over size: the lower-priority item moves even though a smaller, higher-priority item also sits on the same overloaded day", () => {
+    const band = scheduleBand({ scheduleMode: "days" }, 100);
+    const { moves } = run({
+      dayNumbers: [1, 2],
+      load: { 1: 130, 2: 90 },
+      items: [
+        { id: "important-small", day: 1, minDay: 1, priority: 1, size: 5 },
+        { id: "unimportant-big", day: 1, minDay: 1, priority: 3, size: 20 },
+      ],
+      ceiling: band.ceiling,
+      floor: band.floor,
+    });
+    assert.deepEqual(moves, [{ id: "unimportant-big", from: 1, to: 2 }], "tier 3 (lowest priority) moves before tier 1, regardless of size");
+  });
+
+  test("tie-break: when both forward candidates would overshoot, the one with the smaller resulting overshoot is chosen", () => {
+    const band = scheduleBand({ scheduleMode: "days" }, 100); // ceiling 125, floor 80
+    // Source day 1 = 200 (way over ceiling). Candidate day 2 = 100 (in
+    // band); candidate day 3 = 115 (also in band, but closer to ceiling).
+    // Moving the 80-size item onto EITHER candidate pushes it over its own
+    // ceiling — day 2 to 180 (overshoot 55), day 3 to 195 (overshoot 70).
+    // The smaller-overshoot candidate (day 2) must win.
+    const { load, moves } = run({
+      dayNumbers: [1, 2, 3],
+      load: { 1: 200, 2: 100, 3: 115 },
+      items: [{ id: "x", day: 1, minDay: 1, priority: 3, size: 80 }],
+      ceiling: band.ceiling,
+      floor: band.floor,
+    });
+    assert.deepEqual(moves, [{ id: "x", from: 1, to: 2 }], "day 2 (smaller resulting overshoot, 55) is chosen over day 3 (70)");
+    assert.equal(load[2], 180);
+    assert.equal(load[3], 115, "day 3 (the worse candidate) is untouched");
+  });
+
+  test("an edge case that doesn't converge within the safety cap: the loop terminates, makes what progress it can, and leaves real residual overload rather than hanging or forcing a bad fix", () => {
+    const band = scheduleBand({ scheduleMode: "days" }, 100); // ceiling 125, floor 80
+    // Day 1 starts drastically overloaded (500) with four size-100 items;
+    // every other day starts at a moderate 100. There is nowhere for all
+    // four items to actually land without creating new, comparably-bad
+    // overload elsewhere — full convergence would need more relocation
+    // than 3 bounded passes (one move per source day per pass) can do.
+    const { load, moves } = run({
+      dayNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      load: { 1: 500, 2: 100, 3: 100, 4: 100, 5: 100, 6: 100, 7: 100, 8: 100, 9: 100, 10: 100 },
+      items: [
+        { id: "a", day: 1, minDay: 1, priority: 3, size: 100 },
+        { id: "b", day: 1, minDay: 1, priority: 3, size: 100 },
+        { id: "c", day: 1, minDay: 1, priority: 3, size: 100 },
+        { id: "d", day: 1, minDay: 1, priority: 3, size: 100 },
+      ],
+      ceiling: band.ceiling,
+      floor: band.floor,
+    });
+    // It must terminate (this assertion running at all proves that) and
+    // it must not have force-relocated every item just to empty day 1 —
+    // real overload should still remain, since not every relocation was
+    // actually an improvement.
+    assert.ok(moves.length > 0, "some real progress is made (not a complete no-op)");
+    assert.ok(moves.length < 4, "not every item was relocated — full convergence was not reached within the safety cap");
+    const stillOverCount = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((d) => load[d] > band.ceiling).length;
+    assert.ok(stillOverCount > 0, "genuine residual overload remains — the pass didn't force a worse fix just to clear every flag");
+  });
+});
+
+describe("[Pass 90] sequencing — a transition anchored to a chunk that Phase A.5 relocated reflects the chunk's FINAL introducedDay", () => {
+  test("a transition between two chunks whose relative introduction order was swapped by smoothing is never scheduled at or before either flank's real day", () => {
+    // 20 measures / customChunkSize 3 -> 7 uniform-difficulty chunks (c1,
+    // c4, c7, c10, c13, c16, c19) over a 10-day plan. Every chunk is
+    // equally "easy" — Pass 89's tier sort is a guaranteed no-op here (all
+    // tier 3, ties break by measure order), so ANY deviation from strictly
+    // non-decreasing introducedDay by raw chunk order can only be Phase
+    // A.5's own introduction-load smoothing, not Pass 89's reordering.
+    // Confirmed by direct run: this fixture makes Phase A.5 swap c13 and
+    // c16's relative order (c13 ends up on a LATER day than c16, despite
+    // c13 coming first in raw measure order) — a real, verified relocation
+    // to build this regression test around, not a hypothetical one.
+    const piece = basePiece({
+      totalMeasures: 20,
+      measureDifficulty: Array(20).fill(1),
+      customChunkSize: 3,
+      daysToLearn: 10,
+    });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+
+    assert.ok(
+      timeline.introducedDay.c13 > timeline.introducedDay.c16,
+      "test setup sanity check: Phase A.5 really did relocate c13 to a day later than c16, despite c13 coming first in raw measure order"
+    );
+
+    const transition = chunkSet.transitions.find((t) => t.linkedIds.includes("c13") && t.linkedIds.includes("c16"));
+    assert.ok(transition, "test setup sanity check: the transition between c13 and c16 exists");
+
+    // The bug this sequencing fix prevents: if transitions were computed
+    // from a STALE, pre-smoothing introducedDay for c13, this transition
+    // could land on or before c13's real (final) introduction day — seam
+    // practice for content the learner hasn't actually reached yet.
+    assert.ok(
+      timeline.introducedDay[transition.id] > timeline.introducedDay.c13,
+      `the transition (day ${timeline.introducedDay[transition.id]}) must be scheduled after c13's real, final introduction day (${timeline.introducedDay.c13})`
+    );
+    assert.ok(
+      timeline.introducedDay[transition.id] > timeline.introducedDay.c16,
+      `the transition (day ${timeline.introducedDay[transition.id]}) must be scheduled after c16's real, final introduction day (${timeline.introducedDay.c16})`
+    );
+  });
+});
+
 describe("Tier 1 — near-mandatory first-touch review", () => {
   test("under a heavy-introduction collision, every chunk still gets a Tier 1 review placed somewhere, and introduction is untouched", () => {
     // 10 practice chunks + 9 transitions (19 total) crammed into a 5-day
@@ -381,20 +598,34 @@ describe("Tier 2 — flexes under budget contention, rolls forward, never drops 
     // Confirm the smoothing pass actually did something: not all three are
     // still clustered on day 9 (the naive, unsmoothed placement).
     //
-    // Before the difficulty-based review-cost follow-up (minutesFor pricing
-    // a review at chunk.effort * EFFORT_TO_MIN instead of a flat 3
-    // minutes), this same fixture left exactly one review behind on day 9 —
-    // three flat 3-minute reviews (9 minutes total) weren't overloaded
-    // enough for the smoothing pass's own diminishing-returns cutoff (the
-    // "+6" move-worth-it margin) to bother relocating all three. Now each of
-    // these 4-measure chunks reviews at 10 minutes (matching its own
-    // introduction cost), so day 9's real pileup is 30 minutes — clearly
-    // over budget — and every one of the three clears the relocation
-    // threshold, landing on three separate later days instead. Re-verified
-    // by temporarily reverting the review-pricing fix and re-running this
-    // test to see the old "exactly one stays" outcome return.
+    // [Superseded by Pass 90 — see docs/Decisions.md#scheduling] This test
+    // used to assert all three rolled off day 9, under the old reviews-only
+    // smoothing loop's move-acceptance rule (move if the candidate day's
+    // CURRENT load + a flat 6-minute margin is still less than the source's
+    // CURRENT load) — a rule that only compares raw minute totals, blind to
+    // whether the destination itself ends up newly overloaded or the source
+    // ends up undershooting empty. Confirmed by running this exact fixture
+    // against the pre-Pass-90 code: it does relocate all three, but by
+    // chaining each one forward across multiple passes (day 9 -> day
+    // 11/12/13) rather than settling nearby, since nothing in that rule
+    // stops it from moving something that's already "fine" onto marginal
+    // grounds.
+    //
+    // Pass 90's unified pass uses a stricter, more principled rule instead:
+    // a move only happens if it strictly reduces total distance outside the
+    // [floor, ceiling] band, summed across the source and destination
+    // together. In this fixture, this tiny piece's own average is dragged
+    // down by mostly-empty days, so the ceiling sits barely above a single
+    // 10-minute review — meaning the third review literally cannot move
+    // anywhere without creating a *worse* problem than the sliver of
+    // overshoot it would leave behind (piling onto an already-occupied day,
+    // or undershooting day 9's own floor by leaving it empty) — so it's
+    // deliberately left in place instead of being forced somewhere worse.
+    // Re-verified by running this fixture directly: exactly one of the
+    // three (c9) stays on day 9, landing barely over the plan's own tiny
+    // ceiling rather than being shoved onto a day that ends up worse off.
     const stillOnDay9 = Object.values(dayOf).filter((d) => d === 9).length;
-    assert.equal(stillOnDay9, 0, "all three rolled off day 9 — a 30-minute same-day review pileup is enough to clear the smoothing pass's relocation threshold for every one of them");
+    assert.equal(stillOnDay9, 1, "two of three roll off day 9 to genuinely lighter days; the third stays because every candidate move would make the total overshoot worse, not better");
   });
 
   test("a rolled/late Tier 2 review never counts toward computeScheduleStatus's missed count", () => {
@@ -1288,6 +1519,72 @@ describe("Regression: computeTimeline never crashes on missing ladder fields (gu
     piece.progress = { c1: { doneDays: [1], sessions: [{ day: 1, outcome: "pass" }], stage: "stabilizing", nextDueDate: "2026-01-09" } };
     const chunkSet = generateAllChunks(piece);
     assert.doesNotThrow(() => computeTimeline(piece, chunkSet));
+  });
+});
+
+describe("[Pass 90 follow-up] sortPracticeChunksForIntroduction's neighbor detection must survive a rescheduled remainder's gaps", () => {
+  // Rescheduling filters practiceChunks down to only what's still
+  // untouched (App.jsx's remainingChunkOrder, sourced from
+  // computeScheduleStatus's remainingChunkIds) — a *subsequence* of the
+  // original, with a gap wherever an already-practiced chunk used to sit.
+  // Pass 89's original neighbor check compared array positions
+  // (practiceChunks[i-1]/[i+1]), which happens to equal true measure
+  // adjacency in the pristine, gapless list generateAllChunks produces —
+  // but once rescheduling removes a chunk from the middle, two chunks that
+  // are NOT really next to each other in the piece can end up
+  // array-adjacent purely because whatever used to sit between them is
+  // gone, wrongly promoting a far-away chunk to tier 2.
+  //
+  // Confirmed as a real bug, not a hypothetical one: reproduced directly by
+  // calling getEffectiveTimeline with a hand-built rescheduleMarker before
+  // this fix existed, and confirmed it stops reproducing after switching
+  // the neighbor check to measure-boundary matching (prev.end + 1 ===
+  // c.start) instead of raw array index — the two agree on a gapless list,
+  // so nothing changes for a never-rescheduled piece (see the [Pass 89]
+  // describe block above, still passing unchanged), and correctly
+  // disagree once a gap exists.
+  function fixture() {
+    // c1, c5, c9, c13, c17 (20 measures / customChunkSize 4). c9 (measures
+    // 9-12) is hard. c5 and c13 are its TRUE measure-neighbors. c5 is
+    // marked already-practiced and excluded from the remainder, so the
+    // remainder is [c1, c9, c13, c17] — c1 is now array-adjacent to c9,
+    // but not actually adjacent in the piece (c5 sits between them).
+    const measureDifficulty = Array(20).fill(1);
+    for (let m = 9; m <= 12; m++) measureDifficulty[m - 1] = 3;
+    const piece = basePiece({
+      totalMeasures: 20,
+      measureDifficulty,
+      customChunkSize: 4,
+      daysToLearn: 20,
+      progress: { c5: { doneDays: [1] } },
+      rescheduleMarker: {
+        asOfDay: 5,
+        remainingChunkOrder: ["c1", "c9", "c13", "c17"],
+        remainingConnectorIds: [],
+        previous: null,
+      },
+    });
+    const chunkSet = generateAllChunks(piece);
+    return { piece, chunkSet };
+  }
+
+  test("c13 (the hard chunk's real remaining neighbor) is prioritized; c1 (only array-adjacent post-filtering) is not", () => {
+    const { piece, chunkSet } = fixture();
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+
+    assert.equal(timeline.introductionTierById.c9, 1, "the hard chunk itself is tier 1");
+    assert.equal(timeline.introductionTierById.c13, 2, "c13 is c9's genuine measure-neighbor (measures 13-16 right after 9-12) — tier 2");
+    assert.equal(timeline.introductionTierById.c1, 3, "c1 is NOT actually adjacent to c9 (c5 sits between them in the real piece) — must stay tier 3 despite sitting next to c9 in the filtered remainder");
+    assert.equal(timeline.introductionTierById.c17, 3, "c17 was never adjacent to c9 either way — tier 3");
+
+    assert.ok(timeline.introducedDay.c13 < timeline.introducedDay.c1, "c13 (genuine neighbor) must be introduced before c1 (false neighbor)");
+  });
+
+  test("introductionTierById survives getEffectiveTimeline for a rescheduled piece, same as it already does for a never-rescheduled one", () => {
+    const { piece, chunkSet } = fixture();
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    assert.ok(timeline.introductionTierById, "introductionTierById must not be silently dropped by the reschedule-merge wrapper");
+    assert.equal(typeof timeline.introductionTierById.c9, "number");
   });
 });
 

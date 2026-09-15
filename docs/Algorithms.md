@@ -383,12 +383,28 @@ this falls out of sorting a copy of the array by tier alone):
   the set it's keyed off of, not touch this sort again.
 - **Tier 1** — hard chunks (`difficultyLabel === "hard"`).
 - **Tier 2** — a hard chunk's direct one-degree measure-neighbors: the
-  chunk immediately before or after it in `practiceChunks`' own array
-  order. This is the same adjacency `generateComboChunks` (Pass 5,
-  `lib/chunking.js`) already uses to build a combo around a hard chunk
-  (its `prev`/`next` via `practiceChunks[i-1]`/`practiceChunks[i+1]`) —
-  confirmed to match before building this, not a new adjacency rule
-  invented for this pass.
+  chunk immediately before or after it, matched by measure boundary
+  (`prevChunk.end + 1 === c.start` / `c.end + 1 === nextChunk.start`), the
+  same adjacency `generateComboChunks` (Pass 5, `lib/chunking.js`) already
+  uses to build a combo around a hard chunk — confirmed to match before
+  building this, not a new adjacency rule invented for this pass.
+  **Boundary matching, not raw array-index adjacency
+  (`practiceChunks[i-1]`/`practiceChunks[i+1]`) — the two agree on the
+  pristine, gapless list `generateAllChunks` produces (this is how the
+  first-cut version of this tier was actually built and shipped), but
+  disagree the moment `practiceChunks` is a *filtered* subsequence, which
+  is exactly what a rescheduled remainder is** (`getEffectiveTimeline`
+  calls this same sort on `subChunkSet.practiceChunks`, built from
+  whatever's left unpracticed — see [Rescheduling](#rescheduling)). Found
+  as a real, reproduced bug, not a hypothetical one: once an already-
+  practiced chunk between a hard chunk and some other chunk drops out of
+  the remainder, array-index adjacency calls them neighbors purely because
+  nothing sits between them *in the filtered list* — wrongly promoting a
+  chunk that was never actually next to the hard one in the piece. Measure-
+  boundary matching doesn't have this failure mode: a missing chunk in
+  between means the boundaries genuinely don't touch, in either context, so
+  no false neighbor is ever created — one fix, no reschedule-specific
+  branch needed.
 - **Tier 3** — everything else.
 
 Transitions' and combos' own placement (rules 2 and 3 below) are
@@ -407,11 +423,18 @@ on day one, ahead of easier material that comes earlier in the piece — day
 one no longer means "the piece's literal beginning."
 
 The resolved tier for each chunk is threaded out on
-`timeline.introductionTierById` (a plain `{chunkId: 0|1|2|3}` map), for a
-future smoothing pass to read — `computeTimeline` doesn't otherwise persist
-any per-chunk metadata beyond `introducedDay`, so this is new. Regression
-tests: `test/scheduling.test.mjs`, describe block "[Pass 89] difficulty-first
-introduction order."
+`timeline.introductionTierById` (a plain `{chunkId: 0|1|2|3}` map), read by
+Pass 90's smoothing pass (see rule 5 below) — `computeTimeline` doesn't
+otherwise persist any per-chunk metadata beyond `introducedDay`, so this
+was new. `getEffectiveTimeline` (a rescheduled piece's timeline) merges
+this field the same way it already merges `introducedDay`, so it's
+available there too, not just on a never-rescheduled piece's timeline —
+originally dropped by that wrapper's own explicit return shape, fixed
+alongside the neighbor-adjacency bug above once something (Pass 90) gave
+the field an actual reader. Regression tests: `test/scheduling.test.mjs`,
+describe blocks "[Pass 89] difficulty-first introduction order" and
+"[Pass 90 follow-up] sortPracticeChunksForIntroduction's neighbor detection
+must survive a rescheduled remainder's gaps."
 
 Key scheduling rules, deliberately encoded as constraints rather than "just
 spread everything evenly" (all of them now operate in terms of practice-day
@@ -463,10 +486,15 @@ difficulty-first sort above before rule 1 ever sees it):
    during development: an early version delayed transitions unnecessarily
    via an index-based spread. **If you see an `i % backSpan`-style offset
    reappear on the transitions loop (as opposed to the combos loop, where
-   it belongs), that regression is back.**
+   it belongs), that regression is back.** This is only a transition's
+   *initial* placement — as of Pass 90, rule 5's smoothing pass below can
+   still nudge it later if its day is overloaded (see that rule for why
+   this is safe: nothing is anchored to a transition's own day).
 3. **Combos are reserved for the back half**, spread across it round-robin
    over the pool of remaining back-half practice days (`i % candidates.length`
-   — this is where an index-based offset legitimately belongs).
+   — this is where an index-based offset legitimately belongs). Same
+   caveat as rule 2: this is initial placement only, and rule 5's smoothing
+   pass can still nudge a combo later within the back half if needed.
 4. **Spaced review is driven by the maintenance ladder, not a fixed
    offset.** `computeTimeline` places at most one upcoming review per chunk
    per recompute, in one of two tiers (Pass 5 of the maintenance-ladder
@@ -502,25 +530,69 @@ difficulty-first sort above before rule 1 ever sees it):
      legacy chunk isn't wrongly told to do a "first touch" review — it
      simply gets no review placed until it's next logged, at which point it
      picks up real ladder state and starts taking the Tier 2 path.
-5. **Review-load smoothing**: after initial placement, a bounded pass (up to
-   3 iterations) looks for learning days sitting more than 10% above the
-   plan's average load and, for each such day's most expensive Tier 2 review
-   item, tries nudging it 1 or 2 days **later** (never before the day after
-   its introduction, never past the end of the plan, never onto a day that
-   already has that same chunk) if doing so meaningfully reduces the
-   overloaded day's load. Tier 1 items are excluded from this pass entirely
-   (see rule 4). This exists because naive placement causes any day with a
-   lot of new introductions to also have a disproportionately heavy review
-   day soon after — the smoothing pass exists specifically to flatten those
-   swings without ever reviewing something before it's actually due.
-   **Forward-only, not ±1/±2 days both ways** — an earlier version of this
-   pass (inherited unchanged from the old `REVIEW_OFFSETS`-based mechanism,
-   which had no specific "due date" to respect) could nudge a Tier 2 review
-   *earlier* than its real due date, discovered via manual browser
-   verification during the Pass 5 build: a chunk due on day 5 could
-   cascade backward across the 3-iteration loop to as early as day 2,
-   chasing whichever neighboring day was least loaded at each step. Fixed
-   by restricting the candidate days to `day + 1`/`day + 2` only.
+5. **Daily-workload smoothing (Pass 90)**: `smoothOverloadedDays`
+   (`lib/scheduling.js`) — a bounded pass (up to 3 iterations, same cap as
+   the mechanism it replaces) that relieves any day sitting outside an
+   acceptable load band by relocating one of that day's own items to a
+   nearby lighter day. Runs **twice**, at two different points in
+   `computeTimeline`, over two different pools — not once over everything
+   at once (see the sequencing note below for why):
+   - **Phase A.5**, immediately after chunks are placed (before rule 2/3
+     compute anything from `introducedDay`): pool = practice chunks only,
+     scoped to `frontDays`, measured against the introduction-only average
+     over just those days (nothing else has been placed on any day yet at
+     this point, so the plan's general `minutesFor` already reads as
+     introduction-only here for free).
+   - **The final pass**, after rule 4's Tier 1/Tier 2 reviews are placed:
+     pool = transitions + combos + Tier 2 reviews together, over every
+     learning day, measured against the whole plan's average load. This
+     replaces what used to be a narrower version of this same idea that
+     only ever moved Tier 2 reviews — see the "confirmed before building"
+     decision record below for why the two weren't kept running side by
+     side. **Tier 1 items are excluded from this pool entirely** (see rule
+     4) — schedule pressure never gets absorbed there, in either phase.
+   - **The band**: scheduleMode-aware (`scheduleBand`, `lib/scheduling.js`)
+     — ceiling 125%/floor 80% of the relevant average for `scheduleMode:
+     "days"`; ceiling 110%/floor 90% of `piece.minutesPerDay` for
+     `scheduleMode: "minutes"` (a fixed target, not a derived average, matching
+     that mode's whole premise). A day at or above the floor is left alone —
+     the pass settles once every day is in-band, not once load is perfectly
+     even.
+   - **Which item moves**: on an over-ceiling day, the lowest-priority item
+     (Pass 89's tier — an item with no assigned tier, i.e. a transition,
+     combo, or a review of one, defaults to tier 3) moves first; same-tier
+     ties break by smallest size. Priority always wins outright over size.
+   - **Where it can move**: only forward, only 1 or 2 days out (mirrors the
+     mechanism this replaces — a Tier 2 review has a real due date, so
+     nudging it earlier isn't "smoothing," it's reviewing before it's due;
+     kept uniform across all three item kinds in the final pool rather than
+     special-casing just reviews), never onto a day that already carries
+     that same item, never past the plan's own days.
+   - **Whether a candidate move is worth taking**: only if it strictly
+     reduces the *combined* `bandOvershoot` of the source (after removal)
+     and the candidate destination (after addition) versus leaving the
+     source as it is — a move that would just relocate the same overshoot
+     elsewhere (or make the total worse) is declined. When more than one
+     forward candidate would improve things, the one with the smaller
+     resulting combined overshoot wins — the tie-break for "moving either
+     candidate would push a day over its own band."
+   - **Sequencing, confirmed before building, not guessed at:** running one
+     single pass over introduction + transitions/combos + reviews together
+     (as originally proposed) can't work as-is, because rules 2-4 below
+     compute transitions'/combos'/reviews' placement *directly from*
+     `introducedDay` — if introduction could still move after those
+     existed, whatever was anchored to a moved chunk's old day would go
+     stale. The two options on the table were: settle introduction first
+     (Phase A.5, above), or let anything move and then reflow whatever was
+     anchored to it. This codebase has no existing mechanism for that kind
+     of reflow, and building one would be a meaningfully bigger, riskier
+     piece of new logic than sequencing this one phase earlier — settling
+     introduction first was chosen for that reason. One direct consequence:
+     once Phase A.5 finishes, a practice chunk's `introducedDay` never
+     moves again — only transitions/combos/reviews are eligible for the
+     final pass, since by then nothing is anchored to *those* three.
+   - Regression tests: `test/scheduling.test.mjs`, describe blocks
+     `[Pass 90] smoothOverloadedDays` and `[Pass 90] sequencing`.
 6. **Only the final day** (if the plan is ≥5 days) is a pure "no new
    material, full run-through" consolidation day. Earlier iterations
    reserved a much bigger tail for this; that was deliberately walked back
@@ -2027,6 +2099,65 @@ are expected states, not a sign anything went wrong.
 > tab**, every panel, not just the history row. Case 3 above is not an edge
 > case: any piece with a logged section run-through hit it. See
 > [Decisions.md](Decisions.md#ux).
+
+### Historical cards on Daily Practice
+
+Added on direct request: a day's own `newChunkIds`/`specialChunkIds`/
+`reviewChunkIds` are `computeTimeline`'s *live* projection, recomputed fresh
+on every render — not a permanent record of what that day originally
+showed. A transition or combo Pass 90's daily-workload smoothing relocates,
+or a review whose `nextDueDate` has since advanced past this specific
+occurrence, simply stops appearing on the day it actually happened, on the
+very next render — even though `piece.progress[id].doneDays`/`sessions[]`
+never lost the record. Browsing back to that day in Daily Practice (single
+day or "All Tasks") used to show nothing there at all.
+
+`findHistoricalItemsForDay(piece, chunks, timeline, day)` (`lib/history.js`)
+closes this gap for `DayChecklist.jsx`: for the day being viewed, it finds
+every id with `doneDays` including that day which ISN'T already part of
+that day's own live arrays, resolves it against the current chunk set, and
+returns it with `findNextOccurrenceDay(timeline, id, day)` — the next day
+(skipping the consolidation day, which lists every practice chunk
+unconditionally and would otherwise trivially "match" everything) that id
+appears anywhere in the live schedule, or `null` if it doesn't appear again
+within this plan's own bounded view. Scoped to real chunk-set items only
+(kind `"section"`/`"transition"`/`"combo"`) — the synthetic progress keys
+(`__consolidation__`, `__cold_start__`, `sr_<sectionId>`) each already have
+their own dedicated panel that doesn't fit a chunk-shaped card, and
+`computePracticeHistory` above already covers them for its own text-summary
+case.
+
+`DayChecklist.jsx` renders each result as an ordinary `ChecklistItem`, with
+a new `historical` prop that switches it to a read-only mode: the timer,
+reps/BPM inputs, "Needs more work" checkbox, log/undo buttons, and note
+editing are all hidden (acting on a day that isn't this item's current live
+slot could produce confusing data — a fresh log entry dated to a day the
+ladder no longer treats as due). **Same-session follow-up, on direct
+request:** the requirement line ("Need N reps...") and the Spaced
+Repetition status line are hidden too — both describe what's still needed
+*going forward*, which isn't this card's question once the "Logged: ..."
+line already states what actually happened — and the separate `Completed
+here` tag was dropped outright, since a card's presence on a specific day
+already implies that; the dashed card border alone now carries the
+"historical" signal. What's left (measure range, difficulty, confidence,
+the "Logged: ..." line — which correctly reports *that specific day's*
+session, since `day` passed in is the historical day itself, not the
+chunk's latest) is exactly the record of what happened, nothing about
+what's next. A `Go to next scheduled practice (Day N) →` link (wired
+through `TodayTab.jsx`'s `handleGoToDay`, the same drop-into-day-view
+pattern `handleSelectWeekDay` already uses for Week view) answers that
+separately, jumping straight to wherever the item actually lives now, or a
+plain "not currently scheduled again" note when `findNextOccurrenceDay`
+finds nothing.
+
+**Scoped to Daily Practice only, for now, on direct request** — Timeline,
+Week view, and Master Agenda don't render individual per-item cards today
+(they show rolled-up measure-range badges per bucket instead), so giving
+them the same treatment is a distinct, larger change, deliberately not
+built here. `findHistoricalItemsForDay`/`findNextOccurrenceDay` are kept as
+plain, general-purpose `lib/` functions (not reaching into `DayChecklist`'s
+own state) specifically so a future pass extending this to those screens
+doesn't need to redo the underlying lookup.
 
 ## Behind-schedule detection
 

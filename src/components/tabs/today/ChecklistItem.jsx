@@ -28,6 +28,24 @@ export function ChecklistItem({
   memoryAnchor,
   onSetMemoryAnchor,
   onReassessRange,
+  // Historical mode (DayChecklist's record-of-what-was-done cards, added
+  // when this item's own live schedule slot has since moved elsewhere —
+  // see findHistoricalItemsForDay, lib/history.js): read-only, no
+  // logging/undo/note-editing controls, since acting on a day that isn't
+  // this item's current live slot could produce confusing data (a fresh
+  // log entry dated to a day the ladder no longer treats as this chunk's
+  // due day). `day` is still the historical day itself, so the "Logged:
+  // ..." line below correctly reports THAT day's own session, not the
+  // chunk's latest one. No separate "completed here" badge — being on a
+  // specific day already implies that, per direct request — and the
+  // requirement/spaced-repetition lines are skipped too, since what
+  // actually happened is already stated by the "Logged: ..." line; those
+  // two describe what's still needed *going forward*, which isn't this
+  // card's question. The dashed card border (`.checklist-item.historical`,
+  // App.jsx) is what marks it as historical now, not any text/tag.
+  historical = false,
+  nextOccurrenceDay,
+  onGoToNextOccurrence,
 }) {
   const entry = piece.progress[chunk.id] || {};
   const checked = (entry.doneDays || []).includes(day);
@@ -230,8 +248,12 @@ export function ChecklistItem({
   };
 
   return (
-    <div className={`checklist-item ${checked ? "checked" : ""}`}>
-      {checked ? (
+    <div className={`checklist-item ${checked ? "checked" : ""} ${historical ? "historical" : ""}`}>
+      {historical ? (
+        <span className="checklist-check" aria-hidden="true">
+          <Check size={16} />
+        </span>
+      ) : checked ? (
         <button
           className="checklist-check"
           onClick={() => onUnlogSession(chunk.id, day)}
@@ -347,15 +369,17 @@ export function ChecklistItem({
             Overlearning: practice tempo ({practiceBPM} BPM) is now above target ({targetBPM} BPM).
           </p>
         ) : null}
-        <p className="tip-line"><strong>{requirementText}</strong></p>
-        <p className="tip-line">
-          Spaced Repetition:{" "}
-          {ladderStatus
-            ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
-                ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
-              }`
-            : "not started yet"}
-        </p>
+        {!historical && <p className="tip-line"><strong>{requirementText}</strong></p>}
+        {!historical && (
+          <p className="tip-line">
+            Spaced Repetition:{" "}
+            {ladderStatus
+              ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
+                  ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
+                }`
+              : "not started yet"}
+          </p>
+        )}
         {!isFirstEncounter && practiceBPM == null && targetBPM ? (
           <p className="tip-line">Target tempo: {targetBPM} BPM</p>
         ) : null}
@@ -363,57 +387,61 @@ export function ChecklistItem({
           <p className="tip-line">Tempo ladder: {tempoLadder.join(" → ")} BPM</p>
         )}
 
-        <div className="timer-row">
-          <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
-            {timerRunning ? "Stop" : "Start"} timer
-          </button>
-          {timerRunning ? (
-            <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
-          ) : (
-            <label className="timer-manual">
-              <span>minutes practiced</span>
+        {!historical && (
+          <div className="timer-row">
+            <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
+              {timerRunning ? "Stop" : "Start"} timer
+            </button>
+            {timerRunning ? (
+              <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
+            ) : (
+              <label className="timer-manual">
+                <span>minutes practiced</span>
+                <NumberInput
+                  value={durationSeconds ? Math.round(durationSeconds / 60) : ""}
+                  min={0}
+                  onCommit={(n) => setDurationSeconds(Math.round(n * 60))}
+                  placeholder="e.g. 10"
+                />
+              </label>
+            )}
+          </div>
+        )}
+
+        {!historical && (
+          <div className="log-row">
+            <label>
+              <span>Clean reps (aim {requiredReps})</span>
               <NumberInput
-                value={durationSeconds ? Math.round(durationSeconds / 60) : ""}
+                value={reps}
                 min={0}
-                onCommit={(n) => setDurationSeconds(Math.round(n * 60))}
-                placeholder="e.g. 10"
+                onCommit={(n) => setReps(n)}
+                onDraftChange={(text) => setHasRepsDraft(text !== "")}
+                placeholder={String(requiredReps)}
+                acceptPlaceholderOnTab
               />
             </label>
-          )}
-        </div>
-
-        <div className="log-row">
-          <label>
-            <span>Clean reps (aim {requiredReps})</span>
-            <NumberInput
-              value={reps}
-              min={0}
-              onCommit={(n) => setReps(n)}
-              onDraftChange={(text) => setHasRepsDraft(text !== "")}
-              placeholder={String(requiredReps)}
-              acceptPlaceholderOnTab
-            />
-          </label>
-          <label>
-            <span>BPM achieved</span>
-            <NumberInput
-              value={bpm}
-              min={20}
-              onCommit={(n) => setBpm(n)}
-              onDraftChange={(text) => setHasBpmDraft(text !== "")}
-              acceptPlaceholderOnTab
-              placeholder={
-                practiceBPM != null
-                  ? String(practiceBPM)
-                  : suggestedStartingBPM != null
-                  ? String(suggestedStartingBPM)
-                  : targetBPM
-                  ? String(targetBPM)
-                  : "e.g. 88"
-              }
-            />
-          </label>
-        </div>
+            <label>
+              <span>BPM achieved</span>
+              <NumberInput
+                value={bpm}
+                min={20}
+                onCommit={(n) => setBpm(n)}
+                onDraftChange={(text) => setHasBpmDraft(text !== "")}
+                acceptPlaceholderOnTab
+                placeholder={
+                  practiceBPM != null
+                    ? String(practiceBPM)
+                    : suggestedStartingBPM != null
+                    ? String(suggestedStartingBPM)
+                    : targetBPM
+                    ? String(targetBPM)
+                    : "e.g. 88"
+                }
+              />
+            </label>
+          </div>
+        )}
         {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
         {canEditNote && (
           noteOpen ? (
@@ -443,13 +471,33 @@ export function ChecklistItem({
             </button>
           )
         )}
-        <label className="fail-override-row">
-          <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />
-          <span>Needs more work (lowers practice tempo, increases chunk visibility)</span>
-        </label>
-        <button className="primary-btn sm" disabled={!canLog} style={{ marginTop: 8, alignSelf: "flex-start" }} onClick={submitLog}>
-          {checked ? "Log another attempt" : "Log practice"}
-        </button>
+        {historical && onGoToNextOccurrence && (
+          nextOccurrenceDay != null ? (
+            <button
+              type="button"
+              className="link-btn"
+              style={{ alignSelf: "flex-start" }}
+              onClick={() => onGoToNextOccurrence(nextOccurrenceDay)}
+            >
+              Go to next scheduled practice (Day {nextOccurrenceDay}) →
+            </button>
+          ) : (
+            <p className="tip-line" style={{ fontStyle: "italic" }}>
+              Not currently scheduled again within this plan.
+            </p>
+          )
+        )}
+        {!historical && (
+          <>
+            <label className="fail-override-row">
+              <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />
+              <span>Needs more work (lowers practice tempo, increases chunk visibility)</span>
+            </label>
+            <button className="primary-btn sm" disabled={!canLog} style={{ marginTop: 8, alignSelf: "flex-start" }} onClick={submitLog}>
+              {checked ? "Log another attempt" : "Log practice"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

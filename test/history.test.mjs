@@ -15,7 +15,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computePracticeHistory } from "../src/lib/history.js";
+import { computePracticeHistory, findNextOccurrenceDay, findHistoricalItemsForDay } from "../src/lib/history.js";
 
 // Minimal fixtures — computePracticeHistory only reads `progress` and
 // `sections` off the piece, and `id`/`start`/`end` off each chunk.
@@ -249,5 +249,108 @@ describe("computePracticeHistory — empty and malformed input", () => {
     // put the stale ids there in the first place.
     assert.doesNotThrow(() => computePracticeHistory({}, undefined));
     assert.deepEqual(computePracticeHistory({}, undefined), []);
+  });
+});
+
+// findNextOccurrenceDay / findHistoricalItemsForDay — a day whose current
+// live schedule (computeTimeline recomputed fresh every render) no longer
+// lists something that was genuinely completed there, because that item's
+// own placement has since moved (Pass 90's daily-workload smoothing) or its
+// next review due date has advanced past this specific occurrence. Added on
+// direct request: doneDays/sessions already permanently record what
+// happened and when — nothing here changes that — but until this, a
+// day-by-day schedule view had no way to surface it once the live
+// projection moved on.
+const timelineDay = (dayNumber, overrides = {}) => ({
+  dayNumber,
+  type: "learning",
+  newChunkIds: [],
+  specialChunkIds: [],
+  reviewChunkIds: [],
+  ...overrides,
+});
+
+// Both functions under test index `timeline.days` by position
+// (`days[day - 1]`), matching the real computeTimeline output, which is
+// always a full, gapless array (index i is always day i+1) — never a
+// sparse list of only the "interesting" days. `overridesByDay` supplies
+// just the days that need real content; every other index in between is
+// filled with a plain, empty learning day so position stays aligned.
+function buildTimeline(length, overridesByDay = {}) {
+  return {
+    days: Array.from({ length }, (_, i) => timelineDay(i + 1, overridesByDay[i + 1] || {})),
+  };
+}
+
+describe("findNextOccurrenceDay", () => {
+  test("finds the next day (strictly after afterDay) the id appears in any bucket", () => {
+    const timeline = buildTimeline(3, { 1: { reviewChunkIds: ["c1"] }, 3: { specialChunkIds: ["c1"] } });
+    assert.equal(findNextOccurrenceDay(timeline, "c1", 1), 3);
+  });
+
+  test("checks newChunkIds and specialChunkIds too, not just reviewChunkIds", () => {
+    const timeline = buildTimeline(2, { 2: { newChunkIds: ["c1"] } });
+    assert.equal(findNextOccurrenceDay(timeline, "c1", 1), 2);
+    const timeline2 = buildTimeline(2, { 2: { specialChunkIds: ["t1"] } });
+    assert.equal(findNextOccurrenceDay(timeline2, "t1", 1), 2);
+  });
+
+  test("skips the consolidation day even though it lists every practice chunk", () => {
+    const timeline = buildTimeline(2, { 2: { type: "consolidation", reviewChunkIds: ["c1", "c2", "c3"] } });
+    assert.equal(findNextOccurrenceDay(timeline, "c1", 1), null, "the consolidation day must not count as a real next occurrence");
+  });
+
+  test("returns null when the id never appears again", () => {
+    const timeline = buildTimeline(2, { 1: { reviewChunkIds: ["c1"] } });
+    assert.equal(findNextOccurrenceDay(timeline, "c1", 1), null);
+  });
+
+  test("never matches on or before afterDay itself, only strictly later", () => {
+    const timeline = buildTimeline(2, { 1: { reviewChunkIds: ["c1"] }, 2: { reviewChunkIds: ["c1"] } });
+    assert.equal(findNextOccurrenceDay(timeline, "c1", 2), null, "day 1 is before afterDay(2), day 2 is afterDay itself — neither should match");
+  });
+});
+
+describe("findHistoricalItemsForDay", () => {
+  const c1 = chunk("c1", 1, 4);
+  const c2 = chunk("c2", 5, 8);
+
+  test("an id done on this day but no longer part of this day's live schedule is surfaced", () => {
+    const timeline = buildTimeline(9, { 9: { reviewChunkIds: ["c1"] } });
+    const p = piece({ c1: logged(5) });
+    const result = findHistoricalItemsForDay(p, [c1], timeline, 5);
+    assert.deepEqual(result, [{ chunk: c1, nextOccurrenceDay: 9 }]);
+  });
+
+  test("an id already part of this day's live schedule is NOT duplicated as historical", () => {
+    const timeline = buildTimeline(5, { 5: { reviewChunkIds: ["c1"] } });
+    const p = piece({ c1: logged(5) });
+    assert.deepEqual(findHistoricalItemsForDay(p, [c1], timeline, 5), []);
+  });
+
+  test("an id logged on a different day than the one being viewed is excluded", () => {
+    const timeline = buildTimeline(5);
+    const p = piece({ c1: logged(3) }); // done on day 3, not day 5
+    assert.deepEqual(findHistoricalItemsForDay(p, [c1], timeline, 5), []);
+  });
+
+  test("an id with no matching chunk (orphaned or synthetic, e.g. __consolidation__) is skipped, not crashed on", () => {
+    const timeline = buildTimeline(5);
+    const p = piece({ __consolidation__: logged(5), stale_id: logged(5) });
+    assert.doesNotThrow(() => findHistoricalItemsForDay(p, [c1], timeline, 5));
+    assert.deepEqual(findHistoricalItemsForDay(p, [c1], timeline, 5), []);
+  });
+
+  test("multiple historical entries are sorted by measure start ascending", () => {
+    const timeline = buildTimeline(5);
+    const p = piece({ c2: logged(5), c1: logged(5) });
+    const result = findHistoricalItemsForDay(p, [c1, c2], timeline, 5);
+    assert.deepEqual(result.map((r) => r.chunk.id), ["c1", "c2"]);
+  });
+
+  test("a day past the end of the timeline (or with no timeline) returns nothing rather than throwing", () => {
+    const timeline = buildTimeline(1);
+    assert.doesNotThrow(() => findHistoricalItemsForDay(piece({ c1: logged(5) }), [c1], timeline, 5));
+    assert.deepEqual(findHistoricalItemsForDay(piece({ c1: logged(5) }), [c1], timeline, 5), []);
   });
 });

@@ -141,3 +141,62 @@ export function computePracticeHistory(piece, chunks, limit = 10) {
     .slice(0, limit)
     .map((day) => describeDay(piece, chunkById, orderedSections, idsByDay[day], day));
 }
+
+// The next day (strictly after `afterDay`) this id appears anywhere in the
+// LIVE schedule — used to link a historical entry ("this was done here")
+// forward to wherever the item actually lives now. Skips the consolidation
+// day deliberately: it unconditionally lists every practice chunk in
+// reviewChunkIds regardless of individual due state, so without this
+// exclusion every chunk's "next occurrence" would trivially resolve there
+// instead of a real, targeted future touch (or correctly finding none).
+export function findNextOccurrenceDay(timeline, id, afterDay) {
+  for (let i = afterDay; i < timeline.days.length; i++) {
+    const d = timeline.days[i];
+    if (d.type === "consolidation") continue;
+    if (d.newChunkIds.includes(id) || d.specialChunkIds.includes(id) || d.reviewChunkIds.includes(id)) {
+      return d.dayNumber;
+    }
+  }
+  return null;
+}
+
+/**
+ * What was actually practiced on `day` that ISN'T part of that day's
+ * current live schedule (`timeline.days[day-1]`'s own newChunkIds/
+ * specialChunkIds/reviewChunkIds). computeTimeline recomputes fresh from
+ * whatever `piece` currently holds, so a transition/combo Pass 90's
+ * daily-workload smoothing relocates, or a review whose ladder has since
+ * advanced past this exact occurrence, quietly stops appearing on the day
+ * it actually happened — even though `doneDays` never lost the record.
+ * This reads that permanent record directly (the same technique
+ * computePracticeHistory above already uses) rather than trusting the
+ * live projection to still show it.
+ *
+ * Scoped to real chunk-set items only (kind "section"/"transition"/
+ * "combo") — the synthetic progress keys (`__consolidation__`,
+ * `__cold_start__`, `sr_<sectionId>`) each already have their own
+ * dedicated, non-ChecklistItem panel and don't fit a chunk-shaped
+ * historical card; describeDay above already covers them for the
+ * text-summary case computePracticeHistory serves.
+ *
+ * @param {object} piece
+ * @param {Array}  chunks    the current chunk set (`chunkSet.all` —
+ *   practiceChunks + transitions + combos)
+ * @param {object} timeline  computeTimeline/getEffectiveTimeline's result
+ * @param {number} day       the day being viewed
+ * @returns {Array<{chunk: object, nextOccurrenceDay: number|null}>}
+ */
+export function findHistoricalItemsForDay(piece, chunks, timeline, day) {
+  const liveDay = timeline.days[day - 1];
+  if (!liveDay) return [];
+  const liveIds = new Set([...liveDay.newChunkIds, ...liveDay.specialChunkIds, ...liveDay.reviewChunkIds]);
+  const chunkById = Object.fromEntries((chunks || []).map((c) => [c.id, c]));
+
+  return Object.entries(piece.progress || {})
+    .filter(([id, entry]) => !liveIds.has(id) && ((entry || {}).doneDays || []).includes(day) && chunkById[id])
+    .map(([id]) => ({
+      chunk: chunkById[id],
+      nextOccurrenceDay: findNextOccurrenceDay(timeline, id, day),
+    }))
+    .sort((a, b) => a.chunk.start - b.chunk.start);
+}

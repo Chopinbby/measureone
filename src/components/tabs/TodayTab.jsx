@@ -245,6 +245,15 @@ export function TodayTab({
     setViewMode("day");
   };
 
+  // A historical card's "go to next scheduled practice" link (DayChecklist/
+  // ChecklistItem) — same drop-into-day-view pattern handleSelectWeekDay
+  // already uses, since "View all" mode has no single-day nav of its own to
+  // land on otherwise.
+  const handleGoToDay = (dayNumber) => {
+    onDayChange(dayNumber);
+    setViewMode("day");
+  };
+
   // Interleaved mode (Pass 29) — every chunk in the whole piece that's
   // actually left Stabilizing (isInterleaveEligible, lib/ladder.js), not
   // just whatever happens to be scheduled for today specifically. Used to
@@ -663,6 +672,7 @@ export function TodayTab({
             piece={piece}
             chunks={chunks}
             day={dayForChecklist}
+            timeline={timeline}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
             onConfirmProvisionalSession={onConfirmProvisionalSession}
@@ -670,6 +680,7 @@ export function TodayTab({
             onLogRunThrough={onLogRunThrough}
             onUnlogRunThrough={onUnlogRunThrough}
             onSetMemoryAnchor={onSetMemoryAnchor}
+            onGoToNextOccurrence={handleGoToDay}
           />
         )
       ) : viewMode === "interleave" ? (
@@ -703,6 +714,7 @@ export function TodayTab({
               piece={piece}
               chunks={chunks}
               day={d}
+              timeline={timeline}
               onLogSession={onLogSession}
               onUnlogSession={onUnlogSession}
               onConfirmProvisionalSession={onConfirmProvisionalSession}
@@ -710,6 +722,7 @@ export function TodayTab({
               onLogRunThrough={onLogRunThrough}
               onUnlogRunThrough={onUnlogRunThrough}
               onSetMemoryAnchor={onSetMemoryAnchor}
+              onGoToNextOccurrence={handleGoToDay}
             />
           ))}
         </div>

@@ -3,6 +3,7 @@ import { ChecklistItem } from "./ChecklistItem";
 import { NumberInput } from "../../NumberInput";
 import { formatMinutes } from "../../../lib/utils";
 import { isDayFullySwept } from "../../../lib/scheduling";
+import { findHistoricalItemsForDay } from "../../../lib/history";
 
 // Consolidation-day logging: stop count replaces the old bare "mark
 // complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
@@ -58,6 +59,7 @@ export function DayChecklist({
   piece,
   chunks,
   day,
+  timeline,
   onLogSession,
   onUnlogSession,
   onConfirmProvisionalSession,
@@ -65,8 +67,18 @@ export function DayChecklist({
   onLogRunThrough,
   onUnlogRunThrough,
   onSetMemoryAnchor,
+  onGoToNextOccurrence,
 }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
+  // What was actually practiced on this exact day that the current live
+  // schedule no longer lists here — a transition/combo Pass 90's smoothing
+  // has since relocated, or a review whose ladder has moved past this
+  // occurrence. `timeline` is optional (View all's per-day loop and the
+  // single-day view both already have it in scope; a future caller that
+  // doesn't pass it just sees none, rather than crashing) — see
+  // findHistoricalItemsForDay, lib/history.js.
+  const historicalItems =
+    day.type === "consolidation" || !timeline ? [] : findHistoricalItemsForDay(piece, chunks, timeline, day.dayNumber);
 
   if (day.type === "consolidation") {
     return (
@@ -103,13 +115,37 @@ export function DayChecklist({
     </p>
   );
 
+  // A historical entry's role for tag/label purposes: a plain chunk
+  // (kind "section") only ever shows up here for a completed REVIEW
+  // occurrence that's since moved — its own introduction day never
+  // disappears — so "review" is correct for it, same as for an id with no
+  // kind of its own. Transitions/combos use their own kind directly.
+  const roleForHistorical = (chunk) => (chunk.kind === "combo" ? "combo" : chunk.kind === "transition" ? "transition" : "review");
+
   if (items.length === 0) {
     return (
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
-        <p className="wizard-hint" style={{ margin: 0 }}>
-          {staleReviewNote ? <em>Already due — see Daily Practice</em> : "Nothing scheduled."}
-        </p>
+        {historicalItems.length === 0 ? (
+          <p className="wizard-hint" style={{ margin: 0 }}>
+            {staleReviewNote ? <em>Already due — see Daily Practice</em> : "Nothing scheduled."}
+          </p>
+        ) : (
+          <div className="checklist">
+            {historicalItems.map(({ chunk, nextOccurrenceDay }) => (
+              <ChecklistItem
+                key={chunk.id + "-historical"}
+                chunk={chunk}
+                role={roleForHistorical(chunk)}
+                piece={piece}
+                day={day.dayNumber}
+                historical
+                nextOccurrenceDay={nextOccurrenceDay}
+                onGoToNextOccurrence={onGoToNextOccurrence}
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -156,6 +192,18 @@ export function DayChecklist({
             onConfirmProvisionalSession={onConfirmProvisionalSession}
             onDiscardProvisionalSession={onDiscardProvisionalSession}
             onSetMemoryAnchor={onSetMemoryAnchor}
+          />
+        ))}
+        {historicalItems.map(({ chunk, nextOccurrenceDay }) => (
+          <ChecklistItem
+            key={chunk.id + "-historical"}
+            chunk={chunk}
+            role={roleForHistorical(chunk)}
+            piece={piece}
+            day={day.dayNumber}
+            historical
+            nextOccurrenceDay={nextOccurrenceDay}
+            onGoToNextOccurrence={onGoToNextOccurrence}
           />
         ))}
       </div>

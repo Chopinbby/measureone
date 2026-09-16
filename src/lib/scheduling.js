@@ -141,6 +141,157 @@ export function adaptiveReviewOffsets(chunk, progress) {
   return REVIEW_OFFSETS.map((o) => Math.max(1, Math.round(o * factor)));
 }
 
+// Pass 89 — difficulty-first introduction order. Before the placement loop
+// below decides *which day* a chunk lands on, this decides what *order*
+// practiceChunks are fed into that loop in, so hard material (and its
+// immediate neighbors) reach the front of the queue instead of waiting on
+// raw measure position. Four tiers, highest priority first:
+//   0. A chunk whose trouble spots just resolved. No data source for this
+//      exists yet (the Trouble-spot pass hasn't shipped) — troubleSpotIds is
+//      always empty for now, so this tier is a real slot in the ordering
+//      that currently produces no reordering on its own. Once that pass
+//      exists, it only needs to populate troubleSpotIds; nothing here needs
+//      to change.
+//   1. Hard chunks (difficultyLabel === "hard").
+//   2. Direct one-degree measure-neighbors of a hard chunk — the chunk
+//      immediately before/after it in practiceChunks' own array order,
+//      which is already how this codebase defines chunk adjacency
+//      elsewhere (generateComboChunks' prev/next in lib/chunking.js uses
+//      the identical i-1/i+1 relationship to build a combo around a hard
+//      chunk).
+//   3. Everything else.
+// Ties within a tier keep practiceChunks' own order (measure order) as the
+// stable secondary key — Array.prototype.sort is a stable sort, so this
+// falls out for free from sorting a copy of the array in tier order alone.
+//
+// The one-degree-further transition-clustering gap this leaves (a hard
+// chunk's neighbor's own neighbor stays at tier 3) is a deliberately
+// accepted limit, not chased here — see docs/Decisions.md#scheduling.
+function sortPracticeChunksForIntroduction(practiceChunks, troubleSpotResolvedIds) {
+  const troubleSpotIds = troubleSpotResolvedIds || new Set();
+  const hardIds = new Set(practiceChunks.filter((c) => c.difficultyLabel === "hard").map((c) => c.id));
+  // Adjacency by measure boundary (prev.end + 1 === c.start), not by raw
+  // array index — the two agree whenever practiceChunks is the pristine,
+  // unbroken list generateAllChunks produces (chunks are always contiguous
+  // by construction there), but a rescheduled remainder's practiceChunks is
+  // a *filtered* subsequence with gaps wherever an already-practiced chunk
+  // was removed. Array-index adjacency on that filtered list would call two
+  // chunks "neighbors" purely because whatever used to sit between them is
+  // gone — confirmed as a real bug (a chunk two measure-chunks away from a
+  // hard one got wrongly promoted to tier 2 once the chunk actually between
+  // them had already been practiced and dropped out of the remainder).
+  // Boundary matching is immune to this: a missing chunk in between means
+  // the boundaries genuinely don't touch anymore, so no false neighbor gets
+  // created, in either context — this one fix covers both, no reschedule-
+  // specific branch needed.
+  const byId = new Map(practiceChunks.map((c) => [c.id, c]));
+  const startsAt = new Map(practiceChunks.map((c) => [c.start, c.id]));
+  const endsAt = new Map(practiceChunks.map((c) => [c.end, c.id]));
+  const neighborIds = new Set();
+  hardIds.forEach((id) => {
+    const c = byId.get(id);
+    const prevId = endsAt.get(c.start - 1);
+    const nextId = startsAt.get(c.end + 1);
+    if (prevId) neighborIds.add(prevId);
+    if (nextId) neighborIds.add(nextId);
+  });
+  const tierById = {};
+  practiceChunks.forEach((c) => {
+    tierById[c.id] = troubleSpotIds.has(c.id) ? 0 : hardIds.has(c.id) ? 1 : neighborIds.has(c.id) ? 2 : 3;
+  });
+  const order = [...practiceChunks].sort((a, b) => tierById[a.id] - tierById[b.id]);
+  return { order, tierById };
+}
+
+// Pass 90 — daily-workload smoothing. How far a day's load sits outside
+// the acceptable [floor, ceiling] band — 0 if it's inside the band, the
+// positive distance past whichever edge it's outside of otherwise. Used
+// both to decide whether a day needs relief at all (ceiling side) and to
+// score candidate moves (either side, per the tie-break rule below).
+export function bandOvershoot(load, floor, ceiling) {
+  if (load > ceiling) return load - ceiling;
+  if (load < floor) return floor - load;
+  return 0;
+}
+
+// The acceptable load band for a day, scheduleMode-aware: for
+// scheduleMode "days" it's relative to the plan's own average load for
+// whatever's being smoothed (front-day introduction load while that's
+// being settled, the whole plan's average once everything is placed);
+// for "minutes" it's relative to the fixed piece.minutesPerDay budget,
+// since that mode's whole premise is a fixed daily target rather than a
+// derived average. Ceiling (125%/110%) is the trigger — a day above it
+// needs relief. Floor (80%/90%) is the far edge of "acceptable" — a day
+// at or above it is left alone, matching the "the pass settles once
+// every day is in-band, not once load is perfectly even" design.
+export function scheduleBand(piece, avg) {
+  const isMinutesMode = piece.scheduleMode === "minutes";
+  const target = isMinutesMode ? Number(piece.minutesPerDay || 30) : avg;
+  return {
+    ceiling: target * (isMinutesMode ? 1.1 : 1.25),
+    floor: target * (isMinutesMode ? 0.9 : 0.8),
+  };
+}
+
+// The unified overload-relief pass itself — used twice by computeTimeline
+// (see the two call sites below) with different pools/day-ranges/load
+// functions, replacing what used to be a narrower, reviews-only version
+// of this same idea. Bounded to 3 passes, matching that version's own
+// precedent — a backstop, not the primary stop mechanism; the real stop
+// condition is "no day left over ceiling."
+//
+// For each day over ceiling (worst first), tries that day's own items in
+// priority order (Pass 89's tier — lowest priority, i.e. highest tier
+// number, first; same-tier ties broken by smallest size) looking for the
+// first one with a valid, improving move. A move is only "valid" onto a
+// day that isn't already carrying that same item, no earlier than the
+// item's own minDay, and at most 2 days forward (mirrors the review-only
+// version's own forward-only, ±1/±2-day window — nudging earlier isn't
+// "smoothing" for a review with a real due date, and staying forward-only
+// uniformly avoids re-litigating that per item kind). "Improving" means
+// the combined bandOvershoot of the source (after removal) and the
+// candidate destination (after addition) is strictly less than the
+// source's own overshoot today — a move that would just relocate the same
+// overshoot elsewhere (or make it worse) is declined outright, and the
+// candidate whose combined overshoot is smallest wins when more than one
+// candidate improves things (the tie-break the request calls for).
+// Moves one item per overloaded day per pass; any day still over ceiling
+// after that gets another chance on the next pass, up to the cap.
+export function smoothOverloadedDays({ dayNumbers, items, loadFor, ceiling, floor, hasItem, moveItem }) {
+  for (let pass = 0; pass < 3; pass++) {
+    let movedAny = false;
+    dayNumbers
+      .filter((d) => loadFor(d) > ceiling)
+      .sort((a, b) => loadFor(b) - loadFor(a))
+      .forEach((sourceDay) => {
+        if (loadFor(sourceDay) <= ceiling) return; // already fixed earlier this same pass
+        const onDay = items.filter((it) => it.day === sourceDay);
+        if (!onDay.length) return;
+        onDay.sort((a, b) => b.priority - a.priority || a.size - b.size);
+        for (const item of onDay) {
+          const candidates = [sourceDay + 1, sourceDay + 2].filter(
+            (d) => dayNumbers.includes(d) && d >= item.minDay && !hasItem(d, item.id)
+          );
+          if (!candidates.length) continue;
+          const currentTotal = bandOvershoot(loadFor(sourceDay), floor, ceiling);
+          const sourceAfter = loadFor(sourceDay) - item.size;
+          const best = candidates
+            .map((d) => {
+              const destAfter = loadFor(d) + item.size;
+              return { d, destAfter, total: bandOvershoot(sourceAfter, floor, ceiling) + bandOvershoot(destAfter, floor, ceiling) };
+            })
+            .sort((a, b) => a.total - b.total || a.destAfter - b.destAfter)[0];
+          if (best.total >= currentTotal) continue;
+          moveItem(item, sourceDay, best.d);
+          item.day = best.d;
+          movedAny = true;
+          break;
+        }
+      });
+    if (!movedAny) break;
+  }
+}
+
 // Rule: the whole piece gets introduced within the first half of the
 // learning days. The back half mixes review, seam transitions, and
 // hard-section focus blocks (entered from a different point than the
@@ -175,6 +326,33 @@ export function computeTimeline(piece, chunkSet) {
   }));
 
   const introducedDay = {};
+
+  // Built early (Pass 90) — previously constructed after transitions/combos
+  // were placed, but Phase A.5's introduction-load smoothing below needs it
+  // (and minutesFor) before any of that exists. `all` (practiceChunks +
+  // transitions + combos) is already fully generated on chunkSet by this
+  // point, so nothing here depends on introducedDay/placement being final.
+  const chunkById = Object.fromEntries(all.map((c) => [c.id, c]));
+  // A review is priced the same as introducing the chunk fresh —
+  // chunk.effort * EFFORT_TO_MIN, same formula for all three roles, and the
+  // same rate computeDueReviews (lib/maintenance.js) already uses for its
+  // live due-review estimate. Previously reviewMin used a flat 3
+  // minutes/touch regardless of the chunk's own difficulty, which
+  // undercounted how long a hard chunk's review actually takes and could
+  // make a minutes-mode plan's day count come out too optimistic once
+  // review load was folded in (see computeDaysNeededForMinutesPerDay below,
+  // which had the same flat-rate assumption baked into its day-count math).
+  const minutesFor = (d) => {
+    const newMin = d.newChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
+    const specialMin = d.specialChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
+    const reviewMin = d.reviewChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
+    return newMin + specialMin + reviewMin;
+  };
+  // Both close over `introductionTierById`, assigned a few lines below by
+  // sortPracticeChunksForIntroduction — safe, since neither is actually
+  // called until after that assignment runs (Phase A.5 onward).
+  const priorityOf = (id) => (introductionTierById[id] != null ? introductionTierById[id] : 3);
+  const sizeOf = (id) => chunkById[id].effort * EFFORT_TO_MIN;
 
   const halfPointCount = Math.max(1, Math.min(learningDaysCalendar.length, Math.ceil(learningDaysCalendar.length * 0.5)));
   const halfPoint = learningDaysCalendar[halfPointCount - 1];
@@ -226,13 +404,17 @@ export function computeTimeline(piece, chunkSet) {
   // midpoint comparison can push even the first chunk past day one's
   // boundary and leave it empty, found while testing this fix (a 3-chunk
   // piece spread across 7 front days left day one with nothing introduced
-  // at all). Order (measure order) is preserved — this only changes which
-  // day a chunk lands on, never the sequence.
+  // at all). This boundary math is untouched by which order chunks are fed
+  // into it — as of Pass 89, that's introOrder (difficulty-first, see
+  // sortPracticeChunksForIntroduction above), not raw measure order; this
+  // loop only decides which day a chunk lands on, never the sequence it's
+  // considered in.
   const totalNewEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
   const numFrontDays = frontDays.length;
+  const { order: introOrder, tierById: introductionTierById } = sortPracticeChunksForIntroduction(practiceChunks);
   let dayIdx = 0;
   let runningEffort = 0;
-  practiceChunks.forEach((chunk) => {
+  introOrder.forEach((chunk) => {
     while (dayIdx < numFrontDays - 1 && runningEffort >= (totalNewEffort * (dayIdx + 1)) / numFrontDays) {
       dayIdx++;
     }
@@ -241,8 +423,45 @@ export function computeTimeline(piece, chunkSet) {
     introducedDay[chunk.id] = day;
     runningEffort += chunk.effort;
   });
+
+  // Pass 90, Phase A.5 — settle introduction-bucket load *before* anything
+  // else is computed off it. transitions/combos below compute their own
+  // placement directly from introducedDay, and Tier 1/2 reviews after that
+  // do the same — so if a chunk's introduction day could still move once
+  // those exist, whatever was already anchored to its old day would go
+  // stale. Confirmed before building (see docs/Decisions.md#scheduling):
+  // settle introduction first, rather than letting a later, broader pass
+  // move a chunk and then having to re-derive everything anchored to it —
+  // this codebase has no existing mechanism for that kind of reflow, and
+  // building one would be a meaningfully bigger, riskier piece of new
+  // logic than sequencing this one phase earlier. Scoped to frontDays only
+  // (introduction never lands anywhere else), measured against the
+  // introduction-only average over just those days — at this exact point
+  // nothing else has been placed on any day yet, so `minutesFor` already
+  // reads as introduction-only without needing a separate load function.
+  const frontIntroAvg = frontDays.length
+    ? frontDays.reduce((s, d) => s + minutesFor(days[d - 1]), 0) / frontDays.length
+    : 0;
+  const introBand = scheduleBand(piece, frontIntroAvg);
+  const introItems = practiceChunks.map((c) => ({ id: c.id, day: introducedDay[c.id], minDay: frontDays[0] || 1, priority: priorityOf(c.id), size: sizeOf(c.id) }));
+  smoothOverloadedDays({
+    dayNumbers: frontDays,
+    items: introItems,
+    loadFor: (d) => minutesFor(days[d - 1]),
+    ceiling: introBand.ceiling,
+    floor: introBand.floor,
+    hasItem: (d, id) => days[d - 1].newChunkIds.includes(id),
+    moveItem: (item, from, to) => {
+      const list = days[from - 1].newChunkIds;
+      list.splice(list.indexOf(item.id), 1);
+      days[to - 1].newChunkIds.push(item.id);
+      introducedDay[item.id] = to;
+    },
+  });
+
   const sectionsEndDay = halfPoint;
 
+  const transitionItems = [];
   transitions.forEach((t) => {
     const readyDay = Math.max(
       introducedDay[t.linkedIds[0]] || sectionsEndDay,
@@ -251,8 +470,10 @@ export function computeTimeline(piece, chunkSet) {
     const day = snapCapped(readyDay + 1);
     days[day - 1].specialChunkIds.push(t.id);
     introducedDay[t.id] = day;
+    transitionItems.push({ id: t.id, minDay: readyDay + 1, day });
   });
 
+  const comboItems = [];
   combos.forEach((c, i) => {
     const readyDay = introducedDay[c.linkedIds[0]] || sectionsEndDay;
     const earliest = snapCapped(Math.max(sectionsEndDay + 1, readyDay + 1));
@@ -261,24 +482,8 @@ export function computeTimeline(piece, chunkSet) {
     const day = candidates[i % candidates.length];
     days[day - 1].specialChunkIds.push(c.id);
     introducedDay[c.id] = day;
+    comboItems.push({ id: c.id, minDay: earliest, day });
   });
-
-  const chunkById = Object.fromEntries(all.map((c) => [c.id, c]));
-  // A review is priced the same as introducing the chunk fresh —
-  // chunk.effort * EFFORT_TO_MIN, same formula for all three roles, and the
-  // same rate computeDueReviews (lib/maintenance.js) already uses for its
-  // live due-review estimate. Previously reviewMin used a flat 3
-  // minutes/touch regardless of the chunk's own difficulty, which
-  // undercounted how long a hard chunk's review actually takes and could
-  // make a minutes-mode plan's day count come out too optimistic once
-  // review load was folded in (see computeDaysNeededForMinutesPerDay below,
-  // which had the same flat-rate assumption baked into its day-count math).
-  const minutesFor = (d) => {
-    const newMin = d.newChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
-    const specialMin = d.specialChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
-    const reviewMin = d.reviewChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
-    return newMin + specialMin + reviewMin;
-  };
 
   // Tier 1 / Tier 2 review placement — Repertoire-Lifecycle.md's
   // "Introduction-window review scheduling: Tier 1 / Tier 2". Replaces the
@@ -290,7 +495,6 @@ export function computeTimeline(piece, chunkSet) {
   // its *next* due date, not a whole future schedule) — this function is
   // already rerun on every piece change (see Architecture.md), so that's
   // sufficient to keep it current as sessions get logged.
-  const learningDaySet = new Set(learningDaysCalendar);
 
   // Tier 1 — a one-time, near-mandatory first-touch review for a chunk
   // that's genuinely never been logged (ChunkProgress.stage still null —
@@ -365,41 +569,50 @@ export function computeTimeline(piece, chunkSet) {
   tier2Items.forEach((item) => days[item.day - 1].reviewChunkIds.push(item.chunkId));
 
   const learningDayList = days.filter((d) => d.type === "learning");
-  const avgLoad = learningDayList.length
+
+  // Pass 90, Phase D — the unified daily-workload smoothing pass, replacing
+  // what used to be a narrower version of this same idea that only ever
+  // moved Tier 2 reviews. Confirmed before building (see
+  // docs/Decisions.md#scheduling): one mechanism now covers transitions,
+  // combos, and Tier 2 reviews together, rather than the two coexisting
+  // with potentially conflicting adjustments (different thresholds, each
+  // blind to what the other just moved). By this point in the function,
+  // introduction placement is already final (Phase A.5 above) and
+  // transitions/combos/Tier 2 reviews are all placed from it, so moving any
+  // of these three has nothing anchored to it that would go stale — unlike
+  // introduction items, which is exactly why those were settled earlier
+  // instead of being included in this later, broader pool. Tier 1 reviews
+  // are deliberately excluded here too, same as the loop this replaces —
+  // per the existing design, schedule pressure never gets absorbed there.
+  const learningAvg = learningDayList.length
     ? learningDayList.reduce((s, d) => s + minutesFor(d), 0) / learningDayList.length
     : 0;
-
-  for (let pass = 0; pass < 3; pass++) {
-    let movedAny = false;
-    tier2Items
-      .map((_, idx) => idx)
-      .sort((a, b) => minutesFor(days[tier2Items[b].day - 1]) - minutesFor(days[tier2Items[a].day - 1]))
-      .forEach((idx) => {
-        const item = tier2Items[idx];
-        const currentMinutes = minutesFor(days[item.day - 1]);
-        if (currentMinutes <= avgLoad * 1.1) return;
-        // Forward-only, unlike the REVIEW_OFFSETS-era version of this pass
-        // (which nudged ±1/±2 days, since it was smoothing a fixed schedule
-        // computed once, with no notion of a review being "due" on a
-        // specific date). Tier 2's due date is a real ladder date — nudging
-        // it *earlier* than that isn't "smoothing," it's reviewing before
-        // it's actually due, which the design frames specifically as
-        // "rolls to the next day under budget contention" (Repertoire-
-        // Lifecycle.md), not bidirectional flex.
-        const candidates = [item.day + 1, item.day + 2].filter(
-          (d) => d >= item.minDay && learningDaySet.has(d) && !days[d - 1].reviewChunkIds.includes(item.chunkId)
-        );
-        if (!candidates.length) return;
-        const best = candidates.reduce((a, b) => (minutesFor(days[b - 1]) < minutesFor(days[a - 1]) ? b : a));
-        if (minutesFor(days[best - 1]) + 6 < currentMinutes) {
-          days[item.day - 1].reviewChunkIds.splice(days[item.day - 1].reviewChunkIds.indexOf(item.chunkId), 1);
-          days[best - 1].reviewChunkIds.push(item.chunkId);
-          item.day = best;
-          movedAny = true;
-        }
-      });
-    if (!movedAny) break;
-  }
+  const finalBand = scheduleBand(piece, learningAvg);
+  const smoothableItems = [
+    ...transitionItems.map((it) => ({ ...it, bucket: "special", priority: priorityOf(it.id), size: sizeOf(it.id) })),
+    ...comboItems.map((it) => ({ ...it, bucket: "special", priority: priorityOf(it.id), size: sizeOf(it.id) })),
+    ...tier2Items.map((it) => ({ id: it.chunkId, day: it.day, minDay: it.minDay, bucket: "review", priority: priorityOf(it.chunkId), size: sizeOf(it.chunkId) })),
+  ];
+  smoothOverloadedDays({
+    dayNumbers: learningDaysCalendar,
+    items: smoothableItems,
+    loadFor: (d) => minutesFor(days[d - 1]),
+    ceiling: finalBand.ceiling,
+    floor: finalBand.floor,
+    hasItem: (d, id) => days[d - 1].specialChunkIds.includes(id) || days[d - 1].reviewChunkIds.includes(id),
+    moveItem: (item, from, to) => {
+      const bucket = item.bucket === "review" ? "reviewChunkIds" : "specialChunkIds";
+      const list = days[from - 1][bucket];
+      list.splice(list.indexOf(item.id), 1);
+      days[to - 1][bucket].push(item.id);
+      // A review's day is never the same thing as its chunk's introducedDay
+      // — only a transition/combo's own placement day belongs there, and
+      // other code (countBehindDays, isDayFullySwept, etc.) reads it as
+      // that item's real, current day, so it has to stay in sync if this
+      // pass relocates one.
+      if (item.bucket !== "review") introducedDay[item.id] = to;
+    },
+  });
 
   if (consolidationDays) {
     days[consolidationDay - 1].reviewChunkIds = practiceChunks.map((c) => c.id);
@@ -409,7 +622,7 @@ export function computeTimeline(piece, chunkSet) {
     d.minutes = d.type === "consolidation" ? Number(piece.minutesPerDay || 30) : d.type === "rest" ? 0 : Math.round(minutesFor(d));
   });
 
-  return { days, learningDays, consolidationDays, halfPoint, introducedDay };
+  return { days, learningDays, consolidationDays, halfPoint, introducedDay, introductionTierById };
 }
 
 // Rescheduling a piece a *second* time used to discard the first
@@ -518,6 +731,15 @@ function computeEffectiveTimeline(piece, chunkSet, marker) {
     // Chunks not in the rescheduled remainder (already practiced) keep
     // their original introduction day; only the re-placed ones shift.
     introducedDay: { ...original.introducedDay, ...shiftedIntroducedDay },
+    // No day-shifting needed here (a tier number isn't a day) — just the
+    // same "already-practiced chunks keep their old value, the remainder
+    // gets its freshly-recomputed one" merge introducedDay already uses.
+    // Previously dropped entirely by this wrapper (computeTimeline's own
+    // return includes it, but this recursive merge built its own object
+    // from an explicit field list that didn't) — nothing reads it yet, but
+    // there's no reason a rescheduled piece's tier data should be any less
+    // available than a never-rescheduled one's.
+    introductionTierById: { ...original.introductionTierById, ...sub.introductionTierById },
   };
 }
 

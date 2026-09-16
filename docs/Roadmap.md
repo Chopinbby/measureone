@@ -245,6 +245,37 @@ entry for the gap.
 > wasn't kept current enough to carry — same gap, same reason, as the note
 > above.
 
+**Since Pass 89**, introduction order within `computeTimeline` is
+difficulty-first, not raw measure order: hard chunks and their immediate
+measure-neighbors move to the front of the introduction queue, ahead of
+easier material that comes earlier in the piece — so a hard passage late
+in a piece gets more total practice runway before the plan's deadline,
+at the deliberate cost of "day one" no longer always meaning the piece's
+literal opening measures. **Since Pass 90**, a separate, broader
+daily-workload smoothing pass replaces the old reviews-only version:
+introduction, transitions/combos, and Tier 2 reviews are all balanced
+together against a scheduleMode-aware load band, settling once every day
+is in-band rather than chasing a perfectly even load. **Same-session
+follow-up**, once rescheduling was checked against Pass 89's reorder: a
+neighbor-detection bug specific to a rescheduled remainder (a chunk could
+look adjacent to a hard chunk purely because whatever used to sit between
+them had already been practiced and dropped out of the list) was found
+and fixed. See
+[Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
+and [Decisions.md](Decisions.md#scheduling) for both.
+
+**Same broader session**, on direct request: Daily Practice can now show a
+read-only card for something genuinely completed on a day whose live
+schedule no longer lists it there (an item Pass 90's smoothing relocated,
+or a review whose due date has since advanced past that occurrence) — the
+underlying session record was never actually lost, but the day-by-day
+views only ever showed the *current* live projection until now. Scoped to
+Daily Practice only for now; Timeline/Week view/Master Agenda don't render
+individual item cards today, only rolled-up range badges, so extending
+this there is a distinct, larger change. See
+[Algorithms.md#historical-cards-on-daily-practice](Algorithms.md#historical-cards-on-daily-practice)
+and [Decisions.md](Decisions.md#ux).
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold
@@ -280,11 +311,17 @@ assuming this section is stale.
    `handleLogSession` on every logged session) — see
    [Data-Model.md](Data-Model.md#the-piece-object) and
    [Algorithms.md#session-outcomes--the-maintenance-ladder](Algorithms.md#session-outcomes--the-maintenance-ladder).
-   **The Tier 1/Tier 2 split resolving budget contention during the
-   front-loaded introduction window is also built** (`computeTimeline`,
+   **The Tier 1/Tier 2 split placing review during the front-loaded
+   introduction window is also built** (`computeTimeline`,
    `src/lib/scheduling.js` — see
    [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
-   rule 4). **Post-run-through logging is also built**: the consolidation-day
+   rule 4). **Since Pass 90, the budget-contention part of that story is a
+   separate, broader mechanism**: daily-workload smoothing now covers
+   introduction, transitions/combos, and Tier 2 reviews together against a
+   scheduleMode-aware load band, replacing what used to be a narrower
+   pass that could only ever relieve an overloaded day by moving reviews —
+   see [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
+   rule 5 and [Decisions.md](Decisions.md#scheduling). **Post-run-through logging is also built**: the consolidation-day
    checklist captures a stop count, and the Piece Map's rough/lost flag
    demotes a chunk's ladder stage and pins its next review to today (see
    [Repertoire-Lifecycle.md#post-run-through-logging](Repertoire-Lifecycle.md#post-run-through-logging)).

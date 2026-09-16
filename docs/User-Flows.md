@@ -94,7 +94,13 @@ than jumping to a specific day.
    [UX-Principles.md](UX-Principles.md#direct-manipulation-over-confirmation-ceremony)).
    **Since Pass 23**, each item also carries an inline, editable free-text
    note (reusing `piece.memoryAnchors`, labeled "Notes" in the UI) — "+ Add
-   a note" / "Edit note," committing on blur.
+   a note" / "Edit note," committing on blur. **Since Pass 90**, a day can
+   also show read-only cards for something genuinely completed there that
+   the live schedule no longer lists on that day (a transition/combo
+   Pass 90's own smoothing relocated, or a review whose due date has since
+   moved past this occurrence) — no timer/inputs/log button, just the
+   logged outcome and a link to wherever the item is scheduled now. See
+   [Algorithms.md](Algorithms.md#historical-cards-on-daily-practice).
 4. `SectionRunThroughPanel` appears once it has anything to show — since
    Pass 49, that's not a one-time unlock but a repeating gate (due, then
    not due, then due again as practice continues), plus a locked/grayed

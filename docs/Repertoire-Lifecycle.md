@@ -425,7 +425,10 @@ not obvious from the design above:**
   ladder state and starts taking the Tier 2 path like any other chunk.
 - **"Rolls to the next day" is enforced as strictly forward-only, not a
   bidirectional nudge.** The review-load-smoothing mechanism Tier 2 reuses
-  (Algorithms.md#timeline--scheduler, rule 5) was inherited from the
+  (Algorithms.md#timeline--scheduler, rule 5 — **since Pass 90, a broader
+  mechanism that also covers introduction and transitions/combos, not a
+  Tier-2-only pass anymore**, though the forward-only rule below still
+  applies to a review exactly as it always has) was inherited from the
   pre-ladder fixed-offset system, which nudged a review ±1 or ±2 days in
   *either* direction — harmless there, since it had no specific "due date"
   to respect. Discovered via manual browser verification during the Pass 5

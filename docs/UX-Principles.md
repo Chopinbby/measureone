@@ -218,3 +218,17 @@ codebase — as the fix for the specific bug shape above, and as a general
 "only show this on real today" tool for ordinary display decisions — so
 finding it somewhere doesn't by itself imply a leak was being fixed there.
 See [Decisions.md](Decisions.md#ux).
+
+**Since Pass 90, a new function was built adjacent to this exact trap and
+correctly avoids it from the start — a positive example worth keeping
+alongside the four fixes above.** `findHistoricalItemsForDay`
+(`lib/history.js`), which finds what was genuinely completed on a day the
+live schedule no longer lists it on, takes `day` as an explicit parameter
+and reads that specific day's own `doneDays`/`sessions` — never a live,
+un-dated "what's true right now" computation. Rendered from a component
+(`DayChecklist`) that also renders real today, a past day, a future day,
+and (in "View all") every day at once, this is exactly the shape the
+mistake above needs to occur in — and doesn't, because the underlying
+function was written dated from the outset rather than needing a
+display-layer `isRealToday` gate bolted on after the fact. See
+[Algorithms.md](Algorithms.md#historical-cards-on-daily-practice).

@@ -75,7 +75,97 @@ introduced, not batched into the back half.**
   the *combos* loop — if it reappears on the *transitions* loop, that's the
   bug returning. See [Algorithms.md](Algorithms.md#timeline--scheduler).
 
+**Decision (Pass 89): introduction order is difficulty-first, not raw
+measure order — hard chunks and their immediate measure-neighbors move to
+the front of the introduction queue, ahead of easier material that comes
+earlier in the piece.**
+
+- **Why:** A hard passage sitting late in a piece's raw measure order used
+  to wait its turn behind everything before it, regardless of difficulty —
+  so the material most likely to need the most repetitions got the least
+  runway before the plan's own deadline. Front-loading it instead gives it
+  more total practice time across the plan.
+- **Mechanism:** `sortPracticeChunksForIntroduction`
+  (`lib/scheduling.js`) sorts a copy of `practiceChunks` into 4 tiers
+  before the existing effort-spreading placement loop (the loop itself is
+  untouched — only the order it's fed changes): tier 0 (a chunk whose
+  trouble spots just resolved — no data source yet, since the Trouble-spot
+  pass hasn't shipped, so this tier is always empty for now, built early so
+  that pass doesn't need to touch this sort again), tier 1 (hard chunks),
+  tier 2 (a hard chunk's immediate array-neighbor — one measure-chunk
+  before or after it), tier 3 (everything else). Ties within a tier keep
+  measure order via a stable sort.
+- **Neighbor definition confirmed, not assumed:** tier 2's "immediate
+  measure-neighbor" is `practiceChunks[i-1]`/`practiceChunks[i+1]` — the
+  same adjacency `generateComboChunks` (`lib/chunking.js`) already uses to
+  build a combo around a hard chunk. Checked against that function before
+  building this, rather than inventing a second definition of adjacency.
+- **Accepted, not chased:** a hard chunk's neighbor's own neighbor (one
+  degree further out) stays at tier 3 — this pass only reaches one degree
+  out, not a wider blast radius around each hard chunk.
+- **Deliberate UX consequence:** day one of a plan no longer necessarily
+  shows the piece's literal opening measures — it shows whichever material
+  is highest-priority under this order, which can be a hard passage from
+  anywhere in the piece. A learner expecting "day one starts at the
+  beginning" will see something different for a piece with hard material
+  later on.
+- **Scope, deliberately bounded:** this pass only reorders *which day a
+  chunk is introduced on* — it doesn't touch daily-load balancing (a
+  separate, later smoothing pass) and doesn't change transitions' or
+  combos' own placement logic, which already depend only on
+  `introducedDay` lookups (never chunk-array position) and so need no
+  changes to keep working correctly under the new order.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler).
+
+**Fix (same-session follow-up to Pass 90, on direct request): tier 2's
+neighbor check must survive a rescheduled remainder's gaps.**
+
+- **Why:** rescheduling reuses `computeTimeline` on a *filtered*
+  `practiceChunks` — only whatever's still unpracticed, per
+  `getEffectiveTimeline`. The original neighbor check compared array
+  position (`practiceChunks[i-1]`/`[i+1]`), which happens to equal true
+  measure adjacency on the pristine, gapless list this sort normally
+  receives — but once rescheduling removes an already-practiced chunk from
+  the middle, two chunks that are *not* really next to each other in the
+  piece can end up array-adjacent purely because whatever used to sit
+  between them is gone. Confirmed as a real, reproduced bug (not
+  hypothetical): a chunk two measure-chunks away from a hard one got
+  wrongly promoted to tier 2 once the chunk actually between them had
+  already been practiced and dropped out of the remainder — its own
+  genuine neighbor still got correctly prioritized, but so did this
+  unrelated, farther-away chunk.
+- **Important nuance: this was never "rescheduling doesn't know about the
+  new rules."** Rescheduling calls the very same `computeTimeline` that
+  Pass 89/90 modified — the tier-sort and the daily-workload smoothing both
+  already ran on a reschedule's remainder before this fix, correctly. The
+  bug was narrower and easy to conflate with that broader-sounding
+  framing: only the *neighbor* half of tier 2 broke, and only once a chunk
+  from the middle of the sequence had already been removed.
+- **Fix:** match neighbors by actual measure boundary
+  (`prevChunk.end + 1 === c.start` / `c.end + 1 === nextChunk.start`)
+  instead of raw array index. The two are equivalent on the pristine list
+  (nothing changes there — the existing [Pass 89] tests still pass
+  unchanged), and boundary matching correctly finds *no* neighbor across a
+  gap instead of inventing a false one.
+- **Same-session follow-up within this fix:** `introductionTierById` was
+  also being silently dropped by `getEffectiveTimeline`'s own explicit
+  return shape (it never spreads `computeTimeline`'s full result) — fixed
+  by merging it the same way `introducedDay` already is. Nothing reads it
+  yet outside this pass's own smoothing and tests, but there's no reason a
+  rescheduled piece's tier data should be any less available than a
+  never-rescheduled one's.
+- Verified by reverting the fix and re-running the new regression test to
+  confirm it actually fails, then restoring it — same standard this
+  codebase already holds every regression test to.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler) and
+  [Algorithms.md](Algorithms.md#rescheduling).
+
 **Decision: add a bounded review-load smoothing pass to the scheduler.**
+**Superseded by Pass 90 — see the decision below.** Accurate history of
+what shipped originally, not a description of current behavior: this
+pass only ever moved Tier 2 reviews, and only ever measured load against
+a single `scheduleMode: "days"`-shaped average with no minutes-mode
+variant.
 
 - **Why:** Fixed-offset spaced review (`[1,3,7,14]` days after introduction)
   meant any day with a lot of new introductions produced a correspondingly
@@ -85,6 +175,63 @@ introduced, not batched into the back half.**
   days within their valid window (never before intro+1, never past the plan
   end) rather than redesigning the offset system itself — a targeted fix
   over a bigger rework, since the offsets themselves work fine on average.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler).
+
+**Decision (Pass 90): replace the reviews-only smoothing pass above with
+one unified daily-workload smoothing mechanism covering introduction,
+transitions/combos, and reviews together — not the two running side by
+side.**
+
+- **Why now:** the difficulty-first reorder (Pass 89) can concentrate
+  several heavy chunks onto the same front day; the old mechanism could
+  only ever relieve that by moving *reviews*, never the introductions
+  actually causing it.
+- **Confirmed before building, not guessed at — two real forks:**
+  1. *Replace vs. run alongside.* Two mechanisms with different overload
+     thresholds, each blind to what the other just moved, risked
+     undoing each other's fixes on the same day. Resolved: replace, one
+     mechanism, one set of thresholds.
+  2. *Sequencing inside `computeTimeline`.* Transitions/combos/reviews all
+     compute their placement directly from `introducedDay` — if smoothing
+     could still move a chunk's introduction *after* those existed,
+     whatever was anchored to it would go stale (a transition scheduled
+     off a day its own chunk no longer occupies). The two options were:
+     settle introduction first, or let anything move and reflow whatever
+     depended on it. This codebase has no existing mechanism for that kind
+     of reflow — building one would be a meaningfully bigger, riskier
+     change than resequencing one phase earlier. Resolved: settle
+     introduction first (Phase A.5 in Algorithms.md), so a practice
+     chunk's `introducedDay` is permanently final before rules 2-4 ever
+     read it; only transitions/combos/reviews are eligible for the later,
+     broader pass.
+- **The band, and why it's scheduleMode-aware:** ceiling 125%/floor 80% of
+  the relevant average for `scheduleMode: "days"`; ceiling 110%/floor 90%
+  of `piece.minutesPerDay` for `scheduleMode: "minutes"` — that mode's
+  whole premise is a fixed daily budget, not a derived average, so its
+  band is relative to that fixed number instead.
+- **Move selection:** lowest-priority item first (Pass 89's tier; an
+  untiered item — a transition, combo, or a review of one — defaults to
+  tier 3), same-tier ties broken by smallest size. When more than one
+  forward candidate would help, the one leaving the smaller *combined*
+  distance outside the band (source + destination together) wins — a move
+  that would just relocate the same overshoot elsewhere, or make the total
+  worse, is declined outright rather than forced.
+- **A pre-existing test needed updating, not just re-running, as a direct
+  result:** `test/scheduling.test.mjs`'s "three chunks due on the same
+  overloaded day" test used to assert all three always relocate, under the
+  old mechanism's cruder accept-a-move rule (destination's current load + a
+  flat 6-minute margin < source's current load — blind to whether the
+  destination itself ends up newly overloaded). Confirmed by running that
+  exact fixture against the pre-Pass-90 code: it does relocate all three,
+  but by chaining each one forward across multiple passes into
+  progressively worse territory (day 9 → days 11/12/13) rather than
+  settling nearby — a symptom of the old rule having no concept of "is this
+  actually still a problem," just "is there anything even slightly lighter
+  nearby." Under the new, stricter rule, exactly one of the three stays on
+  day 9 in that fixture, because every candidate move for it would make the
+  *combined* overshoot worse, not better — the test's expected count of
+  reviews left behind changed from 0 to 1 to match this, with the reasoning
+  recorded inline.
 - See [Algorithms.md](Algorithms.md#timeline--scheduler).
 
 **Decision: reserve only the final day as a pure consolidation/run-through
@@ -3773,6 +3920,46 @@ best-case assumption, with a fixed 90-day bar — not compared against
 - See [Algorithms.md](Algorithms.md#tempo-convergence-simulation-pass-62).
 
 ## UX
+
+**Decision: a day whose original content has moved elsewhere shows what was
+actually completed there, not nothing — a full, read-only card, not a
+plain text note.**
+
+- **Why:** `computeTimeline` recomputes fresh on every render — it's a live
+  projection of the current schedule, not a permanent record. A transition/
+  combo Pass 90's smoothing relocates, or a review whose due date has since
+  advanced past this specific occurrence, simply stops appearing on the day
+  it actually happened, even though the underlying session data
+  (`doneDays`/`sessions[]`) never lost it. Browsing back to that day showed
+  nothing there at all — reported directly, from someone trying to go back
+  and check a day after a "Focus block" card had moved.
+- **Two things confirmed before building, not guessed at:** which screens
+  (Daily Practice only, for now — Timeline/Week/Master Agenda don't render
+  individual item cards today, only rolled-up range badges, so extending
+  this there is a distinct, larger change) and what a historical entry
+  should look like (a full `ChecklistItem`-shaped card, not a plain
+  summary line — chosen over the lighter option specifically for visual
+  consistency with everything else on the page, at the cost of a bigger
+  UI change: `ChecklistItem` needed a genuine read-only mode, not just a
+  new line of text).
+- **A "go to next scheduled practice" link was added on the same request**
+  — since the item's occurrence here is no longer live, the natural
+  follow-up is "so where did it go," answered by searching the live
+  schedule forward from this day for the next place this id appears
+  (skipping the consolidation day, which would otherwise trivially "match"
+  every chunk).
+- **Same-session follow-up, once actually seen rendered:** trimmed after
+  looking at it live — the requirement line, the Spaced Repetition status
+  line, and the separate `Completed here` tag all came out. The first two
+  describe what's still needed *going forward*; a historical card is
+  answering a different question ("what happened"), already fully covered
+  by the "Logged: ..." line, so both read as noise once seen next to it.
+  The tag came out for a sharper reason, not just declutter: sitting on a
+  specific day already means "this happened here" — a card that needs to
+  also *say* that is telling the reader something the day heading already
+  told them. The dashed card border is what's left to mark a card
+  historical at a glance.
+- See [Algorithms.md](Algorithms.md#historical-cards-on-daily-practice).
 
 **Decision: Piece Map chunk detail opens as a real modal, not inline below
 the grid.**

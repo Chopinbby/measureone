@@ -149,6 +149,41 @@ chunking, scheduling, and confidence are actually computed, see
     rescheduled again. See
     [`docs/Algorithms.md`](docs/Algorithms.md#rescheduling) and
     [`docs/Decisions.md`](docs/Decisions.md#scheduling).
+  - **Introduction placement must be fully settled (including Pass 90's
+    load-smoothing) before transitions/combos/reviews compute anything
+    from `introducedDay` (Pass 90).** `computeTimeline`'s Phase A.5
+    (introduction-only smoothing, scoped to `frontDays`) runs immediately
+    after chunks are placed and *before* the `transitions.forEach`/
+    `combos.forEach` loops — never after. If a chunk's own introduction
+    day could still change once those loops have already read it, a
+    transition/combo ends up anchored to a day its own dependency has
+    since moved away from. This was a real architectural fork, confirmed
+    before building rather than guessed at: the alternative (let anything
+    move, then reflow whatever was anchored to it) would need a kind of
+    re-derivation this codebase has never built. See
+    [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) rule 1
+    and [`docs/Decisions.md`](docs/Decisions.md#scheduling).
+  - **The daily-workload smoothing pass (`smoothOverloadedDays`,
+    rule 5) must never move a Tier 1 item, in either of its two call
+    sites (Pass 90).** Tier 1 is where schedule pressure deliberately
+    never gets absorbed (see the Tier 1 entry above) — a movable-items
+    pool built for a future extension of this pass that includes Tier 1
+    by accident would silently reintroduce exactly what that design
+    already rejected.
+  - **`sortPracticeChunksForIntroduction`'s hard-chunk-neighbor check
+    matches by measure boundary (`prevChunk.end + 1 === c.start`), never
+    by raw array index (Pass 89, fixed same broader session as Pass 90).**
+    Array-index adjacency is only correct when `practiceChunks` is the
+    pristine, gapless list `generateAllChunks` produces — a rescheduled
+    remainder (`getEffectiveTimeline`'s `subChunkSet.practiceChunks`) is a
+    *filtered* subsequence with gaps wherever an already-practiced chunk
+    was removed, and array-index adjacency there can call two chunks
+    neighbors purely because whatever used to sit between them is gone.
+    Confirmed as a real, reproduced bug, not hypothetical. If you touch
+    this function's neighbor logic, keep the boundary-based match — see
+    [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md#position-based-logic-is-only-correct-for-the-caller-whose-list-it-was-written-against)
+    for the general lesson and
+    [`docs/Decisions.md`](docs/Decisions.md#scheduling) for the incident.
 - **`Wizard` is create-only.** Editing an existing piece always goes through
   `SettingsTab`, never the wizard.
 - **Piece Map chunk detail is a modal, not inline** — this was a deliberate
@@ -1410,3 +1445,68 @@ itself covers:**
   Map) is completely unaffected — a separate render path, never a shared
   component. See [`docs/Decisions.md`](docs/Decisions.md#revival) for the
   full writeup.
+
+**Since Pass 89**, `computeTimeline`'s introduction loop feeds on a
+difficulty-first order, not raw measure order —
+`sortPracticeChunksForIntroduction` (`lib/scheduling.js`) sorts a copy of
+`practiceChunks` into 4 tiers before the existing effort-spreading
+placement loop ever sees it (the loop itself, and transitions'/combos' own
+placement, are untouched — only the order chunks are fed in changes): tier
+0 (a chunk whose trouble spots just resolved — no data source yet, since
+the Trouble-spot pass hasn't shipped, so always empty for now, built early
+so that pass doesn't need to touch this sort again), tier 1 (hard chunks),
+tier 2 (a hard chunk's immediate measure-neighbor, matched the same way
+`generateComboChunks` already defines adjacency — confirmed, not assumed,
+before building), tier 3 (everything else). Deliberate UX consequence: day
+one of a plan no longer necessarily shows the piece's literal opening
+measures. Accepted, not chased: a hard chunk's neighbor's own neighbor
+(one degree further out) stays tier 3. See
+[`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) and
+[`docs/Decisions.md`](docs/Decisions.md#scheduling).
+
+**Since Pass 90**, a single unified daily-workload smoothing pass
+(`smoothOverloadedDays`, `lib/scheduling.js`) replaces what used to be a
+narrower, reviews-only version of the same idea — confirmed before
+building, not guessed at, since running both side by side risked one
+undoing the other's fix on the same day. It runs **twice**: once right
+after chunks are placed (introduction-only, scoped to `frontDays`, before
+transitions/combos/reviews compute anything from `introducedDay` — see the
+new regression note above for why this sequencing is load-bearing), and
+once at the end (transitions + combos + Tier 2 reviews together, Tier 1
+never included). The acceptable load band is scheduleMode-aware — 125%/80%
+of average for `scheduleMode: "days"`, 110%/90% of `minutesPerDay` for
+`scheduleMode: "minutes"` — and a move only happens if it strictly reduces
+total distance outside that band; a move that would just relocate the same
+overshoot elsewhere is declined outright. See
+[`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) rule 5 and
+[`docs/Decisions.md`](docs/Decisions.md#scheduling).
+
+**Same broader session, once rescheduling was checked against Pass 89's
+reorder:** a real bug was found and fixed — see the new regression note
+above (`sortPracticeChunksForIntroduction`'s neighbor check, array index
+vs. measure boundary). Not "rescheduling doesn't apply the new rules" (it
+does; it calls the same `computeTimeline`) — narrower than that, and easy
+to conflate with the broader claim at first.
+
+**Also since Pass 90, on direct request:** Daily Practice (`DayChecklist`)
+can show a read-only card for something genuinely completed on a day whose
+*current* live schedule no longer lists it there — a transition/combo this
+pass's own smoothing relocated, or a review whose due date has since
+advanced past that occurrence. The underlying session record
+(`doneDays`/`sessions[]`) was never actually lost; only the live,
+recomputed-every-render projection had nowhere left to show it.
+`findHistoricalItemsForDay`/`findNextOccurrenceDay` (`lib/history.js`) are
+plain, reusable `lib/` functions — not wired into `DayChecklist`'s own
+state — specifically so a later pass extending this to Week view doesn't
+need to redo the lookup. `ChecklistItem`'s new `historical` prop hides the
+timer, reps/BPM inputs, fail checkbox, log/undo controls, and note
+editing; **same-session follow-up, once seen actually rendered**, it also
+hides the requirement line and the Spaced Repetition line (both answer
+"what's needed going forward," not this card's question) and drops the
+separate `Completed here` tag entirely (sitting on a specific day already
+implies that) — leaving just the "Logged: ..." line and a `Go to next
+scheduled practice (Day N) →` link. Daily Practice only for now — Timeline/
+Week view/Master Agenda don't render individual item cards, only rolled-up
+range badges. See
+[`docs/Algorithms.md`](docs/Algorithms.md#historical-cards-on-daily-practice)
+and [`docs/Decisions.md`](docs/Decisions.md#ux).

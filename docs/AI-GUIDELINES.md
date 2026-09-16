@@ -820,6 +820,38 @@ direct follow-up request — the pool-scoping bug and its fix are still
 worth knowing, since a future re-add of a similar field would reintroduce
 the identical trap.)
 
+## Position-based logic is only correct for the caller whose list it was written against
+
+When new logic derives a relationship from *array position* (previous/next
+element, index adjacency) rather than from the data's own identifying
+fields, it's only actually correct for whichever callers pass the array in
+its pristine, complete form. Before trusting it, grep for every existing
+caller of the function that will receive this array and check whether any
+of them pass a *filtered subset* instead — removing an element from the
+middle silently makes two originally-non-adjacent elements look adjacent by
+position, with no error and no obviously wrong output to notice.
+
+Worked example (Pass 89, caught only once the user asked for rescheduling
+to be checked against it): `sortPracticeChunksForIntroduction`'s original
+"is this chunk a hard chunk's neighbor" check compared array position
+(`practiceChunks[i-1]`/`[i+1]`) — correct for `generateAllChunks`'s
+pristine, gapless output, which is what every *other* existing caller of
+`computeTimeline` passes. But `getEffectiveTimeline` (rescheduling) calls
+the same `computeTimeline` on `subChunkSet.practiceChunks` — a *filtered*
+list containing only whatever's left unpracticed, with gaps wherever an
+already-done chunk used to sit. Once a chunk that genuinely sat between a
+hard chunk and some other chunk got marked done and dropped from that
+filtered list, the other chunk became array-adjacent to the hard chunk
+purely because nothing sat between them *in the filtered list* — wrongly
+promoting it to the hard chunk's priority tier, despite not actually being
+next to it in the piece. Reproduced directly (a hand-built reschedule
+marker, checked before and after the fix) rather than reasoned about only.
+Fixed by matching on actual measure boundaries
+(`prevChunk.end + 1 === c.start`) instead of array index — equivalent to
+the position-based version on a pristine list, and correctly finds no
+match across a gap instead of inventing one. See
+[Decisions.md](Decisions.md#scheduling) for the full incident.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

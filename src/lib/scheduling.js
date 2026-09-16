@@ -657,15 +657,40 @@ export function computeRemainingConnectorIds(piece, chunkSet) {
 // `marker` is null when there's nothing to protect (every practice chunk
 // introduced and no connector both untouched and overdue) — the same
 // condition handleReschedule's dialog already declines to open for.
-export function computeRescheduleRemainder(piece, chunkSet, timeline, realCurrentDay) {
-  const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, realCurrentDay);
+//
+// Anchors asOfDay to elapsedDay(piece) — the real, unclamped calendar day —
+// rather than accepting a currentDay/realCurrentDay from the caller.
+// Reported live: extending a piece's target date from a plan that had
+// already fully expired (the common "very behind" case this function
+// exists for) produced a WORSE "days behind" figure than before the
+// extension. Cause: App.jsx's realCurrentDay is getCurrentDay(piece,
+// CURRENT plan length) — clamped to whatever daysToLearn was *before* the
+// extension being applied in this same action. Building the marker from
+// that stale, clamped value bakes in the OLD plan's last day as asOfDay;
+// once the piece is saved with a longer daysToLearn, every day between
+// that stale asOfDay and the real elapsed day is freshly populated with
+// "remaining" content that was never actually lived through on those
+// specific days, so it all reads as newly "behind" — confirmed live: 9
+// days behind before, 30 after extending the target date by two weeks.
+// elapsedDay(piece) has no dependency on plan length at all, so it's
+// always the right anchor regardless of whether this same action is also
+// changing daysToLearn — computeEffectiveTimeline's own
+// `clamp(marker.asOfDay, 1, original.days.length)` still does the actual
+// day-count clamping, against whatever the CURRENT plan length is at read
+// time. For a piece not past its own plan, elapsedDay(piece) and the old
+// realCurrentDay parameter were always numerically identical, so this is
+// a no-op for the common case and only changes behavior for the exact
+// already-expired-plan case this bug lived in.
+export function computeRescheduleRemainder(piece, chunkSet, timeline) {
+  const asOfDay = elapsedDay(piece);
+  const status = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, asOfDay);
   const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
   const qualifyingConnectorIds = remainingConnectorIds.filter(
-    (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < realCurrentDay
+    (id) => timeline.introducedDay[id] && timeline.introducedDay[id] < asOfDay
   );
   const marker =
     status.remainingChunkIds.length > 0 || qualifyingConnectorIds.length > 0
-      ? { asOfDay: realCurrentDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null }
+      ? { asOfDay, remainingChunkOrder: status.remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null }
       : null;
   return { remainingChunkIds: status.remainingChunkIds, remainingConnectorIds, qualifyingConnectorIds, marker };
 }

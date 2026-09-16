@@ -2037,13 +2037,18 @@ describe("[regression] a schedule-only Settings save (e.g. changing the target d
   // computation handleReschedule's own button already trusted — is what
   // handleSavePiece now uses instead, for a schedule-only edit.
   test("computeRescheduleRemainder's marker excludes a touched chunk from the remainder and includes untouched ones", () => {
+    // startDate 9 days before "today" so elapsedDay(piece) — what
+    // computeRescheduleRemainder now anchors asOfDay to internally — comes
+    // out to a known 10, the same value this test used to pass in directly.
     const piece = basePiece({
       totalMeasures: 12, customChunkSize: 4, daysToLearn: 20,
+      startDate: addDaysISO(todayISODate(), -9),
       progress: { c9: { doneDays: [7], sessions: [] } }, // c9 practiced once already
     });
     const chunkSet = generateAllChunks(piece);
     const timeline = getEffectiveTimeline(piece, chunkSet);
-    const { marker } = computeRescheduleRemainder(piece, chunkSet, timeline, 10);
+    const { marker } = computeRescheduleRemainder(piece, chunkSet, timeline);
+    assert.equal(marker.asOfDay, 10, "test setup sanity check: elapsedDay(piece) resolved to the intended 10");
     assert.ok(marker, "there's real untouched work (c1, c5), so a marker should be built");
     assert.ok(!marker.remainingChunkOrder.includes("c9"), "c9 already has a logged session — it must not be swept into the remainder");
     assert.ok(marker.remainingChunkOrder.includes("c1") && marker.remainingChunkOrder.includes("c5"), "c1 and c5 are genuinely untouched — they belong in the remainder");
@@ -2056,17 +2061,17 @@ describe("[regression] a schedule-only Settings save (e.g. changing the target d
     // effort-last, so extending daysToLearn pushes its *fresh* placement
     // later — empirically day 7 under daysToLearn: 20, day 14 under
     // daysToLearn: 40 (both computed by generateAllChunks/computeTimeline
-    // directly, not asserted a priori) — landing on/after realCurrentDay,
-    // which is exactly the "today's task list" surface the bug report was
-    // about.
+    // directly, not asserted a priori) — landing on/after today, which is
+    // exactly the "today's task list" surface the bug report was about.
+    const realCurrentDay = 10;
     const before = basePiece({
       totalMeasures: 12, customChunkSize: 4, daysToLearn: 20,
+      startDate: addDaysISO(todayISODate(), -(realCurrentDay - 1)),
       progress: { c9: { doneDays: [7], sessions: [] } },
     });
     const chunkSet = generateAllChunks(before);
     const beforeTimeline = getEffectiveTimeline(before, chunkSet);
-    const realCurrentDay = 10;
-    const { marker } = computeRescheduleRemainder(before, chunkSet, beforeTimeline, realCurrentDay);
+    const { marker } = computeRescheduleRemainder(before, chunkSet, beforeTimeline);
 
     // Simulates changing the target date in Settings: same piece, same
     // progress, a materially different daysToLearn (chunkSet is unaffected —
@@ -2094,5 +2099,41 @@ describe("[regression] a schedule-only Settings save (e.g. changing the target d
     // separate, already-solved concern (isDayFullySwept's own "done
     // elsewhere" check, independent of remainingChunkOrder — see its comment
     // above), not this fix's job.
+  });
+
+  test("[regression] extending the target date from a plan that has already fully expired must not spike the behind-days count", () => {
+    // Reported live: a plan already well past its own target date, extended
+    // two weeks further out via a plain Settings save, went from 9 days
+    // behind to 30. Root cause: computeRescheduleRemainder used to anchor
+    // asOfDay on the caller's realCurrentDay, which App.jsx computes as
+    // elapsedDay clamped to the CURRENT (pre-extension) plan length — i.e.
+    // the old plan's own last day, not real "today". Once daysToLearn grows
+    // to accommodate the extension, every day between that stale asOfDay
+    // and the real elapsed day gets freshly populated with "remaining"
+    // content that was never actually lived through on those specific
+    // days, so it all reads as newly behind.
+    const trueElapsed = 34;
+    const oldDaysToLearn = 20; // already 14 days past its own plan
+    const before = basePiece({
+      totalMeasures: 40, customChunkSize: 4, daysToLearn: oldDaysToLearn,
+      startDate: addDaysISO(todayISODate(), -(trueElapsed - 1)),
+      progress: { c1: { doneDays: [1] }, c5: { doneDays: [4] } }, // 2 of 10 chunks genuinely practiced
+    });
+    const chunkSet = generateAllChunks(before);
+    const beforeTimeline = getEffectiveTimeline(before, chunkSet);
+    assert.equal(elapsedDay(before), trueElapsed, "test setup sanity check");
+    assert.equal(getCurrentDay(before, beforeTimeline.days.length), oldDaysToLearn, "test setup sanity check: the old plan is short enough that realCurrentDay would have been clamped to it");
+
+    const { marker } = computeRescheduleRemainder(before, chunkSet, beforeTimeline);
+    assert.equal(marker.asOfDay, trueElapsed, "asOfDay must anchor to the real elapsed day, not the old (about-to-be-superseded) plan length");
+
+    // Simulates "set the target date out 2 more weeks": daysToLearn grows
+    // enough to comfortably fit the real elapsed day plus the remaining work.
+    const after = { ...before, daysToLearn: 40, rescheduleMarker: marker };
+    const afterTimeline = getEffectiveTimeline(after, chunkSet);
+    const afterRealCurrentDay = getCurrentDay(after, afterTimeline.days.length);
+    assert.equal(afterRealCurrentDay, trueElapsed, "test setup sanity check: the extended plan now comfortably fits the real elapsed day");
+    const behind = countBehindDays(after, afterTimeline, afterRealCurrentDay);
+    assert.ok(behind < 5, `expected a small, sane behind-days count after the extension, got ${behind} (a large figure means asOfDay was anchored to the stale pre-extension plan length again)`);
   });
 });

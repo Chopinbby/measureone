@@ -74,20 +74,29 @@ const NAV_BASE = [
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
-// Fields that regenerate practice-chunk identity (mirrors ScheduleFields.jsx's
-// own chunkSet-recompute dependency list exactly). Anything outside this list
-// — targetDate, minutesPerDay, practiceDaysPerWeek, scheduleMode, startDate —
-// only changes pacing, never which chunks exist. handleSavePiece uses this to
-// tell a pure pacing edit apart from one that also touched chunk structure.
-const CHUNK_STRUCTURE_FIELDS = [
-  "totalMeasures",
-  "measureDifficulty",
-  "chunkMode",
-  "customChunkSize",
-  "recurringMode",
-  "recurringMeasures",
-  "recurringPairs",
-];
+// Fields that regenerate practice-chunk IDENTITY (ids/boundaries) —
+// generatePracticeChunks (lib/chunking.js) builds `id: c${start}` from a
+// loop over totalMeasures stepped by chunkMode/customChunkSize alone,
+// nothing else. Originally this list also included measureDifficulty,
+// recurringMode, recurringMeasures, and recurringPairs — mirroring
+// ScheduleFields.jsx's own chunkSet-recompute dependency list — but that
+// list answers a different question (which fields change total EFFORT,
+// so the Schedule tab's minutesNeeded/daysToLearn estimate should
+// refresh), not "which fields change chunk ids." Difficulty/recurring
+// fields only feed weightedDifficultyFromArray/effortMultiplier — real
+// scheduling inputs, but the chunk id a session was logged against is
+// completely unaffected by them. Treating them as identity-changing was
+// a real, reported bug: reassessing 2 chunks as hard/difficult cleared
+// rescheduleMarker (see handleSavePiece below) exactly like a target-date
+// edit did before that was fixed, so already-practiced chunks could get
+// freshly re-spread and read as behind purely from the effort-weighted
+// day placement shifting under them. Anything outside this list — target
+// date, minutes/day, practice days/week, schedule mode, start date, AND
+// difficulty/recurring — only changes pacing/effort, never which chunks
+// exist. handleSavePiece uses this to tell an edit that's safe to
+// preserve reschedule history across apart from one that regenerates
+// chunk ids outright.
+const CHUNK_STRUCTURE_FIELDS = ["totalMeasures", "chunkMode", "customChunkSize"];
 
 // Renders nothing for an active piece — there's no badge for the default
 // state, only for the two that pull a piece off the daily agenda.
@@ -557,28 +566,28 @@ export default function App() {
     // of the comparison. A no-op, same object back, when nothing was
     // actually orphaned by this edit.
     const progress = migrateOrphanedProgress(piece, updated);
-    // A save that only touched pacing (target date, minutes/day, practice
-    // days/week, schedule mode, start date) — not anything that regenerates
-    // chunk identity — used to still always drop rescheduleMarker to null,
-    // same as every other edit, falling back to a from-scratch
-    // computeTimeline on the next render. That function has no notion of
-    // piece.progress at all: it freely re-labels every practice chunk "new"
-    // by where it lands in the newly spread schedule, regardless of
-    // doneDays — so simply retyping the target date here (including via the
-    // reschedule dialog's own "Set new target date" escape hatch, which
-    // lands on this exact save path) could make an already-practiced chunk
-    // read as brand new. computeRescheduleRemainder is the same "what's
-    // actually still untouched" computation handleReschedule's own button
-    // already trusts — reusing it here keeps that distinction intact for
-    // this entry point too, chained onto any existing reschedule history the
-    // same way. Only applies when nothing chunk-structural changed; an edit
-    // that also touched measures/difficulty/chunking falls through to the
-    // pre-existing behavior, since chunk ids may not mean the same thing
-    // anymore anyway (migrateOrphanedProgress, above, is what handles that
-    // case).
+    // A save that doesn't regenerate chunk ids (see CHUNK_STRUCTURE_FIELDS)
+    // — pacing fields, or a difficulty/recurring reassessment — used to
+    // still always drop rescheduleMarker to null, same as every other edit,
+    // falling back to a from-scratch computeTimeline on the next render.
+    // That function has no notion of piece.progress at all: it freely
+    // re-labels every practice chunk "new" by where it lands in the newly
+    // spread schedule, regardless of doneDays — so simply retyping the
+    // target date here (including via the reschedule dialog's own "Set new
+    // target date" escape hatch, which lands on this exact save path), or
+    // reassessing a chunk's difficulty, could make an already-practiced
+    // chunk read as brand new or newly behind. computeRescheduleRemainder
+    // is the same "what's actually still untouched" computation
+    // handleReschedule's own button already trusts — reusing it here keeps
+    // that distinction intact for this entry point too, chained onto any
+    // existing reschedule history the same way. Only an edit that actually
+    // regenerates chunk ids (totalMeasures/chunkMode/customChunkSize) falls
+    // through to the pre-existing behavior, since a chunk id from before
+    // that edit may not even exist anymore (migrateOrphanedProgress, above,
+    // is what handles reattaching progress in that case).
     const scheduleOnlyEdit = CHUNK_STRUCTURE_FIELDS.every((f) => updated[f] === piece[f]);
     const rescheduleMarker = scheduleOnlyEdit
-      ? computeRescheduleRemainder(piece, chunkSet, timeline, realCurrentDay).marker
+      ? computeRescheduleRemainder(piece, chunkSet, timeline).marker
       : null;
     updatePiece(ensureWorkId({ ...updated, progress, rescheduleMarker }));
     setEditDraftState(null);
@@ -1492,13 +1501,16 @@ export default function App() {
     new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
   const handleReschedule = () => {
-    // Pass 74: anchored to realCurrentDay, not currentDay — currentDay is
-    // whatever day is currently being browsed (Timeline/day-nav can set it
-    // to a past or future day via dayOverride), and reschedule eligibility,
-    // fit estimation, and the new marker's asOfDay must all be measured
-    // against the real current day regardless of what's on screen. Reported
-    // live as a marker anchored to a browsed past day (e.g. day 19 while
-    // real-today was day 29) instead of today.
+    // Pass 74: fit estimation below is anchored to realCurrentDay, not
+    // currentDay — currentDay is whatever day is currently being browsed
+    // (Timeline/day-nav can set it to a past or future day via
+    // dayOverride), and reschedule eligibility and fit estimation must be
+    // measured against the real current day regardless of what's on
+    // screen. Reported live as a marker anchored to a browsed past day
+    // (e.g. day 19 while real-today was day 29) instead of today. The new
+    // marker's own asOfDay is a separate concern, computed inside
+    // computeRescheduleRemainder from elapsedDay(piece) directly — see its
+    // comment for why that can't just reuse realCurrentDay either.
     // Pass 73 follow-up to Pass 65: a transition/combo's own logged status
     // was never checked directly anywhere in the reschedule mechanism —
     // computeEffectiveTimeline could only infer it indirectly from whether
@@ -1507,7 +1519,7 @@ export default function App() {
     // reschedule, forever, no matter how many times the piece was
     // rescheduled again (confirmed, reported precisely). computeRescheduleRemainder
     // checks the connector directly instead of guessing from its neighbors.
-    const { remainingChunkIds, remainingConnectorIds, marker } = computeRescheduleRemainder(piece, chunkSet, timeline, realCurrentDay);
+    const { remainingChunkIds, remainingConnectorIds, marker } = computeRescheduleRemainder(piece, chunkSet, timeline);
     if (!marker) {
       // Genuinely nothing to do: every practice chunk has been introduced
       // AND no connector is both untouched and overdue. isPlanActuallyComplete's

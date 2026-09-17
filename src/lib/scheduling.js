@@ -1037,7 +1037,21 @@ export function planRescheduleForPieces(pieces) {
         // computeEffectiveTimeline for why a piece rescheduled more than
         // once needs that chain instead of always re-deriving from the raw,
         // never-rescheduled schedule.
-        marker: { asOfDay, remainingChunkOrder: remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
+        //
+        // asOfDay here is elapsedDay(piece) — the real, unclamped calendar
+        // day — NOT the `asOfDay` local above (getCurrentDay, clamped to
+        // the CURRENT/pre-extend plan length). Same bug computeRescheduleRemainder
+        // was fixed for (see its comment in this file): when `extend` also
+        // grows daysToLearn in this same action, a marker anchored to the
+        // old plan's last day leaves every day between that stale point and
+        // today freshly populated with "remaining" content that was never
+        // actually lived through, reading as newly behind — this is a
+        // second, independent copy of that exact computation that drifted
+        // out of sync with the fix, not covered by it. `asOfDay` (clamped)
+        // is still the right anchor for `fit` above — "does what's left fit
+        // in what THIS plan currently has left" is genuinely about the
+        // current, pre-extension length.
+        marker: { asOfDay: elapsedDay(piece), remainingChunkOrder: remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
         extend,
       });
     } catch (e) {

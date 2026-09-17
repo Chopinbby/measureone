@@ -1611,6 +1611,27 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
     assert.equal(plan.extend.targetDate, addDaysISO(piece.startDate, plan.extend.daysToLearn - 1));
   });
 
+  test("[regression] the marker's own asOfDay is also anchored to elapsedDay, not the clamped getCurrentDay, for a piece already past its own plan", () => {
+    // Sibling bug to the one above, in the same function: eligiblePieceContext's
+    // local `asOfDay` (getCurrentDay, clamped to the CURRENT/pre-extend plan
+    // length) is still exactly right for `fit`/`extend` above — "does what's
+    // left fit in what THIS plan currently has left" is genuinely about the
+    // pre-extension length — but it was also, separately, being used to
+    // anchor the MARKER itself. Once `extend` grows daysToLearn in the same
+    // action, a marker anchored to the OLD plan's last day (10, here) rather
+    // than today (30) leaves every day from 10 to 30 freshly populated with
+    // "remaining" content that was never actually lived through on those
+    // specific days — reported live as a piece reading MORE behind right
+    // after a target-date extension, not less. Reproduces the exact
+    // fixture the `extend` test above uses, since that's precisely the
+    // shape (already past its own plan) where elapsedDay and the clamped
+    // getCurrentDay diverge.
+    const piece = basePiece({ name: "Old", daysToLearn: 10, startDate: startedDaysAgo(20) });
+    const [plan] = planRescheduleForPieces({ piece });
+    assert.equal(elapsedDay(piece), 21, "test setup sanity check");
+    assert.equal(plan.marker.asOfDay, 21, "the marker must anchor to the real elapsedDay (21), not getCurrentDay clamped to the old 10-day plan");
+  });
+
   test("a piece that's merely tight but still inside its own plan gets no `extend` — unchanged pack-into-what's-left behavior", () => {
     const piece = behindPieceOnDay6({ name: "Tight", totalMeasures: 200, measureDifficulty: Array(200).fill(1) });
 

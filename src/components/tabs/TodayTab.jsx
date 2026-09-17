@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, Target } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { FocusPanel } from "./today/FocusPanel";
+import { FocusSpotCard } from "./today/FocusSpotCard";
 import { SectionRunThroughPanel } from "./today/SectionRunThroughPanel";
 import { ColdStartPanel } from "./today/ColdStartPanel";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
@@ -15,8 +16,56 @@ import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../l
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival, getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
 import { isManualConfidence } from "../../lib/confidence";
-import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, isDayFullySwept } from "../../lib/scheduling";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, isDayFullySwept, focusSpotGate } from "../../lib/scheduling";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, formatRange, hasPendingProvisionalSession } from "../../lib/utils";
+
+// Pass 91 (experimental v1) — every practice chunk's unresolved focus spots,
+// one FocusSpotCard per spot (a chunk with more than one open spot gets one
+// card each, not one card for the whole chunk — docs/Algorithms.md#focus-spots-v1).
+// `gated` (no introducedDay in the live timeline) only changes each card's
+// own bottom-note wording; the actual scheduling consequence already
+// happened inside computeTimeline (lib/scheduling.js) by the time this
+// renders. Deliberately separate from computeTimeline placement, same as
+// the pass calls for — this reads piece.progress directly, not
+// timeline.days[], so a gated chunk's drill is reachable even though the
+// chunk itself is nowhere in today's (or any day's) checklist.
+function FocusSpotsPanel({ piece, chunks, timeline, onLogFocusSpotTime, onUnlogFocusSpotTime, onResolveFocusSpot }) {
+  const rows = [];
+  chunks
+    .filter((c) => c.kind === "section")
+    .forEach((chunk) => {
+      const { unresolved } = focusSpotGate(piece.progress[chunk.id]);
+      unresolved.forEach((spot) => {
+        rows.push({ chunk, spot, gated: timeline.introducedDay[chunk.id] == null, siblingCount: unresolved.length });
+      });
+    });
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="panel focus-spot-panel" id="focus-spots-panel">
+      <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}><Target size={16} /> Focus spots</h3>
+      <p className="focus-spot-summary">
+        Resolve focus spot{rows.length === 1 ? "" : "s"} to add the chunk to daily practice.
+      </p>
+      <div className="focus-spot-cards">
+        {rows.map(({ chunk, spot, gated, siblingCount }) => (
+          <FocusSpotCard
+            key={spot.id}
+            chunk={chunk}
+            spot={spot}
+            gated={gated}
+            siblingCount={siblingCount}
+            requiredMinutes={piece.troubleSpotDefaultMinutes ?? 5}
+            onLogTime={onLogFocusSpotTime}
+            onUnlogTime={onUnlogFocusSpotTime}
+            onResolve={onResolveFocusSpot}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
 // N" left to show — the plan grid is exhausted, but the maintenance ladder
@@ -112,6 +161,10 @@ export function TodayTab({
   onEndRevival,
   onAssessmentTimerRiskChange,
   onConfirmLeaveAssessmentTimer,
+  onAddFocusSpot,
+  onLogFocusSpotTime,
+  onUnlogFocusSpotTime,
+  onResolveFocusSpot,
 }) {
   const [viewMode, setViewMode] = useState("day");
   const day = timeline.days[currentDay - 1];
@@ -656,6 +709,15 @@ export function TodayTab({
 
       <FocusPanel piece={piece} chunks={chunks} currentDay={currentDay} />
 
+      <FocusSpotsPanel
+        piece={piece}
+        chunks={chunks}
+        timeline={timeline}
+        onLogFocusSpotTime={onLogFocusSpotTime}
+        onUnlogFocusSpotTime={onUnlogFocusSpotTime}
+        onResolveFocusSpot={onResolveFocusSpot}
+      />
+
       {viewMode === "day" ? (
         pastPlan ? (
           <DueReviewPanel
@@ -680,6 +742,7 @@ export function TodayTab({
             onLogRunThrough={onLogRunThrough}
             onUnlogRunThrough={onUnlogRunThrough}
             onSetMemoryAnchor={onSetMemoryAnchor}
+            onAddFocusSpot={onAddFocusSpot}
             onGoToNextOccurrence={handleGoToDay}
           />
         )
@@ -722,6 +785,7 @@ export function TodayTab({
               onLogRunThrough={onLogRunThrough}
               onUnlogRunThrough={onUnlogRunThrough}
               onSetMemoryAnchor={onSetMemoryAnchor}
+              onAddFocusSpot={onAddFocusSpot}
               onGoToNextOccurrence={handleGoToDay}
             />
           ))}

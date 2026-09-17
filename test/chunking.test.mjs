@@ -15,6 +15,7 @@ import {
   sectionPairRunThroughGate,
   chunksBySectionId,
   migrateOrphanedProgress,
+  reassociateTroubleSpots,
 } from "../src/lib/chunking.js";
 
 const chunk = (id, start, end) => ({ id, kind: "section", start, end });
@@ -401,5 +402,124 @@ describe("migrateOrphanedProgress — reattaching history after a chunk-id-shift
     const newPiece = mkPiece({ totalMeasures: 8, customChunkSize: 4, progress: oldPiece.progress });
     const result = migrateOrphanedProgress(oldPiece, newPiece);
     assert.equal(result.c13, oldPiece.progress.c13, "nothing to migrate onto — stays exactly as it was, not discarded");
+  });
+});
+
+describe("[Pass 91 follow-up] reassociateTroubleSpots — re-homing focus spots by measure position, not by chunk-id continuity", () => {
+  const spot = (id, startMeasure, overrides = {}) => ({
+    id,
+    name: `spot ${id}`,
+    position: String(startMeasure),
+    startMeasure,
+    endMeasure: startMeasure,
+    length: null,
+    fromSetup: true,
+    resolved: false,
+    resolvedBpm: null,
+    resolvedAt: null,
+    sessions: [],
+    ...overrides,
+  });
+
+  test("nothing to reassociate: no progress entries carry any trouble spots at all — same reference back", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c5", 5, 8)];
+    const progress = { c1: { doneDays: [1], sessions: [] } };
+    assert.equal(reassociateTroubleSpots(progress, chunks), progress);
+  });
+
+  test("already correctly homed: every spot's startMeasure already falls inside the chunk it's nested under — same reference back, no-op", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c5", 5, 8)];
+    const progress = { c1: { doneDays: [], troubleSpots: [spot("fs1", 2)] } };
+    assert.equal(reassociateTroubleSpots(progress, chunks), progress);
+  });
+
+  test("chunk id disappeared outright: the spot moves to whichever current chunk now contains its measure", () => {
+    // Old chunking put a spot at measure 6 under "c5" (5-8); new chunking
+    // (size 4 -> 3) no longer has a "c5" at all — measure 6 now falls
+    // under "c4" (4-6). The old "c5" key can still exist afterward (this
+    // function only ever relocates the troubleSpots array itself, not the
+    // whole entry — see the "only the troubleSpots array itself relocates"
+    // test below) but carries no spots anymore.
+    const chunks = [chunk("c1", 1, 3), chunk("c4", 4, 6), chunk("c7", 7, 9)];
+    const progress = { c5: { doneDays: [], troubleSpots: [spot("fs1", 6)] } };
+    const result = reassociateTroubleSpots(progress, chunks);
+    assert.notEqual(result, progress);
+    assert.deepEqual(result.c5.troubleSpots, [], "the stale id keeps no spots once its one spot has a real new home");
+    assert.deepEqual(result.c4.troubleSpots.map((s) => s.id), ["fs1"]);
+  });
+
+  test("[the actual bug] a chunk id that coincidentally still exists, but now covers different measures, is not mistaken for continuity", () => {
+    // customChunkSize 8 -> 4: "c9" exists in BOTH chunkings, but means
+    // measures 9-16 under the old size and only 9-12 under the new one.
+    // migrateOrphanedProgress's id-existence check alone would call this
+    // "nothing to migrate" — this is exactly the gap reassociateTroubleSpots
+    // exists to close by checking the spot's own measure instead.
+    const oldChunks = [chunk("c1", 1, 8), chunk("c9", 9, 16)];
+    const newChunks = [chunk("c1", 1, 4), chunk("c5", 5, 8), chunk("c9", 9, 12), chunk("c13", 13, 16)];
+    const progress = { c9: { doneDays: [], troubleSpots: [spot("fs1", 14)] } }; // 14 is in old c9, NOT new c9
+    // sanity check: the id genuinely persists in the new chunk set, so this
+    // scenario is real, not a typo in the fixture
+    assert.ok(newChunks.some((c) => c.id === "c9"));
+    const result = reassociateTroubleSpots(progress, newChunks);
+    assert.notEqual(result, progress);
+    assert.deepEqual((result.c9 && result.c9.troubleSpots) || [], [], "measure 14 is no longer covered by the reused c9 id");
+    assert.deepEqual(result.c13.troubleSpots.map((s) => s.id), ["fs1"], "measure 14 now falls under c13 (13-16)");
+    void oldChunks; // documents the old shape; not itself passed to the function under test
+  });
+
+  test("a spot with no startMeasure at all (saved before this validation existed) is left exactly where it is — no ground truth to check, no crash", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c5", 5, 8)];
+    const progress = { c1: { doneDays: [], troubleSpots: [spot("fs1", null, { position: "" })] } };
+    const result = reassociateTroubleSpots(progress, chunks);
+    assert.equal(result, progress, "no position data to match on — treated as already in its only known home, not moved or dropped");
+  });
+
+  test("a spot whose measure no longer exists in any current chunk (the piece itself got shorter): stays under its old id rather than being dropped", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c5", 5, 8)];
+    const progress = { c9: { doneDays: [], troubleSpots: [spot("fs1", 12)] } }; // measure 12 no longer exists at all
+    const result = reassociateTroubleSpots(progress, chunks);
+    assert.equal(result, progress, "genuinely nothing to reattach to — left in place, same as migrateOrphanedProgress's own precedent");
+  });
+
+  test("two spots on one chunk, only one of which actually needs to move: the other stays put, not just the whole entry moved wholesale", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c4", 4, 6), chunk("c7", 7, 9)];
+    const progress = { c5: { doneDays: [], troubleSpots: [spot("stays", 5), spot("moves", 8)] } };
+    // note: under the NEW chunking there is no "c5" at all (4-6 then 7-9),
+    // so both spots are technically homeless under their current id —
+    // "stays" (measure 5) belongs in c4, "moves" (measure 8) belongs in c7.
+    const result = reassociateTroubleSpots(progress, chunks);
+    assert.deepEqual(result.c4.troubleSpots.map((s) => s.id), ["stays"]);
+    assert.deepEqual(result.c7.troubleSpots.map((s) => s.id), ["moves"]);
+  });
+
+  test("a spot moves into a chunk id that previously had no progress entry of its own at all", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c5", 5, 8)];
+    const progress = { c9: { doneDays: [], troubleSpots: [spot("fs1", 6)] } }; // c5 has no entry yet
+    const result = reassociateTroubleSpots(progress, chunks);
+    assert.deepEqual(result.c5.troubleSpots.map((s) => s.id), ["fs1"]);
+    assert.deepEqual(result.c5.doneDays, [], "a freshly-created entry still gets a sane doneDays default");
+  });
+
+  test("only the troubleSpots array itself relocates — a chunk's own doneDays/sessions/practiceBPM are a different question (whole-entry reattachment is migrateOrphanedProgress's job, run first at the real call sites) and stay where they are", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c4", 4, 6)];
+    const progress = {
+      c5: { doneDays: [3], sessions: [{ day: 3 }], practiceBPM: 90, troubleSpots: [spot("fs1", 5)] },
+    };
+    const result = reassociateTroubleSpots(progress, chunks);
+    assert.deepEqual(result.c4.troubleSpots.map((s) => s.id), ["fs1"], "the spot itself moves to where measure 5 actually is");
+    assert.equal(result.c5.doneDays, progress.c5.doneDays, "c5's own practice history is untouched by this function");
+    assert.equal(result.c5.practiceBPM, 90);
+    assert.deepEqual(result.c5.troubleSpots, [], "c5 keeps existing (its other fields are real data), just with no spots left");
+  });
+
+  test("a spot on an already-correct chunk keeps its own object identity even though a different chunk in the same progress object needed to move", () => {
+    const chunks = [chunk("c1", 1, 4), chunk("c4", 4, 6), chunk("c7", 7, 9)];
+    const progress = {
+      c1: { doneDays: [], troubleSpots: [spot("stays1", 2)] },
+      c5: { doneDays: [], troubleSpots: [spot("moves", 8)] },
+    };
+    const result = reassociateTroubleSpots(progress, chunks);
+    assert.equal(result.c1.troubleSpots[0], progress.c1.troubleSpots[0], "c1's own spot object is carried through unchanged, not cloned or lost, just because c5's spot elsewhere needed reattaching");
+    assert.deepEqual(result.c7.troubleSpots.map((s) => s.id), ["moves"]);
   });
 });

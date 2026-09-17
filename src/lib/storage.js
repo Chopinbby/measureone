@@ -1,7 +1,8 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
-import { todayISODate, addDaysISO } from "./utils";
+import { todayISODate, addDaysISO, parseMeasurePosition } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
 import { isInRevival } from "./revival";
+import { generatePracticeChunks, reassociateTroubleSpots } from "./chunking";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -152,7 +153,22 @@ const NON_CHUNK_PROGRESS_KEYS = ["__consolidation__", "__cold_start__"];
 // values, not derived from session history — same non-destructive spirit as
 // the rest of this migration. Skips NON_CHUNK_PROGRESS_KEYS
 // (Data-Model.md#the-piece-object) since none of them are a real chunk.
-function backfillProgressLadderState(progress, startDate) {
+// Focus spots (Pass 91 follow-up) — best-effort recovery of startMeasure/
+// endMeasure for a spot saved before position validation existed. Re-parses
+// its existing free-text position the same way a brand-new spot's position
+// is validated at creation time; a spot whose old text never looked like a
+// measure reference (empty, or genuinely free text like "the tricky bit")
+// simply stays without one — nothing to recover, not an error. A spot that
+// already has a startMeasure (created under this validation to begin with)
+// is left untouched; this never re-derives over an already-trustworthy
+// value.
+function backfillSpotMeasures(spot, totalMeasures) {
+  if (spot.startMeasure != null) return spot;
+  const parsed = parseMeasurePosition(spot.position, totalMeasures);
+  return parsed ? { ...spot, startMeasure: parsed.start, endMeasure: parsed.end } : spot;
+}
+
+function backfillProgressLadderState(progress, startDate, totalMeasures) {
   const result = {};
   Object.entries(progress || {}).forEach(([key, entry]) => {
     if (NON_CHUNK_PROGRESS_KEYS.includes(key)) {
@@ -263,6 +279,24 @@ function backfillProgressLadderState(progress, startDate) {
       // number (`chunkLadderState.holdingReviewCount || 0`), so this changes
       // nothing about the actual ladder math — only the backfilled shape.
       holdingReviewCount: entry.holdingReviewCount !== undefined ? entry.holdingReviewCount : null,
+      // Pass 91 (experimental v1) — a chunk's flagged focus spots
+      // (docs/Data-Model.md#focus-spots-v1). Same null-not-materialized
+      // backfill as every ladder-state field above, for the same reason:
+      // this codebase's established checklist for a new nested field
+      // (CLAUDE.md). Every reader treats `entry.troubleSpots || []`
+      // identically either way, so this costs nothing in practice — it's
+      // just the established idiom for "this field didn't exist yet on an
+      // older save."
+      // != null (not !==) deliberately catches both "field never existed"
+      // (undefined) and "already migrated once before, backfilled to null"
+      // (a second migration pass, e.g. re-running validateAndMigratePiece
+      // on its own already-migrated output) — .map would throw on a bare
+      // null otherwise. Both non-array cases fall through to the same null
+      // result the pre-existing undefined-only check already produced.
+      troubleSpots:
+        entry.troubleSpots != null
+          ? entry.troubleSpots.map((s) => backfillSpotMeasures(s, totalMeasures))
+          : null,
     };
   });
   return result;
@@ -301,7 +335,7 @@ export function validateAndMigratePiece(piece) {
   }
 
   const startDate = piece.startDate || todayISODate();
-  const progress = backfillProgressLadderState(piece.progress || {}, startDate);
+  const progress = backfillProgressLadderState(piece.progress || {}, startDate, piece.totalMeasures);
 
   // Default missing fields to safe values (non-destructive for old data)
   const migrated = {
@@ -351,11 +385,41 @@ export function validateAndMigratePiece(piece) {
     // Pieces saved before the manual "finished elsewhere" override existed
     // default to false — only ever set true explicitly, from Settings.
     markedLearnedElsewhere: !!piece.markedLearnedElsewhere,
+    // Pass 91 (experimental v1) — whether this piece tracks focus spots at
+    // all, set from the Wizard's yes/no step and changeable later from
+    // Settings (docs/Data-Model.md#focus-spots-v1). Scoped to UI only: it
+    // gates whether the "add a focus spot" affordances are offered, never
+    // whether an already-flagged spot keeps gating/pausing its chunk —
+    // scheduling reads focusSpotGate (lib/scheduling.js) directly off
+    // progress[id].troubleSpots, not off this flag, so turning tracking off
+    // for a piece never silently un-gates or un-pauses real, already-
+    // entered data.
+    troubleSpotsEnabled: !!piece.troubleSpotsEnabled,
+    troubleSpotDefaultMinutes:
+      typeof piece.troubleSpotDefaultMinutes === "number" ? piece.troubleSpotDefaultMinutes : 5,
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.
     startDate,
   };
+
+  // Focus spots (Pass 91 follow-up) — self-heals any spot left mismatched
+  // from before reassociateTroubleSpots existed (or from a hand-edited
+  // import) on every load, the same "never trust stored state, always
+  // re-derive against the piece's current chunks" spirit chunkSet/timeline
+  // already follow elsewhere in this app. Guarded on measureDifficulty
+  // specifically: unlike every other field this migration backfills,
+  // validateAndMigratePiece has never defaulted it (generatePracticeChunks
+  // is the only thing in this file that ever needed it), so a piece this
+  // function still has to tolerate without it — this file's own test
+  // fixtures included, not just a theoretical case — would otherwise crash
+  // generatePracticeChunks here on a load path that used to never call it
+  // at all. Skipping reassociation for that narrow shape is the same
+  // "never make this worse than before" fallback reassociateTroubleSpots
+  // itself already follows for a spot it can't place.
+  const withReassociatedSpots = Array.isArray(migrated.measureDifficulty)
+    ? { ...migrated, progress: reassociateTroubleSpots(migrated.progress, generatePracticeChunks(migrated)) }
+    : migrated;
 
   // A "minutes per day" piece's daysToLearn must stay derived from its
   // minutesPerDay budget, not just whatever value happened to be sitting on
@@ -363,7 +427,7 @@ export function validateAndMigratePiece(piece) {
   // this can't just live in the Wizard/Settings UI. Runs on every load, not
   // just once, since editing difficulty/measures/recurring material via
   // Settings legitimately changes how many days the same budget needs.
-  return reconcileMinutesPerDaySchedule(migrated);
+  return reconcileMinutesPerDaySchedule(withReassociatedSpots);
 }
 
 /* ------------------------------------------------------------------ */
@@ -649,6 +713,27 @@ function mergeSessionArrays(existingSessions, importedSessions) {
   });
 }
 
+// Pass 91 (experimental v1) — additive by spot id, same spirit as
+// mergeById (sections/recordings/documents/bpmZones above): a spot only one
+// side has is kept outright, a spot both sides have keeps whichever side's
+// scalar fields (name/position/resolved/etc.) the import carries, per the
+// general `{...e, ...i}` convention every other per-chunk field already
+// follows in mergeProgress below, but with its own `sessions` unioned via
+// the same mergeSessionArrays dedup the chunk's own sessions already use —
+// a trouble-spot session is real logged practice time, and "practice
+// history is the one thing that must never silently disappear" (see this
+// file's own header) applies just as much to it as to the parent chunk's
+// sessions array.
+function mergeTroubleSpots(existingSpots, importedSpots) {
+  const byId = Object.fromEntries((existingSpots || []).map((s) => [s.id, s]));
+  (importedSpots || []).forEach((s) => {
+    if (!s || !s.id) return;
+    const e = byId[s.id];
+    byId[s.id] = e ? { ...e, ...s, sessions: mergeSessionArrays(e.sessions, s.sessions) } : s;
+  });
+  return Object.values(byId);
+}
+
 // Ladder-state fields a chunk carries once it's on the spaced-repetition
 // ladder (Repertoire-Lifecycle.md's "The ladder: three stages"). Ladder
 // state is *derived* from practice history (computeLadderAdvance,
@@ -757,6 +842,7 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
       ...i,
       doneDays: [...new Set([...(e.doneDays || []), ...(i.doneDays || [])])].sort((a, b) => a - b),
       sessions: mergeSessionArrays(e.sessions, i.sessions),
+      troubleSpots: mergeTroubleSpots(e.troubleSpots, i.troubleSpots),
       currentBPM: preferByRecency(i.currentBPM, e.currentBPM, importIsStale),
       targetBPM: preferByRecency(i.targetBPM, e.targetBPM, importIsStale),
       manualConfidence: preferByRecency(i.manualConfidence, e.manualConfidence, importIsStale),

@@ -852,6 +852,70 @@ the position-based version on a pristine list, and correctly finds no
 match across a gap instead of inventing one. See
 [Decisions.md](Decisions.md#scheduling) for the full incident.
 
+**Recurred in a later session (Pass 91, experimental v1), same general
+shape, different specific proxy for "identity."** A focus spot was
+originally re-homed after a chunking edit purely by checking whether its
+parent chunk *id* still existed in the new chunk set — correct only as
+long as an id, once reused, still means the same thing. It doesn't: chunk
+ids are `c${start}`, so `customChunkSize` 8 → 4 produces a "c9" under
+*both* chunkings, just meaning measures 9–16 under the first and only
+9–12 under the second. An id-existence check reads that as pure
+continuity; a spot logged at measure 14 would have silently stayed under
+a "c9" that no longer actually covers it. Fixed the same way as the Pass
+89 case — the same category of fix, not just the same category of bug —
+by checking the spot's own recorded measure position against each
+current chunk's real range (`reassociateTroubleSpots`,
+`lib/chunking.js`), never trusting the id it happens to be nested under.
+The general habit this reinforces: when *anything* acts as a stand-in for
+"this is the same thing as before" — array position, an id derived from a
+value that can itself change meaning — check what happens when the
+underlying structure it was derived from changes shape, not just whether
+the stand-in still technically exists. See
+[Decisions.md](Decisions.md#focus-spots-v1) for the full incident.
+
+## A new call added inside a widely-shared function can break every existing caller's assumptions, not just the one you're fixing
+
+`validateAndMigratePiece` (`lib/storage.js`) runs on every piece load, and
+dozens of pre-existing tests across the suite call it directly with
+deliberately minimal fixtures — that's the whole point of a migration
+function, tolerating incomplete data. Adding a *new* call inside it to a
+function that has stricter requirements than anything the migration path
+previously needed can crash every one of those callers at once, not just
+the piece shape you were actually trying to fix, and nothing about the
+new code being locally correct protects against this — it's the calling
+context's pre-existing looseness that breaks.
+
+Worked example (Pass 91, experimental v1, self-healing focus-spot
+reassociation): adding a call to `generatePracticeChunks` inside
+`validateAndMigratePiece` — to re-check a spot's chunk association on
+every load — assumed every piece reaching that point already has
+`measureDifficulty` set, since every *other* consumer of that function
+(`App.jsx`'s own `chunkSet` derivation, chiefly) always receives a
+fully-formed piece. `validateAndMigratePiece` itself had never defaulted
+that field, because nothing inside it had ever needed to read it before —
+and several of `test/storage.test.mjs`'s own long-standing fixtures
+(`fresh`, used across many unrelated tests) don't set it. Running the full
+suite immediately failed four pre-existing, unrelated tests with the same
+`TypeError` — caught before this was ever treated as working, not
+discovered later. Fixed by guarding the new call
+(`Array.isArray(migrated.measureDifficulty)`) rather than assuming the
+input was always safe. **A second, narrower instance of the same root
+issue was caught the same way, in the same function, immediately after**:
+the new field's own backfill line (`entry.troubleSpots !== undefined ?
+entry.troubleSpots.map(...) : null`) crashed on a *second* migration pass
+over already-migrated output, because a prior pass had already backfilled
+the field to `null` — and `!== undefined` is true for `null`, so `.map`
+ran on it. A dedicated idempotency test (`validateAndMigratePiece` called
+twice on its own output) already existed in the suite for unrelated
+reasons and caught it on the first run.
+
+The generalizable habit: before adding a call to a function with its own
+data requirements inside a widely-shared entry point, run the full test
+suite — not just tests for the specific change — before calling it done.
+A new dependency's requirements are a property of every *existing* caller
+of the function you added it to, not just the one you're actively
+thinking about.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

@@ -28,6 +28,7 @@ import {
   smoothOverloadedDays,
   scheduleBand,
   bandOvershoot,
+  focusSpotGate,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "../src/lib/utils.js";
 
@@ -2550,5 +2551,130 @@ describe("[regression] a schedule-only Settings save (e.g. changing the target d
     assert.equal(afterRealCurrentDay, trueElapsed, "test setup sanity check: the extended plan now comfortably fits the real elapsed day");
     const behind = countBehindDays(after, afterTimeline, afterRealCurrentDay);
     assert.ok(behind < 5, `expected a small, sane behind-days count after the extension, got ${behind} (a large figure means asOfDay was anchored to the stale pre-extension plan length again)`);
+  });
+});
+
+describe("[Pass 91, experimental v1] focus-spot introduction gating", () => {
+  // 40 measures / customChunkSize 4 -> c1, c5, c9, c13, c17, c21, c25, c29,
+  // c33, c37 (raw measure order). c9 (measures 9-12) is the only hard
+  // chunk, so it anchors exactly one combo (c5/c13 as its measure-boundary
+  // neighbors) and sits on two transitions (t_c5_c9, t_c9_c13) — enough to
+  // exercise the transition/combo guards below, not just the introduction
+  // loop itself.
+  function hardMiddlePiece(progressOverrides = {}) {
+    const measureDifficulty = Array(40).fill(1);
+    for (let m = 9; m <= 12; m++) measureDifficulty[m - 1] = 3;
+    return basePiece({
+      totalMeasures: 40,
+      measureDifficulty,
+      customChunkSize: 4,
+      daysToLearn: 16,
+      progress: progressOverrides,
+    });
+  }
+
+  function unresolvedSpot(overrides = {}) {
+    return {
+      id: "fs1",
+      name: "test spot",
+      position: "",
+      length: null,
+      fromSetup: true,
+      resolved: false,
+      resolvedBpm: null,
+      resolvedAt: null,
+      sessions: [],
+      ...overrides,
+    };
+  }
+
+  test("a fromSetup unresolved spot excludes its chunk from introduction entirely — no day, no introducedDay", () => {
+    const piece = hardMiddlePiece({ c9: { troubleSpots: [unresolvedSpot()] } });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.equal(timeline.introducedDay.c9, undefined, "a gated chunk must not receive an introducedDay");
+    timeline.days.forEach((d, i) => {
+      assert.ok(!d.newChunkIds.includes("c9"), `c9 must not appear as a new chunk on day ${i + 1} while gated`);
+    });
+  });
+
+  test("a spot added post-introduction (fromSetup: false) does NOT gate — the chunk keeps its introducedDay", () => {
+    // The pass's own explicit requirement: a spot discovered on an
+    // already-introduced chunk's Daily Practice card must never
+    // retroactively pull that chunk back off the schedule.
+    const piece = hardMiddlePiece({ c9: { troubleSpots: [unresolvedSpot({ fromSetup: false })] } });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.ok(timeline.introducedDay.c9, "a chunk with only a fromSetup:false unresolved spot must still be introduced");
+  });
+
+  test("once every trouble spot on a gated chunk resolves, it re-enters at tier 0 with a real introducedDay", () => {
+    const piece = hardMiddlePiece({
+      c9: { troubleSpots: [unresolvedSpot({ resolved: true, resolvedBpm: 80, resolvedAt: Date.now() })] },
+    });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.ok(timeline.introducedDay.c9, "a chunk whose only trouble spot has resolved must be introduced");
+    assert.equal(timeline.introductionTierById.c9, 0, "a chunk whose trouble spots just resolved must land in tier 0");
+  });
+
+  test("focusSpotGate: an empty/absent troubleSpots array never reads as 'just resolved' (vacuous-truth guard)", () => {
+    // [].every(...) is vacuously true in JS — without an explicit
+    // length > 0 check, every ordinary chunk with no trouble spots at all
+    // would wrongly land in tier 0 on every recompute.
+    assert.equal(focusSpotGate(undefined).allResolved, false);
+    assert.equal(focusSpotGate({ troubleSpots: [] }).allResolved, false);
+    assert.equal(focusSpotGate(undefined).gatesIntroduction, false);
+  });
+
+  test("a transition touching a gated chunk is not placed at all", () => {
+    const piece = hardMiddlePiece({ c9: { troubleSpots: [unresolvedSpot()] } });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.equal(timeline.introducedDay.t_c5_c9, undefined, "a transition into a gated chunk must not be placed");
+    assert.equal(timeline.introducedDay.t_c9_c13, undefined, "a transition out of a gated chunk must not be placed");
+    timeline.days.forEach((d) => {
+      assert.ok(!d.specialChunkIds.includes("t_c5_c9"));
+      assert.ok(!d.specialChunkIds.includes("t_c9_c13"));
+    });
+  });
+
+  test("a combo anchored to a gated hard chunk is not placed at all", () => {
+    const piece = hardMiddlePiece({ c9: { troubleSpots: [unresolvedSpot()] } });
+    const chunkSet = generateAllChunks(piece);
+    const combo = chunkSet.combos.find((c) => c.linkedIds[0] === "c9");
+    assert.ok(combo, "test setup sanity check: this fixture must actually generate a combo anchored to c9");
+    const timeline = computeTimeline(piece, chunkSet);
+    assert.equal(timeline.introducedDay[combo.id], undefined, "a combo anchored to a gated chunk must not be placed");
+  });
+
+  test("a gated chunk is excluded from the whole-piece consolidation run-through", () => {
+    const piece = hardMiddlePiece({ c9: { troubleSpots: [unresolvedSpot()] } });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    const consolidationDay = timeline.days.find((d) => d.type === "consolidation");
+    assert.ok(consolidationDay, "test setup sanity check: this fixture must produce a consolidation day");
+    assert.ok(!consolidationDay.reviewChunkIds.includes("c9"), "a chunk that's never been introduced has nothing to play through yet");
+  });
+
+  // Found live while building the guard above: a first draft keyed the
+  // transitions/combos guard off "does the linked chunk lack an
+  // introducedDay" rather than off troubleSpotGatedIds specifically, which
+  // broke three pre-existing, unrelated tests — a "stuck" transition whose
+  // neighbor chunk has already been completed and dropped from a
+  // rescheduled remainder's practiceChunks *also* has no introducedDay, for
+  // a reason that has nothing to do with trouble spots, and depends on the
+  // `|| sectionsEndDay` fallback to still get placed instead of stranded.
+  // This test pins that fallback path directly rather than relying on
+  // those three tests alone to catch a regression here again.
+  test("a genuinely stuck transition (neighbor absent from this chunk set, unrelated to trouble spots) still falls back and gets placed", () => {
+    const piece = hardMiddlePiece();
+    const chunkSet = generateAllChunks(piece);
+    const prunedChunkSet = { ...chunkSet, practiceChunks: chunkSet.practiceChunks.filter((c) => c.id !== "c5") };
+    const timeline = computeTimeline(piece, prunedChunkSet);
+    assert.ok(
+      timeline.introducedDay.t_c5_c9,
+      "a transition whose neighbor is simply absent from this chunk set (not trouble-spot-gated) must still fall back to sectionsEndDay and get placed, exactly as before this pass"
+    );
   });
 });

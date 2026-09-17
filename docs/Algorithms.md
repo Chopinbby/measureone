@@ -3079,3 +3079,268 @@ account.
 The banner itself is suppressed whenever `piece.revival.active` is
 already true — `OverviewTab` already shows "Continue revival" in that
 state, so there's nothing to additionally suggest.
+
+## Focus spots (v1)
+
+**Experimental, Pass 91.** See
+[Data-Model.md](Data-Model.md#focus-spots-v1) for the `TroubleSpot` shape
+and the two entry points that create one. This section is the mechanism:
+how an unresolved spot changes what `computeTimeline` does.
+
+### `focusSpotGate` — the one predicate everything else reads
+
+`focusSpotGate(entry)` (`lib/scheduling.js`) is a pure read off a chunk's
+own `progress` entry:
+
+```js
+{
+  unresolved,          // TroubleSpot[] — every spot on this chunk that
+                        // isn't resolved yet
+  allResolved,         // boolean — true only when troubleSpots.length > 0
+                        // AND every one of them is resolved. The length
+                        // check is load-bearing: [].every(...) is
+                        // vacuously true in JS, so without it, an ordinary
+                        // chunk that has never had a trouble spot at all
+                        // would read as "just resolved" too.
+  gatesIntroduction,    // boolean — true when `unresolved` contains at
+                        // least one spot with fromSetup: true.
+}
+```
+
+Every other piece of this mechanism — `computeTimeline`'s introduction
+skip, the Daily Practice "paused" display, the Focus Spots panel's own
+contents — calls this one function rather than re-deriving the same check.
+
+### Why `fromSetup`, not "was this chunk already introduced"
+
+The pass's own requirement is two-sided: a spot flagged **before**
+introduction must hold the chunk back entirely (no day, no
+`introducedDay`); a spot discovered **after** introduction must never
+retroactively pull an already-scheduled chunk back off the plan. The
+obvious-looking implementation — check whether the chunk currently has an
+`introducedDay` before deciding whether to gate it — doesn't work:
+`chunkSet`/`timeline` are pure derivations, recomputed from scratch on
+every render (CLAUDE.md), so `computeTimeline` has no memory of what it
+computed last time to compare against. A chunk introduced on day 5 that
+picks up a spot on day 9 would, under a purely-current-state rule, simply
+vanish from `introducedDay` on the very next recompute — exactly the
+retroactive removal the pass says must not happen.
+
+The two entry points resolve this for free, once the distinction is
+captured at creation time instead of re-derived later: a spot can only
+ever be created via the Wizard (before the piece has any practice history
+at all) or via a chunk's own Daily Practice card (which, by construction,
+only exists once that chunk is already on the schedule). `fromSetup` just
+records which one happened. `computeTimeline` never has to ask "was this
+chunk already introduced" — it only ever asks "was this specific spot
+flagged at setup," which is a fact fixed forever at creation, not
+something that has to be reconstructed from a stateless recompute.
+
+### The introduction-skip itself
+
+Inside `computeTimeline`, before any placement math runs:
+
+```js
+troubleSpotGatedIds = { chunk ids where focusSpotGate(...).gatesIntroduction }
+troubleSpotResolvedIds = { chunk ids where focusSpotGate(...).allResolved }
+introducibleChunks = practiceChunks.filter(not in troubleSpotGatedIds)
+```
+
+`introducibleChunks` — not raw `practiceChunks` — is what the front-half
+effort-spreading boundary math (rule 1,
+[#timeline--scheduler](#timeline--scheduler)) is computed against, and
+what's fed into `sortPracticeChunksForIntroduction`. A gated chunk's
+effort never eats into the budget every other chunk is being spread
+across, and it simply never appears in `introOrder`, so it never receives
+a day or an `introducedDay` — "no day, no introducedDay" falls out of the
+filter, not a separate skip branch inside the placement loop itself.
+
+`troubleSpotResolvedIds` is passed straight into
+`sortPracticeChunksForIntroduction` as the tier-0 set Pass 89 built a slot
+for but left permanently empty (["Introduction order is
+difficulty-first"](#timeline--scheduler)) — a chunk whose spots have all
+just resolved sorts ahead of even the hard-chunk tier on its very next
+recompute. Nothing about the sort itself changed; only what populates
+that one input.
+
+### Transitions and combos: gated by `troubleSpotGatedIds`, not by a missing `introducedDay`
+
+A transition or combo touching a gated chunk must not be placed either —
+otherwise a "Review" tile would show up on the schedule connecting to
+content that isn't anywhere else in the plan. The natural-looking guard
+("skip if either linked chunk lacks an `introducedDay`") is wrong, and
+was caught by the existing test suite while building this: a rescheduled
+remainder's `linkedIds` can already point at a chunk that's been fully
+completed and filtered out of `practiceChunks` entirely, for a reason
+that has nothing to do with trouble spots — and the `|| sectionsEndDay`
+fallback on the very next line exists specifically so that "stuck"
+transition still gets placed instead of stranded (three pre-existing
+tests in `test/scheduling.test.mjs` cover exactly this and failed
+immediately under the missing-`introducedDay` version of this guard). The
+fix checks `troubleSpotGatedIds.has(...)` directly instead — targeted at
+the one real cause, leaving the pre-existing "stuck connector" fallback
+completely untouched. See that test file's own
+`[Pass 91, experimental v1]` describe block, including a test that pins
+the stuck-connector fallback directly, not just via the three tests that
+happened to already cover it.
+
+The whole-piece consolidation day (rule 6) is filtered the same way —
+`introducibleChunks`, not `practiceChunks` — since a chunk that's never
+been introduced has nothing to "play through" yet.
+
+### Resolution: minutes logged, then one gate
+
+A focus spot's own practice card (`FocusSpotCard.jsx`, rendered by
+`FocusSpotsPanel` in `TodayTab.jsx` — one card per unresolved spot, not
+one per chunk, so a chunk with two open spots shows two cards) is
+minutes-based, not reps/BPM-based: a timer, and a single prompt, "Can you
+play this cleanly at a low tempo yet?" "Not yet, log time" (originally
+labeled "Log time" — renamed same-session, before this ever shipped, per
+direct request) calls `handleLogFocusSpotTime` (`App.jsx`), which just
+appends a session to that spot's own `sessions` array — never touches the
+parent chunk's `sessions`, `stage`, or anything else `computeConfidence`/
+the ladder reads. "Yes, log BPM" (originally "Achieved / Doable") prompts
+for the clean BPM and, on confirm (`handleResolveFocusSpot`), sets
+`resolved`/`resolvedBpm`/`resolvedAt` on that one spot.
+
+**Same-session follow-up: neither action is reachable until a minimum
+practice time is met.** `piece.troubleSpotDefaultMinutes` (Settings/Wizard,
+default 5 for a piece created after this follow-up, `min={1}` enforced in
+both editors so it can never be 0) sets a floor both buttons check —
+`currentSeconds() >= requiredMinutes * 60` — checked against whichever is
+larger, the running timer's live elapsed time or a manually-typed "minutes
+practiced" value (both already fed through the same `currentSeconds()`
+this component already used). Below the floor, both buttons are disabled
+with an explanatory tooltip and a "Practice for at least N minutes before
+logging" line. The timer display itself counts *down* toward the target
+while below it, then flips to counting *up* past it once met, so it's
+always showing something meaningful — time still needed, or total time
+actually spent. Raised directly by the user, who pointed out that without
+this, "Yes, log BPM" could resolve a spot — and permanently seed the
+parent chunk's `practiceBPM` from it (see below) — off zero seconds of
+actual drilling; closing that gap was the entire point of the gate.
+
+**Also same-session follow-up: the checkbox on the card's own head row
+(shows once `loggedToday` — any session logged today — is true) is a real
+undo control, not decoration.** Clicking it (`handleUnlogFocusSpotTime`,
+`App.jsx`) clears *every* session logged today for that spot, not just the
+most recent one — found and fixed after the first cut (removing only the
+latest entry) left the checkbox looking stuck checked whenever a second
+time-log had already happened the same day, since `loggedToday` only cares
+whether *any* session exists for today, not which one. One click now
+always fully unchecks it, regardless of how many times time was logged
+that day.
+
+If that was the chunk's last unresolved spot, the same handler additionally
+seeds the chunk's own `progress[id].practiceBPM` — the "hands the spot to
+the existing tempo-ladder machinery" the pass calls for — as the **minimum**
+`resolvedBpm` across every spot on the chunk (conservative: the chunk as a
+whole can only go as fast as its slowest cleared spot), and only when
+`practiceBPM` isn't already set. This is a direct seed, the same rule
+`handleLogSession` already uses for a chunk's first-ever real session
+(`practiceBPM` is seeded from whatever the learner actually logs the first
+time they touch a chunk) — not a `computeLadderAdvance` call, since no
+rep/pass-fail outcome is being judged here, only a tempo. `stage` stays
+`null`; the chunk's very next *real* logged session is what actually puts
+it on the ladder for the first time, same as any other never-logged
+chunk, just starting from a non-null `practiceBPM` instead of guessing.
+
+### Display: gated vs. paused
+
+`FocusSpotsPanel` renders a card for every unresolved spot on every
+practice chunk, keyed off `piece.progress` directly — not off
+`timeline.days[]` — which is what makes a gated chunk's drill reachable
+even though the chunk itself is nowhere in any day's checklist. Each
+card's `gated` prop (`timeline.introducedDay[chunk.id] == null`) is
+display-only: it only changes the bottom note's wording ("will be
+introduced" vs. "will resume") — the actual scheduling consequence
+already happened inside `computeTimeline` by the time this renders.
+
+On the chunk's own Daily Practice card (`ChecklistItem.jsx`), an
+unresolved spot — regardless of `fromSetup` — suppresses the card's
+regular practice UI (requirement line, timer, log inputs, the log button,
+**and the leading checkmark "mark done" button** — see the same-session
+follow-up below; the first four are simple conditional rendering, but the
+checkmark button sits outside all of it and needed `isPaused` folded
+directly into `canLog` to actually block it) in favor of a `.paused-note`,
+the same suppression-without-removal treatment `needsRelearning` already
+gets on an in-progress chunk's review, plus the card itself carrying a
+`.paused` class (dashed border, tinted background). "+ Add a focus spot"
+itself only shows on a chunk that ISN'T already paused, has
+`chunk.kind === "section"` (never on a transition/combo card), and only
+while `piece.troubleSpotsEnabled`.
+
+### Same-session follow-up: position-based reassociation
+
+**A spot's chunk association is no longer purely an id it happens to be
+nested under.** `position` is now required and validated —
+`parseMeasurePosition(text, totalMeasures)` (`lib/utils.js`) parses "24",
+"24a" (a trailing letter is accepted but not itself meaningful — only the
+numeric measure(s) matter), or "24-25" into `{start, end}`, rejecting
+anything that doesn't parse or falls outside the piece's own measures. The
+parsed numbers are stored on the spot as `startMeasure`/`endMeasure` at
+creation time (both entry points — Wizard's `FocusSpotsStep`,
+`ChecklistItem`'s inline form — call the same function, so they can't
+drift into accepting different formats) and re-derived on edit (the
+Wizard's own edit path is the only one that currently supports editing an
+existing spot).
+
+`reassociateTroubleSpots(progress, practiceChunks)` (`lib/chunking.js`)
+uses that measure as ground truth: for every spot nested anywhere in
+`progress`, it finds whichever CURRENT chunk's `[start, end]` range
+actually contains `spot.startMeasure`, and moves the spot there if that's
+not where it already is — falling back to leaving it under its current id
+untouched if no chunk contains it at all (the piece itself got shorter) or
+the spot has no `startMeasure` to check (data from before this validation
+existed, unrecoverable from its own position text either). Returns the
+same `progress` reference when nothing needs to move, so a caller can tell
+cheaply whether anything changed.
+
+This is a deliberately narrower, more precise tool than
+`migrateOrphanedProgress` (`lib/chunking.js`, existing): that function
+reattaches a *whole* progress entry (sessions, `doneDays`, `practiceBPM`,
+and any nested `troubleSpots` along with it) by whichever new chunk has
+the greatest *measure-range overlap* with the old one, and only even
+considers an id that's disappeared from the new chunk set outright. It
+can't catch — and was never meant to catch — an id that's still present
+but now covers different measures: chunk ids are `c${start}`, so
+`customChunkSize` 8 → 4 produces a "c9" under both chunkings, at measures
+9–16 then 9–12. An existence check alone reads that as continuity;
+`reassociateTroubleSpots` checks each spot's own measure instead, so a
+spot at measure 14 correctly moves off a "c9" that still exists but no
+longer contains it. `reassociateTroubleSpots` only ever touches the
+`troubleSpots` array itself, never the rest of an entry's fields — at the
+two call sites that matter (below), `migrateOrphanedProgress` (or nothing,
+in the Wizard, where there's no "old piece" to diff against yet) already
+ran first and settled where the bulk of an entry belongs; this is a
+second, spot-precise correction on top, not a replacement.
+
+Three call sites:
+
+1. **`Wizard.jsx`**, reactively — a `useEffect` keyed on
+   `chunkSet.practiceChunks` re-associates `draft.progress` on every
+   change, so the Focus Spots step is always showing what's actually
+   there even if the learner backtracks and changes `totalMeasures` or
+   chunk size after already adding spots — not just fixed invisibly once
+   the wizard finishes.
+2. **`App.jsx`'s `handleSavePiece`** (a Settings edit) — chained right
+   after `migrateOrphanedProgress`, against the *edited* piece's real,
+   post-save chunk set.
+3. **`validateAndMigratePiece`** (`lib/storage.js`), unconditionally on
+   every load — a defensive third pass that self-heals a piece already
+   left mismatched from before this fix existed, or a hand-edited import,
+   with no user action required. Guarded on
+   `Array.isArray(migrated.measureDifficulty)` specifically: unlike every
+   other field this migration backfills, `measureDifficulty` itself was
+   never defaulted here (nothing needed it before), and calling
+   `generatePracticeChunks` without it throws — caught by the existing
+   test suite (four unrelated, pre-existing tests failed) before this was
+   ever treated as working.
+
+A spot saved before this validation existed gets a best-effort recovery of
+`startMeasure`/`endMeasure` on migration — `backfillSpotMeasures`
+(`lib/storage.js`) re-parses the spot's own already-stored `position` text
+the same way a new spot's position is validated at creation. A spot whose
+old text was genuine free text (or empty) simply keeps no `startMeasure` —
+nothing to recover, not an error, and `reassociateTroubleSpots` already
+treats that case as "leave it exactly where it is."

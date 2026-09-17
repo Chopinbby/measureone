@@ -50,6 +50,29 @@ export function formatRange(start, end) {
   return start === end ? `m. ${start}` : `mm. ${start}–${end}`;
 }
 
+// Focus spots (Pass 91 follow-up) — validates a spot's measure-position
+// label ("24", "24a", "24-25") so it's always anchored to a real, checkable
+// location instead of free text. The trailing letter (a pickup/alternate-
+// ending suffix, e.g. "24a") is accepted but not itself meaningful — only
+// the numeric measure(s) drive matching. `totalMeasures` is optional: pass
+// the piece's own measure count to reject a measure it doesn't have (used
+// everywhere a spot is created or edited); omit it for a lenient,
+// format-only parse (used to best-effort recover startMeasure/endMeasure
+// from an old spot's position text during migration, where the piece's
+// measure count may since have changed). Returns null when the text
+// doesn't parse as a measure or range at all.
+export function parseMeasurePosition(text, totalMeasures) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^(\d+)[a-zA-Z]?(?:\s*-\s*(\d+)[a-zA-Z]?)?$/);
+  if (!m) return null;
+  const start = Number(m[1]);
+  const end = m[2] ? Number(m[2]) : start;
+  if (start < 1 || end < start) return null;
+  if (typeof totalMeasures === "number" && (start > totalMeasures || end > totalMeasures)) return null;
+  return { start, end };
+}
+
 // Collapses a list of {start,end} measure ranges into the smallest set of
 // contiguous/overlapping spans, sorted ascending. Purely a display helper —
 // never merges ranges that actually have a gap between them, so it never

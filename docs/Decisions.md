@@ -6189,6 +6189,311 @@ explicit same-session follow-up once asked for directly.**
   navigating away) is harmless by design, matching "optional" in the
   strongest sense: there is nothing to come back to later.
 
+## Focus spots (v1)
+
+**Experimental, Pass 91.** See [Data-Model.md](Data-Model.md#focus-spots-v1)
+for the schema and [Algorithms.md](Algorithms.md#focus-spots-v1) for the
+mechanism. This entry is the judgment calls behind both — made where the
+pass description set a goal without prescribing how, flagged here per that
+pass's own instruction to surface them rather than silently resolve them.
+
+- **"Trouble spot" became "focus spot" in every piece of user-facing copy,
+  mid-build, on direct request.** Raised during design review, before any
+  code existed: "technical work" (the pass's own gate-question wording) and
+  "trouble spot" (the mechanism's own name) were being used interchangeably
+  for two different things — a category label and an item name — and
+  neither fit the general case ("not all trouble spots are necessarily
+  technical," and "trouble spots" read as unnecessarily negative). Resolved
+  by dropping "technical work" entirely and standardizing on one term,
+  "focus spot," everywhere: the Wizard's step name and gate question, both
+  panel headings, Settings, and every button/copy line. The internal field
+  name (`troubleSpots`, matching this pass's own title) was deliberately
+  **not** renamed to match — same internal-name-vs-display-label split this
+  codebase already uses everywhere (e.g. `needsRelearning` displays as
+  "Needs reinforcement"), and renaming a field mid-pass for a copy-only
+  decision would have been real, avoidable churn for zero behavioral gain.
+  The wizard's own example copy was broadened at the same time and for the
+  same underlying reason ("an awkward stretch, a fast run, a tricky
+  fingering" only named technical examples; now includes a rhythm and a
+  memory example too) — the label change alone would have been hollow if
+  the copy right next to it still only illustrated the narrow case.
+- **The wizard's chunk list paginates at 15 chunks/page, with a
+  "See mm. X–Y →" / "← Back" link, rather than showing every chunk at
+  once or a free-text "type a measure number" input.** Also raised during
+  design review: a full list "feels cumbersome" on a bigger piece, but the
+  alternative (typed measure-number matching) trades that for real
+  ambiguity — no confirmation of which chunk you're actually tagging. The
+  paginated list was built and approved as a middle ground; the free-text
+  alternative was discussed but never built, and is still open if it turns
+  out the list doesn't fully solve the cumbersome feeling in real use.
+- **Icon: `Target`, not `Wrench`.** Also a design-review call — a wrench
+  reads as "something is technically broken," which is exactly the
+  narrowing the "focus spot" rename was trying to get away from. `Flag`
+  was considered and rejected: Piece Map already uses that exact icon for
+  its own, different rough/lost marking system, and reusing it here would
+  blur two unrelated mechanics together.
+- **`fromSetup`, not "was this chunk already introduced," is what gates
+  introduction** — see [Algorithms.md](Algorithms.md#focus-spots-v1) for
+  the full reasoning. Worth restating the core fact here: `chunkSet`/
+  `timeline` are pure, stateless derivations (CLAUDE.md), so there is no
+  "last time" for `computeTimeline` to compare against — the distinction
+  has to be captured at creation time or it can't be recovered later at
+  all. This was a real architectural fork, resolved before writing the
+  gating logic rather than discovered by a failing test: the naive
+  "unresolved spot ⇒ exclude" rule looks obviously correct until you ask
+  what happens the moment a spot is added to a chunk that's already on the
+  schedule.
+- **A gated chunk's transitions/combos are excluded by checking
+  `troubleSpotGatedIds` directly, not by checking for a missing
+  `introducedDay`.** Found the hard way, not designed up front: the
+  missing-`introducedDay` version of this guard broke three pre-existing,
+  unrelated tests, because a rescheduled remainder's "stuck" connector
+  (its neighbor chunk already completed and filtered out of
+  `practiceChunks`) *also* has no `introducedDay`, for a reason that has
+  nothing to do with trouble spots, and depends on computeTimeline's own
+  `|| sectionsEndDay` fallback to still get placed instead of stranded.
+  Fixed by targeting the actual cause instead of the symptom it happened
+  to share with an unrelated, already-correct case.
+- **Resolving a chunk's last spot seeds `practiceBPM` as the *minimum*
+  `resolvedBpm` across every spot on that chunk**, not the most recent one
+  or an average. Conservative on purpose: the chunk as a whole can only
+  honestly be said to go as fast as its slowest cleared spot. This is a
+  direct seed (the same rule `handleLogSession` already uses for a
+  chunk's first-ever real session), not a `computeLadderAdvance` call —
+  no rep/pass-fail outcome is being judged at the moment a spot resolves,
+  only a tempo, so running it through the ladder engine would be judging
+  something that was never actually attempted as a ladder rep.
+- **Deliberately scoped out, flagged rather than silently folded in
+  (per this pass's own scope-fence instruction):**
+  - **Renaming the existing "Focus block" combo label to "Combo."** Raised
+    in the same design-review conversation that produced the "focus spot"
+    rename, specifically because the two would otherwise collide on the
+    same screen (Daily Practice can show a "Focus spots" panel heading
+    directly above a checklist item tagged "Focus block"). Approved for
+    the *mockup*, but "Focus block" is an existing, already-shipped label
+    (`ROLE_LABEL.combo`, `lib/constants.js`, referenced across several
+    components and docs) — outside this pass's own Touches list, and a
+    real collision risk left unresolved in the shipped app until it's
+    explicitly asked for as its own change.
+  - **A Settings-side list for reviewing/editing/removing focus spots
+    after setup.** Explored in the same round of mockup review (click a
+    spot to edit, × to remove, grouped by chunk) and well-liked, but this
+    pass's own Settings touches are explicitly scoped to just the on/off
+    toggle and the default-minutes field — building the full list would
+    have been folding in a real, separate feature just because the
+    mockup for it already existed.
+  - **Wiring a focus-spot session's `durationSeconds` into any aggregate
+    "time practiced" figure outside its own card** — `computeTimeline`'s
+    `day.minutes` is a pure schedule *estimate*
+    (`chunk.effort * EFFORT_TO_MIN`), structurally unrelated to actual
+    logged time anywhere else in this codebase (Progress's own "Estimated
+    vs. actual" panel exists specifically because those are already kept
+    as two different numbers everywhere else) — and `lib/utils.js`'s
+    `sumPracticeSeconds`/`sumPracticeSecondsSince` (the actual aggregate-
+    total functions) are outside this pass's Touches list. A focus-spot
+    session's own card shows its own logged time; it does not yet feed
+    Progress's weekly totals or any other cross-piece figure. Flagged as a
+    real, human-decidable gap rather than silently reached into an
+    out-of-scope file to close it.
+  - ~~**Any validation of `position` against real measure numbers, and the
+    `length` field.**~~ **The `position`-validation half is resolved — see
+    the follow-up below.** `length` is still deferred; nothing in this
+    follow-up round touched it.
+
+**Same-session follow-up — critical review before commit, requested
+directly by the user ("as a skeptical second engineer, not the author"),
+found two P1 bugs and two lower-severity gaps; all four fixed on request:**
+
+- **P1 — a chunk's leading "mark done" checkmark button had no idea a
+  chunk could be paused.** `canLog` (`ChecklistItem.jsx`) gated the
+  reps/BPM log form and the bottom "Log practice" button, both of which
+  are already hidden while `isPaused` — but the leading checkmark button
+  sits *before* any of that JSX and was never wired to either. Reproduced
+  directly: type reps/BPM into a chunk's card, then (without submitting)
+  add a focus spot to that same chunk — the checkmark stayed enabled and,
+  if clicked, called `submitLog()` for real, logging a session against a
+  chunk the card was simultaneously telling the learner was paused. Fixed
+  at the single source — `canLog` itself now reads
+  `hasRepsDraft && hasBpmDraft && !isPaused` — so the button's `disabled`,
+  its tooltip, and `submitLog`'s own guard all agree automatically, rather
+  than patching the button in isolation. The disabled tooltip was briefly
+  wrong after this fix (still said "Fill in reps and BPM first" even when
+  both were already filled and the real reason was `isPaused`) — caught
+  live during verification, not assumed away, and corrected to a
+  paused-specific message. Verified live: reps/BPM typed into a chunk,
+  then a spot added to it mid-sitting — checkmark button flips to
+  `disabled: true` with the correct tooltip.
+- **P1 — a focus spot's chunk association was purely an id under which it
+  happened to be nested, with nothing to recover it if that id stopped
+  meaning the same measures.** This is the bug behind "spots disappearing"
+  the user raised directly, and per their own diagnosis it needed more
+  than a narrow patch: **a spot's measure position is now a first-class,
+  validated field** (`startMeasure`/`endMeasure`, parsed from a required
+  `position` label via `parseMeasurePosition`, `lib/utils.js`) that a new
+  function, `reassociateTroubleSpots` (`lib/chunking.js`), uses to re-home
+  every spot onto whichever *current* chunk's range actually contains it —
+  never trusting id continuity alone. That distinction matters because
+  chunk ids are just `c${start}`: `customChunkSize` 8 → 4 produces a "c9"
+  under *both* chunkings, but 9–16 under the first and only 9–12 under the
+  second — an id-existence check alone (`migrateOrphanedProgress`'s own
+  check, still correct for what it does) reads that as pure continuity,
+  while the spot's own measure says otherwise. Wired into both places a
+  piece's chunking can change: live, reactively, in the Wizard (a
+  `useEffect` keyed on `chunkSet.practiceChunks`, so the Focus spots step
+  never shows a stale association even mid-setup) and in
+  `handleSavePiece`'s Settings-edit path (`App.jsx`, chained after
+  `migrateOrphanedProgress`, using the piece's real post-edit chunk set) —
+  plus a third, defensive pass inside `validateAndMigratePiece` itself
+  (`lib/storage.js`) that self-heals *any* piece on every load, closing the
+  gap for data that went bad before this fix existed or a hand-edited
+  import. `position` is required now, not optional, and validated against
+  the piece's own `totalMeasures` at both creation points (the Wizard's
+  `FocusSpotsStep` and `ChecklistItem`'s inline add-spot form) — the same
+  `parseMeasurePosition` call, so the two can't drift into accepting
+  different formats. A spot saved before this validation existed gets a
+  best-effort backfill of `startMeasure`/`endMeasure` by re-parsing its own
+  existing position text on migration (`backfillSpotMeasures`,
+  `lib/storage.js`) — free recovery for a spot whose old text already
+  happened to look like a measure reference, and a harmless no-op
+  (unchanged, left exactly as it was, not an error) for one that never did.
+  **Verified live, not just unit-tested:** built a real piece, added a spot
+  at measure 10 while chunk size was 4 (nested under "c9", 9–12), changed
+  chunk size to 6 inside the same Wizard session — the spot's own chip
+  followed to "mm. 7–12" (the chunk that now actually contains measure 10)
+  instead of vanishing from "mm. 9–12," which no longer existed. Saved the
+  piece, then changed chunk size again from Settings (6 → 4, "Determine
+  automatically") — both spots on the piece re-homed correctly a second
+  time through the *Settings* path specifically (a different call site
+  than the Wizard's), confirmed via the live Daily Practice screen showing
+  the correct new containing-chunk range for each. 20 new lib-level
+  regression tests (`test/utils.test.mjs`'s `parseMeasurePosition` describe
+  block, `test/chunking.test.mjs`'s `reassociateTroubleSpots` describe
+  block) plus 5 more in `test/storage.test.mjs` for the backfill and
+  load-time self-heal paths — including the specific "id reused but means
+  different measures" scenario as its own named test, not just covered
+  incidentally by a broader one. See
+  [Data-Model.md](Data-Model.md#focus-spots-v1) for the updated schema and
+  [Algorithms.md](Algorithms.md#focus-spots-v1) for where
+  `reassociateTroubleSpots` sits in the mechanism.
+  - **A real crash bug was found and fixed while building this, before it
+    ever reached the user:** the first cut of `validateAndMigratePiece`'s
+    self-heal called `generatePracticeChunks` unconditionally, which
+    throws on any piece missing `measureDifficulty` — a field this
+    migration function has never defaulted (nothing needed it to, before
+    now) and several of this file's own pre-existing test fixtures don't
+    set. Caught immediately by the full test suite (four unrelated,
+    pre-existing tests failing, not just new ones) before this was ever
+    treated as done. Fixed by guarding the self-heal behind
+    `Array.isArray(migrated.measureDifficulty)` — skips reassociation for
+    that narrow shape rather than crash a load path that never used to call
+    `generatePracticeChunks` at all.
+  - **A second bug in the same self-heal, also caught by the test suite
+    before being called done:** the migration's own idempotency test (run
+    `validateAndMigratePiece` twice on its own output) crashed on
+    `entry.troubleSpots.map` — the existing backfill check
+    (`!== undefined`) is true for a literal `null`, which is exactly what
+    the *first* migration pass already backfills an absent `troubleSpots`
+    to, so a second pass over already-migrated data called `.map` on
+    `null`. Fixed by checking `!= null` (loose) instead, which correctly
+    treats "never existed" and "already backfilled to null" the same way —
+    both fall through to `null`, only a real array gets mapped over.
+- **P2 — `computeTimeline`'s introduction-smoothing pass
+  (`introItems`, `lib/scheduling.js`) still spread every practice chunk,
+  including gated ones, instead of just the introducible ones.** Traced
+  through `smoothOverloadedDays`'s own day-matching logic and confirmed
+  harmless before this session (a gated chunk's `day: undefined` entry can
+  never match a real `sourceDay`, so it was inert, not wrong) — fixed
+  anyway for consistency with the rest of the gating mechanism, which
+  already computes `introducibleChunks` for exactly this purpose. No new
+  test needed: nothing observable changes, confirmed by the full,
+  already-comprehensive focus-spot test suite staying green.
+- **P2 — the `.checklist-item.paused` CSS rule (dashed border, tinted
+  background) existed but was never actually reachable — the card's own
+  `className` never included `"paused"`.** A paused card only ever got the
+  inline note, never the card-level visual treatment the CSS was written
+  for. Fixed by adding `isPaused` to the className alongside `checked`/
+  `historical`. Verified live via computed style, not just class presence:
+  `getComputedStyle` on a paused card confirmed `border-style: dashed`,
+  the brass border color, and the tinted background actually render.
+
+**Same-session follow-up, several smaller rounds of direct user feedback,
+all before this pass was ever merged:**
+
+- **The Wizard's Focus-spots Yes/No toggle read as oversized** — `.field`'s
+  own default (`align-items: stretch`) stretches any direct child to the
+  field's full width, which barely shows on a long-labeled toggle ("A
+  single piece" / "Multiple movements") but reads as pure oversized padding
+  on a two-word one. Scoped narrowly (`style={{ alignSelf: "flex-start"
+  }}` on this one `.segmented` div, not a change to the shared class) so
+  every other toggle in the app — several of which genuinely do want the
+  full width — is untouched. Verified live: 99px wide instead of spanning
+  the field.
+- **"Use *a* or *b* for half measures" was added, then relocated, on
+  direct request both times.** First cut added it as its own
+  always-visible line under the Measure field, in both the Wizard and
+  `ChecklistItem`'s add-spot form. Asked to be undone and folded into the
+  *existing*, error-only hint instead — "restore the original copy...
+  just put [it] after that line" — so the final shape is one line, still
+  gated the same way it always was (shown only once the typed text fails
+  to parse), reading "Enter a measure number within this piece (e.g. 24,
+  24a, or 24-25). Use *a* or *b* for half measures." Applied identically
+  to both forms, keeping the precedent this whole feature has followed of
+  never letting the Wizard's and `ChecklistItem`'s copy drift apart.
+- **The focus-spot card's own checkbox was decorative — a `<span>`, not a
+  button — until asked to make it real.** Now a `<button>` once
+  `loggedToday`, calling a new `handleUnlogFocusSpotTime` (`App.jsx`).
+  **Found live, from the user's own report ("the checkbox seems to be
+  working inconsistently"), not caught in initial testing**: the first cut
+  only removed the *most recent* session logged today, but `loggedToday`
+  is "does *any* session exist for today" — so a second time-log the same
+  day (log some time, come back later and log more, an entirely normal
+  thing to do) left one click looking like it did nothing, since a session
+  from earlier that day was still there. Fixed by clearing *every* session
+  logged today in one click instead of just the last one — verified with
+  an explicit before/after test (logged twice, 0→1→2 sessions; one
+  checkbox click, 2→0, not 2→1).
+- **`.focus-spot-icon`'s Target glyph was rendering inverted** — a dark
+  circular badge (`background: var(--ink); color: var(--white)`), flagged
+  directly as making it "look less recognizable as a target." Every other
+  Target icon in this feature (the paused-note, the panel heading) is a
+  plain colored glyph with no background; this one was the outlier.
+  Matched to that precedent — dropped the background/border-radius/fixed
+  size entirely, just `color: var(--brass-deep)` on a transparent
+  ground — confirmed via computed style, not just visual impression.
+- **Both FocusSpotCard buttons were relabeled**, on direct request: "Log
+  time" → "Not yet, log time," "Achieved / Doable →" → "Yes, log BPM." No
+  handler changes — `logTime`/`confirmResolve` are unchanged, only the
+  button text.
+- **A genuine gap, surfaced by the user asking "what happens if you log
+  under the default amount required":** nothing did. `troubleSpotDefaultMinutes`
+  was read back only in the two setup screens that set it — never once in
+  the actual practice flow. Resolving a spot with zero seconds logged was
+  fully possible, and would still have permanently seeded the parent
+  chunk's `practiceBPM` from an unverified BPM. **Built into a real,
+  enforced minimum once asked for directly** — see
+  [Algorithms.md](Algorithms.md#focus-spots-v1) for the mechanism
+  (`FocusSpotCard`'s countdown-then-count-up timer, both actions disabled
+  below the floor). The countdown framing itself came from a question the
+  user asked mid-request ("does that make it a countdown timer?") rather
+  than an instruction — read as an invitation to build it that way, not
+  just answer the question, and confirmed correct by the follow-up (no
+  pushback on that framing). The piece-level default was also lowered from
+  10 to 5 minutes for a newly-created piece, per direct request, with
+  `min={1}` already in place on both editors (unrelated, pre-existing)
+  meaning the floor can never be set to 0 and trivially bypassed.
+- **The checkmark icon inside `.checklist-check` read as too small** — a
+  16px `<Check>` inside a 22px box, flagged simply as "the checks look
+  tiny." Bumped to 18px, applied identically everywhere that shared box
+  renders a checkmark (`ChecklistItem.jsx`'s checked/historical states,
+  `FocusSpotCard.jsx`'s checked/resolved states) rather than just the one
+  screen most recently in view, since all four are the same visual
+  component and drifting only one of them would have been a new, smaller
+  version of the exact inconsistency this whole round of feedback was
+  about.
+
+Committed as a single commit (`2dce47d`) once all of the above was done —
+the branch was not pushed and no PR was opened in that same request.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

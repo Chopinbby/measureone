@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2 } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { SectionsEditor } from "../fields/SectionsEditor";
@@ -26,7 +26,26 @@ import { formatMinutes } from "../../lib/utils";
 // needed for that).
 const ARCHIVE_LOCKED_TITLE = "Available once this piece's learning plan is actually finished";
 
-export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft, onSave, onDelete, editing, onStartEdit, onDiscard, onAddPiece, onExportClick, onImportClick, onSetStatus, onSetMarkedLearnedElsewhere, onSetTempoLadderFraction }) {
+export function SettingsTab({
+  piece,
+  chunkSet,
+  timeline,
+  editDraft,
+  setEditDraft,
+  onSave,
+  onDelete,
+  editing,
+  onStartEdit,
+  onDiscard,
+  onAddPiece,
+  onExportClick,
+  onImportClick,
+  onSetStatus,
+  onSetMarkedLearnedElsewhere,
+  onSetTempoLadderFraction,
+  onSetTroubleSpotsEnabled,
+  onSetTroubleSpotDefaultMinutes,
+}) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
   // the toggle is on but the work title is blank (same rule as the Wizard,
@@ -153,6 +172,54 @@ export function SettingsTab({ piece, chunkSet, timeline, editDraft, setEditDraft
             </label>
           </div>
         )}
+        {/* Pass 91 (experimental v1) — shown unconditionally, unlike the
+            revival panel above: this is the "can change later" affordance
+            the Wizard's own yes/no step promises, so it has to be reachable
+            regardless of what was chosen at setup, not just once the
+            feature is already on. Toggling it only ever changes whether the
+            "add a focus spot" UI is offered — it never touches (or hides)
+            an already-flagged spot's own gating/pausing, which reads
+            straight off progress[id].troubleSpots (lib/scheduling.js's
+            focusSpotGate), not off this flag. */}
+        <div className="panel">
+          <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}><Target size={15} /> Focus spots</h3>
+          <p className="wizard-hint" style={{ marginBottom: 12 }}>
+            Flag passages that need slow, deliberate drilling before they're ready for normal-tempo
+            work. A chunk with unresolved focus spots is held back from your regular schedule until
+            every spot on it resolves.
+          </p>
+          <div className="field">
+            <span>Track focus spots for this piece</span>
+            <div className="segmented">
+              <button
+                type="button"
+                className={!piece.troubleSpotsEnabled ? "active" : ""}
+                onClick={() => onSetTroubleSpotsEnabled(false)}
+              >
+                Off
+              </button>
+              <button
+                type="button"
+                className={piece.troubleSpotsEnabled ? "active" : ""}
+                onClick={() => onSetTroubleSpotsEnabled(true)}
+              >
+                On
+              </button>
+            </div>
+          </div>
+          {piece.troubleSpotsEnabled && (
+            <label className="field" style={{ maxWidth: 340, marginBottom: 0 }}>
+              <span>Default focus-spot session length (minutes)</span>
+              <NumberInput
+                value={piece.troubleSpotDefaultMinutes}
+                min={1}
+                max={120}
+                onCommit={onSetTroubleSpotDefaultMinutes}
+              />
+              <p className="tip-line">Applies to new focus spots going forward. Existing ones keep the value they were created with.</p>
+            </label>
+          )}
+        </div>
         <div className="panel">
           <h3>Backup & restore</h3>
           <p className="wizard-hint" style={{ marginBottom: 12 }}>

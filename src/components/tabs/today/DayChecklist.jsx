@@ -67,6 +67,7 @@ export function DayChecklist({
   onLogRunThrough,
   onUnlogRunThrough,
   onSetMemoryAnchor,
+  onAddFocusSpot,
   onGoToNextOccurrence,
 }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
@@ -192,6 +193,7 @@ export function DayChecklist({
             onConfirmProvisionalSession={onConfirmProvisionalSession}
             onDiscardProvisionalSession={onDiscardProvisionalSession}
             onSetMemoryAnchor={onSetMemoryAnchor}
+            onAddFocusSpot={onAddFocusSpot}
           />
         ))}
         {historicalItems.map(({ chunk, nextOccurrenceDay }) => (

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
-import { generateAllChunks, migrateOrphanedProgress } from "./lib/chunking";
+import { generateAllChunks, migrateOrphanedProgress, reassociateTroubleSpots } from "./lib/chunking";
 import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
@@ -565,7 +565,15 @@ export default function App() {
     // closure's own current value, not `updated`), so it's the "old" side
     // of the comparison. A no-op, same object back, when nothing was
     // actually orphaned by this edit.
-    const progress = migrateOrphanedProgress(piece, updated);
+    // reassociateTroubleSpots (lib/chunking.js) is a second, more precise
+    // pass on top of migrateOrphanedProgress: the latter only catches a
+    // chunk id that's disappeared outright, not one that still exists but
+    // now covers different measures (customChunkSize 8 -> 4 both produce a
+    // "c9", just at 9-16 vs 9-12) — a case migrateOrphanedProgress reads as
+    // pure continuity. Each focus spot's own startMeasure is checked
+    // against `updated`'s real, current chunks regardless of which id it's
+    // currently nested under.
+    const progress = reassociateTroubleSpots(migrateOrphanedProgress(piece, updated), generateAllChunks(updated).practiceChunks);
     // A save that doesn't regenerate chunk ids (see CHUNK_STRUCTURE_FIELDS)
     // — pacing fields, or a difficulty/recurring reassessment — used to
     // still always drop rescheduleMarker to null, same as every other edit,
@@ -979,6 +987,140 @@ export default function App() {
       return { ...p, progress };
     });
   };
+
+  // Pass 91 (experimental v1) — focus spots (docs/Data-Model.md#focus-spots-v1).
+  // A spot discovered on a chunk's own Daily Practice card (ChecklistItem's
+  // "+ Add a focus spot"), so this handler only ever exists for a chunk
+  // that's already introduced. fromSetup is hardcoded false here — see
+  // lib/scheduling.js's focusSpotGate for why that matters (only a
+  // fromSetup spot gates introduction; a spot added here must never
+  // retroactively pull an already-scheduled chunk back off the plan). The
+  // Wizard's own equivalent (FocusSpotsStep, Wizard.jsx) writes fromSetup:
+  // true directly onto its local draft instead of going through this
+  // handler, since the piece doesn't exist yet at that point for
+  // updatePiece to target.
+  const handleAddFocusSpot = (chunkId, { name, position, startMeasure, endMeasure }) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId] || { doneDays: [] };
+      const spot = {
+        id: `fs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        position: position || "",
+        // Validated by the caller (ChecklistItem's add-spot form) before
+        // this ever runs — see lib/utils.js's parseMeasurePosition. This is
+        // what reassociateTroubleSpots (lib/chunking.js) matches against if
+        // this piece's measures/chunking ever change later.
+        startMeasure: typeof startMeasure === "number" ? startMeasure : null,
+        endMeasure: typeof endMeasure === "number" ? endMeasure : null,
+        length: null,
+        fromSetup: false,
+        resolved: false,
+        resolvedBpm: null,
+        resolvedAt: null,
+        sessions: [],
+      };
+      progress[chunkId] = { ...prevEntry, troubleSpots: [...(prevEntry.troubleSpots || []), spot] };
+      return { ...p, progress };
+    });
+  };
+
+  // "Log time" on FocusSpotCard — records that time was spent without
+  // claiming the spot is clean yet. Deliberately separate from
+  // handleLogSession's chunk-level sessions array: a trouble-spot session is
+  // not evidence of whole-chunk practice, so nothing here ever touches
+  // piece.progress[chunkId].sessions or the chunk's own ladder state — only
+  // this one spot's own nested sessions array.
+  const handleLogFocusSpotTime = (chunkId, spotId, durationSeconds) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const loggedDate = todayISODate();
+      const nextSpots = (prevEntry.troubleSpots || []).map((s) =>
+        s.id === spotId
+          ? { ...s, sessions: [...(s.sessions || []), { loggedAt: Date.now(), loggedDate, durationSeconds }] }
+          : s
+      );
+      progress[chunkId] = { ...prevEntry, troubleSpots: nextSpots };
+      return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
+  // Undo for the checkbox on FocusSpotCard's own head row (same click-to-
+  // undo pattern ChecklistItem's leading checkmark already uses) — clears
+  // EVERY session logged today for this one spot, not just the most recent.
+  // loggedToday (FocusSpotCard.jsx) is "does any session exist for today,"
+  // so removing only the last one left the checkbox looking stuck checked
+  // whenever a second time-log had already happened the same day (log some
+  // time, come back later and log more — an entirely normal thing to do) —
+  // one click looked like it did nothing. Removing every today-dated entry
+  // makes the checkbox behave as an actual toggle: one click always fully
+  // unchecks it, regardless of how many times time was logged today.
+  const handleUnlogFocusSpotTime = (chunkId, spotId) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const today = todayISODate();
+      const nextSpots = (prevEntry.troubleSpots || []).map((s) => {
+        if (s.id !== spotId) return s;
+        const sessions = s.sessions || [];
+        if (!sessions.some((sess) => sess.loggedDate === today)) return s;
+        return { ...s, sessions: sessions.filter((sess) => sess.loggedDate !== today) };
+      });
+      progress[chunkId] = { ...prevEntry, troubleSpots: nextSpots };
+      return { ...p, progress };
+    });
+  };
+
+  // "Achieved / Doable" on FocusSpotCard — the one gate the pass describes:
+  // hitting this, with the BPM it was played cleanly at, both ends this
+  // spot's own tracking and, once every spot on the chunk has cleared,
+  // hands the whole chunk to the existing tempo-ladder machinery. That
+  // handoff is a direct practiceBPM seed (the same "practiceBPM is seeded
+  // from whatever the learner actually logs the first time they touch a
+  // chunk" rule handleLogSession already uses above, just triggered by a
+  // trouble-spot resolution instead of a first real session) — not a
+  // computeLadderAdvance call, since no rep/pass-fail outcome is being
+  // judged here, only a tempo. The chunk still starts at stage: null, same
+  // as any other never-logged chunk; its very next *real* logged session is
+  // what actually puts it on the ladder for the first time. Seeded as the
+  // minimum resolvedBpm across every spot on the chunk — conservative, since
+  // the chunk as a whole can only go as fast as its slowest cleared spot —
+  // and only when practiceBPM isn't already set (a chunk this handler can
+  // resolve the last spot on was, by construction, gated, so it should
+  // never have one yet; guarded anyway rather than assumed).
+  const handleResolveFocusSpot = (chunkId, spotId, bpm, durationSeconds = 0) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const loggedDate = todayISODate();
+      const resolvedAt = Date.now();
+      const nextSpots = (prevEntry.troubleSpots || []).map((s) =>
+        s.id === spotId
+          ? {
+              ...s,
+              resolved: true,
+              resolvedBpm: bpm,
+              resolvedAt,
+              sessions: [...(s.sessions || []), { loggedAt: resolvedAt, loggedDate, durationSeconds }],
+            }
+          : s
+      );
+      const allResolved = nextSpots.length > 0 && nextSpots.every((s) => s.resolved);
+      const seededPracticeBPM =
+        allResolved && prevEntry.practiceBPM == null
+          ? Math.min(...nextSpots.map((s) => s.resolvedBpm).filter((n) => typeof n === "number"))
+          : prevEntry.practiceBPM;
+      progress[chunkId] = { ...prevEntry, troubleSpots: nextSpots, practiceBPM: seededPracticeBPM };
+      return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
+  const handleSetTroubleSpotsEnabled = (enabled) => updatePiece((p) => ({ ...p, troubleSpotsEnabled: enabled }));
+  const handleSetTroubleSpotDefaultMinutes = (minutes) => updatePiece((p) => ({ ...p, troubleSpotDefaultMinutes: minutes }));
 
   // Pass 29 follow-up — resolves a provisional session (see handleLogSession
   // above) by finally running it through computeLadderAdvance, using the
@@ -2031,6 +2173,10 @@ export default function App() {
                 onEndRevival={handleEndRevival}
                 onAssessmentTimerRiskChange={setAssessmentTimerRisk}
                 onConfirmLeaveAssessmentTimer={confirmLeavingAssessmentTimer}
+                onAddFocusSpot={handleAddFocusSpot}
+                onLogFocusSpotTime={handleLogFocusSpotTime}
+                onUnlogFocusSpotTime={handleUnlogFocusSpotTime}
+                onResolveFocusSpot={handleResolveFocusSpot}
               />
             )}
             {activeTab === "progress" && (
@@ -2072,6 +2218,8 @@ export default function App() {
                 onSetStatus={handleSetPieceStatus}
                 onSetMarkedLearnedElsewhere={handleSetMarkedLearnedElsewhere}
                 onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
+                onSetTroubleSpotsEnabled={handleSetTroubleSpotsEnabled}
+                onSetTroubleSpotDefaultMinutes={handleSetTroubleSpotDefaultMinutes}
               />
             )}
           </main>
@@ -2518,6 +2666,46 @@ const CSS = `
 .log-row input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
 .fail-override-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-soft); font-weight: 600; margin-top: 8px; }
 .primary-btn.sm { padding: 7px 14px; font-size: 12.5px; }
+
+/* Pass 91 (experimental v1) — focus spots. .ts- prefix is shared by the
+   Wizard's setup-time spot list (Wizard.jsx's FocusSpotsStep) and Settings'
+   own on/off panel; .focus-spot- prefix is Daily Practice's own gated/
+   paused practice card (components/tabs/today/FocusSpotCard.jsx). */
+.ts-chunk-list { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ts-chunk-row { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; background: var(--white); }
+.ts-chunk-row-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ts-chunk-row-main .grow { flex: 1; }
+.ts-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ts-chip { display: inline-flex; align-items: center; background: rgba(32,42,51,0.06); border-radius: 20px; padding: 2px; }
+.ts-chip-label { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: none; padding: 3px 4px 3px 8px; font-size: 12px; color: var(--ink); font-family: inherit; cursor: pointer; }
+.ts-chip-label .mono { color: var(--ink-soft); font-size: 11px; }
+.ts-chip-label:hover { color: var(--brass-deep); }
+.ts-chip-remove { background: transparent; border: none; color: var(--ink-faint); width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; flex-shrink: 0; }
+.ts-chip-remove:hover { background: rgba(181,71,58,0.15); color: var(--brick); }
+.ts-add-form { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px 6px; margin-top: 10px; }
+.ts-add-form .field { margin-bottom: 10px; }
+.ts-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 10px 0 4px; }
+
+.focus-spot-panel { border-color: rgba(185,138,62,0.4); }
+.focus-spot-summary { font-size: 12.5px; color: var(--ink-soft); margin: -6px 0 14px; }
+.focus-spot-cards { display: flex; flex-direction: column; gap: 12px; }
+.focus-spot-card { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; background: var(--white); padding: 14px 15px; }
+.focus-spot-card.resolved { background: rgba(46,110,99,0.08); border-color: rgba(46,110,99,0.35); }
+.focus-spot-card-body { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.focus-spot-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.focus-spot-name { font-weight: 700; }
+.focus-spot-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--brass-deep); }
+.focus-spot-count { font-size: 11.5px; color: var(--brass-deep); background: rgba(185,138,62,0.12); border-radius: 20px; padding: 2px 9px; font-weight: 600; }
+.focus-spot-prompt { font-size: 13px; margin: 0; }
+.focus-spot-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.focus-spot-bpm-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.focus-spot-bpm-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink-soft); font-weight: 600; }
+.focus-spot-bpm-form input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; font-size: 13.5px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
+.focus-spot-resolved-line { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--teal); margin: 0; }
+
+.checklist-item.paused { border-style: dashed; border-color: var(--brass); background: rgba(185,138,62,0.05); }
+.paused-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; background: rgba(185,138,62,0.08); border-radius: 8px; padding: 10px 11px; }
+.paused-note svg { flex-shrink: 0; margin-top: 1px; color: var(--brass-deep); }
 
 .view-all-list { display: flex; flex-direction: column; gap: 14px; }
 

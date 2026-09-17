@@ -141,17 +141,47 @@ export function adaptiveReviewOffsets(chunk, progress) {
   return REVIEW_OFFSETS.map((o) => Math.max(1, Math.round(o * factor)));
 }
 
+// Pass 91 (experimental v1) — a chunk's trouble-spot gate, read off its own
+// progress entry. Two entry points create a trouble spot (Wizard.jsx's new
+// step, pre-introduction; a chunk's own Daily Practice card, post-
+// introduction — see ChecklistItem.jsx), and they need different scheduling
+// consequences: a spot flagged at setup must hold the whole chunk back from
+// ever being introduced, while a spot discovered mid-practice on an
+// already-introduced chunk must NOT retroactively pull it back off the
+// schedule (docs/Data-Model.md#focus-spots-v1) — computeTimeline has no
+// memory of a past run to tell "already introduced" from "never introduced"
+// by itself (chunkSet/timeline are pure derivations, recomputed from
+// scratch every time — CLAUDE.md), so that distinction is captured at
+// creation time instead, as `fromSetup` on the spot itself. Only a
+// `fromSetup` spot ever gates introduction; a chunk already showing on the
+// schedule stays there regardless of what gets flagged on it afterward — it
+// just reads as "paused" at the display layer (ChecklistItem.jsx), a data
+// change nowhere in this file.
+export function focusSpotGate(entry) {
+  const spots = (entry && entry.troubleSpots) || [];
+  const unresolved = spots.filter((s) => !s.resolved);
+  return {
+    unresolved,
+    // Every spot on the chunk cleared, and there was at least one to begin
+    // with — `[].every(...)` is vacuously true, so the length check is load-
+    // bearing: without it, a chunk with no trouble spots at all would read
+    // as "just resolved" and wrongly jump to tier 0 on every recompute.
+    allResolved: spots.length > 0 && unresolved.length === 0,
+    gatesIntroduction: unresolved.some((s) => s.fromSetup),
+  };
+}
+
 // Pass 89 — difficulty-first introduction order. Before the placement loop
 // below decides *which day* a chunk lands on, this decides what *order*
 // practiceChunks are fed into that loop in, so hard material (and its
 // immediate neighbors) reach the front of the queue instead of waiting on
 // raw measure position. Four tiers, highest priority first:
-//   0. A chunk whose trouble spots just resolved. No data source for this
-//      exists yet (the Trouble-spot pass hasn't shipped) — troubleSpotIds is
-//      always empty for now, so this tier is a real slot in the ordering
-//      that currently produces no reordering on its own. Once that pass
-//      exists, it only needs to populate troubleSpotIds; nothing here needs
-//      to change.
+//   0. A chunk whose focus spots have all resolved (Pass 91, experimental
+//      v1) — computeTimeline passes troubleSpotResolvedIds (focusSpotGate's
+//      allResolved rule, above) rather than this function computing it
+//      itself, same separation as hardIds/neighborIds being derived from
+//      practiceChunks alone. This is exactly the slot Pass 89 built for it;
+//      nothing else about this sort changed to add it.
 //   1. Hard chunks (difficultyLabel === "hard").
 //   2. Direct one-degree measure-neighbors of a hard chunk — the chunk
 //      immediately before/after it in practiceChunks' own array order,
@@ -299,6 +329,23 @@ export function smoothOverloadedDays({ dayNumbers, items, loadFor, ceiling, floo
 // run-through.
 export function computeTimeline(piece, chunkSet) {
   const { practiceChunks, transitions, combos, all } = chunkSet;
+
+  // Pass 91 (experimental v1) — a chunk with a trouble spot flagged at setup
+  // (focusSpotGate's fromSetup rule, above) is held out of introduction
+  // placement entirely: no day, no introducedDay, exactly as if it weren't
+  // part of the piece yet. `introducibleChunks` — not raw `practiceChunks`
+  // — is what every piece of the placement math below actually spreads
+  // across; a gated chunk's effort must not eat into the budget every other
+  // chunk is being spread over, or the whole front-half boundary math would
+  // be sized for work that isn't actually being introduced this recompute.
+  const troubleSpotGatedIds = new Set(
+    practiceChunks.filter((c) => focusSpotGate(piece.progress[c.id]).gatesIntroduction).map((c) => c.id)
+  );
+  const troubleSpotResolvedIds = new Set(
+    practiceChunks.filter((c) => focusSpotGate(piece.progress[c.id]).allResolved).map((c) => c.id)
+  );
+  const introducibleChunks = practiceChunks.filter((c) => !troubleSpotGatedIds.has(c.id));
+
   const totalDays = Math.max(1, Number(piece.daysToLearn) || 1);
   const restFlags = computeRestDayFlags(totalDays, piece.practiceDaysPerWeek);
 
@@ -409,9 +456,12 @@ export function computeTimeline(piece, chunkSet) {
   // sortPracticeChunksForIntroduction above), not raw measure order; this
   // loop only decides which day a chunk lands on, never the sequence it's
   // considered in.
-  const totalNewEffort = practiceChunks.reduce((s, c) => s + c.effort, 0);
+  const totalNewEffort = introducibleChunks.reduce((s, c) => s + c.effort, 0);
   const numFrontDays = frontDays.length;
-  const { order: introOrder, tierById: introductionTierById } = sortPracticeChunksForIntroduction(practiceChunks);
+  const { order: introOrder, tierById: introductionTierById } = sortPracticeChunksForIntroduction(
+    introducibleChunks,
+    troubleSpotResolvedIds
+  );
   let dayIdx = 0;
   let runningEffort = 0;
   introOrder.forEach((chunk) => {
@@ -443,7 +493,7 @@ export function computeTimeline(piece, chunkSet) {
     ? frontDays.reduce((s, d) => s + minutesFor(days[d - 1]), 0) / frontDays.length
     : 0;
   const introBand = scheduleBand(piece, frontIntroAvg);
-  const introItems = practiceChunks.map((c) => ({ id: c.id, day: introducedDay[c.id], minDay: frontDays[0] || 1, priority: priorityOf(c.id), size: sizeOf(c.id) }));
+  const introItems = introducibleChunks.map((c) => ({ id: c.id, day: introducedDay[c.id], minDay: frontDays[0] || 1, priority: priorityOf(c.id), size: sizeOf(c.id) }));
   smoothOverloadedDays({
     dayNumbers: frontDays,
     items: introItems,
@@ -463,6 +513,19 @@ export function computeTimeline(piece, chunkSet) {
 
   const transitionItems = [];
   transitions.forEach((t) => {
+    // Pass 91 (experimental v1) — a transition seams two flanking chunks
+    // together, so it can't honestly be placed while either one is gated by
+    // a focus spot — checked via troubleSpotGatedIds specifically, NOT via
+    // "does either linked chunk lack an introducedDay," which is also true
+    // of an unrelated, pre-existing case this must not disturb: a
+    // rescheduled remainder's linkedIds can point at an already-completed
+    // chunk that simply isn't in this chunk set at all anymore, and the
+    // `|| sectionsEndDay` fallback right below is exactly what lets that
+    // "stuck" transition still get placed instead of stranded (see
+    // test/scheduling.test.mjs's "stuck, never-logged transition" cases) —
+    // confirmed the hard way, by first writing this guard too broadly and
+    // watching those tests fail.
+    if (troubleSpotGatedIds.has(t.linkedIds[0]) || troubleSpotGatedIds.has(t.linkedIds[1])) return;
     const readyDay = Math.max(
       introducedDay[t.linkedIds[0]] || sectionsEndDay,
       introducedDay[t.linkedIds[1]] || sectionsEndDay
@@ -475,6 +538,12 @@ export function computeTimeline(piece, chunkSet) {
 
   const comboItems = [];
   combos.forEach((c, i) => {
+    // Pass 91 (experimental v1) — same reasoning, and same troubleSpotGatedIds-
+    // not-introducedDay guard, as the transitions loop just above. A combo
+    // is anchored to a single hard chunk (linkedIds[0]), and that's exactly
+    // the kind of chunk likely to carry a flagged focus spot, so this is a
+    // live case, not a theoretical one.
+    if (troubleSpotGatedIds.has(c.linkedIds[0])) return;
     const readyDay = introducedDay[c.linkedIds[0]] || sectionsEndDay;
     const earliest = snapCapped(Math.max(sectionsEndDay + 1, readyDay + 1));
     const pool = backDays.length ? backDays.filter((d) => d >= earliest) : [];
@@ -615,7 +684,12 @@ export function computeTimeline(piece, chunkSet) {
   });
 
   if (consolidationDays) {
-    days[consolidationDay - 1].reviewChunkIds = practiceChunks.map((c) => c.id);
+    // Pass 91 (experimental v1) — a gated chunk was never actually
+    // introduced, so it has nothing to "play through" yet; leaving it out
+    // of practiceChunks.map below (introducibleChunks, not practiceChunks)
+    // keeps the whole-piece run-through honest about what's actually been
+    // learned so far.
+    days[consolidationDay - 1].reviewChunkIds = introducibleChunks.map((c) => c.id);
   }
 
   days.forEach((d) => {

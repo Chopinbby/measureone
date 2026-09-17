@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Check } from "lucide-react";
-import { formatRange, formatDuration, todayISODate } from "../../../lib/utils";
+import { Check, Plus, Target } from "lucide-react";
+import { formatRange, formatDuration, todayISODate, parseMeasurePosition } from "../../../lib/utils";
 import { ROLE_LABEL, DIFFICULTY_META, SESSION_OUTCOME_META } from "../../../lib/constants";
 import {
   computeConfidence,
@@ -11,6 +11,7 @@ import {
   formatLadderStatus,
   resolveRequiredReps,
 } from "../../../lib/confidence";
+import { focusSpotGate } from "../../../lib/scheduling";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
 import { ReassessPanel } from "./ReassessPanel";
@@ -28,6 +29,12 @@ export function ChecklistItem({
   memoryAnchor,
   onSetMemoryAnchor,
   onReassessRange,
+  // Pass 91 (experimental v1) — only passed by DayChecklist's live (non-
+  // historical) render path; a chunk that's already paused by an unresolved
+  // spot doesn't need it (there's nowhere to show it once the paused note
+  // takes over the card body), and it's never offered on a transition/combo
+  // card (chunk.kind !== "section") — see the render below.
+  onAddFocusSpot,
   // Historical mode (DayChecklist's record-of-what-was-done cards, added
   // when this item's own live schedule slot has since moved elsewhere —
   // see findHistoricalItemsForDay, lib/history.js): read-only, no
@@ -48,6 +55,38 @@ export function ChecklistItem({
   onGoToNextOccurrence,
 }) {
   const entry = piece.progress[chunk.id] || {};
+  // Pass 91 (experimental v1) — an unresolved spot pauses this card's
+  // regular practice UI regardless of *how* it was added (fromSetup only
+  // matters to computeTimeline's introduction gate, lib/scheduling.js —
+  // once a card is showing at all, any open spot pauses it). Never true in
+  // historical mode: a read-only record of a day that's already passed has
+  // nothing to pause.
+  const unresolvedFocusSpots = focusSpotGate(entry).unresolved;
+  const isPaused = !historical && unresolvedFocusSpots.length > 0;
+  const [addFocusSpotOpen, setAddFocusSpotOpen] = useState(false);
+  const [focusSpotName, setFocusSpotName] = useState("");
+  const [focusSpotPosition, setFocusSpotPosition] = useState("");
+  const canAddFocusSpot =
+    !historical && !isPaused && typeof onAddFocusSpot === "function" && chunk.kind === "section" && piece.troubleSpotsEnabled;
+  // Required, not optional — a spot with no real measure reference can't be
+  // matched back to a chunk if this piece's measures/chunking ever change
+  // (reassociateTroubleSpots, lib/chunking.js), so it's validated the same
+  // way at both places a spot can be created (this form and the Wizard's
+  // FocusSpotsStep).
+  const focusSpotPositionParsed = parseMeasurePosition(focusSpotPosition, piece.totalMeasures);
+  const submitAddFocusSpot = () => {
+    const name = focusSpotName.trim();
+    if (!name || !focusSpotPositionParsed) return;
+    onAddFocusSpot(chunk.id, {
+      name,
+      position: focusSpotPosition.trim(),
+      startMeasure: focusSpotPositionParsed.start,
+      endMeasure: focusSpotPositionParsed.end,
+    });
+    setFocusSpotName("");
+    setFocusSpotPosition("");
+    setAddFocusSpotOpen(false);
+  };
   const checked = (entry.doneDays || []).includes(day);
   // Multiple sessions can now legitimately share a plan-day (a Tier 1
   // touch, a due review, a re-attempt) — this surface shows/undoes just
@@ -137,7 +176,17 @@ export function ChecklistItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);
 
-  const canLog = hasRepsDraft && hasBpmDraft;
+  // isPaused belongs here, not just on the blocks below that stop
+  // rendering while paused: the leading checkmark button (right below, in
+  // the render) reads canLog directly and isn't nested inside any of those
+  // isPaused-gated blocks, so without it here a reps/BPM draft typed in
+  // before a focus spot got added to this same chunk left that button
+  // clickable — and clicking it called submitLog for real, silently, on a
+  // card that was telling the learner practice was paused. Found in review,
+  // fixed here rather than by threading a second condition onto the button
+  // itself, so canLog, its tooltip text, and submitLog's own guard all stay
+  // correct together automatically.
+  const canLog = hasRepsDraft && hasBpmDraft && !isPaused;
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   const practiceBPM = entry.practiceBPM ?? null;
   // Single source of truth for "how many reps does this chunk actually
@@ -248,10 +297,10 @@ export function ChecklistItem({
   };
 
   return (
-    <div className={`checklist-item ${checked ? "checked" : ""} ${historical ? "historical" : ""}`}>
+    <div className={`checklist-item ${checked ? "checked" : ""} ${historical ? "historical" : ""} ${isPaused ? "paused" : ""}`}>
       {historical ? (
         <span className="checklist-check" aria-hidden="true">
-          <Check size={16} />
+          <Check size={18} />
         </span>
       ) : checked ? (
         <button
@@ -264,7 +313,7 @@ export function ChecklistItem({
               : "Removes this log entry, but can't reverse tempo or schedule changes it already caused — a later session has been logged since, or this entry predates undo support."
           }
         >
-          <Check size={16} />
+          <Check size={18} />
         </button>
       ) : (
         <button
@@ -272,7 +321,7 @@ export function ChecklistItem({
           className="checklist-check-empty"
           disabled={!canLog}
           aria-label="Mark done"
-          title={canLog ? "Mark done" : "Fill in reps and BPM first"}
+          title={canLog ? "Mark done" : isPaused ? "Regular practice is paused — resolve the focus spot first" : "Fill in reps and BPM first"}
           onClick={submitLog}
         />
       )}
@@ -284,6 +333,87 @@ export function ChecklistItem({
           <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
           <span className="conf-pill mono">{conf}%</span>
         </div>
+
+        {/* Pass 91 (experimental v1) — a chunk with an unresolved focus spot
+            pauses here: the rest of this card's regular practice UI
+            (requirement line, timer, log inputs, the log button itself) is
+            suppressed below, in favor of this one note. Mirrors the
+            suppression-without-removal treatment needsRelearning already
+            gets on an in-progress chunk's review — the card stays, it just
+            isn't actionable the normal way right now. */}
+        {isPaused && (
+          <div className="paused-note">
+            <Target size={14} aria-hidden="true" />
+            <span>
+              Regular practice paused. {unresolvedFocusSpots.length} focus spot{unresolvedFocusSpots.length === 1 ? "" : "s"} to
+              work through first.
+              <br />
+              <button
+                type="button"
+                className="link-btn"
+                style={{ marginTop: 4 }}
+                onClick={() => document.getElementById("focus-spots-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                Jump to focus spot ↑
+              </button>
+            </span>
+          </div>
+        )}
+
+        {canAddFocusSpot && !addFocusSpotOpen && (
+          <button type="button" className="link-btn" onClick={() => setAddFocusSpotOpen(true)}>
+            <Plus size={12} /> Add a focus spot
+          </button>
+        )}
+        {canAddFocusSpot && addFocusSpotOpen && (
+          <div className="ts-add-form">
+            <label className="field">
+              <span>Name</span>
+              <input
+                type="text"
+                value={focusSpotName}
+                onChange={(e) => setFocusSpotName(e.target.value)}
+                placeholder="e.g. the descending run"
+              />
+            </label>
+            <label className="field">
+              <span>Measure</span>
+              <input
+                type="text"
+                value={focusSpotPosition}
+                onChange={(e) => setFocusSpotPosition(e.target.value)}
+                placeholder="e.g. 24, 24a, or 24-25"
+              />
+              {focusSpotPosition.trim() && !focusSpotPositionParsed && (
+                <p className="tip-line">
+                  Enter a measure number within this piece (e.g. 24, 24a, or 24-25). Use{" "}
+                  <em>a</em> or <em>b</em> for half measures.
+                </p>
+              )}
+            </label>
+            <div className="ts-form-actions">
+              <button
+                type="button"
+                className="ghost-btn sm"
+                onClick={() => {
+                  setAddFocusSpotOpen(false);
+                  setFocusSpotName("");
+                  setFocusSpotPosition("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-btn sm"
+                disabled={!focusSpotName.trim() || !focusSpotPositionParsed}
+                onClick={submitAddFocusSpot}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Opt-in: only rendered where a caller passes onReassessRange — no
             current caller does (revival's post-reassessment plan/escalation
@@ -369,8 +499,8 @@ export function ChecklistItem({
             Overlearning: practice tempo ({practiceBPM} BPM) is now above target ({targetBPM} BPM).
           </p>
         ) : null}
-        {!historical && <p className="tip-line"><strong>{requirementText}</strong></p>}
-        {!historical && (
+        {!historical && !isPaused && <p className="tip-line"><strong>{requirementText}</strong></p>}
+        {!historical && !isPaused && (
           <p className="tip-line">
             Spaced Repetition:{" "}
             {ladderStatus
@@ -387,7 +517,7 @@ export function ChecklistItem({
           <p className="tip-line">Tempo ladder: {tempoLadder.join(" → ")} BPM</p>
         )}
 
-        {!historical && (
+        {!historical && !isPaused && (
           <div className="timer-row">
             <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
               {timerRunning ? "Stop" : "Start"} timer
@@ -408,7 +538,7 @@ export function ChecklistItem({
           </div>
         )}
 
-        {!historical && (
+        {!historical && !isPaused && (
           <div className="log-row">
             <label>
               <span>Clean reps (aim {requiredReps})</span>
@@ -487,7 +617,7 @@ export function ChecklistItem({
             </p>
           )
         )}
-        {!historical && (
+        {!historical && !isPaused && (
           <>
             <label className="fail-override-row">
               <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />

@@ -218,6 +218,61 @@ export function migrateOrphanedProgress(oldPiece, newPiece) {
   return migrated;
 }
 
+// Focus spots (Pass 91 follow-up) — re-homes every trouble spot onto
+// whichever CURRENT chunk's measure range actually contains that spot's
+// own recorded startMeasure, rather than trusting the chunk id it happens
+// to be nested under. migrateOrphanedProgress above only catches an id
+// that's disappeared outright; it can't catch one that still exists but
+// now means a *different* measure range — chunk ids are `c${start}`, so
+// e.g. customChunkSize 8 -> 4 produces a "c9" both before and after
+// (measures 9-16, then 9-12), which reads as pure continuity to that
+// function even though nothing about the actual content lined up.  A
+// spot's own startMeasure is ground truth here in a way a chunk id never
+// can be, since chunk ids are themselves just a byproduct of the current
+// chunking scheme.
+//
+// A spot with no startMeasure at all (saved before this validation
+// existed, and not recoverable by re-parsing its old position text either
+// — see backfillProgressLadderState, lib/storage.js) has no ground truth
+// to check against, so it's left exactly where it already is. Same for a
+// spot whose startMeasure no longer falls inside ANY current chunk (the
+// piece itself got shorter) — genuinely nothing to reattach to. Both
+// mirror migrateOrphanedProgress's own precedent: never make an
+// already-orphaned entry worse, just leave it be.
+//
+// Returns the same `progress` reference when nothing actually needs to
+// move, so a caller can cheaply tell whether anything changed via `!==`.
+export function reassociateTroubleSpots(progress, practiceChunks) {
+  const spotted = Object.entries(progress || {}).filter(([, e]) => e && e.troubleSpots && e.troubleSpots.length);
+  if (!spotted.length) return progress;
+
+  const byNewChunk = {};
+  let changed = false;
+  spotted.forEach(([chunkId, entry]) => {
+    entry.troubleSpots.forEach((spot) => {
+      const home =
+        (spot.startMeasure != null &&
+          practiceChunks.find((c) => spot.startMeasure >= c.start && spot.startMeasure <= c.end)) ||
+        practiceChunks.find((c) => c.id === chunkId);
+      const homeId = home ? home.id : chunkId;
+      if (homeId !== chunkId) changed = true;
+      if (!byNewChunk[homeId]) byNewChunk[homeId] = [];
+      byNewChunk[homeId].push(spot);
+    });
+  });
+  if (!changed) return progress;
+
+  const next = { ...progress };
+  spotted.forEach(([chunkId, entry]) => {
+    next[chunkId] = { ...entry, troubleSpots: byNewChunk[chunkId] || [] };
+    delete byNewChunk[chunkId];
+  });
+  Object.entries(byNewChunk).forEach(([chunkId, spots]) => {
+    next[chunkId] = { ...(next[chunkId] || progress[chunkId] || { doneDays: [] }), troubleSpots: spots };
+  });
+  return next;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Section run-throughs: unlike chunks/transitions/combos above,     */
 /*  these are NOT part of the precomputed timeline and carry no       */

@@ -243,7 +243,49 @@ export function computeTimeline(piece, chunkSet) {
   });
   const sectionsEndDay = halfPoint;
 
+  // A transition whose BOTH flanking chunks are missing from introducedDay
+  // — not "not yet reached," genuinely absent from this call's own
+  // practiceChunks entirely — only happens in one shape: this is a
+  // reschedule's remainder sub-schedule (computeEffectiveTimeline), and
+  // both flanks were already practiced *before* the reschedule, so they
+  // were excluded from remainingChunks and never passed into this
+  // particular computeTimeline call at all. That's structurally
+  // unreachable in the ordinary, whole-piece call this function also
+  // serves — there every chunk (and so every transition's flanks) gets an
+  // introducedDay from the loop above, by construction. Precomputed
+  // before the loop below runs, since introducedDay only holds chunk
+  // entries at this point — a transition never affects another
+  // transition's readiness.
+  //
+  // Reported live: every such transition fell back to the exact same
+  // `readyDay = sectionsEndDay` default, piling all of them onto one
+  // single day (confirmed: 9 transitions, 90 minutes, one day, while
+  // neighboring days sat empty) instead of being spread the way the
+  // combos loop below already spreads its own analogous "readyDay
+  // unknown" fallback via `i % candidates.length`. This mirrors that
+  // existing, already-shipped pattern for the identical shape of problem
+  // — not a new one for this file, and not the index-based-spread-
+  // replacing-real-readiness mistake the comment on this file's own
+  // CLAUDE.md entry warns against: a transition with at least one
+  // tracked flank is completely untouched by this and still schedules
+  // strictly off that flank's own real introduction day, exactly as
+  // before. This only reaches a transition that has no real per-run
+  // readiness signal to begin with — the previous behavior already fell
+  // back to an arbitrary default for it, just not a spread one.
+  const orphanedTransitionIds = new Set(
+    transitions
+      .filter((t) => !introducedDay[t.linkedIds[0]] && !introducedDay[t.linkedIds[1]])
+      .map((t) => t.id)
+  );
+  let orphanedTransitionIdx = 0;
   transitions.forEach((t) => {
+    if (orphanedTransitionIds.has(t.id)) {
+      const day = learningDaysCalendar[orphanedTransitionIdx % learningDaysCalendar.length];
+      orphanedTransitionIdx++;
+      days[day - 1].specialChunkIds.push(t.id);
+      introducedDay[t.id] = day;
+      return;
+    }
     const readyDay = Math.max(
       introducedDay[t.linkedIds[0]] || sectionsEndDay,
       introducedDay[t.linkedIds[1]] || sectionsEndDay
@@ -842,9 +884,26 @@ export function countBehindDays(piece, timeline, currentDay, chunkById = {}) {
 // a second copy of the formula. The 0.65 is the same day-fill factor the
 // rest of the scheduler uses (see computeDaysNeededForMinutesPerDay), and
 // the 5-minute floor on minutesPerDay guards a divide-by-something-tiny.
-export function estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay, remainingChunkIds) {
+//
+// `connectors`/`remainingConnectorIds` default to `[]` — optional, so a
+// call site that only cares about practice-chunk fit doesn't have to pass
+// them — but omitting them for a piece whose only remaining work is
+// transitions/combos silently reports `fits: true` no matter how much of
+// that work is actually outstanding, since remainingEffort would then be
+// computed from practice chunks alone. Reported live (indirectly): a
+// piece with every practice chunk already learned and 9 untouched
+// transitions still got told everything "fits" into whatever single day
+// was left in its plan, so no extension was ever offered — reschedule
+// then had nowhere to put those 9 transitions but that one day (~3 hours
+// of work). Both current call sites (handleReschedule, App.jsx;
+// planRescheduleForPieces, below) already have chunkSet and
+// remainingConnectorIds in scope and now pass them.
+export function estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay, remainingChunkIds, connectors = [], remainingConnectorIds = []) {
   const remaining = new Set(remainingChunkIds);
-  const remainingEffort = practiceChunks.reduce((s, c) => (remaining.has(c.id) ? s + c.effort : s), 0);
+  const remainingConnectors = new Set(remainingConnectorIds);
+  const remainingEffort =
+    practiceChunks.reduce((s, c) => (remaining.has(c.id) ? s + c.effort : s), 0) +
+    connectors.reduce((s, c) => (remainingConnectors.has(c.id) ? s + c.effort : s), 0);
   const availableDays = Math.max(1, timeline.days.length - asOfDay + 1);
   const requiredDays = Math.max(
     1,
@@ -1003,7 +1062,15 @@ export function planRescheduleForPieces(pieces) {
       // outcome. Found in review, removed rather than left as dead weight.
       if (missedCount === 0 && qualifyingConnectorIds.length === 0) return;
 
-      const fit = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds);
+      const fit = estimateRescheduleFit(
+        piece,
+        chunkSet.practiceChunks,
+        timeline,
+        asOfDay,
+        remainingChunkIds,
+        [...chunkSet.transitions, ...chunkSet.combos],
+        remainingConnectorIds
+      );
 
       // A piece whose target date has already passed (not just "tight
       // within what's left") has no meaningful "pack into what's left"

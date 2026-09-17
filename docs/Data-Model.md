@@ -272,9 +272,12 @@ piece = {
                          // spot keeps gating/pausing its chunk — scheduling reads
                          // focusSpotGate (lib/scheduling.js) directly off
                          // progress[id].troubleSpots, not off this flag.
-  troubleSpotDefaultMinutes, // number, default 10 — Pass 91 (experimental v1). How long a
-                         // fresh focus-spot session suggests working the spot before
-                         // checking in again. Piece-level only; there is no per-spot override.
+  troubleSpotDefaultMinutes, // number, default 5 (was 10 — lowered same-session, before this
+                         // ever shipped) — Pass 91 (experimental v1). Enforced, not just
+                         // suggested: FocusSpotCard.jsx disables both "Not yet, log time" and
+                         // "Yes, log BPM" until this many minutes are logged (timer or the
+                         // manual field), min={1} enforced in both editors so it can never be
+                         // 0 and trivially bypassed. Piece-level only; no per-spot override.
 }
 
 ChunkProgress = {
@@ -1062,12 +1065,16 @@ by `fromSetup`:
    the chunk isn't already paused) — for a spot discovered mid-practice,
    writing `fromSetup: false`.
 
-`piece.troubleSpotsEnabled`/`piece.troubleSpotDefaultMinutes` (see the
-piece object above) are UI-only — they gate whether the "add a spot"
-affordances are offered, never whether an already-flagged spot keeps
-gating or pausing its chunk. See
-[Algorithms.md](Algorithms.md#focus-spots-v1) for the full scheduling
-mechanism this drives, and
+`piece.troubleSpotsEnabled` (see the piece object above) is UI-only — it
+gates whether the "add a spot" affordances are offered, never whether an
+already-flagged spot keeps gating or pausing its chunk.
+`piece.troubleSpotDefaultMinutes` is **not** UI-only in that same sense as
+of a same-session follow-up — see the field's own comment above and
+[Algorithms.md](Algorithms.md#focus-spots-v1) for the enforced minimum it
+now drives on `FocusSpotCard.jsx`. Neither field ever affects
+`focusSpotGate` (`lib/scheduling.js`) or the introduction-gating mechanism
+itself — that reads `progress[id].troubleSpots` directly, regardless of
+either piece-level setting. See
 [Decisions.md](Decisions.md#focus-spots-v1) for the judgment calls behind
 `fromSetup`, the BPM-seeding rule, and what this pass deliberately left
 out (Settings-side spot management, wiring focus-spot minutes into any

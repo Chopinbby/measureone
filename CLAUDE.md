@@ -184,6 +184,21 @@ chunking, scheduling, and confidence are actually computed, see
     [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md#position-based-logic-is-only-correct-for-the-caller-whose-list-it-was-written-against)
     for the general lesson and
     [`docs/Decisions.md`](docs/Decisions.md#scheduling) for the incident.
+  - **`reassociateTroubleSpots` (`lib/chunking.js`) matches a focus spot to
+    its chunk by measure position (`startMeasure`), never by trusting the
+    chunk id it's nested under (Pass 91, experimental v1).** The same
+    general lesson as the bullet above, a second instance of it: chunk ids
+    are `c${start}`, so a chunking-scheme edit (`customChunkSize` 8 → 4)
+    can produce an id that still exists in the new chunk set but now
+    covers different measures entirely (a "c9" meaning 9–16, then 9–12) —
+    an id-existence check alone reads that as continuity.
+    `migrateOrphanedProgress` is correct for what it does (whole-entry
+    reattachment by best overlap); this function exists specifically to
+    catch what that one can't. If you touch this function's matching
+    logic, keep the measure-position check — simplifying it down to "does
+    this id still exist" silently reintroduces the exact spot-orphaning
+    bug it was built to fix. See
+    [`docs/Algorithms.md`](docs/Algorithms.md#focus-spots-v1).
 - **`Wizard` is create-only.** Editing an existing piece always goes through
   `SettingsTab`, never the wizard.
 - **Piece Map chunk detail is a modal, not inline** — this was a deliberate
@@ -1452,9 +1467,11 @@ difficulty-first order, not raw measure order —
 `practiceChunks` into 4 tiers before the existing effort-spreading
 placement loop ever sees it (the loop itself, and transitions'/combos' own
 placement, are untouched — only the order chunks are fed in changes): tier
-0 (a chunk whose trouble spots just resolved — no data source yet, since
-the Trouble-spot pass hasn't shipped, so always empty for now, built early
-so that pass doesn't need to touch this sort again), tier 1 (hard chunks),
+0 (a chunk whose trouble spots just resolved — no data source yet at the
+time, since the Trouble-spot pass hadn't shipped; **populated as of Pass
+91** by `troubleSpotResolvedIds`, built early specifically so that pass
+didn't need to touch this sort again — see
+[`docs/Algorithms.md`](docs/Algorithms.md#focus-spots-v1)), tier 1 (hard chunks),
 tier 2 (a hard chunk's immediate measure-neighbor, matched the same way
 `generateComboChunks` already defines adjacency — confirmed, not assumed,
 before building), tier 3 (everything else). Deliberate UX consequence: day
@@ -1510,3 +1527,84 @@ Week view/Master Agenda don't render individual item cards, only rolled-up
 range badges. See
 [`docs/Algorithms.md`](docs/Algorithms.md#historical-cards-on-daily-practice)
 and [`docs/Decisions.md`](docs/Decisions.md#ux).
+
+**Since Pass 91 (experimental v1),** MeasureOne has a **focus spots**
+mechanism: a specific passage inside a practice chunk that needs slow,
+minutes-based drilling before it's ready for the chunk's normal reps/BPM
+tracking. A spot flagged at Wizard setup time (`fromSetup: true`) holds its
+whole chunk back from introduction entirely — no day, no `introducedDay`,
+transitions/combos touching it excluded too, the whole-piece consolidation
+run-through excluded too; a spot added later from a chunk's own Daily
+Practice card (`fromSetup: false`) never retroactively pulls an
+already-scheduled chunk back off the plan. `focusSpotGate`
+(`lib/scheduling.js`) is the one predicate everything else reads. Resolving
+a chunk's last open spot seeds its `practiceBPM` as the minimum
+`resolvedBpm` across every spot on it. A new "Focus spots" Wizard step (5
+of 7, between Difficulty and Timeline) and a matching Settings panel gate
+whether the "add a spot" affordance is offered at all
+(`piece.troubleSpotsEnabled`); a `FocusSpotsPanel` on Daily Practice shows
+one `FocusSpotCard` per unresolved spot anywhere in the piece, reading
+`piece.progress` directly rather than the current day's schedule. See
+[`docs/Algorithms.md`](docs/Algorithms.md#focus-spots-v1),
+[`docs/Data-Model.md`](docs/Data-Model.md#focus-spots-v1), and
+[`docs/Decisions.md`](docs/Decisions.md#focus-spots-v1).
+
+**A spot's chunk association is anchored to a real, validated measure
+position, not just the chunk id it happens to be nested under.** `position`
+is required (not optional) and validated at both entry points via
+`parseMeasurePosition` (`lib/utils.js` — "24", "24a", or "24-25", checked
+against the piece's own `totalMeasures`); the parsed numbers
+(`startMeasure`/`endMeasure`) are what `reassociateTroubleSpots`
+(`lib/chunking.js`) matches against a chunk's own range to find a spot's
+real current home, rather than trusting the id it's nested under. **This
+matters because chunk ids are just `c${start}`** — a chunking-scheme edit
+can produce an id that still exists but now covers different measures
+entirely (`customChunkSize` 8 → 4 both produce a "c9," just at 9–16 then
+9–12), which reads as pure continuity to `migrateOrphanedProgress`'s
+existence check alone. **If you touch `reassociateTroubleSpots`, keep the
+measure-position match — don't simplify it down to an id-existence check**,
+or this exact bug (a spot silently orphaned by a chunking edit, the thing
+this function was built to fix) comes back. Wired into three places: the
+Wizard, reactively, so the Focus spots step never shows a stale association
+even mid-setup; `App.jsx`'s `handleSavePiece`, chained right after
+`migrateOrphanedProgress`; and `validateAndMigratePiece` unconditionally on
+every load, as a self-healing safety net (guarded on
+`Array.isArray(migrated.measureDifficulty)` specifically, since that field
+was never defaulted in this migration before and calling
+`generatePracticeChunks` without it throws — found by the test suite, not
+assumed safe).
+
+**A focus-spot practice card gates on a minimum practice time before
+either action enables** (`piece.troubleSpotDefaultMinutes`, default 5,
+`min={1}` enforced in both editors) — a countdown timer counts down to
+that target, then flips to counting up past it once met, checked against
+whichever is larger, the running timer or a manually-typed minutes value.
+Closes a real gap found by direct question ("what happens if you log under
+the default"): before this, nothing enforced it at all, and a spot could
+be resolved — permanently seeding the parent chunk's `practiceBPM` — off
+zero seconds of actual drilling.
+
+**Two real bugs were found in critical review, before this was ever
+committed, and both are worth knowing if you touch this feature again:**
+`ChecklistItem`'s leading "mark done" checkmark button sits outside every
+`isPaused`-gated block in that component (the reps/BPM form, the log
+button — all simple conditional rendering — are not the same code path as
+this button), so pausing a chunk mid-practice-session used to leave that
+one control still live; fixed by folding `!isPaused` directly into
+`canLog` itself, the single value the button's `disabled`, tooltip, and
+`submitLog`'s own guard all already read. And the `.checklist-item.paused`
+CSS existed but the class was never actually applied to the element — a
+paused card only ever showed the inline note, never the dashed-border
+visual treatment the CSS was written for.
+
+**"logged today" is "does any session exist for today," never "was the
+most recent action today"** — worth remembering if you build another
+undo control keyed to a boolean like this. `FocusSpotCard`'s own checkbox
+undo first shipped clearing only the *most recent* today-dated session,
+which left it looking stuck checked the moment a second session got logged
+the same day (log some time, come back later, log more — an ordinary
+thing to do), since at least one still matched "today." Found from a
+direct user report of "inconsistent" behavior, not caught in initial
+testing. Fixed by clearing every today-dated session in one click, not
+just the last one — the boolean and the undo action now agree about what
+"today" means.

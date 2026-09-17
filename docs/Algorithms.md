@@ -3194,12 +3194,42 @@ A focus spot's own practice card (`FocusSpotCard.jsx`, rendered by
 `FocusSpotsPanel` in `TodayTab.jsx` — one card per unresolved spot, not
 one per chunk, so a chunk with two open spots shows two cards) is
 minutes-based, not reps/BPM-based: a timer, and a single prompt, "Can you
-play this cleanly at a low tempo yet?" "Log time" (`handleLogFocusSpotTime`,
-`App.jsx`) just appends a session to that spot's own `sessions` array —
-never touches the parent chunk's `sessions`, `stage`, or anything else
-`computeConfidence`/the ladder reads. "Achieved / Doable" prompts for the
-clean BPM and, on confirm (`handleResolveFocusSpot`), sets
+play this cleanly at a low tempo yet?" "Not yet, log time" (originally
+labeled "Log time" — renamed same-session, before this ever shipped, per
+direct request) calls `handleLogFocusSpotTime` (`App.jsx`), which just
+appends a session to that spot's own `sessions` array — never touches the
+parent chunk's `sessions`, `stage`, or anything else `computeConfidence`/
+the ladder reads. "Yes, log BPM" (originally "Achieved / Doable") prompts
+for the clean BPM and, on confirm (`handleResolveFocusSpot`), sets
 `resolved`/`resolvedBpm`/`resolvedAt` on that one spot.
+
+**Same-session follow-up: neither action is reachable until a minimum
+practice time is met.** `piece.troubleSpotDefaultMinutes` (Settings/Wizard,
+default 5 for a piece created after this follow-up, `min={1}` enforced in
+both editors so it can never be 0) sets a floor both buttons check —
+`currentSeconds() >= requiredMinutes * 60` — checked against whichever is
+larger, the running timer's live elapsed time or a manually-typed "minutes
+practiced" value (both already fed through the same `currentSeconds()`
+this component already used). Below the floor, both buttons are disabled
+with an explanatory tooltip and a "Practice for at least N minutes before
+logging" line. The timer display itself counts *down* toward the target
+while below it, then flips to counting *up* past it once met, so it's
+always showing something meaningful — time still needed, or total time
+actually spent. Raised directly by the user, who pointed out that without
+this, "Yes, log BPM" could resolve a spot — and permanently seed the
+parent chunk's `practiceBPM` from it (see below) — off zero seconds of
+actual drilling; closing that gap was the entire point of the gate.
+
+**Also same-session follow-up: the checkbox on the card's own head row
+(shows once `loggedToday` — any session logged today — is true) is a real
+undo control, not decoration.** Clicking it (`handleUnlogFocusSpotTime`,
+`App.jsx`) clears *every* session logged today for that spot, not just the
+most recent one — found and fixed after the first cut (removing only the
+latest entry) left the checkbox looking stuck checked whenever a second
+time-log had already happened the same day, since `loggedToday` only cares
+whether *any* session exists for today, not which one. One click now
+always fully unchecks it, regardless of how many times time was logged
+that day.
 
 If that was the chunk's last unresolved spot, the same handler additionally
 seeds the chunk's own `progress[id].practiceBPM` — the "hands the spot to

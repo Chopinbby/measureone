@@ -276,6 +276,21 @@ this there is a distinct, larger change. See
 [Algorithms.md#historical-cards-on-daily-practice](Algorithms.md#historical-cards-on-daily-practice)
 and [Decisions.md](Decisions.md#ux).
 
+**Since Pass 91 (experimental v1)**, a **focus spots** mechanism: flag a
+specific passage inside a practice chunk (measure-position-validated, a new
+Wizard step and a matching Settings toggle) that needs slow, minutes-based
+drilling before it joins the chunk's normal reps/BPM tracking. A spot
+flagged at setup holds its whole chunk back from introduction entirely; one
+added later from a chunk's own Daily Practice card never pulls an
+already-scheduled chunk back off the plan. A dedicated practice card gates
+on a minimum practice time (`piece.troubleSpotDefaultMinutes`, default 5)
+before it can be logged or resolved — a countdown timer, not just a
+suggestion. Marked experimental/v1 deliberately: no Settings-side spot
+management list, and focus-spot minutes don't yet feed any cross-piece
+"time practiced" total — see
+[Decisions.md](Decisions.md#focus-spots-v1) for the full scope-fence and
+[Algorithms.md](Algorithms.md#focus-spots-v1) for the mechanism.
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold

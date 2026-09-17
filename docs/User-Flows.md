@@ -18,16 +18,21 @@
 Entry points: "Start a new piece" (empty state), "Add new piece" (Overview,
 sidebar switcher, Settings).
 
-`Wizard` walks through six steps: **Piece → Sections → Difficulty → Repeats →
-Timeline → Review**. Each step's fields are the same shared editor components
-used later in Settings (`BasicsFields`, `SectionsEditor`, `DifficultyEditor`,
-`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`,
-`DocumentsEditor`) — see
+`Wizard` walks through seven steps: **Piece → Sections → Repeats →
+Difficulty → Focus spots → Timeline → Review**. Every step but one reuses
+the same shared editor components Settings uses later (`BasicsFields`,
+`SectionsEditor`, `RecurringEditor`, `DifficultyEditor`, `ScheduleFields`,
+`BpmZonesEditor`, `RecordingsEditor`, `DocumentsEditor`) — see
 [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows).
-The Review step shows a `ManuscriptStrip` preview of the generated chunks
-before the piece is created. Completing the wizard calls
-`generateAllChunks` + `computeTimeline` for the first time and persists the
-new piece to `localStorage`.
+**Focus spots (Pass 91, experimental v1) is the one exception**: a yes/no
+toggle for `piece.troubleSpotsEnabled`, and — only when "Yes" — a
+paginated, chunk-by-chunk spot editor (`FocusSpotsStep`) that exists only
+in `Wizard.jsx`, not in Settings' shared `fields/` — see
+[Decisions.md](Decisions.md#focus-spots-v1) for why this one step doesn't
+follow the shared-editor pattern. The Review step shows a `ManuscriptStrip`
+preview of the generated chunks before the piece is created. Completing the
+wizard calls `generateAllChunks` + `computeTimeline` for the first time and
+persists the new piece to `localStorage`.
 
 Step 1 is also where the user says whether this is a single piece or one
 movement of a larger work, and whether they're learning it fresh or reviving
@@ -85,7 +90,17 @@ than jumping to a specific day.
    (`computeScheduleStatus`) and offers rescheduling — see flow 4.
 2. `FocusPanel` surfaces what most needs attention right now, independent of
    what's scheduled for today.
-3. `DayChecklist` lists today's actual scheduled items (new chunks, reviews,
+3. **Since Pass 91 (experimental v1)**, `FocusSpotsPanel` renders next,
+   whenever any practice chunk has an unresolved focus spot — a
+   `FocusSpotCard` per spot (not per chunk), reading `piece.progress`
+   directly rather than the current day's own schedule, so a spot on a
+   chunk that isn't introduced yet is still reachable. Each card gates on
+   a minimum practice time (`piece.troubleSpotDefaultMinutes`, default 5)
+   before either action button enables — a countdown timer counting down
+   to that target, then up past it once met. "Not yet, log time" logs the
+   time and leaves the spot open; "Yes, log BPM" resolves it. See
+   [Algorithms.md](Algorithms.md#focus-spots-v1).
+4. `DayChecklist` lists today's actual scheduled items (new chunks, reviews,
    transitions, combos). Each `ChecklistItem` has a start/stop timer (or a
    manual minutes field, which wins over the timer when filled) and clean
    reps / BPM-achieved inputs, auto-classified into a pass/soft-miss/fail
@@ -101,7 +116,7 @@ than jumping to a specific day.
    moved past this occurrence) — no timer/inputs/log button, just the
    logged outcome and a link to wherever the item is scheduled now. See
    [Algorithms.md](Algorithms.md#historical-cards-on-daily-practice).
-4. `SectionRunThroughPanel` appears once it has anything to show — since
+5. `SectionRunThroughPanel` appears once it has anything to show — since
    Pass 49, that's not a one-time unlock but a repeating gate (due, then
    not due, then due again as practice continues), plus a locked/grayed
    preview the day before the next threshold is crossed; see
@@ -110,11 +125,11 @@ than jumping to a specific day.
    browsing to a past or future day hides it entirely, in every view mode
    (Day view, Week, View all, Interleaved alike), rather than showing
    today's live due-state mislabeled as that day's own.
-5. **Since Pass 57**, `RandomStartPanel` appears once 2+ chunks/transitions/
+6. **Since Pass 57**, `RandomStartPanel` appears once 2+ chunks/transitions/
    combos in the piece have 2+ logged sessions each — "Pick a starting
    point" picks one at random, so a practice session doesn't always start
    from the same place. Hidden entirely below that threshold.
-6. **Since Pass 56**, `ColdStartPanel` appears once every section's own
+7. **Since Pass 56**, `ColdStartPanel` appears once every section's own
    run-through has been logged at least once, at a widening gap (3, 7,
    14, 28, ... days) since the piece was last touched at all — a
    whole-piece cold play-through (no warm-up), logging average BPM and
@@ -124,7 +139,7 @@ than jumping to a specific day.
    short, optional "rate the piece overall right now?" prompt (five
    quick-tap options, or Skip) that feeds Progress's new "Overall
    confidence" stat — see flow 3 below.
-7. `ReassessPanel` is available for re-rating difficulty on today's measure
+8. `ReassessPanel` is available for re-rating difficulty on today's measure
    ranges after practicing them — see flow 5.
 
 Today has four view modes, not just one: **Day view** (the numbered steps

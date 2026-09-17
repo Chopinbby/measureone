@@ -6416,6 +6416,84 @@ found two P1 bugs and two lower-severity gaps; all four fixed on request:**
   `getComputedStyle` on a paused card confirmed `border-style: dashed`,
   the brass border color, and the tinted background actually render.
 
+**Same-session follow-up, several smaller rounds of direct user feedback,
+all before this pass was ever merged:**
+
+- **The Wizard's Focus-spots Yes/No toggle read as oversized** — `.field`'s
+  own default (`align-items: stretch`) stretches any direct child to the
+  field's full width, which barely shows on a long-labeled toggle ("A
+  single piece" / "Multiple movements") but reads as pure oversized padding
+  on a two-word one. Scoped narrowly (`style={{ alignSelf: "flex-start"
+  }}` on this one `.segmented` div, not a change to the shared class) so
+  every other toggle in the app — several of which genuinely do want the
+  full width — is untouched. Verified live: 99px wide instead of spanning
+  the field.
+- **"Use *a* or *b* for half measures" was added, then relocated, on
+  direct request both times.** First cut added it as its own
+  always-visible line under the Measure field, in both the Wizard and
+  `ChecklistItem`'s add-spot form. Asked to be undone and folded into the
+  *existing*, error-only hint instead — "restore the original copy...
+  just put [it] after that line" — so the final shape is one line, still
+  gated the same way it always was (shown only once the typed text fails
+  to parse), reading "Enter a measure number within this piece (e.g. 24,
+  24a, or 24-25). Use *a* or *b* for half measures." Applied identically
+  to both forms, keeping the precedent this whole feature has followed of
+  never letting the Wizard's and `ChecklistItem`'s copy drift apart.
+- **The focus-spot card's own checkbox was decorative — a `<span>`, not a
+  button — until asked to make it real.** Now a `<button>` once
+  `loggedToday`, calling a new `handleUnlogFocusSpotTime` (`App.jsx`).
+  **Found live, from the user's own report ("the checkbox seems to be
+  working inconsistently"), not caught in initial testing**: the first cut
+  only removed the *most recent* session logged today, but `loggedToday`
+  is "does *any* session exist for today" — so a second time-log the same
+  day (log some time, come back later and log more, an entirely normal
+  thing to do) left one click looking like it did nothing, since a session
+  from earlier that day was still there. Fixed by clearing *every* session
+  logged today in one click instead of just the last one — verified with
+  an explicit before/after test (logged twice, 0→1→2 sessions; one
+  checkbox click, 2→0, not 2→1).
+- **`.focus-spot-icon`'s Target glyph was rendering inverted** — a dark
+  circular badge (`background: var(--ink); color: var(--white)`), flagged
+  directly as making it "look less recognizable as a target." Every other
+  Target icon in this feature (the paused-note, the panel heading) is a
+  plain colored glyph with no background; this one was the outlier.
+  Matched to that precedent — dropped the background/border-radius/fixed
+  size entirely, just `color: var(--brass-deep)` on a transparent
+  ground — confirmed via computed style, not just visual impression.
+- **Both FocusSpotCard buttons were relabeled**, on direct request: "Log
+  time" → "Not yet, log time," "Achieved / Doable →" → "Yes, log BPM." No
+  handler changes — `logTime`/`confirmResolve` are unchanged, only the
+  button text.
+- **A genuine gap, surfaced by the user asking "what happens if you log
+  under the default amount required":** nothing did. `troubleSpotDefaultMinutes`
+  was read back only in the two setup screens that set it — never once in
+  the actual practice flow. Resolving a spot with zero seconds logged was
+  fully possible, and would still have permanently seeded the parent
+  chunk's `practiceBPM` from an unverified BPM. **Built into a real,
+  enforced minimum once asked for directly** — see
+  [Algorithms.md](Algorithms.md#focus-spots-v1) for the mechanism
+  (`FocusSpotCard`'s countdown-then-count-up timer, both actions disabled
+  below the floor). The countdown framing itself came from a question the
+  user asked mid-request ("does that make it a countdown timer?") rather
+  than an instruction — read as an invitation to build it that way, not
+  just answer the question, and confirmed correct by the follow-up (no
+  pushback on that framing). The piece-level default was also lowered from
+  10 to 5 minutes for a newly-created piece, per direct request, with
+  `min={1}` already in place on both editors (unrelated, pre-existing)
+  meaning the floor can never be set to 0 and trivially bypassed.
+- **The checkmark icon inside `.checklist-check` read as too small** — a
+  16px `<Check>` inside a 22px box, flagged simply as "the checks look
+  tiny." Bumped to 18px, applied identically everywhere that shared box
+  renders a checkmark (`ChecklistItem.jsx`'s checked/historical states,
+  `FocusSpotCard.jsx`'s checked/resolved states) rather than just the one
+  screen most recently in view, since all four are the same visual
+  component and drifting only one of them would have been a new, smaller
+  version of the exact inconsistency this whole round of feedback was
+  about.
+
+Committed as a single commit (`2dce47d`) once all of the above was done —
+the branch was not pushed and no PR was opened in that same request.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

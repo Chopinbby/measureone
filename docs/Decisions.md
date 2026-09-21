@@ -1585,6 +1585,108 @@ days behind schedule" one.**
   are genuinely not interchangeable in practice, not just in theory.
 - See [Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83).
 
+**Decision (Pass 92): the four day-list surfaces' separate "nothing left
+here" checks consolidate into one shared `classifyDayEmptyState`, reusing
+`isDayFullySwept` rather than duplicating it — and the staleness-specific
+copy ("Already due"/"Now due") is deleted outright, not reworded.**
+
+- **The report:** `DayChecklist.jsx`, `TimelineTab.jsx`, `WeekView.jsx`,
+  and `MasterAgendaTab.jsx` had each grown their own slightly different
+  version of "is there really nothing to show for this day" — an
+  `items.length === 0` check, an `isDayFullySwept` call, and a
+  `day.staleReviewIds` check, combined differently in each file — and each
+  rendered its own near-but-not-quite-identical copy for the same three
+  underlying states: real content remains, everything was rescheduled
+  away, or nothing remains at all. Timeline's version of the third case had
+  no fallback text at all — a genuinely empty, never-scheduled day rendered
+  nothing in its card body.
+- **The consolidation:** `classifyDayEmptyState(day, piece, chunkById =
+  {})` (`lib/scheduling.js`) reuses `isDayFullySwept` internally rather
+  than re-deriving the same sweep logic, and returns `null` (real content
+  remains — render normally), `"rescheduled"` (`isDayFullySwept` is true),
+  or `"empty"` (nothing remains and `isDayFullySwept` is false). Neither
+  `isDayFullySwept` nor `withLiveReviewStatus` themselves changed — this
+  only changes how their existing outputs get turned into display copy,
+  confirmed precisely against the request's own framing before writing any
+  code.
+- **The `"empty"` case deliberately merges two previously-distinct
+  situations into one string, per the request:** a day that genuinely
+  never had anything scheduled, and a day whose only content was a review
+  `withLiveReviewStatus` had already pulled out for staleness
+  (`day.staleReviewIds`). Before this pass, the second case got its own
+  copy — Day view's "Already due — see Daily Practice," the other three
+  surfaces' "Now due — see today" — explaining *why* the day looked empty.
+  That copy is deleted outright, not reworded or preserved as a fallback:
+  a day emptied purely by staleness now reads "Nothing scheduled." exactly
+  like any other empty day, with no explanation of what used to be there.
+  This was the request's explicit call, not a simplification made
+  unilaterally while implementing.
+- **Wording unification, not just logic unification:** the four surfaces
+  had never agreed on exact copy even for the *shared* cases —
+  `DayChecklist`'s "Nothing scheduled." (with period) was treated as
+  canonical; Week view's "Nothing scheduled" (no period) and Master
+  Agenda's "No tasks scheduled" both changed to match it. "Tasks
+  rescheduled" was already identical across all four and needed no change.
+- **What stayed out of scope, on purpose:** Master Agenda's two other
+  "nothing scheduled"-adjacent strings — the whole-agenda summary label
+  (`"Busy day"`/`"Moderate"`/`"Light"`/`"Nothing scheduled"`, driven by
+  `agendaData.totalMinutes` across every piece) and the Learning sub-tab's
+  whole-list empty state (`"Nothing scheduled"` / `"No active pieces have
+  practice scheduled for this day"`) — both answer "is there anything for
+  *any* piece today," a different question from "does *this* piece's *this*
+  day have anything," and neither was touched.
+- **Verified:** four new unit tests (`classifyDayEmptyState` describe
+  block, `test/scheduling.test.mjs`) covering all three return values, plus
+  the specific case the request called out by name — a day emptied purely
+  by staleness must read `"empty"`, never `"rescheduled"`. Full suite green
+  (715 tests). Manual, in-browser, across three fixtures: a day whose only
+  content was a stale review read "Nothing scheduled." on all four surfaces
+  (not the old "due"/"see today" wording); a day fully swept by an actual
+  reschedule still read "Tasks rescheduled" on all four, unchanged; a
+  genuinely empty, never-rescheduled day on Timeline specifically now read
+  "Nothing scheduled." where it previously rendered no text at all; and a
+  day with partial staleness (a real chunk remaining alongside a stale
+  review) rendered normally on all four, with no note about the missing
+  review.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler) (Pass 92 note, end
+  of section).
+
+**Same-session follow-up, per direct request: Timeline and Week view's
+"Rest day" label is gone — a rest day now reads "Nothing scheduled.",
+same as any other day with nothing to do.**
+
+- **The report:** Timeline and Week view special-cased `d.type === "rest"`
+  with its own "Rest day" text, while Day view and Master Agenda — which
+  never had a "Rest day" branch at all — already showed the exact same
+  rest day as "Nothing scheduled." The user's own reasoning for closing
+  this gap: Interleaved practice and section run-throughs remain
+  accessible from Daily Practice regardless of what the day itself has
+  scheduled, so a "Rest day" label implying nothing is available was
+  actively misleading, not just inconsistent phrasing across surfaces.
+- **The fix:** removed the `d.type === "rest"` branch from both
+  `TimelineTab.jsx` and `WeekView.jsx`. A rest day has no `newChunkIds`/
+  `specialChunkIds`/`reviewChunkIds` by construction, so it now falls
+  through to the same `classifyDayEmptyState` call every other day on
+  these two surfaces already goes through, landing on `"empty"` →
+  "Nothing scheduled." — no new logic needed, since the shared function
+  built earlier this session already answered this correctly for every
+  day type it was ever called on; the only thing wrong was that these two
+  files short-circuited past it for rest days specifically before it ever
+  got a chance to run.
+- **`d.type` itself is untouched** — still drives the day-card's CSS class
+  (`` `day-card clickable ${d.type}` ``) for whatever visual distinction
+  exists there; only the text branch was removed.
+- **Verified:** full suite green (715 tests, unchanged — no `lib/`-level
+  code touched by this follow-up) and a clean `npm run build`. Manual,
+  in-browser: built a piece with `practiceDaysPerWeek: 5` (which produces
+  real `type: "rest"` days, confirmed via direct `computeTimeline` output
+  before testing in the browser — days 4 and 7 of the fixture), and
+  confirmed both Timeline and Week view now show "Nothing scheduled." for
+  those exact days instead of "Rest day," matching what Day view and
+  Master Agenda already showed for the same days.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler) (Pass 92
+  same-session follow-up, end of section).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,

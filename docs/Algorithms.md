@@ -2804,6 +2804,54 @@ prop from `App.jsx`: `WeekView` already receives `piece` from `TodayTab`,
 and `MasterAgendaTab` already builds `chunkSet`/`chunkById` per piece
 internally.
 
+**Since Pass 92**, the four day-list surfaces' own separate
+`items.length`/`isDayFullySwept`/`staleReviewIds` checks are consolidated
+into one shared classification: `classifyDayEmptyState(day, piece,
+chunkById = {})` (`lib/scheduling.js`) reuses `isDayFullySwept` internally
+(untouched by this pass, along with `withLiveReviewStatus` — only how
+their outputs get turned into display copy changes) and returns one of
+three values. `null` means real content remains after both filters — the
+caller renders the day normally, with no note. `"rescheduled"` means
+`isDayFullySwept` is true — every item this day originally scheduled ended
+up moved by a reschedule; unchanged, still "Tasks rescheduled." `"empty"`
+means nothing remains and `isDayFullySwept` is false — collapsing two
+previously-distinct cases into one display string: a day that genuinely
+never had anything scheduled (Timeline previously rendered nothing at all
+in this case — this pass is what actually adds "Nothing scheduled." there
+for the first time), and a day whose only content was a review
+`withLiveReviewStatus` has since pulled out for staleness (`day.
+staleReviewIds`), with no `rescheduleMarker` sweep involved either way.
+The two separate strings that used to distinguish the staleness case
+specifically — Day view's "Already due — see Daily Practice" and
+Timeline/Week view/Master Agenda's "Now due — see today" — are deleted
+outright, per the request, with no replacement copy of their own: a day
+emptied purely by staleness now just reads "Nothing scheduled.", the same
+as any other empty day. `DayChecklist.jsx`, `TimelineTab.jsx`,
+`WeekView.jsx`, and `MasterAgendaTab.jsx` each replaced their own local
+check with one `classifyDayEmptyState` call and now render exactly two
+possible non-null strings, matching `DayChecklist`'s pre-existing exact
+wording ("Tasks rescheduled" / "Nothing scheduled.", period included) —
+Week view's own "Nothing scheduled" (no period) and Master Agenda's own
+"No tasks scheduled" both changed to match. Master Agenda's two other,
+unrelated "nothing scheduled"-adjacent strings (the whole-agenda summary
+label and the Learning sub-tab's whole-list empty state) answer a
+different question — every piece for the whole day, not one piece's one
+day — and are untouched.
+
+**Same-session follow-up, per direct request:** Timeline and Week view no
+longer special-case `d.type === "rest"` with its own "Rest day" copy — a
+rest day now falls through to the same `classifyDayEmptyState` check as
+any other day with nothing scheduled and reads "Nothing scheduled.",
+matching what Day view and Master Agenda already showed for a rest day
+(neither of those two ever had a "Rest day" branch to begin with). The
+reasoning: Interleaved practice and section run-throughs remain accessible
+from Daily Practice regardless of whether the current day has any
+scheduled chunks, so labeling a rest day differently from any other empty
+day implied a harder stop than actually exists. `d.type`'s own value is
+untouched and still drives the day-card's CSS class (`` `day-card
+clickable ${d.type}` ``) for whatever visual styling exists — only the
+text branch was removed.
+
 ## Revival
 
 Data shapes: [Data-Model.md](Data-Model.md#revival). Recovering a piece that

@@ -23,6 +23,7 @@ import {
   computeRemainingConnectorIds,
   computeRescheduleRemainder,
   isDayFullySwept,
+  classifyDayEmptyState,
   withLiveReviewStatus,
   computeAbandonedPlanReminder,
   smoothOverloadedDays,
@@ -2676,5 +2677,46 @@ describe("[Pass 91, experimental v1] focus-spot introduction gating", () => {
       timeline.introducedDay.t_c5_c9,
       "a transition whose neighbor is simply absent from this chunk set (not trouble-spot-gated) must still fall back to sectionsEndDay and get placed, exactly as before this pass"
     );
+  });
+});
+
+describe("Pass 92 — classifyDayEmptyState consolidates the four surfaces' own separate items.length/isDayFullySwept/staleReviewIds checks into one shared classification", () => {
+  test("returns null when real content remains", () => {
+    const piece = basePiece({ progress: {} });
+    const day = { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayEmptyState(day, piece), null);
+  });
+
+  test("returns 'rescheduled' for a fully-swept day", () => {
+    const piece = basePiece({
+      progress: { c1: { doneDays: [5] } }, // done, but on day 5 — not day 1
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: [], remainingConnectorIds: [], previous: null },
+    });
+    const day = { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: [] };
+    // Sanity check against the underlying function this reuses.
+    assert.equal(isDayFullySwept(day, piece), true);
+    assert.equal(classifyDayEmptyState(day, piece), "rescheduled");
+  });
+
+  test("returns 'empty' for a day that never had anything scheduled", () => {
+    const piece = basePiece({ progress: {} });
+    const day = { dayNumber: 1, newChunkIds: [], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayEmptyState(day, piece), "empty");
+  });
+
+  test("returns 'empty', not 'rescheduled', for a day emptied purely by review staleness", () => {
+    // withLiveReviewStatus already reduced this day's reviewChunkIds to
+    // empty before classifyDayEmptyState ever sees it (day.staleReviewIds
+    // is what's left to say why) — no rescheduleMarker involved at all, so
+    // this must read as plain "empty", not "rescheduled".
+    const piece = basePiece({ progress: { c1: { doneDays: [2], nextDueDate: "2026-01-08" } } });
+    const timeline = {
+      days: [{ dayNumber: 8, type: "learning", newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c1"] }],
+    };
+    const result = withLiveReviewStatus(timeline, piece, 15);
+    const day = result.days[0];
+    assert.deepEqual(day.reviewChunkIds, []);
+    assert.deepEqual(day.staleReviewIds, ["c1"]);
+    assert.equal(classifyDayEmptyState(day, piece), "empty");
   });
 });

@@ -1212,7 +1212,7 @@ actually left Stabilizing.
   - **Narrowed by a later follow-up**: "resolve it whenever" above is no
     longer unconditional. Leaving Interleaved mode itself — switching to
     Day view/Week/View all, a different app tab, switching to a different
-    piece, opening the "Edit piece" settings, or finishing the "Add new
+    piece, opening "Edit piece settings", or finishing the "Add new
     piece" wizard (the last two added on a subsequent review pass, after
     being missed in the original build — same warning, same guard function,
     just two more call sites) — while a provisional from the current

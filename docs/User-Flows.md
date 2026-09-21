@@ -69,6 +69,21 @@ week, chunk size).
 The Wizard is **create-only** — an existing piece is never edited through it;
 editing always goes through Settings instead.
 
+**Since Pass 93, Settings is split in two.** The Settings tab itself keeps
+only what isn't about the current piece — "Pieces" (Add new piece) and
+"Backup & restore" — plus a read-only "Current piece details" summary sitting
+directly above the "Edit piece settings" button. Everything about the
+current piece lives behind that button, on the "Edit piece settings" page,
+which is also reachable from the sidebar on every tab (previously Overview
+only). That page is a draft-and-save form (Save changes / Discard changes) —
+including Focus spots, Revival settings (only while in revival) and "Mark as
+learned elsewhere" (which asks "are you sure?" before it marks the draft) —
+followed by a separate, clearly labelled **"Applies immediately"** group
+below the Save/Discard row holding Practice status (Pause/Archive/Resume/
+Reactivate) and Delete this piece, which act on the live piece the moment
+they're clicked and are unaffected by Discard. The button was called "Edit
+piece" before this pass.
+
 ### 1a. Adding a movement to an existing work
 
 "Add a movement" on the Overview `PartSwitcher` reopens the same wizard with a
@@ -400,7 +415,7 @@ That makes this button inconsistent with the other two subtabs' own
 an obvious bug to silently correct.
 
 **Since Pass 29 follow-up**, switching pieces (or navigating to a different
-sidebar tab, or clicking "Edit piece") while the piece you're leaving has
+sidebar tab, or clicking "Edit piece settings") while the piece you're leaving has
 Interleaved mode open with an unresolved provisional log first asks for
 confirmation — see flow 2 above and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29).
@@ -483,7 +498,7 @@ isn't scheduled to a calendar):
    complete) and "End revival" sit in the header throughout.
 
 `piece.revival.tempoLadderStartFraction` is editable after entry only from
-Settings' own "Revival settings" panel, shown while a revival is active —
+the "Edit piece settings" page's own "Revival settings" panel (a draft field, saved with Save changes), shown while a revival is active —
 nowhere inside the revival flow itself. Ending revival (`onEndRevival`)
 resets `piece.revival` to its inactive defaults; flags and manual
 confidence set during the run are **not** cleared — they're durable chunk

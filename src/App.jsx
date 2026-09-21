@@ -25,6 +25,7 @@ import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
+import { mergeEditedPiece } from "./lib/pieceEdit";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
   loadPiecesFromStorage,
@@ -554,7 +555,14 @@ export default function App() {
     return () => clearTimeout(id);
   }, [focusTargetDateOnSettings, activeTab]);
   const setEditDraft = (patch) => setEditDraftState((d) => ({ ...d, ...patch }));
-  const handleSavePiece = (updated) => {
+  const handleSavePiece = (draft) => {
+    // `draft` is the edit form's copy of the piece from when editing started
+    // (or last saved). Only the fields the form owns are taken from it — see
+    // mergeEditedPiece (lib/pieceEdit.js) — so Save can't undo practice
+    // logged, ratings, chunk notes, a Pause/Archive, or an ended revival
+    // that happened elsewhere while the form was open. `updated` below is
+    // the live piece with just the form's edits applied.
+    const updated = mergeEditedPiece(piece, draft);
     // Typing a work title on a standalone piece promotes it into a work;
     // clearing it pulls the piece back out. See lib/works.js.
     //
@@ -1119,9 +1127,6 @@ export default function App() {
     });
   };
 
-  const handleSetTroubleSpotsEnabled = (enabled) => updatePiece((p) => ({ ...p, troubleSpotsEnabled: enabled }));
-  const handleSetTroubleSpotDefaultMinutes = (minutes) => updatePiece((p) => ({ ...p, troubleSpotDefaultMinutes: minutes }));
-
   // Pass 29 follow-up — resolves a provisional session (see handleLogSession
   // above) by finally running it through computeLadderAdvance, using the
   // real reps/BPM/outcome it already recorded. Operates on the most recent
@@ -1443,15 +1448,6 @@ export default function App() {
 
   const handleSetPieceStatus = (status) => {
     updatePiece((p) => ({ ...p, status }));
-  };
-
-  // Manual escape hatch for a piece finished away from the app — see
-  // isPlanActuallyComplete's markedLearnedElsewhere check (lib/scheduling.js)
-  // for what this unlocks. Freely reversible, same low-ceremony pattern as
-  // handleSetPieceStatus above — no confirmation dialog, matching Pause/
-  // Archive's own precedent.
-  const handleSetMarkedLearnedElsewhere = (value) => {
-    updatePiece((p) => ({ ...p, markedLearnedElsewhere: value }));
   };
 
   const handleUpdateRevival = (patch) => {
@@ -2075,11 +2071,9 @@ export default function App() {
               })}
             </div>
             <div className="sidebar-foot">
-              {activeTab === "overview" && (
-                <button className="ghost-btn full" onClick={startEditing}>
-                  <Pencil size={14} /> Edit piece
-                </button>
-              )}
+              <button className="ghost-btn full" onClick={startEditing}>
+                <Pencil size={14} /> Edit piece settings
+              </button>
               <button className="ghost-btn full" onClick={() => openWizard()}>
                 <Plus size={14} /> Add new piece
               </button>
@@ -2216,10 +2210,6 @@ export default function App() {
                 onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
-                onSetMarkedLearnedElsewhere={handleSetMarkedLearnedElsewhere}
-                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
-                onSetTroubleSpotsEnabled={handleSetTroubleSpotsEnabled}
-                onSetTroubleSpotDefaultMinutes={handleSetTroubleSpotDefaultMinutes}
               />
             )}
           </main>

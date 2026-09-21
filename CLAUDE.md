@@ -423,7 +423,7 @@ Leaving Interleaved mode with an unconfirmed provisional now warns and, on
 confirmation, discards it — gated through one shared function
 (`confirmAndDiscardProvisional`/`guardLeavingInterleaved`, `App.jsx`) at
 every place `activeTab`/`activePieceId` can change, not just the obvious
-ones; two sidebar controls ("Edit piece," finishing the "Add new piece"
+ones; two sidebar controls ("Edit piece settings," finishing the "Add new piece"
 wizard) were missed on the first pass and only caught on review — if you
 add another way to navigate away from Interleaved mode, route it through
 that same function rather than adding a new `setActiveTab`/

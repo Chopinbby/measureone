@@ -325,7 +325,7 @@ Worked example (Pass 29 follow-up): a "warn before leaving Interleaved mode
 with unresolved data" guard was built and verified against three routes —
 the view-mode buttons, the sidebar nav list, the piece switcher. A later
 review pass grepped every `setActiveTab`/`setActivePieceId` call site in
-`App.jsx` and found two more the sidebar can trigger ("Edit piece,"
+`App.jsx` and found two more the sidebar can trigger ("Edit piece settings,"
 finishing the "Add new piece" wizard) that had simply never been
 considered, let alone tested, because they weren't part of the three
 routes the feature was scoped around while building it. Not a subtle bug —

@@ -320,15 +320,19 @@ conditions and a piece can meet both at once. See
 **Since Pass 75, a stale review no longer just sits, unaddressed, on the
 past day it was originally placed on** — Timeline, Week view, Daily
 Practice, and Master Agenda all stop listing a Tier 2 review there once
-it's overdue and wasn't logged that day, showing a short note instead
-("Now due — see today," or Daily Practice's own day view's longer
-"…now tracked as due — see Daily Practice") pointing at where it's
-actually live now.
-Unrelated to rescheduling — this fires whether or not the piece has ever
-been rescheduled. A Tier 1 "first touch" review and a consolidation day are
-both untouched by this. See
+it's overdue and wasn't logged that day, since it's already live and
+actionable on today's own screen instead. **Since Pass 92, a day emptied
+this way reads exactly like any other day with nothing scheduled**
+("Nothing scheduled.") — the two notes this originally shipped with
+("Now due — see today," Daily Practice's own longer "…now tracked as due
+— see Daily Practice") are gone; a day emptied purely by staleness
+doesn't get its own explanation any more than a day that was simply never
+scheduled does. Unrelated to rescheduling — this fires whether or not the
+piece has ever been rescheduled. A Tier 1 "first touch" review and a
+consolidation day are both untouched by this. See
 [Algorithms.md](Algorithms.md#timeline--scheduler) for the mechanism
-(`withLiveReviewStatus`).
+(`withLiveReviewStatus`, `classifyDayEmptyState`) and
+[Decisions.md](Decisions.md#scheduling) for the Pass 92 decision.
 
 **Since Pass 39, Daily Practice can also show a second, separate banner**
 below the "N days behind schedule" one (a day-count since Pass 70, not the

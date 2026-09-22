@@ -291,6 +291,39 @@ management list, and focus-spot minutes don't yet feed any cross-piece
 [Decisions.md](Decisions.md#focus-spots-v1) for the full scope-fence and
 [Algorithms.md](Algorithms.md#focus-spots-v1) for the mechanism.
 
+**Passes 92-96 were a maintenance/polish arc, not backlog items** —
+worth naming here so a jump from Pass 91 straight to Pass 96 elsewhere in
+this doc doesn't read as a documentation gap the way the Pass 59-82/84-88
+jumps above do. **Pass 92** consolidated the four day-list surfaces' own
+separate "nothing left here" checks (`items.length`/`isDayFullySwept`/
+`staleReviewIds`) into one shared `classifyDayEmptyState`
+(`lib/scheduling.js`): every surface now shows exactly "Tasks
+rescheduled" or "Nothing scheduled." for an empty day, the staleness-
+specific notes ("Now due — see today," etc.) are gone, Timeline gained a
+real empty-day fallback it never had, and Timeline/Week view stopped
+special-casing rest days with their own label. **Pass 93** split Settings
+into app-wide settings (Pieces, Backup & restore) and a separate "Edit
+piece settings" page reachable from the sidebar on every tab, and fixed a
+real data-loss bug found in the process: Save used to write the edit
+form's whole draft back over the live piece, silently undoing anything
+that changed elsewhere while the form was open. **Pass 94** was five
+small UI fixes: one shared CSS rule for form-control widths (replacing
+scattered inline patches), an exit path for Interleaved mode, the
+schedule banner's catch-up button hidden while already on that day, modal
+footer spacing, and the obsolete "Tempo ratchet" editor removed from
+`LadderConfigEditor` (the field it edited had been unreachable UI since
+Pass 59's gap-proportional ratchet replaced it as the live mechanism).
+**Pass 96** redesigned the Piece Map chunk card: a new Focus spots
+column next to Related chunks, each spot linking into Daily Practice —
+an open spot to its practice card, a resolved one to the chunk's next
+scheduled day, or plain text mid-revival. See
+[CLAUDE.md](../CLAUDE.md)'s own changelog and
+[Decisions.md](Decisions.md#scheduling),
+[Decisions.md](Decisions.md#ux), and
+[Decisions.md](Decisions.md#focus-spots-v1) for the full detail (Passes
+92, 94, and 96's own decision entries respectively; Pass 93's own entry
+sits earlier in [Decisions.md](Decisions.md#ux), just above Pass 94's).
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold

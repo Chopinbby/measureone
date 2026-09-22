@@ -633,13 +633,20 @@ the same way.
 
 Every consumer of `timeline.days[]` gets the corrected `reviewChunkIds` for
 free from this one change: `classifyDayCompletion`/`countBehindDays` stop
-reading a stale review as still-incomplete work, and the four rendering
-surfaces that already had an "explain what happened to this content"
-precedent (`isDayFullySwept`'s "Tasks rescheduled") each show a small note
-("Now due — see today" / "Already due — see Daily Practice") instead of
-the item silently vanishing. Overview's first-week list needed no change
-at all — it already just sums `reviewChunkIds` into a measure count, so it
-automatically stops counting a stale review, just without an explicit note
+reading a stale review as still-incomplete work, and the item stops
+silently vanishing from the four rendering surfaces without explanation.
+**Since Pass 92**, the explanation is no longer a dedicated note — a day
+emptied purely by this collapses into `classifyDayEmptyState`'s ordinary
+`"empty"` result, the same "Nothing scheduled." every other genuinely
+empty day reads as; the two notes this originally shipped with ("Now due
+— see today" on Timeline/Week view/Master Agenda, "Already due — see
+Daily Practice" on Day view) are gone outright, per direct request, since
+a day emptied by staleness doesn't need a different explanation from any
+other empty day. See
+[Decisions.md](Decisions.md#scheduling) for that decision. Overview's
+first-week list needed no change at all, then or now — it already just
+sums `reviewChunkIds` into a measure count, so it automatically stops
+counting a stale review, just without an explicit note
 pointing at where it went (a deliberate, accepted asymmetry, not an
 oversight). See [Decisions.md](Decisions.md#open-questions) for the full
 investigation history, including why the original two-reading framing

@@ -4880,6 +4880,70 @@ existing `.primary-btn`/`.danger-btn:disabled` pattern exactly.**
   the disabled state, not auditing the hover rule. See
   [AI-GUIDELINES.md](AI-GUIDELINES.md#a-docs-claim-about-existing-behavior-is-a-claim-not-a-fact--check-it).
 
+**Decision (Pass 93): Settings splits into app-wide settings and a
+separate "Edit piece settings" page — confirmed by mockup before any code,
+per the request's own Step 0.**
+
+- **The mockup step caught real preference mismatches before
+  implementation, not after.** A static HTML page (reusing the app's own
+  CSS, nothing committed) showed three framed views — the trimmed landing
+  page, the edit page with a proposed "Applies immediately" group below
+  Save/Discard, the sidebar button on a non-Overview tab — before any
+  React code was written. The user's answers changed the recommended
+  design on two of the three flagged forks: Focus spots, the revival
+  tempo field, and "Mark as learned elsewhere" moved from the
+  recommended "outside the draft, applies immediately" group into the
+  draft form itself (saved with Save changes, discarded with Discard);
+  "Mark as learned elsewhere" also gained a confirmation dialog, on the
+  user's own reasoning that flipping it can reclassify a piece's whole
+  schedule state. Only Practice status and Delete stayed in the
+  immediate-apply group. Piece details survived as "Current piece
+  details," trimmed to drop the Sections/Chunk size/Recurring material
+  rows that are now only editable, never just read, on the edit page.
+- **A real, unrelated bug was found while implementing the confirmed
+  design, not invented to justify a rewrite:** the edit page's Save
+  handler wrote the whole draft — a snapshot of the piece taken when
+  editing started — back over the live piece. Since three of the moved
+  controls (Focus spots, the revival tempo, "Mark as learned elsewhere")
+  now live inside that same draft, and the two that stayed outside it
+  (Practice status, Delete) already acted on the live piece immediately,
+  Save could silently undo a Pause/Archive done from the same page, or
+  wipe out practice logged, a rating changed, or a revival ended while
+  the page sat open. Reproduced live: rate a chunk from Daily Practice
+  while the edit page is still open elsewhere, return, click Save — the
+  rating was gone.
+- **Fixed with an allow-list (`EDIT_FORM_FIELDS`, `lib/pieceEdit.js`),
+  not a block-list, on purpose.** `mergeEditedPiece(livePiece, draft)`
+  takes only the fields the form actually edits from the draft and keeps
+  everything else — `progress`, `memoryAnchors`, `status`, the rest of
+  `revival`, `lastLoggedAt`, `sortOrder` — from the live piece. An
+  allow-list fails loud: forget to add a new form field to the list and
+  the edit simply doesn't save, caught the first time anyone tries it. A
+  block-list fails silent: forget to add a new *non-form* field to a
+  protected list and Save quietly wipes it the next time someone edits
+  the piece while something else touched that field — the exact bug
+  this was built to fix, reintroduced by the opposite mistake. Verified
+  by temporarily reverting the fix and re-running the same live repro
+  (confirmed it reproduces), then restoring it (confirmed it doesn't) —
+  not just reasoned through. 11 new regression tests
+  (`test/piece-edit.test.mjs`), including the exact chunk-size-change
+  case (re-homing progress onto new chunks must read live progress, not
+  the draft's stale copy, or newly-logged practice is lost in the same
+  way).
+- **Verified:** full test suite green (726 tests, 11 new), clean build.
+  Manual, in-browser: the sidebar button opens the edit page from all
+  seven tabs; Pause/Archive/Resume/Reactivate, Mark as learned elsewhere
+  (Cancel/OK/Undo), Focus spots, Delete, and the revival tempo field all
+  work exactly as before from their new locations; Discard reverts a
+  Focus spots or revival-tempo change while leaving a same-page Pause
+  intact; the leave-confirmation for an unresolved Interleaved provisional
+  or a running revival assessment timer still fires when the sidebar
+  button is clicked from Daily Practice.
+- See [Architecture.md](Architecture.md#main-ui-components) (the `SettingsTab`
+  row) for the full page layout and
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#verify-a-regression-test-can-actually-fail)
+  for the general pattern this data-loss fix followed.
+
 **Decision (Pass 94): small UI fixes — one width rule for form controls, an
 exit for Interleaved mode, the catch-up button hidden on its own day, modal
 button spacing, and the obsolete "Tempo ratchet" editor removed.**

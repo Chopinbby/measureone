@@ -916,6 +916,46 @@ A new dependency's requirements are a property of every *existing* caller
 of the function you added it to, not just the one you're actively
 thinking about.
 
+## A scripted multi-file or multi-substitution edit needs its actual diff read, not just its exit code
+
+A single Python (or similar) script making several string substitutions
+across one or more files is convenient for repetitive doc edits, but it
+fails in a way that's easy to miss: if one substitution's `assert
+s.count(old) == 1` trips partway through, the whole script raises and
+stops — every substitution *after* the failing one silently never runs,
+even in files that had nothing wrong with them. The script's own error
+output makes this obvious in the moment, but if the next step is "fix
+the one that failed and move on" rather than "check whether anything
+*after* it in the same script also never landed," a change gets reported
+as done when part of it quietly wasn't.
+
+Worked example (Pass 94, this same session): a batch script updated a
+short comment across five sibling field-editor files. The fourth
+substitution's expected indentation didn't match the real file, the
+script raised, and the fix-and-retry that followed only re-included the
+file that had actually failed — not the fifth file, which had never run
+at all in the original batch. It shipped, was reviewed, and the gap
+wasn't caught until a later, unrelated critical-review pass compared the
+full file list against `git diff --stat` and noticed one expected file
+simply wasn't in it.
+
+**A second, related failure mode:** a naive string-replace can succeed
+(the target string is found and swapped) while still landing in the
+*wrong place* — splicing new text into the middle of an existing sentence
+because the `old` string being matched was a prefix of a longer sentence,
+not the whole thing. This doesn't raise anything; the file changes
+exactly as instructed and still reads as broken prose. Also caught only
+by a later pass re-reading the actual diff, not by the edit itself
+reporting success.
+
+The generalizable habit: after any scripted edit — especially one
+touching several files or several spots in one file — read the real
+`git diff` (or the file itself) for every file the script was *supposed*
+to touch, not just confirm the script exited without error. A clean exit
+code proves the substitutions that ran, ran; it says nothing about
+substitutions that never got the chance to, or ones that ran in the wrong
+spot.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

@@ -297,11 +297,7 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
               </p>
               <div className="field">
                 <span>Will any of the difficult chunks have focus spots, specific passages that need extra, deliberate practice before they're ready? You can change this later in Settings.</span>
-                {/* .field's own default (align-items: stretch) otherwise stretches this
-                    to the field's full width — fine for a longer-labeled toggle like
-                    "A single piece / Multiple movements" above, but a two-word No/Yes
-                    toggle just reads as oversized padding with nothing to show for it. */}
-                <div className="segmented" style={{ alignSelf: "flex-start" }}>
+                <div className="segmented">
                   <button
                     type="button"
                     className={!draft.troubleSpotsEnabled ? "active" : ""}

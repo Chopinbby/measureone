@@ -165,7 +165,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
 
       <div className="field" style={{ marginTop: 8 }}>
         <span>How many days per week do you want to practice?</span>
-        <div className="segmented" style={{ alignSelf: "flex-start" }}>
+        <div className="segmented">
           {PRACTICE_DAYS_OPTIONS.map((n) => (
             <button
               key={n}

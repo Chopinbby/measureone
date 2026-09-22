@@ -338,9 +338,11 @@ ambiguity concrete:
   slower-growing — a technically-passing but shaky review is exactly when
   the next check-in should come sooner, not later.
 - Stage lengths, graduation pass-counts, tempo floors, **and the
-  practiceBPM ratchet step sizes below** are **piece-level tunable data,
-  not hardcoded constants** (a future per-chunk override is explicitly
-  flagged as a want, not built yet).
+  practiceBPM ratchet step sizes** are **piece-level tunable data, not
+  hardcoded constants** (a future per-chunk override is explicitly flagged
+  as a want, not built yet). **Since Pass 94, the step sizes are tunable
+  data only, not editable from this editor** — see the "Editing UI built"
+  bullet below.
 - **Editing UI built (Pass 17).** `LadderConfigEditor`
   (`src/components/fields/LadderConfigEditor.jsx`), wired into
   `SettingsTab`'s edit view only (not the Wizard — no setup-time use case
@@ -356,7 +358,18 @@ ambiguity concrete:
   gets a "Clear (no floor)" button next to it, the same pattern
   `PieceMapTab`'s manual-confidence override already uses to get back to
   `null`, since a plain `NumberInput` can't commit a cleared field to
-  `null` on its own.
+  `null` on its own. **Since Pass 94, the "Tempo ratchet" sub-section (the
+  three `ladderConfig.bpmSteps` fields — full pass / partial pass / fail
+  fallback) is no longer in this editor**, and its intro sentence no longer
+  promises control over how much practice tempo moves after each session:
+  that movement is now the gap-proportional `tempoRatchet` (Pass 59, never
+  editable here), and `bpmSteps` survives only as the fallback for a chunk
+  with no target BPM. `ladderConfig.bpmSteps` itself is untouched in the
+  config, storage, the Wizard defaults and `lib/ladder.js` — a piece that
+  had customized those values keeps them, they're just no longer editable.
+  The stage lengths, graduation counts and the Stabilizing/Settling "Tempo
+  floor (fraction of target)" fields are unchanged. See
+  [Decisions.md](Decisions.md#ux).
 
 ### Introduction-window review scheduling: Tier 1 / Tier 2
 

@@ -369,7 +369,8 @@ export function TodayTab({
   }, []);
 
   // Shared by every way this component itself can leave Interleaved mode
-  // (currently just the segmented control below) — confirms and discards
+  // (the segmented control below, the "All Tasks" nudge button, and the
+  // "Exit interleaved practice" button) — confirms and discards
   // via the one function App.jsx owns (onConfirmLeaveInterleaved), so the
   // warning text and discard behavior can't drift between this path and
   // the sidebar/piece-switcher path, which reads the risk this component
@@ -614,7 +615,12 @@ export function TodayTab({
         timeline={timeline}
         realCurrentDay={realCurrentDay}
         onReschedule={onReschedule}
-        earliestBehindDay={earliestBehindDay}
+        // Already on the earliest behind day: "Go to Day N" would jump nowhere,
+        // so hide it (and, via the banner's own hasCatchUp check, the "or pick
+        // up where you left off" half of its copy). Done here rather than in
+        // ScheduleBanner itself, which Pass 74 made realCurrentDay-only — it
+        // deliberately has no notion of the browsed day.
+        earliestBehindDay={earliestBehindDay === currentDay ? null : earliestBehindDay}
         onDayChange={onDayChange}
       />
       {needsRescheduleNudge && (
@@ -680,17 +686,22 @@ export function TodayTab({
       {/* Pulled out of the segmented view-mode control (Day View/Week
           View/All Tasks) into its own button — entering Interleaved mode
           is a distinct action, not another way to view the same day, so it
-          reads oddly grouped alongside those three. Doesn't route through
-          leaveInterleaved like the others do, since you're never leaving
-          Interleaved mode by clicking this — only entering it. */}
+          reads oddly grouped alongside those three.
+          Pass 94: it's also the way back out. While in Interleaved mode it
+          reads "Exit interleaved practice" and returns to Day View — through
+          leaveInterleaved, like every other way out, so an unconfirmed
+          provisional session still gets the warn-and-discard prompt. The
+          "fewer than two qualifying chunks" disable applies only to
+          ENTERING: if the pool drops below two mid-session, a disabled exit
+          would trap you in the mode. */}
       <button
         type="button"
         className={`ghost-btn interleave-mode-btn ${viewMode === "interleave" ? "active" : ""}`}
         style={{ alignSelf: "flex-start" }}
-        disabled={interleaveItems.length < 2}
-        onClick={() => setViewMode("interleave")}
+        disabled={viewMode !== "interleave" && interleaveItems.length < 2}
+        onClick={() => (viewMode === "interleave" ? leaveInterleaved("day") : setViewMode("interleave"))}
       >
-        Interleaved practice
+        {viewMode === "interleave" ? "Exit interleaved practice" : "Interleaved practice"}
       </button>
       {/* Pass 69 — needs two qualifying chunks to actually rotate between,
           not just one, so the unlock threshold moved from "zero" to "fewer

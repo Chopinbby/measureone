@@ -4880,6 +4880,54 @@ existing `.primary-btn`/`.danger-btn:disabled` pattern exactly.**
   the disabled state, not auditing the hover rule. See
   [AI-GUIDELINES.md](AI-GUIDELINES.md#a-docs-claim-about-existing-behavior-is-a-claim-not-a-fact--check-it).
 
+**Decision (Pass 94): small UI fixes — one width rule for form controls, an
+exit for Interleaved mode, the catch-up button hidden on its own day, modal
+button spacing, and the obsolete "Tempo ratchet" editor removed.**
+
+- **One width rule instead of per-site patches.** A toggle or standalone
+  button directly inside a `.field` (or an add-row `.pairs-list`) used to
+  stretch to the column's full width — a flex column's default
+  `align-items: stretch` — and each site that noticed had patched it with its
+  own inline `alignSelf: "flex-start"`. One CSS rule (`.field > .segmented`,
+  `.field > .ghost-btn`/`.primary-btn`/`.danger-btn`, `.pairs-list >
+  .ghost-btn`) now covers them all; the two inline patches that were direct
+  children of a `.field` (Wizard's focus-spots toggle, `ScheduleFields`'
+  practice-days toggle) were deleted. Text inputs, selects and textareas
+  deliberately stay full width; the sidebar's `.ghost-btn.full` is
+  intentionally full width. Patches on controls that are *not* in a `.field`
+  (Master Agenda's sub-tab toggle, Overview's "Continue learning", the
+  Interleaved button, etc.) were left, since the rule wouldn't cover them.
+  **Audit finding beyond the listed sites:** the "Add section / Add tempo
+  zone / Copy ranges from sections / Add recording / Add document / Add
+  repeated passage" buttons were also stretched (they sit in `.pairs-list`,
+  not `.field`), so that one selector was added to the same rule.
+- **Interleaved exit.** The "Interleaved practice" button reads "Exit
+  interleaved practice" while in the mode and returns to Day View — through
+  `leaveInterleaved`, like every other exit, so an unconfirmed provisional
+  session still gets the warn-and-discard prompt. Its "needs two qualifying
+  chunks" disable applies only to entering, so a pool that drops below two
+  mid-session (e.g. confirming a failed attempt demotes a chunk back to
+  Stabilizing) can't trap you in the mode. Returning to the *previous* view
+  mode instead of Day View was considered and deliberately not built.
+- **Catch-up button on its own day.** `TodayTab` passes `earliestBehindDay`
+  as `null` when it equals the browsed day. `ScheduleBanner` itself is
+  untouched — Pass 74 made it `realCurrentDay`-only on purpose.
+- **Modal footers.** `.modal-foot` gained `gap: 12px` and `flex-wrap: wrap`;
+  the two-button footers still sit left/right, and the reschedule dialog's
+  four buttons no longer touch when they wrap.
+- **"Tempo ratchet" removed from `LadderConfigEditor` (UI only).** The three
+  `ladderConfig.bpmSteps` fields were an editor for the old flat step sizes,
+  which the gap-proportional `tempoRatchet` (Pass 59) replaced as the
+  primary mechanism; the flat values are now only the fallback for a chunk
+  with no target BPM. The config, storage, Wizard defaults and
+  `lib/ladder.js` are untouched, so tempo behavior is unchanged (verified: a
+  no-target chunk logged at 60 BPM moves to 62). **Flagged consequence:**
+  anyone who customized `bpmSteps` keeps their values but can no longer
+  edit them. Removing `bpmSteps` from config/storage/`ladder.js` entirely
+  would need a hardcoded fallback and a decision about those customized
+  pieces — not done here. The Stabilizing/Settling "Tempo floor (fraction of
+  target)" fields are a different, still-live setting and stay.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as

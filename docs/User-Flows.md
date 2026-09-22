@@ -174,6 +174,11 @@ logging an outcome), and a rough auto-classified result gets saved
 chunk's card anywhere it's shown, rather than it silently affecting the
 ladder right away. Leaving Interleaved mode with an unresolved provisional
 still pending (switching view, tab, or piece) prompts a confirmation first.
+**Since Pass 94**, the "Interleaved practice" button is also the way out: in
+Interleaved mode it reads "Exit interleaved practice" and returns to Day
+View, through the same leave-confirmation as every other exit. The
+"needs two qualifying chunks" disable applies only to *entering* — if the
+pool drops below two mid-session the exit button stays clickable.
 See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
 for the full mechanism.
 
@@ -254,7 +259,10 @@ week-vs-all-time and heatmap-window choices.
    pre-check this used to have, which could hide the button even when a
    past transition or review was genuinely still incomplete (Overview and
    Timeline don't get this second button, and render the banner exactly as
-   before).
+   before). **Since Pass 94, it's hidden while you're already browsing that
+   earliest day** — the button would jump nowhere, and the banner's "or pick
+   up where you left off" half of its copy goes with it; browse anywhere else
+   and both return.
 3. `handleReschedule` estimates whether the remaining material can
    realistically fit in the remaining days at the current pace. If it
    can't, the confirmation dialog names the shortfall and offers a way past

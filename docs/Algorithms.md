@@ -1483,8 +1483,9 @@ tempo-ratchet math a pass's step size floors at 1 BPM whenever there's a
 real gap left to close (`tempoRatchetStepSize`'s own `Math.max(1, ...)`),
 so in practice this loop already terminates well under the cap for
 realistic BPM ranges. But the cap isn't decorative: `ladderConfig.
-tempoRatchet.kCapBpm` is user-editable (Settings' `LadderConfigEditor`,
-Pass 17), and a `kCapBpm` of exactly `0` collapses that floor's outer
+tempoRatchet.kCapBpm` is per-piece stored config (`LadderConfigEditor` has
+never exposed it, but a hand-edited backup import could set it), and a
+`kCapBpm` of exactly `0` collapses that floor's outer
 `Math.min` to `0` — every simulated step then moves `practiceBPM` by
 exactly zero, forever, with nothing left in the formula to break the tie.
 A chunk in that state genuinely cannot converge; the cap is what stops the

@@ -2773,13 +2773,20 @@ const CSS = `
 .modal-step.done:hover { color: var(--brass-deep); }
 .modal-step-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
 .modal-body { padding: 26px 26px 10px; overflow-y: auto; flex: 1; }
-.modal-foot { display: flex; justify-content: space-between; padding: 18px 26px; border-top: 1px solid var(--line); }
+.modal-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 26px; border-top: 1px solid var(--line); }
 
 .wizard-pane h2 { font-size: 20px; margin-bottom: 6px; }
 .wizard-hint { color: var(--ink-soft); font-size: 13.5px; margin: 0 0 20px; line-height: 1.5; }
 
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .field > span { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+/* One width rule for every toggle/button that sits directly in a form field or
+   an add-row list: size to the content instead of stretching to the column's
+   full width (a flex column's default align-items: stretch). Text inputs,
+   selects and textareas are deliberately not listed — they stay full width.
+   The sidebar's .ghost-btn.full is its own, intentionally full-width thing. */
+.field > .segmented, .field > .ghost-btn, .field > .primary-btn, .field > .danger-btn,
+.pairs-list > .ghost-btn { align-self: flex-start; }
 .field input[type="text"], .field input[type="number"], .field input[type="date"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
 .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); font-family: inherit; resize: vertical; }
 .field input:disabled { color: var(--ink-faint); background: var(--paper); }

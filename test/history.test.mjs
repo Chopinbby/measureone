@@ -15,7 +15,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computePracticeHistory, findNextOccurrenceDay, findHistoricalItemsForDay } from "../src/lib/history.js";
+import { computePracticeHistory, findNextOccurrenceDay, findHistoricalItemsForDay, findNextScheduledDay } from "../src/lib/history.js";
 
 // Minimal fixtures — computePracticeHistory only reads `progress` and
 // `sections` off the piece, and `id`/`start`/`end` off each chunk.
@@ -308,6 +308,35 @@ describe("findNextOccurrenceDay", () => {
   test("never matches on or before afterDay itself, only strictly later", () => {
     const timeline = buildTimeline(2, { 1: { reviewChunkIds: ["c1"] }, 2: { reviewChunkIds: ["c1"] } });
     assert.equal(findNextOccurrenceDay(timeline, "c1", 2), null, "day 1 is before afterDay(2), day 2 is afterDay itself — neither should match");
+  });
+});
+
+// findNextScheduledDay (Pass 96) — a resolved focus spot's Piece Map link
+// target: the chunk's next scheduled occurrence "from today onward", which
+// findNextOccurrenceDay alone can't express directly since it always
+// excludes its own afterDay argument.
+describe("findNextScheduledDay", () => {
+  test("returns today when the chunk is scheduled today and not yet logged", () => {
+    const timeline = buildTimeline(3, { 2: { reviewChunkIds: ["c1"] } });
+    const piece = { progress: { c1: { doneDays: [] } } };
+    assert.equal(findNextScheduledDay(piece, timeline, "c1", 2), 2);
+  });
+
+  test("returns the following scheduled day when the chunk is already logged today", () => {
+    const timeline = buildTimeline(4, { 2: { reviewChunkIds: ["c1"] }, 4: { reviewChunkIds: ["c1"] } });
+    const piece = { progress: { c1: { doneDays: [2] } } };
+    assert.equal(findNextScheduledDay(piece, timeline, "c1", 2), 4, "today (day 2) is already logged, so it must not be returned again");
+  });
+
+  test("returns null when there is no further scheduled day", () => {
+    const timeline = buildTimeline(3, { 1: { reviewChunkIds: ["c1"] } });
+    const piece = { progress: { c1: { doneDays: [1] } } };
+    assert.equal(findNextScheduledDay(piece, timeline, "c1", 2), null);
+  });
+
+  test("a chunk with no progress entry at all is safely treated as not logged today", () => {
+    const timeline = buildTimeline(2, { 1: { reviewChunkIds: ["c1"] } });
+    assert.equal(findNextScheduledDay({ progress: {} }, timeline, "c1", 1), 1, "no entry at all must not crash, and must fall back to 'not logged' (today is in range), not 'logged'");
   });
 });
 

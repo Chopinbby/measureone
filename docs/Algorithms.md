@@ -3393,3 +3393,79 @@ the same way a new spot's position is validated at creation. A spot whose
 old text was genuine free text (or empty) simply keeps no `startMeasure` —
 nothing to recover, not an error, and `reassociateTroubleSpots` already
 treats that case as "leave it exactly where it is."
+
+### Piece Map: focus spots linked to Today's Practice (Pass 96)
+
+The chunk-detail modal's "Related chunks" field moved up to sit directly
+under the card details (`detailStats`) — it used to share that spot with
+a "Run-through flag" field, which moved down to sit directly above the
+Current BPM/Target BPM row instead, keeping the button itself (its own
+text already says what it does at every state — `FLAG_LABEL`) but
+dropping the redundant "Run-through flag" span above it. Related chunks
+and a new Focus spots field now sit side by side in a `.related-focus-row`
+(App.jsx CSS) — each a normal `.field`, `flex: 1 1 180px`, wrapping to a
+stacked layout only once the modal is too narrow to fit both floors side
+by side. Either field is simply omitted (not rendered as an empty column)
+when it has nothing to show, so the other one fills the row alone —
+`(relatedChunks.length > 0 || focusSpots.length > 0)` gates the row
+itself, and each `.field` inside it is gated independently. `focusSpots`
+is `selectedEntry.troubleSpots || []`, gated on `selectedChunk.kind ===
+"section"` first — a transition or combo can never carry spots (Pass 91),
+so this is a `kind` check, not just an emptiness check, even though the
+two happen to coincide today.
+
+Each spot row shows its name, its position tag (`m. {spot.position}`,
+mono — the same format `FocusSpotCard`/`ChecklistItem`'s own inline
+add-spot form use), and Open/Resolved. It's a link to that spot's task on
+Daily Practice, using the same App.jsx state (`scrollToOnArrival`) and
+effect `focusTargetDateOnSettings` already established the pattern for:
+set a flag, navigate, then scroll-and-briefly-highlight (`.arrival-
+highlight`, a `box-shadow` pulse — not `background`/`border-color`, both
+of which are already meaningful state on these cards) once the target tab
+has actually re-rendered, since Today's Practice mounts fresh on every
+navigation into it and the target DOM node doesn't exist until then.
+`onSelectDay` (`handleSelectDay`, App.jsx) gained an optional second
+argument, `scrollTargetId`, defaulted to `null` and always set (not only
+when truthy) so every *other* caller of the same prop (Timeline, Master
+Agenda, Overview, Week view) reliably clears a stale target left over from
+an earlier focus-spot click instead of only doing so when it happens to
+pass one of its own.
+
+- **Open spot:** always `onSelectDay(null, "focus-spot-{spot.id}")` — real
+  today, no other day is meaningful for `FocusSpotsPanel` (it isn't scoped
+  to a single day). `FocusSpotCard` carries that id on its own root
+  element.
+- **Resolved spot:** `findNextScheduledDay(piece, timeline, chunkId,
+  realCurrentDay)` (`lib/history.js`) — a thin wrapper around
+  `findNextOccurrenceDay`, kept as its own function specifically so this
+  distinction can carry a regression test: that function searches strictly
+  *after* its `afterDay` argument, so returning "today, if the chunk is
+  scheduled today and not yet logged" needs `realCurrentDay - 1`, while
+  "today's occurrence is already logged, so skip to the next one" needs
+  `realCurrentDay` itself (checked via `doneDays.includes(realCurrentDay)`).
+  A `null` result (searched the live, bounded `timeline.days`, found
+  nothing) renders the spot as plain text plus the same muted line
+  `ChecklistItem`'s own historical card already uses verbatim ("Not
+  currently scheduled again within this plan.") — deliberately no
+  live-due-review fallback in v1. Otherwise, `onSelectDay(day ===
+  realCurrentDay ? null : day, "checklist-item-{chunkId}")` —
+  `ChecklistItem`'s root element carries that id (a known, accepted
+  imperfection: "All Tasks" view renders one `DayChecklist` per plan day
+  and can legitimately show the same chunk more than once, which would
+  repeat the id there; the link always lands on the default Day view,
+  where it's unique).
+- **Mid-revival** (`isInRevival(piece)`): every spot renders as plain text,
+  no link — Today's Practice shows neither a day view nor the Focus spots
+  panel while a revival is active (`TodayTab.jsx`'s own `isInRevival`
+  short-circuit), so there is nowhere for either target to land.
+
+Scope stays display plus navigation: `PieceMapTab` gained exactly three
+new props (`timeline`, `realCurrentDay`, `onSelectDay`) and no handler for
+adding, resolving, or deleting a spot — that still only happens from a
+chunk's own Daily Practice card or the Wizard's Focus spots step, matching
+CLAUDE.md's existing "Piece Map is display-only for this feature" scope.
+Leaving the Piece Map tab entirely closes the chunk modal on its own
+(`selected` is this component's own local state, and the whole component
+unmounts on tab switch — no explicit close call needed, same as Today's
+Practice's `viewMode` resetting on every fresh mount elsewhere in this
+same pass).

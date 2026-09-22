@@ -297,7 +297,18 @@ export function ChecklistItem({
   };
 
   return (
-    <div className={`checklist-item ${checked ? "checked" : ""} ${historical ? "historical" : ""} ${isPaused ? "paused" : ""}`}>
+    <div
+      // Pass 96 — a stable arrival target for Piece Map's resolved-focus-
+      // spot links (App.jsx's scroll-and-highlight effect). Only unique
+      // per screen on Day view / "Due today", which is what that link
+      // always lands on; "All Tasks" renders one DayChecklist per plan
+      // day and can legitimately show the same chunk more than once
+      // (new, then reviewed again later), which would repeat this id —
+      // a known, accepted imperfection (getElementById just finds the
+      // first one), not chased further here.
+      id={`checklist-item-${chunk.id}`}
+      className={`checklist-item ${checked ? "checked" : ""} ${historical ? "historical" : ""} ${isPaused ? "paused" : ""}`}
+    >
       {historical ? (
         <span className="checklist-check" aria-hidden="true">
           <Check size={18} />

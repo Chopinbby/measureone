@@ -6644,6 +6644,67 @@ all before this pass was ever merged:**
 Committed as a single commit (`2dce47d`) once all of the above was done —
 the branch was not pushed and no PR was opened in that same request.
 
+**Decision (Pass 96): Piece Map's chunk card gets a Focus spots column,
+linked to Today's Practice — display and navigation only, no editing.**
+
+- **Why a shared "arrival target" instead of a per-scenario callback:**
+  both the open-spot case (land on real today, scroll to a `FocusSpotCard`)
+  and the resolved-spot case (land on a specific plan day, scroll to a
+  `ChecklistItem`) reduce to the same two things — which day to select,
+  and which DOM id to scroll to once that day's screen has actually
+  rendered. Building one mechanism (a DOM id string held in App.jsx state,
+  plus one effect) for both, rather than two separate flag-and-effect
+  pairs, was the explicit build instruction, not a simplification found
+  mid-implementation — and it meant `onSelectDay` only needed one new
+  optional argument (`scrollTargetId`), not a new prop.
+- **Why `handleSelectDay` grew a second argument instead of a new prop:**
+  the pass's own build instruction was explicit that `PieceMapTab` should
+  gain exactly three new props (`timeline`, `realCurrentDay`,
+  `onSelectDay`) — flagged directly as replacing an earlier draft's claim
+  that none were needed, since the earlier draft hadn't yet worked out
+  that the day-selection logic (which day a resolved spot's chunk is next
+  scheduled) has to live in `PieceMapTab` itself, which needs `timeline`/
+  `realCurrentDay` to compute it and `onSelectDay` to act on it. Given
+  that constraint, the arrival-target flag couldn't be a fourth prop
+  `PieceMapTab` sets directly — `onSelectDay`'s underlying function
+  (`handleSelectDay`) absorbs it instead, as an optional `scrollTargetId`
+  argument defaulted to `null`. Every other caller of the same
+  `onSelectDay` prop (Timeline, Master Agenda, Overview, Week view) calls
+  it with one argument and is unaffected; passing `null` unconditionally
+  when the caller doesn't ask for a scroll (not only skipping the
+  assignment) is what keeps a stale target from an earlier focus-spot
+  click from misfiring on an unrelated, later day-select.
+- **Why the highlight is a `box-shadow` pulse, not a `background`/
+  `border-color` change:** both `.checklist-item` and `.focus-spot-card`
+  already use background and border-color to carry real state (checked,
+  paused, resolved) — animating either would visually fight that instead
+  of layering cleanly on top of it. A `box-shadow` ring is state-neutral
+  on both cards and reads clearly regardless of which state class the
+  card already has. Uses a CSS `@keyframes` animation rather than a
+  React-driven style transition, so it's covered for free by the
+  existing app-wide `prefers-reduced-motion` rule instead of needing its
+  own check.
+- **Why the two-column split is `flex: 1 1 180px` rather than a fixed
+  50/50 grid or a hard media-query breakpoint:** Related chunks and Focus
+  spots are two lists of very different, unpredictable lengths — a
+  chunk with one related transition next to one with three open spots
+  shouldn't be forced to the same column width. A flex-basis floor lets
+  each column claim only the space its own content needs down to 180px,
+  growing to fill the row when it's alone, and wrapping to a stacked
+  layout purely from running out of horizontal room — no explicit
+  `@media` query, and it stacks at whatever width two 180px-plus-gap
+  columns stop fitting, which naturally scales with `.detail-modal`'s own
+  480px cap rather than a breakpoint picked independently of it.
+- **Why a resolved spot with no further scheduled day gets no live-due-
+  review fallback:** explicitly deferred, not overlooked — the pass
+  named this exact case as v1 scope, matching `ChecklistItem`'s own
+  historical-card precedent (verbatim reused copy: "Not currently
+  scheduled again within this plan.") for a chunk whose live schedule
+  doesn't currently list it, rather than inventing new wording or new
+  logic to chase where a review might resurface later.
+- See [Algorithms.md](Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
+  for the full mechanism.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

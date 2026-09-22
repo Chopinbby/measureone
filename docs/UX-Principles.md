@@ -77,6 +77,15 @@ navigation with nothing at stake — so the common case still gets zero
 friction. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
+**Since Pass 93**, "Mark as learned elsewhere" (Settings' edit page) gets
+the same treatment, for the same reason: one click flips a piece into
+maintenance mode wholesale — unlocking Archive and Start revival, and
+switching Daily Practice/Master Agenda over to review-only scheduling —
+which is exactly the kind of consequence the test above is asking about.
+The rest of that same panel (Focus spots, the revival tempo field) stays
+frictionless, since toggling either genuinely doesn't cost anything to
+reconsider.
+
 ## A mode lives inside its tab, not a standing nav entry
 
 When a piece enters a special way of practicing — Interleaved rotation,

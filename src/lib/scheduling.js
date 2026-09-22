@@ -1115,6 +1115,37 @@ export function isDayFullySwept(day, piece, chunkById = {}) {
   return ids.every(isMovedId);
 }
 
+// One shared classification for "this day has nothing to show" across the
+// four day-list surfaces (Day view/DayChecklist, Timeline, Week view,
+// Master Agenda) — each used to run its own separate
+// items.length/isDayFullySwept/staleReviewIds checks and render its own
+// near-identical (but not quite identical — "Now due — see today" vs
+// "Already due — see Daily Practice" vs no fallback text at all on
+// Timeline) copy for the same three underlying states. Reuses
+// isDayFullySwept directly rather than duplicating its logic; does not
+// touch it or withLiveReviewStatus — only how their existing outputs get
+// turned into display copy.
+//
+// Three possible results:
+//  - null: real content remains after both filters (the reschedule sweep
+//    and stale-review removal) — render the day normally, no note.
+//  - "rescheduled": isDayFullySwept(day, piece, chunkById) is true — every
+//    item this day originally scheduled ended up moved by a reschedule.
+//  - "empty": nothing remains and isDayFullySwept is false. Two different
+//    ways to land here collapse to the same display text: a day that
+//    genuinely never had anything scheduled, and a day whose only content
+//    was a review withLiveReviewStatus has since pulled out for
+//    staleness (day.reviewChunkIds already reduced to empty by the time
+//    this runs) — with no rescheduleMarker sweep involved either way. Per
+//    the request, the staleness case gets no special-cased copy of its own
+//    anymore ("Already due"/"Now due" are gone) — it just reads the same
+//    as any other empty day.
+export function classifyDayEmptyState(day, piece, chunkById = {}) {
+  if (isDayFullySwept(day, piece, chunkById)) return "rescheduled";
+  const hasContent = day.newChunkIds.length > 0 || day.specialChunkIds.length > 0 || day.reviewChunkIds.length > 0;
+  return hasContent ? null : "empty";
+}
+
 // How many distinct timeline days are "behind" (per classifyDayCompletion)
 // as of currentDay — a day-count sibling to computeScheduleStatus's
 // chunk-count missedCount, for surfaces that want to say "N days behind"

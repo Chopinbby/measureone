@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDaysISO, todayISODate, formatRange, mergeRanges, formatMinutes, clamp } from "../../../lib/utils";
 import { totalDueMinutes, computeDueOnDate } from "../../../lib/maintenance";
-import { isDayFullySwept } from "../../../lib/scheduling";
+import { classifyDayEmptyState } from "../../../lib/scheduling";
 
 /* ------------------------------------------------------------------ */
 /*  Week view — 7 days at a glance, current day highlighted.           */
@@ -190,16 +190,17 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
         {days.map((d) => {
           const isCurrent = d.dayNumber === currentDay;
           const specialIsCombo = d.specialChunkIds.some((id) => chunkById[id]?.kind === "combo");
-          // Pass 75 — same isDayFullySwept check DayChecklist/TodayTab's
-          // own single-day view/TimelineTab already apply (Pass 48, widened
-          // Pass 73): a day before the reschedule marker's asOfDay still
-          // carries its stale pre-reschedule newChunkIds/specialChunkIds/
-          // reviewChunkIds, duplicating tasks that now also appear on their
-          // new day. Week view had never had this check at all, so a
-          // rescheduled day showed real, clickable-looking tasks here that
-          // clicking into (Day view) already knew to collapse to "Tasks
-          // rescheduled" — the exact report this pass exists to fix.
-          const isFullySwept = isDayFullySwept(d, piece, chunkById);
+          // Pass 75 — same shared check DayChecklist/TodayTab's own
+          // single-day view/TimelineTab already apply (Pass 48, widened
+          // Pass 73; consolidated into classifyDayEmptyState, Pass 92): a
+          // day before the reschedule marker's asOfDay still carries its
+          // stale pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds,
+          // duplicating tasks that now also appear on their new day. Week
+          // view had never had this check at all, so a rescheduled day
+          // showed real, clickable-looking tasks here that clicking into
+          // (Day view) already knew to collapse to "Tasks rescheduled" —
+          // the exact report this pass exists to fix.
+          const emptyState = classifyDayEmptyState(d, piece, chunkById);
           return (
             <button
               key={d.dayNumber}
@@ -226,10 +227,10 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
               )}
               {d.type === "consolidation" ? (
                 <p className="day-card-note">Full run-through of the piece</p>
-              ) : d.type === "rest" ? (
-                <p className="day-card-note">Rest day</p>
-              ) : isFullySwept ? (
+              ) : emptyState === "rescheduled" ? (
                 <p className="day-card-note"><em>Tasks rescheduled</em></p>
+              ) : emptyState === "empty" ? (
+                <p className="day-card-note">Nothing scheduled.</p>
               ) : (
                 <>
                   {d.newChunkIds.length > 0 && (
@@ -255,18 +256,6 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
                         <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                       ))}
                     </div>
-                  )}
-                  {/* withLiveReviewStatus (lib/scheduling.js) already
-                      pulled a passed-due review out of d.reviewChunkIds
-                      above — it's already live and actionable on today's
-                      own screen (mergeLiveDueReviews), not stuck here.
-                      This just says so instead of it silently vanishing. */}
-                  {d.staleReviewIds && d.staleReviewIds.length > 0 && (
-                    <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic" }}>Now due — see today</p>
-                  )}
-                  {d.newChunkIds.length === 0 && d.specialChunkIds.length === 0 && d.reviewChunkIds.length === 0 &&
-                    !(d.staleReviewIds && d.staleReviewIds.length > 0) && (
-                    <p className="day-card-note">Nothing scheduled</p>
                   )}
                 </>
               )}

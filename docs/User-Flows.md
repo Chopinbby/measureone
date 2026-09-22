@@ -69,6 +69,21 @@ week, chunk size).
 The Wizard is **create-only** — an existing piece is never edited through it;
 editing always goes through Settings instead.
 
+**Since Pass 93, Settings is split in two.** The Settings tab itself keeps
+only what isn't about the current piece — "Pieces" (Add new piece) and
+"Backup & restore" — plus a read-only "Current piece details" summary sitting
+directly above the "Edit piece settings" button. Everything about the
+current piece lives behind that button, on the "Edit piece settings" page,
+which is also reachable from the sidebar on every tab (previously Overview
+only). That page is a draft-and-save form (Save changes / Discard changes) —
+including Focus spots, Revival settings (only while in revival) and "Mark as
+learned elsewhere" (which asks "are you sure?" before it marks the draft) —
+followed by a separate, clearly labelled **"Applies immediately"** group
+below the Save/Discard row holding Practice status (Pause/Archive/Resume/
+Reactivate) and Delete this piece, which act on the live piece the moment
+they're clicked and are unaffected by Discard. The button was called "Edit
+piece" before this pass.
+
 ### 1a. Adding a movement to an existing work
 
 "Add a movement" on the Overview `PartSwitcher` reopens the same wizard with a
@@ -159,6 +174,11 @@ logging an outcome), and a rough auto-classified result gets saved
 chunk's card anywhere it's shown, rather than it silently affecting the
 ladder right away. Leaving Interleaved mode with an unresolved provisional
 still pending (switching view, tab, or piece) prompts a confirmation first.
+**Since Pass 94**, the "Interleaved practice" button is also the way out: in
+Interleaved mode it reads "Exit interleaved practice" and returns to Day
+View, through the same leave-confirmation as every other exit. The
+"needs two qualifying chunks" disable applies only to *entering* — if the
+pool drops below two mid-session the exit button stays clickable.
 See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
 for the full mechanism.
 
@@ -239,7 +259,10 @@ week-vs-all-time and heatmap-window choices.
    pre-check this used to have, which could hide the button even when a
    past transition or review was genuinely still incomplete (Overview and
    Timeline don't get this second button, and render the banner exactly as
-   before).
+   before). **Since Pass 94, it's hidden while you're already browsing that
+   earliest day** — the button would jump nowhere, and the banner's "or pick
+   up where you left off" half of its copy goes with it; browse anywhere else
+   and both return.
 3. `handleReschedule` estimates whether the remaining material can
    realistically fit in the remaining days at the current pace. If it
    can't, the confirmation dialog names the shortfall and offers a way past
@@ -297,15 +320,19 @@ conditions and a piece can meet both at once. See
 **Since Pass 75, a stale review no longer just sits, unaddressed, on the
 past day it was originally placed on** — Timeline, Week view, Daily
 Practice, and Master Agenda all stop listing a Tier 2 review there once
-it's overdue and wasn't logged that day, showing a short note instead
-("Now due — see today," or Daily Practice's own day view's longer
-"…now tracked as due — see Daily Practice") pointing at where it's
-actually live now.
-Unrelated to rescheduling — this fires whether or not the piece has ever
-been rescheduled. A Tier 1 "first touch" review and a consolidation day are
-both untouched by this. See
+it's overdue and wasn't logged that day, since it's already live and
+actionable on today's own screen instead. **Since Pass 92, a day emptied
+this way reads exactly like any other day with nothing scheduled**
+("Nothing scheduled.") — the two notes this originally shipped with
+("Now due — see today," Daily Practice's own longer "…now tracked as due
+— see Daily Practice") are gone; a day emptied purely by staleness
+doesn't get its own explanation any more than a day that was simply never
+scheduled does. Unrelated to rescheduling — this fires whether or not the
+piece has ever been rescheduled. A Tier 1 "first touch" review and a
+consolidation day are both untouched by this. See
 [Algorithms.md](Algorithms.md#timeline--scheduler) for the mechanism
-(`withLiveReviewStatus`).
+(`withLiveReviewStatus`, `classifyDayEmptyState`) and
+[Decisions.md](Decisions.md#scheduling) for the Pass 92 decision.
 
 **Since Pass 39, Daily Practice can also show a second, separate banner**
 below the "N days behind schedule" one (a day-count since Pass 70, not the
@@ -400,7 +427,7 @@ That makes this button inconsistent with the other two subtabs' own
 an obvious bug to silently correct.
 
 **Since Pass 29 follow-up**, switching pieces (or navigating to a different
-sidebar tab, or clicking "Edit piece") while the piece you're leaving has
+sidebar tab, or clicking "Edit piece settings") while the piece you're leaving has
 Interleaved mode open with an unresolved provisional log first asks for
 confirmation — see flow 2 above and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29).
@@ -483,7 +510,7 @@ isn't scheduled to a calendar):
    complete) and "End revival" sit in the header throughout.
 
 `piece.revival.tempoLadderStartFraction` is editable after entry only from
-Settings' own "Revival settings" panel, shown while a revival is active —
+the "Edit piece settings" page's own "Revival settings" panel (a draft field, saved with Save changes), shown while a revival is active —
 nowhere inside the revival flow itself. Ending revival (`onEndRevival`)
 resets `piece.revival` to its inactive defaults; flags and manual
 confidence set during the run are **not** cleared — they're durable chunk

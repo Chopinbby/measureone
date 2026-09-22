@@ -160,6 +160,21 @@ export function findNextOccurrenceDay(timeline, id, afterDay) {
   return null;
 }
 
+// Pass 96 — a resolved focus spot's Piece Map link needs "the next day this
+// chunk is actually scheduled, from today onward" — almost findNextOccurrenceDay,
+// except that function searches strictly AFTER its afterDay argument, and
+// "from today onward" has to mean two different things depending on whether
+// today's own occurrence has already been logged: if it hasn't, today itself
+// is a valid answer (pass realCurrentDay - 1, so day realCurrentDay itself is
+// in range); if it has, today is stale and the search should skip past it
+// (pass realCurrentDay itself). Kept as its own small function, not inlined
+// at the one call site, so this distinction can carry a regression test.
+export function findNextScheduledDay(piece, timeline, chunkId, realCurrentDay) {
+  const doneDays = ((piece.progress || {})[chunkId] || {}).doneDays || [];
+  const afterDay = doneDays.includes(realCurrentDay) ? realCurrentDay : realCurrentDay - 1;
+  return findNextOccurrenceDay(timeline, chunkId, afterDay);
+}
+
 /**
  * What was actually practiced on `day` that ISN'T part of that day's
  * current live schedule (`timeline.days[day-1]`'s own newChunkIds/

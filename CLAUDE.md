@@ -293,6 +293,24 @@ chunking, scheduling, and confidence are actually computed, see
   schedule-status computation, anchor it to `realCurrentDay`, not
   whichever `currentDay` the surrounding component happens to be showing.
   See [`docs/Decisions.md`](docs/Decisions.md#scheduling).
+- **Saving the "Edit piece settings" form must never write the whole
+  draft back over the live piece (Pass 93).** The edit page works on a
+  draft — a copy of the piece taken when editing started, kept in
+  `App.jsx` so switching tabs mid-edit doesn't lose it. By the time Save
+  is clicked, the live piece may have moved on: practice logged, a rating
+  changed, a Pause/Archive done from the same page, a revival ended
+  elsewhere. `mergeEditedPiece` (`lib/pieceEdit.js`) builds the saved
+  piece by taking *only* the fields the form actually owns
+  (`EDIT_FORM_FIELDS`, an allow-list) from the draft, and everything else
+  — `progress`, `memoryAnchors`, `status`, the rest of `revival`, etc. —
+  from the live piece. **This is deliberately an allow-list, not a
+  block-list:** forgetting to add a new form field to it fails loud (the
+  edit just doesn't save, caught immediately); the opposite mistake —
+  forgetting to protect a new non-form field on a block-list — fails
+  silent, and would reintroduce the exact data-loss bug this exists to
+  fix. If you add a new field to the edit form (`SettingsTab.jsx` or any
+  of the shared field-editor components), add it to `EDIT_FORM_FIELDS`
+  too. See [`docs/Decisions.md`](docs/Decisions.md#ux).
 
 ## Revival
 
@@ -423,7 +441,7 @@ Leaving Interleaved mode with an unconfirmed provisional now warns and, on
 confirmation, discards it — gated through one shared function
 (`confirmAndDiscardProvisional`/`guardLeavingInterleaved`, `App.jsx`) at
 every place `activeTab`/`activePieceId` can change, not just the obvious
-ones; two sidebar controls ("Edit piece," finishing the "Add new piece"
+ones; two sidebar controls ("Edit piece settings," finishing the "Add new piece"
 wizard) were missed on the first pass and only caught on review — if you
 add another way to navigate away from Interleaved mode, route it through
 that same function rather than adding a new `setActiveTab`/
@@ -1608,3 +1626,89 @@ direct user report of "inconsistent" behavior, not caught in initial
 testing. Fixed by clearing every today-dated session in one click, not
 just the last one — the boolean and the undo action now agree about what
 "today" means.
+
+**Since Pass 92**, the four day-list surfaces (Day view/`DayChecklist`,
+Timeline, Week view, Master Agenda) that each grew their own slightly
+different "there's nothing left to show here" check now share one:
+`classifyDayEmptyState(day, piece, chunkById)` (`lib/scheduling.js`)
+reuses `isDayFullySwept` internally and returns `null` (render normally),
+`"rescheduled"`, or `"empty"`. Every surface now renders exactly one of
+two strings for a non-null result — "Tasks rescheduled" (unchanged) or
+"Nothing scheduled." (period included) — and the staleness-specific notes
+that used to explain a day emptied by a stale review going live elsewhere
+("Now due — see today," "Already due — see Daily Practice") are gone
+outright: that case now reads the same as any other empty day. Timeline
+gained a real empty-day fallback it never had before (it used to render
+no text at all there), and Timeline/Week view stopped special-casing rest
+days with their own "Rest day" label — Interleaved practice and section
+run-throughs stay reachable from Daily Practice regardless of what a day
+has scheduled, so a rest day reads the same as any other empty one now.
+See [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) (end
+of section) and [`docs/Decisions.md`](docs/Decisions.md#scheduling).
+
+**Since Pass 93**, Settings is two things, not one. The Settings tab
+itself now shows only what isn't about the current piece — "Pieces" (Add
+new piece) and "Backup & restore" — plus a read-only "Current piece
+details" summary sitting directly above a prominent "Edit piece settings"
+button, which is now in the sidebar on every tab (previously Overview
+only). Everything about the current piece lives on that edit page
+instead: the shared field-editor components as before, plus three panels
+that used to apply immediately and are now ordinary draft fields saved
+with "Save changes" — Focus spots, the revival tempo field, and "Mark as
+learned elsewhere" (which now asks for confirmation before marking, since
+it can reclassify a piece's whole schedule state). Only Practice status
+and Delete stayed as an "Applies immediately" group below the Save/
+Discard row, since they still act on the live piece the instant they're
+clicked. Building this surfaced a real, separate data-loss bug — see the
+new "Rules that matter every session" bullet above (`mergeEditedPiece`) —
+fixed in the same pass. See
+[`docs/Architecture.md`](docs/Architecture.md#main-ui-components) (the
+`SettingsTab` row) and [`docs/Decisions.md`](docs/Decisions.md#ux).
+
+**Since Pass 94**, five small UI fixes. One shared CSS rule
+(`.field > .segmented`/`.ghost-btn`/`.primary-btn`/`.danger-btn`,
+`.pairs-list > .ghost-btn`) replaces every per-site inline `alignSelf:
+"flex-start"` patch for a toggle or standalone button that used to
+stretch to its column's full width — text inputs/selects/textareas are
+unaffected, and the sidebar's `.ghost-btn.full` stays intentionally full
+width. "Interleaved practice" is now also the way out of Interleaved
+mode: it reads "Exit interleaved practice" while active and returns to
+Day View through `leaveInterleaved`, so an unconfirmed provisional
+session still gets the warn-and-discard prompt; its "needs two
+qualifying chunks" disable now applies only to entering, not exiting.
+`ScheduleBanner`'s "Go to Day N" button (and its matching "or pick up
+where you left off" sub-copy) is hidden while already browsing that exact
+day. `.modal-foot` gained a gap and wraps, fixing the reschedule dialog's
+buttons touching when all four show. And `LadderConfigEditor` dropped its
+dead "Tempo ratchet" sub-section (the three `ladderConfig.bpmSteps`
+fields) — unreachable UI since Pass 59's gap-proportional `tempoRatchet`
+replaced it as the live mechanism; `bpmSteps` itself is untouched in
+config/storage/`lib/ladder.js`, still live as the no-target-BPM fallback,
+just no longer editable. See
+[`docs/Decisions.md`](docs/Decisions.md#ux) and
+[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
+
+**Since Pass 96**, Piece Map's chunk-detail modal has a Focus spots
+column. The "Run-through flag" label is gone (the button's own text
+already says what it does), and the button moved down to sit directly
+above the Current BPM/Target BPM row — which puts "Related chunks"
+directly under the card details instead, now beside a new "Focus spots"
+field in a two-column row that stacks only once the modal is too narrow
+for both. Each spot links into Daily Practice: an open spot always lands
+on real today, scrolled to its `FocusSpotCard`; a resolved spot lands on
+its chunk's next scheduled day (`findNextScheduledDay`, `lib/history.js`)
+scrolled to its `ChecklistItem`, or shows the same muted "Not currently
+scheduled again within this plan." text `ChecklistItem`'s historical
+cards already use when there isn't one; mid-revival, every spot is plain
+text, no link, since Today's Practice shows neither a day view nor the
+Focus spots panel then. Landing uses one shared mechanism: `onSelectDay`
+(`handleSelectDay`, `App.jsx`) gained an optional `scrollTargetId`
+argument, and a new `scrollToOnArrival` state/effect scrolls to and
+briefly highlights (`.arrival-highlight`, a `box-shadow` pulse — not
+`background`/`border-color`, both already meaningful state on these
+cards) the target once Today's Practice has actually rendered, mirroring
+the existing `focusTargetDateOnSettings` pattern exactly. Display and
+navigation only — adding, resolving, or deleting a spot is still only
+ever done from Daily Practice or the Wizard. See
+[`docs/Algorithms.md`](docs/Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
+and [`docs/Decisions.md`](docs/Decisions.md#focus-spots-v1).

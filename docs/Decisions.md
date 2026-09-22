@@ -1585,6 +1585,108 @@ days behind schedule" one.**
   are genuinely not interchangeable in practice, not just in theory.
 - See [Algorithms.md](Algorithms.md#the-abandoned-plan-reminder-pass-83).
 
+**Decision (Pass 92): the four day-list surfaces' separate "nothing left
+here" checks consolidate into one shared `classifyDayEmptyState`, reusing
+`isDayFullySwept` rather than duplicating it — and the staleness-specific
+copy ("Already due"/"Now due") is deleted outright, not reworded.**
+
+- **The report:** `DayChecklist.jsx`, `TimelineTab.jsx`, `WeekView.jsx`,
+  and `MasterAgendaTab.jsx` had each grown their own slightly different
+  version of "is there really nothing to show for this day" — an
+  `items.length === 0` check, an `isDayFullySwept` call, and a
+  `day.staleReviewIds` check, combined differently in each file — and each
+  rendered its own near-but-not-quite-identical copy for the same three
+  underlying states: real content remains, everything was rescheduled
+  away, or nothing remains at all. Timeline's version of the third case had
+  no fallback text at all — a genuinely empty, never-scheduled day rendered
+  nothing in its card body.
+- **The consolidation:** `classifyDayEmptyState(day, piece, chunkById =
+  {})` (`lib/scheduling.js`) reuses `isDayFullySwept` internally rather
+  than re-deriving the same sweep logic, and returns `null` (real content
+  remains — render normally), `"rescheduled"` (`isDayFullySwept` is true),
+  or `"empty"` (nothing remains and `isDayFullySwept` is false). Neither
+  `isDayFullySwept` nor `withLiveReviewStatus` themselves changed — this
+  only changes how their existing outputs get turned into display copy,
+  confirmed precisely against the request's own framing before writing any
+  code.
+- **The `"empty"` case deliberately merges two previously-distinct
+  situations into one string, per the request:** a day that genuinely
+  never had anything scheduled, and a day whose only content was a review
+  `withLiveReviewStatus` had already pulled out for staleness
+  (`day.staleReviewIds`). Before this pass, the second case got its own
+  copy — Day view's "Already due — see Daily Practice," the other three
+  surfaces' "Now due — see today" — explaining *why* the day looked empty.
+  That copy is deleted outright, not reworded or preserved as a fallback:
+  a day emptied purely by staleness now reads "Nothing scheduled." exactly
+  like any other empty day, with no explanation of what used to be there.
+  This was the request's explicit call, not a simplification made
+  unilaterally while implementing.
+- **Wording unification, not just logic unification:** the four surfaces
+  had never agreed on exact copy even for the *shared* cases —
+  `DayChecklist`'s "Nothing scheduled." (with period) was treated as
+  canonical; Week view's "Nothing scheduled" (no period) and Master
+  Agenda's "No tasks scheduled" both changed to match it. "Tasks
+  rescheduled" was already identical across all four and needed no change.
+- **What stayed out of scope, on purpose:** Master Agenda's two other
+  "nothing scheduled"-adjacent strings — the whole-agenda summary label
+  (`"Busy day"`/`"Moderate"`/`"Light"`/`"Nothing scheduled"`, driven by
+  `agendaData.totalMinutes` across every piece) and the Learning sub-tab's
+  whole-list empty state (`"Nothing scheduled"` / `"No active pieces have
+  practice scheduled for this day"`) — both answer "is there anything for
+  *any* piece today," a different question from "does *this* piece's *this*
+  day have anything," and neither was touched.
+- **Verified:** four new unit tests (`classifyDayEmptyState` describe
+  block, `test/scheduling.test.mjs`) covering all three return values, plus
+  the specific case the request called out by name — a day emptied purely
+  by staleness must read `"empty"`, never `"rescheduled"`. Full suite green
+  (715 tests). Manual, in-browser, across three fixtures: a day whose only
+  content was a stale review read "Nothing scheduled." on all four surfaces
+  (not the old "due"/"see today" wording); a day fully swept by an actual
+  reschedule still read "Tasks rescheduled" on all four, unchanged; a
+  genuinely empty, never-rescheduled day on Timeline specifically now read
+  "Nothing scheduled." where it previously rendered no text at all; and a
+  day with partial staleness (a real chunk remaining alongside a stale
+  review) rendered normally on all four, with no note about the missing
+  review.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler) (Pass 92 note, end
+  of section).
+
+**Same-session follow-up, per direct request: Timeline and Week view's
+"Rest day" label is gone — a rest day now reads "Nothing scheduled.",
+same as any other day with nothing to do.**
+
+- **The report:** Timeline and Week view special-cased `d.type === "rest"`
+  with its own "Rest day" text, while Day view and Master Agenda — which
+  never had a "Rest day" branch at all — already showed the exact same
+  rest day as "Nothing scheduled." The user's own reasoning for closing
+  this gap: Interleaved practice and section run-throughs remain
+  accessible from Daily Practice regardless of what the day itself has
+  scheduled, so a "Rest day" label implying nothing is available was
+  actively misleading, not just inconsistent phrasing across surfaces.
+- **The fix:** removed the `d.type === "rest"` branch from both
+  `TimelineTab.jsx` and `WeekView.jsx`. A rest day has no `newChunkIds`/
+  `specialChunkIds`/`reviewChunkIds` by construction, so it now falls
+  through to the same `classifyDayEmptyState` call every other day on
+  these two surfaces already goes through, landing on `"empty"` →
+  "Nothing scheduled." — no new logic needed, since the shared function
+  built earlier this session already answered this correctly for every
+  day type it was ever called on; the only thing wrong was that these two
+  files short-circuited past it for rest days specifically before it ever
+  got a chance to run.
+- **`d.type` itself is untouched** — still drives the day-card's CSS class
+  (`` `day-card clickable ${d.type}` ``) for whatever visual distinction
+  exists there; only the text branch was removed.
+- **Verified:** full suite green (715 tests, unchanged — no `lib/`-level
+  code touched by this follow-up) and a clean `npm run build`. Manual,
+  in-browser: built a piece with `practiceDaysPerWeek: 5` (which produces
+  real `type: "rest"` days, confirmed via direct `computeTimeline` output
+  before testing in the browser — days 4 and 7 of the fixture), and
+  confirmed both Timeline and Week view now show "Nothing scheduled." for
+  those exact days instead of "Rest day," matching what Day view and
+  Master Agenda already showed for the same days.
+- See [Algorithms.md](Algorithms.md#timeline--scheduler) (Pass 92
+  same-session follow-up, end of section).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,
@@ -4778,6 +4880,118 @@ existing `.primary-btn`/`.danger-btn:disabled` pattern exactly.**
   the disabled state, not auditing the hover rule. See
   [AI-GUIDELINES.md](AI-GUIDELINES.md#a-docs-claim-about-existing-behavior-is-a-claim-not-a-fact--check-it).
 
+**Decision (Pass 93): Settings splits into app-wide settings and a
+separate "Edit piece settings" page — confirmed by mockup before any code,
+per the request's own Step 0.**
+
+- **The mockup step caught real preference mismatches before
+  implementation, not after.** A static HTML page (reusing the app's own
+  CSS, nothing committed) showed three framed views — the trimmed landing
+  page, the edit page with a proposed "Applies immediately" group below
+  Save/Discard, the sidebar button on a non-Overview tab — before any
+  React code was written. The user's answers changed the recommended
+  design on two of the three flagged forks: Focus spots, the revival
+  tempo field, and "Mark as learned elsewhere" moved from the
+  recommended "outside the draft, applies immediately" group into the
+  draft form itself (saved with Save changes, discarded with Discard);
+  "Mark as learned elsewhere" also gained a confirmation dialog, on the
+  user's own reasoning that flipping it can reclassify a piece's whole
+  schedule state. Only Practice status and Delete stayed in the
+  immediate-apply group. Piece details survived as "Current piece
+  details," trimmed to drop the Sections/Chunk size/Recurring material
+  rows that are now only editable, never just read, on the edit page.
+- **A real, unrelated bug was found while implementing the confirmed
+  design, not invented to justify a rewrite:** the edit page's Save
+  handler wrote the whole draft — a snapshot of the piece taken when
+  editing started — back over the live piece. Since three of the moved
+  controls (Focus spots, the revival tempo, "Mark as learned elsewhere")
+  now live inside that same draft, and the two that stayed outside it
+  (Practice status, Delete) already acted on the live piece immediately,
+  Save could silently undo a Pause/Archive done from the same page, or
+  wipe out practice logged, a rating changed, or a revival ended while
+  the page sat open. Reproduced live: rate a chunk from Daily Practice
+  while the edit page is still open elsewhere, return, click Save — the
+  rating was gone.
+- **Fixed with an allow-list (`EDIT_FORM_FIELDS`, `lib/pieceEdit.js`),
+  not a block-list, on purpose.** `mergeEditedPiece(livePiece, draft)`
+  takes only the fields the form actually edits from the draft and keeps
+  everything else — `progress`, `memoryAnchors`, `status`, the rest of
+  `revival`, `lastLoggedAt`, `sortOrder` — from the live piece. An
+  allow-list fails loud: forget to add a new form field to the list and
+  the edit simply doesn't save, caught the first time anyone tries it. A
+  block-list fails silent: forget to add a new *non-form* field to a
+  protected list and Save quietly wipes it the next time someone edits
+  the piece while something else touched that field — the exact bug
+  this was built to fix, reintroduced by the opposite mistake. Verified
+  by temporarily reverting the fix and re-running the same live repro
+  (confirmed it reproduces), then restoring it (confirmed it doesn't) —
+  not just reasoned through. 11 new regression tests
+  (`test/piece-edit.test.mjs`), including the exact chunk-size-change
+  case (re-homing progress onto new chunks must read live progress, not
+  the draft's stale copy, or newly-logged practice is lost in the same
+  way).
+- **Verified:** full test suite green (726 tests, 11 new), clean build.
+  Manual, in-browser: the sidebar button opens the edit page from all
+  seven tabs; Pause/Archive/Resume/Reactivate, Mark as learned elsewhere
+  (Cancel/OK/Undo), Focus spots, Delete, and the revival tempo field all
+  work exactly as before from their new locations; Discard reverts a
+  Focus spots or revival-tempo change while leaving a same-page Pause
+  intact; the leave-confirmation for an unresolved Interleaved provisional
+  or a running revival assessment timer still fires when the sidebar
+  button is clicked from Daily Practice.
+- See [Architecture.md](Architecture.md#main-ui-components) (the `SettingsTab`
+  row) for the full page layout and
+  [AI-GUIDELINES.md](AI-GUIDELINES.md#verify-a-regression-test-can-actually-fail)
+  for the general pattern this data-loss fix followed.
+
+**Decision (Pass 94): small UI fixes — one width rule for form controls, an
+exit for Interleaved mode, the catch-up button hidden on its own day, modal
+button spacing, and the obsolete "Tempo ratchet" editor removed.**
+
+- **One width rule instead of per-site patches.** A toggle or standalone
+  button directly inside a `.field` (or an add-row `.pairs-list`) used to
+  stretch to the column's full width — a flex column's default
+  `align-items: stretch` — and each site that noticed had patched it with its
+  own inline `alignSelf: "flex-start"`. One CSS rule (`.field > .segmented`,
+  `.field > .ghost-btn`/`.primary-btn`/`.danger-btn`, `.pairs-list >
+  .ghost-btn`) now covers them all; the two inline patches that were direct
+  children of a `.field` (Wizard's focus-spots toggle, `ScheduleFields`'
+  practice-days toggle) were deleted. Text inputs, selects and textareas
+  deliberately stay full width; the sidebar's `.ghost-btn.full` is
+  intentionally full width. Patches on controls that are *not* in a `.field`
+  (Master Agenda's sub-tab toggle, Overview's "Continue learning", the
+  Interleaved button, etc.) were left, since the rule wouldn't cover them.
+  **Audit finding beyond the listed sites:** the "Add section / Add tempo
+  zone / Copy ranges from sections / Add recording / Add document / Add
+  repeated passage" buttons were also stretched (they sit in `.pairs-list`,
+  not `.field`), so that one selector was added to the same rule.
+- **Interleaved exit.** The "Interleaved practice" button reads "Exit
+  interleaved practice" while in the mode and returns to Day View — through
+  `leaveInterleaved`, like every other exit, so an unconfirmed provisional
+  session still gets the warn-and-discard prompt. Its "needs two qualifying
+  chunks" disable applies only to entering, so a pool that drops below two
+  mid-session (e.g. confirming a failed attempt demotes a chunk back to
+  Stabilizing) can't trap you in the mode. Returning to the *previous* view
+  mode instead of Day View was considered and deliberately not built.
+- **Catch-up button on its own day.** `TodayTab` passes `earliestBehindDay`
+  as `null` when it equals the browsed day. `ScheduleBanner` itself is
+  untouched — Pass 74 made it `realCurrentDay`-only on purpose.
+- **Modal footers.** `.modal-foot` gained `gap: 12px` and `flex-wrap: wrap`;
+  the two-button footers still sit left/right, and the reschedule dialog's
+  four buttons no longer touch when they wrap.
+- **"Tempo ratchet" removed from `LadderConfigEditor` (UI only).** The three
+  `ladderConfig.bpmSteps` fields were an editor for the old flat step sizes,
+  which the gap-proportional `tempoRatchet` (Pass 59) replaced as the
+  primary mechanism; the flat values are now only the fallback for a chunk
+  with no target BPM. The config, storage, Wizard defaults and
+  `lib/ladder.js` are untouched, so tempo behavior is unchanged (verified: a
+  no-target chunk logged at 60 BPM moves to 62). **Flagged consequence:**
+  anyone who customized `bpmSteps` keeps their values but can no longer
+  edit them. Removing `bpmSteps` from config/storage/`ladder.js` entirely
+  would need a hardcoded fallback and a decision about those customized
+  pieces — not done here. The Stabilizing/Settling "Tempo floor (fraction of
+  target)" fields are a different, still-live setting and stay.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as
@@ -6493,6 +6707,67 @@ all before this pass was ever merged:**
 
 Committed as a single commit (`2dce47d`) once all of the above was done —
 the branch was not pushed and no PR was opened in that same request.
+
+**Decision (Pass 96): Piece Map's chunk card gets a Focus spots column,
+linked to Today's Practice — display and navigation only, no editing.**
+
+- **Why a shared "arrival target" instead of a per-scenario callback:**
+  both the open-spot case (land on real today, scroll to a `FocusSpotCard`)
+  and the resolved-spot case (land on a specific plan day, scroll to a
+  `ChecklistItem`) reduce to the same two things — which day to select,
+  and which DOM id to scroll to once that day's screen has actually
+  rendered. Building one mechanism (a DOM id string held in App.jsx state,
+  plus one effect) for both, rather than two separate flag-and-effect
+  pairs, was the explicit build instruction, not a simplification found
+  mid-implementation — and it meant `onSelectDay` only needed one new
+  optional argument (`scrollTargetId`), not a new prop.
+- **Why `handleSelectDay` grew a second argument instead of a new prop:**
+  the pass's own build instruction was explicit that `PieceMapTab` should
+  gain exactly three new props (`timeline`, `realCurrentDay`,
+  `onSelectDay`) — flagged directly as replacing an earlier draft's claim
+  that none were needed, since the earlier draft hadn't yet worked out
+  that the day-selection logic (which day a resolved spot's chunk is next
+  scheduled) has to live in `PieceMapTab` itself, which needs `timeline`/
+  `realCurrentDay` to compute it and `onSelectDay` to act on it. Given
+  that constraint, the arrival-target flag couldn't be a fourth prop
+  `PieceMapTab` sets directly — `onSelectDay`'s underlying function
+  (`handleSelectDay`) absorbs it instead, as an optional `scrollTargetId`
+  argument defaulted to `null`. Every other caller of the same
+  `onSelectDay` prop (Timeline, Master Agenda, Overview, Week view) calls
+  it with one argument and is unaffected; passing `null` unconditionally
+  when the caller doesn't ask for a scroll (not only skipping the
+  assignment) is what keeps a stale target from an earlier focus-spot
+  click from misfiring on an unrelated, later day-select.
+- **Why the highlight is a `box-shadow` pulse, not a `background`/
+  `border-color` change:** both `.checklist-item` and `.focus-spot-card`
+  already use background and border-color to carry real state (checked,
+  paused, resolved) — animating either would visually fight that instead
+  of layering cleanly on top of it. A `box-shadow` ring is state-neutral
+  on both cards and reads clearly regardless of which state class the
+  card already has. Uses a CSS `@keyframes` animation rather than a
+  React-driven style transition, so it's covered for free by the
+  existing app-wide `prefers-reduced-motion` rule instead of needing its
+  own check.
+- **Why the two-column split is `flex: 1 1 180px` rather than a fixed
+  50/50 grid or a hard media-query breakpoint:** Related chunks and Focus
+  spots are two lists of very different, unpredictable lengths — a
+  chunk with one related transition next to one with three open spots
+  shouldn't be forced to the same column width. A flex-basis floor lets
+  each column claim only the space its own content needs down to 180px,
+  growing to fill the row when it's alone, and wrapping to a stacked
+  layout purely from running out of horizontal room — no explicit
+  `@media` query, and it stacks at whatever width two 180px-plus-gap
+  columns stop fitting, which naturally scales with `.detail-modal`'s own
+  480px cap rather than a breakpoint picked independently of it.
+- **Why a resolved spot with no further scheduled day gets no live-due-
+  review fallback:** explicitly deferred, not overlooked — the pass
+  named this exact case as v1 scope, matching `ChecklistItem`'s own
+  historical-card precedent (verbatim reused copy: "Not currently
+  scheduled again within this plan.") for a chunk whose live schedule
+  doesn't currently list it, rather than inventing new wording or new
+  logic to chase where a review might resurface later.
+- See [Algorithms.md](Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
+  for the full mechanism.
 
 ## Open questions
 

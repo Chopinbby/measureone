@@ -25,6 +25,7 @@ import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
+import { mergeEditedPiece } from "./lib/pieceEdit";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
   loadPiecesFromStorage,
@@ -171,6 +172,35 @@ export default function App() {
   // clear, a declined guard here would leave this flag pending to
   // incorrectly fire on some later, unrelated arrival at Settings.
   const [focusTargetDateOnSettings, setFocusTargetDateOnSettings] = useState(false);
+  // Pass 96 — a one-shot "scroll to and briefly highlight this DOM id once
+  // Today's Practice has actually rendered" request, same
+  // set-a-flag-then-scroll-in-an-effect shape as focusTargetDateOnSettings
+  // just above (see that state's own comment for why the flag can't be
+  // cleared synchronously in the same pass that schedules the timer).
+  // Set by handleSelectDay's own optional second argument — Piece Map's
+  // focus-spot links are the only caller that passes one; every existing
+  // caller (Timeline, Master Agenda, Overview, Week view) is unaffected
+  // and this always resets to null on THEIR navigations too, so a stale
+  // target from an earlier focus-spot click can never misfire on a later,
+  // unrelated day-select.
+  const [scrollToOnArrival, setScrollToOnArrival] = useState(null);
+  useEffect(() => {
+    if (!scrollToOnArrival) return;
+    if (activeTab !== "today") {
+      setScrollToOnArrival(null);
+      return;
+    }
+    const id = setTimeout(() => {
+      const el = document.getElementById(scrollToOnArrival);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("arrival-highlight");
+        setTimeout(() => el.classList.remove("arrival-highlight"), 1600);
+      }
+      setScrollToOnArrival(null);
+    }, 50);
+    return () => clearTimeout(id);
+  }, [scrollToOnArrival, activeTab]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -554,7 +584,14 @@ export default function App() {
     return () => clearTimeout(id);
   }, [focusTargetDateOnSettings, activeTab]);
   const setEditDraft = (patch) => setEditDraftState((d) => ({ ...d, ...patch }));
-  const handleSavePiece = (updated) => {
+  const handleSavePiece = (draft) => {
+    // `draft` is the edit form's copy of the piece from when editing started
+    // (or last saved). Only the fields the form owns are taken from it — see
+    // mergeEditedPiece (lib/pieceEdit.js) — so Save can't undo practice
+    // logged, ratings, chunk notes, a Pause/Archive, or an ended revival
+    // that happened elsewhere while the form was open. `updated` below is
+    // the live piece with just the form's edits applied.
+    const updated = mergeEditedPiece(piece, draft);
     // Typing a work title on a standalone piece promotes it into a work;
     // clearing it pulls the piece back out. See lib/works.js.
     //
@@ -1119,9 +1156,6 @@ export default function App() {
     });
   };
 
-  const handleSetTroubleSpotsEnabled = (enabled) => updatePiece((p) => ({ ...p, troubleSpotsEnabled: enabled }));
-  const handleSetTroubleSpotDefaultMinutes = (minutes) => updatePiece((p) => ({ ...p, troubleSpotDefaultMinutes: minutes }));
-
   // Pass 29 follow-up — resolves a provisional session (see handleLogSession
   // above) by finally running it through computeLadderAdvance, using the
   // real reps/BPM/outcome it already recorded. Operates on the most recent
@@ -1445,15 +1479,6 @@ export default function App() {
     updatePiece((p) => ({ ...p, status }));
   };
 
-  // Manual escape hatch for a piece finished away from the app — see
-  // isPlanActuallyComplete's markedLearnedElsewhere check (lib/scheduling.js)
-  // for what this unlocks. Freely reversible, same low-ceremony pattern as
-  // handleSetPieceStatus above — no confirmation dialog, matching Pause/
-  // Archive's own precedent.
-  const handleSetMarkedLearnedElsewhere = (value) => {
-    updatePiece((p) => ({ ...p, markedLearnedElsewhere: value }));
-  };
-
   const handleUpdateRevival = (patch) => {
     updatePiece((p) => ({ ...p, revival: { ...(p.revival || {}), ...patch } }));
   };
@@ -1624,9 +1649,17 @@ export default function App() {
     });
   };
 
-  const handleSelectDay = (dayNumber) => {
+  // `scrollTargetId` (optional) is Pass 96's addition — Piece Map's focus-
+  // spot links are the only caller that passes one. Set unconditionally
+  // (to null when omitted), not only when truthy, so this always clears
+  // whatever an earlier focus-spot click left pending — every other
+  // caller of this same onSelectDay prop (Timeline, Master Agenda,
+  // Overview, Week view) has nothing to scroll to and shouldn't
+  // accidentally inherit a stale target from a previous, unrelated click.
+  const handleSelectDay = (dayNumber, scrollTargetId = null) => {
     setDayOverride(dayNumber);
     setActiveTab("today");
+    setScrollToOnArrival(scrollTargetId);
   };
 
   const openRescheduleModal = (targets, title, message, suggestion = null) => {
@@ -2075,11 +2108,9 @@ export default function App() {
               })}
             </div>
             <div className="sidebar-foot">
-              {activeTab === "overview" && (
-                <button className="ghost-btn full" onClick={startEditing}>
-                  <Pencil size={14} /> Edit piece
-                </button>
-              )}
+              <button className="ghost-btn full" onClick={startEditing}>
+                <Pencil size={14} /> Edit piece settings
+              </button>
               <button className="ghost-btn full" onClick={() => openWizard()}>
                 <Plus size={14} /> Add new piece
               </button>
@@ -2132,6 +2163,9 @@ export default function App() {
                 piece={piece}
                 chunks={chunks}
                 currentDay={currentDay}
+                timeline={timeline}
+                realCurrentDay={realCurrentDay}
+                onSelectDay={handleSelectDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
                 onSetFlag={handleSetFlag}
@@ -2216,10 +2250,6 @@ export default function App() {
                 onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
-                onSetMarkedLearnedElsewhere={handleSetMarkedLearnedElsewhere}
-                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
-                onSetTroubleSpotsEnabled={handleSetTroubleSpotsEnabled}
-                onSetTroubleSpotDefaultMinutes={handleSetTroubleSpotDefaultMinutes}
               />
             )}
           </main>
@@ -2703,6 +2733,21 @@ const CSS = `
 .focus-spot-bpm-form input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; font-size: 13.5px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
 .focus-spot-resolved-line { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--teal); margin: 0; }
 
+/* Pass 96 — a brief flash on whatever Piece Map's focus-spot links scroll
+   to (a FocusSpotCard or a ChecklistItem's card), so landing on the right
+   card is obvious even though nothing about its own border/background
+   otherwise changed. box-shadow rather than background/border-color: both
+   of those are already meaningful state on these two cards (checked/
+   paused/resolved), so animating either would fight that instead of
+   layering cleanly on top of it. Automatically skipped for
+   prefers-reduced-motion via the existing app-wide rule near the top of
+   this stylesheet. */
+.arrival-highlight { animation: arrival-pulse 1.6s ease-out; }
+@keyframes arrival-pulse {
+  0% { box-shadow: 0 0 0 3px rgba(185,138,62,0.55); }
+  100% { box-shadow: 0 0 0 3px rgba(185,138,62,0); }
+}
+
 .checklist-item.paused { border-style: dashed; border-color: var(--brass); background: rgba(185,138,62,0.05); }
 .paused-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; background: rgba(185,138,62,0.08); border-radius: 8px; padding: 10px 11px; }
 .paused-note svg { flex-shrink: 0; margin-top: 1px; color: var(--brass-deep); }
@@ -2783,18 +2828,43 @@ const CSS = `
 .modal-step.done:hover { color: var(--brass-deep); }
 .modal-step-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
 .modal-body { padding: 26px 26px 10px; overflow-y: auto; flex: 1; }
-.modal-foot { display: flex; justify-content: space-between; padding: 18px 26px; border-top: 1px solid var(--line); }
+.modal-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 26px; border-top: 1px solid var(--line); }
 
 .wizard-pane h2 { font-size: 20px; margin-bottom: 6px; }
 .wizard-hint { color: var(--ink-soft); font-size: 13.5px; margin: 0 0 20px; line-height: 1.5; }
 
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .field > span { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+/* One width rule for every toggle/button that sits directly in a form field or
+   an add-row list: size to the content instead of stretching to the column's
+   full width (a flex column's default align-items: stretch). Text inputs,
+   selects and textareas are deliberately not listed — they stay full width.
+   The sidebar's .ghost-btn.full is its own, intentionally full-width thing. */
+.field > .segmented, .field > .ghost-btn, .field > .primary-btn, .field > .danger-btn,
+.pairs-list > .ghost-btn { align-self: flex-start; }
 .field input[type="text"], .field input[type="number"], .field input[type="date"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
 .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); font-family: inherit; resize: vertical; }
 .field input:disabled { color: var(--ink-faint); background: var(--paper); }
 .field-row { display: flex; gap: 16px; }
 .field-row .field { flex: 1; }
+/* Piece Map's chunk detail modal (Pass 96) — Related chunks and Focus
+   spots side by side, each sized to content down to a 180px floor rather
+   than a fixed 50/50 split (a short Related-chunks list next to a longer
+   Focus spots one shouldn't force them to match widths), stacking only
+   once the row can no longer fit two of those floors side by side —
+   .detail-modal's own 480px cap already fits two comfortably, so this
+   only actually triggers on a narrower viewport. Unlike .field-row above
+   (never wraps — Current BPM/Target BPM must always stay side by side),
+   deliberately its own class rather than a shared one. When only one of
+   the two sections has anything to show, it's the sole flex child and
+   fills the row on its own — no extra rule needed for that case. */
+.related-focus-row { display: flex; flex-wrap: wrap; gap: 20px; }
+.related-focus-row > .field { flex: 1 1 180px; min-width: 0; }
+/* One spot row (icon, name, position tag, resolved state) — shared by the
+   link, the muted "not currently scheduled" variant, and the plain-text
+   revival variant, so all three line up identically regardless of which
+   one a given spot renders as. */
+.focus-spot-map-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; text-align: left; font-size: 13px; }
 
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; flex-wrap: wrap; }
 .segmented button { border: none; background: var(--white); color: var(--ink-soft); padding: 8px 14px; font-size: 13px; font-weight: 500; border-right: 1px solid var(--line); }

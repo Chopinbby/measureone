@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { X, Pencil, Flag, RotateCcw, TrendingUp, Metronome, AlertTriangle, SignalLow, SignalMedium, SignalHigh } from "lucide-react";
+import { X, Pencil, Flag, RotateCcw, TrendingUp, Metronome, AlertTriangle, SignalLow, SignalMedium, SignalHigh, Target, Check } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
 import { clamp, formatRange, todayISODate, findRelatedChunks } from "../../lib/utils";
+import { findNextScheduledDay } from "../../lib/history";
 import { DIFFICULTY_META, ROLE_LABEL } from "../../lib/constants";
 import {
   computeConfidence,
@@ -13,6 +14,7 @@ import {
   hasClimbingTempo,
 } from "../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../lib/ladder";
+import { isInRevival } from "../../lib/revival";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
 // logging"): undefined ("untouched") -> 'rough' -> 'lost' -> undefined.
@@ -45,6 +47,9 @@ export function PieceMapTab({
   piece,
   chunks,
   currentDay,
+  timeline,
+  realCurrentDay,
+  onSelectDay = () => {},
   onUpdateBPM,
   onSetManualConfidence,
   onSetFlag = () => {},
@@ -103,6 +108,40 @@ export function PieceMapTab({
   // chunk(s) it touches), rather than a one-way dead end.
   const relatedChunks = selectedChunk ? findRelatedChunks(selectedChunk, chunks) : [];
   const relatedChunkLabel = (c) => (c.kind === "section" ? "Chunk" : ROLE_LABEL[c.kind] || c.kind);
+
+  // Pass 96 — only a base practice chunk can carry focus spots (transitions
+  // and combos never do, Pass 91), so this is deliberately gated on `kind`
+  // rather than just checking whether the array happens to be non-empty.
+  const focusSpots = selectedChunk && selectedChunk.kind === "section" ? selectedEntry.troubleSpots || [] : [];
+  const inRevival = isInRevival(piece);
+
+  // Where a focus spot's link should send the learner, and what it should
+  // scroll to once there — the one thing both the open and resolved cases
+  // ultimately produce, so the render below doesn't have to duplicate this
+  // branching per spot.
+  //   - Open: always real today (day null) — FocusSpotsPanel isn't scoped
+  //     to a single day, so there's no other day it could mean — scrolled
+  //     to that spot's own card (`FocusSpotCard`'s `focus-spot-{spot.id}`).
+  //   - Resolved: the chunk's own next scheduled occurrence
+  //     (findNextScheduledDay, lib/history.js — searches the live,
+  //     recomputed-fresh `timeline`, not anything persisted), scrolled to
+  //     that chunk's checklist card (`ChecklistItem`'s
+  //     `checklist-item-{chunkId}`). `null` when that occurrence IS today,
+  //     matching onSelectDay's own "day null means don't override
+  //     dayOverride, land on real today" convention elsewhere in this app
+  //     — passing realCurrentDay itself here would work too (getCurrentDay
+  //     clamps it identically) but would be a real, if harmless, day
+  //     override sitting where every other "just go to today" caller
+  //     passes null.
+  const focusSpotTarget = (spot) => {
+    if (!selectedChunk) return null;
+    if (spot.resolved) {
+      const day = findNextScheduledDay(piece, timeline, selectedChunk.id, realCurrentDay);
+      if (day == null) return null;
+      return { day: day === realCurrentDay ? null : day, scrollId: `checklist-item-${selectedChunk.id}` };
+    }
+    return { day: null, scrollId: `focus-spot-${spot.id}` };
+  };
 
   const detailStats = selectedChunk && (
     <div className="detail-stats">
@@ -207,27 +246,74 @@ export function PieceMapTab({
             <div className="modal-body">
               {detailStats}
 
-              <div className="field">
-                <span>Run-through flag</span>
-                <button
-                  type="button"
-                  className={`flag-toggle ${selectedFlag !== "untouched" ? `flag-${selectedFlag}` : ""}`}
-                  onClick={() => onSetFlag(selectedChunk.id, nextFlag(selectedEntry.flag))}
-                >
-                  <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
-                </button>
-              </div>
+              {(relatedChunks.length > 0 || focusSpots.length > 0) && (
+                <div className="related-focus-row">
+                  {relatedChunks.length > 0 && (
+                    <div className="field">
+                      <span>Related chunks</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                        {relatedChunks.map((rc) => (
+                          <button type="button" key={rc.id} className="link-btn" onClick={() => setSelected(rc.id)}>
+                            {relatedChunkLabel(rc)} — {formatRange(rc.start, rc.end)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-              {relatedChunks.length > 0 && (
-                <div className="field">
-                  <span>Related chunks</span>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-                    {relatedChunks.map((rc) => (
-                      <button type="button" key={rc.id} className="link-btn" onClick={() => setSelected(rc.id)}>
-                        {relatedChunkLabel(rc)} — {formatRange(rc.start, rc.end)}
-                      </button>
-                    ))}
-                  </div>
+                  {focusSpots.length > 0 && (
+                    <div className="field">
+                      <span>Focus spots</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
+                        {focusSpots.map((spot) => {
+                          const positionTag = spot.position ? `m. ${spot.position}` : formatRange(selectedChunk.start, selectedChunk.end);
+                          const statusLabel = spot.resolved ? "Resolved" : "Open";
+                          // Revival's Today's Practice renders neither a day
+                          // view nor the Focus spots panel (TodayTab.jsx —
+                          // isInRevival short-circuits the whole regular
+                          // render), so there's nowhere for either link
+                          // target to actually land — plain text instead.
+                          if (inRevival) {
+                            return (
+                              <span key={spot.id} className="focus-spot-map-row">
+                                <Target size={11} /> {spot.name} — <span className="mono">{positionTag}</span> · {statusLabel}
+                              </span>
+                            );
+                          }
+                          const target = focusSpotTarget(spot);
+                          if (!target) {
+                            return (
+                              <div key={spot.id}>
+                                <span className="focus-spot-map-row">
+                                  <Target size={11} /> {spot.name} — <span className="mono">{positionTag}</span> · {statusLabel}
+                                </span>
+                                <p className="tip-line" style={{ fontStyle: "italic", margin: "2px 0 0" }}>
+                                  Not currently scheduled again within this plan.
+                                </p>
+                              </div>
+                            );
+                          }
+                          return (
+                            <button
+                              type="button"
+                              key={spot.id}
+                              className="link-btn focus-spot-map-row"
+                              onClick={() => onSelectDay(target.day, target.scrollId)}
+                            >
+                              <Target size={11} /> {spot.name} — <span className="mono">{positionTag}</span> ·{" "}
+                              {spot.resolved ? (
+                                <>
+                                  <Check size={11} /> {statusLabel}
+                                </>
+                              ) : (
+                                statusLabel
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -273,6 +359,21 @@ export function PieceMapTab({
                     </button>
                   </div>
                 )}
+              </div>
+
+              {/* Pass 96 — relocated from directly under the card details
+                  (now Related chunks/Focus spots' spot) to right above the
+                  BPM fields. The "Run-through flag" label/copy is gone —
+                  the button's own text (FLAG_LABEL) already says what it
+                  does at every state. */}
+              <div className="field">
+                <button
+                  type="button"
+                  className={`flag-toggle ${selectedFlag !== "untouched" ? `flag-${selectedFlag}` : ""}`}
+                  onClick={() => onSetFlag(selectedChunk.id, nextFlag(selectedEntry.flag))}
+                >
+                  <Flag size={14} /> {FLAG_LABEL[selectedFlag]}
+                </button>
               </div>
 
               <div className="field-row">

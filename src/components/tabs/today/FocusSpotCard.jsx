@@ -82,7 +82,7 @@ export function FocusSpotCard({ chunk, spot, gated, siblingCount, requiredMinute
 
   if (spot.resolved) {
     return (
-      <div className="focus-spot-card resolved">
+      <div id={`focus-spot-${spot.id}`} className="focus-spot-card resolved">
         <span className="checklist-check"><Check size={18} /></span>
         <div className="focus-spot-card-body">
           <div className="focus-spot-card-head">
@@ -97,7 +97,9 @@ export function FocusSpotCard({ chunk, spot, gated, siblingCount, requiredMinute
   }
 
   return (
-    <div className="focus-spot-card">
+    // Pass 96 — a stable arrival target for Piece Map's open-focus-spot
+    // links (App.jsx's scroll-and-highlight effect).
+    <div id={`focus-spot-${spot.id}`} className="focus-spot-card">
       {loggedToday ? (
         <button
           type="button"

@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, Target } from "lucide-react";
 import { ScheduleBanner } from "../ScheduleBanner";
 import { FocusPanel } from "./today/FocusPanel";
+import { FocusSpotCard } from "./today/FocusSpotCard";
 import { SectionRunThroughPanel } from "./today/SectionRunThroughPanel";
 import { ColdStartPanel } from "./today/ColdStartPanel";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
+import { ReassessSequencePanel } from "./revival/ReassessSequencePanel";
 import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
@@ -12,9 +14,58 @@ import { WeekView } from "./today/WeekView";
 import { InterleavePanel } from "./today/InterleavePanel";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { isInterleaveEligible } from "../../lib/ladder";
-import { isInRevival } from "../../lib/revival";
-import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, isDayFullySwept } from "../../lib/scheduling";
-import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, hasPendingProvisionalSession } from "../../lib/utils";
+import { isInRevival, getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
+import { isManualConfidence } from "../../lib/confidence";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, isDayFullySwept, focusSpotGate } from "../../lib/scheduling";
+import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, formatRange, hasPendingProvisionalSession } from "../../lib/utils";
+
+// Pass 91 (experimental v1) — every practice chunk's unresolved focus spots,
+// one FocusSpotCard per spot (a chunk with more than one open spot gets one
+// card each, not one card for the whole chunk — docs/Algorithms.md#focus-spots-v1).
+// `gated` (no introducedDay in the live timeline) only changes each card's
+// own bottom-note wording; the actual scheduling consequence already
+// happened inside computeTimeline (lib/scheduling.js) by the time this
+// renders. Deliberately separate from computeTimeline placement, same as
+// the pass calls for — this reads piece.progress directly, not
+// timeline.days[], so a gated chunk's drill is reachable even though the
+// chunk itself is nowhere in today's (or any day's) checklist.
+function FocusSpotsPanel({ piece, chunks, timeline, onLogFocusSpotTime, onUnlogFocusSpotTime, onResolveFocusSpot }) {
+  const rows = [];
+  chunks
+    .filter((c) => c.kind === "section")
+    .forEach((chunk) => {
+      const { unresolved } = focusSpotGate(piece.progress[chunk.id]);
+      unresolved.forEach((spot) => {
+        rows.push({ chunk, spot, gated: timeline.introducedDay[chunk.id] == null, siblingCount: unresolved.length });
+      });
+    });
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="panel focus-spot-panel" id="focus-spots-panel">
+      <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}><Target size={16} /> Focus spots</h3>
+      <p className="focus-spot-summary">
+        Resolve focus spot{rows.length === 1 ? "" : "s"} to add the chunk to daily practice.
+      </p>
+      <div className="focus-spot-cards">
+        {rows.map(({ chunk, spot, gated, siblingCount }) => (
+          <FocusSpotCard
+            key={spot.id}
+            chunk={chunk}
+            spot={spot}
+            gated={gated}
+            siblingCount={siblingCount}
+            requiredMinutes={piece.troubleSpotDefaultMinutes ?? 5}
+            onLogTime={onLogFocusSpotTime}
+            onUnlogTime={onUnlogFocusSpotTime}
+            onResolve={onResolveFocusSpot}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // Once a piece runs past the end of its bounded plan there is no "Day N of
 // N" left to show — the plan grid is exhausted, but the maintenance ladder
@@ -34,7 +85,7 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
       status !== "active"
         ? `Maintenance reviews are paused while this piece is ${status}.`
         : isInRevival(piece)
-          ? "Maintenance reviews are set aside while a revival is running — the Revival tab has the plan."
+          ? "Maintenance reviews are set aside while a revival is running."
           : null;
 
     return (
@@ -82,6 +133,7 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
 export function TodayTab({
   piece,
   chunks,
+  chunkSet,
   timeline,
   currentDay,
   realCurrentDay,
@@ -102,17 +154,22 @@ export function TodayTab({
   onSetMemoryAnchor,
   onInterleaveRiskChange,
   onConfirmLeaveInterleaved,
-  onOpenRevival,
+  onUpdateBPM,
+  onSetManualConfidence,
+  onFinishReassessment,
+  onReopenReassessment,
+  onEndRevival,
+  onAssessmentTimerRiskChange,
+  onConfirmLeaveAssessmentTimer,
+  onAddFocusSpot,
+  onLogFocusSpotTime,
+  onUnlogFocusSpotTime,
+  onResolveFocusSpot,
 }) {
   const [viewMode, setViewMode] = useState("day");
   const day = timeline.days[currentDay - 1];
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const practiceChunks = chunks.filter((c) => c.kind === "section");
-  // TodayTab already receives exactly chunkSet.all (as `chunks`) and
-  // derives practiceChunks locally above — this is the same shape a real
-  // chunkSet carries, built here rather than threading a new prop through
-  // App.jsx for it.
-  const chunkSet = { all: chunks, practiceChunks };
 
   // getCurrentDay (lib/utils) clamps into the plan, so `currentDay` can
   // never report a day past the end — the unclamped elapsed day is what
@@ -241,6 +298,15 @@ export function TodayTab({
     setViewMode("day");
   };
 
+  // A historical card's "go to next scheduled practice" link (DayChecklist/
+  // ChecklistItem) — same drop-into-day-view pattern handleSelectWeekDay
+  // already uses, since "View all" mode has no single-day nav of its own to
+  // land on otherwise.
+  const handleGoToDay = (dayNumber) => {
+    onDayChange(dayNumber);
+    setViewMode("day");
+  };
+
   // Interleaved mode (Pass 29) — every chunk in the whole piece that's
   // actually left Stabilizing (isInterleaveEligible, lib/ladder.js), not
   // just whatever happens to be scheduled for today specifically. Used to
@@ -303,7 +369,8 @@ export function TodayTab({
   }, []);
 
   // Shared by every way this component itself can leave Interleaved mode
-  // (currently just the segmented control below) — confirms and discards
+  // (the segmented control below, the "All Tasks" nudge button, and the
+  // "Exit interleaved practice" button) — confirms and discards
   // via the one function App.jsx owns (onConfirmLeaveInterleaved), so the
   // warning text and discard behavior can't drift between this path and
   // the sidebar/piece-switcher path, which reads the risk this component
@@ -331,36 +398,211 @@ export function TodayTab({
     .filter((c) => ((piece.progress[c.id] || {}).sessions || []).length >= 2)
     .map((c) => chunkEntry(c, piece.memoryAnchors && piece.memoryAnchors[c.id]));
 
-  // Pass 78 — placed after every hook above (never before one — see the
-  // identical caution on SectionRunThroughPanel's isRealToday gate,
-  // lib/chunking.js's docs), so this never violates React's rules of
-  // hooks even though it replaces the entire rest of the render. The
-  // piece's regular plan (every viewMode: Day/Week/Interleaved/All Tasks,
-  // FocusPanel, SectionRunThroughPanel, the works) is meaningless while a
-  // revival is running — Revival has its own, separate plan — so this
-  // redirects instead of showing stale/irrelevant content. Independent of
+  // Pass 78, folded into Today's Practice by Pass 88 — placed after every
+  // hook above (never before one — see the identical caution on
+  // SectionRunThroughPanel's isRealToday gate, lib/chunking.js's docs), so
+  // this never violates React's rules of hooks even though it replaces the
+  // entire rest of the render. The piece's regular plan (every viewMode:
+  // Day/Week/Interleaved/All Tasks, FocusPanel, SectionRunThroughPanel, the
+  // works, plus ScheduleBanner and the past-target-date nudge — neither
+  // applies without a calendar) is meaningless while a revival is running —
+  // revival has its own, separate plan, rendered here directly instead of a
+  // dedicated tab (retired this pass; there is no more "Revival" nav item
+  // or activeTab value to redirect to). Independent of
   // reassessmentComplete/plan existing yet: isInRevival only checks
-  // revival.active, so this covers every stage of a revival, not just
-  // once a plan has been generated. Same idea DueReviewPanel already
-  // applies to just the maintenance-review list (see its own
-  // isInRevival-gated copy above) — this generalizes it to the whole tab
-  // rather than changing what DueReviewPanel itself does.
+  // revival.active, so this covers every stage of a revival, not just once
+  // a plan has been generated. Same idea DueReviewPanel already applies to
+  // just the maintenance-review list (see its own isInRevival-gated copy
+  // above) — this generalizes it to the whole tab rather than changing what
+  // DueReviewPanel itself does.
   if (isInRevival(piece)) {
+    const revival = piece.revival || {};
+    // Base practice chunks only — what the reassessment sequence below
+    // actually walks and rates. A transition (tagged "Review" in Flagged
+    // chunks below) is connecting material, not something to individually
+    // set a fresh confidence baseline on the way a real chunk gets
+    // Quick-rated during reassessment.
+    const revivalBaseChunks = chunkSet.practiceChunks || practiceChunks;
+    // Same practiceChunks+transitions list RevivalTab used to build off its
+    // own chunkSet prop — chunkSet here is the real one from App.jsx now
+    // (Pass 88 added it to this component's props), not a locally
+    // reconstructed partial shape. Still needed at this broader scope for
+    // the generated plan below (computeRevivalPlan schedules transitions
+    // for practice even though they're not walked during reassessment) and
+    // for Random start.
+    const revivalItems = [...revivalBaseChunks, ...(chunkSet.transitions || [])];
+    // Combos aren't part of revivalItems (not reassessed/rated or given
+    // their own base-plan task — see computeRevivalPlan), but an escalated
+    // combo still needs to be look-up-able by id to render as a
+    // ChecklistItem below.
+    const revivalChunkById = Object.fromEntries(
+      [...revivalItems, ...(chunkSet.combos || [])].map((c) => [c.id, c])
+    );
+    const ratedCount = revivalBaseChunks.filter((c) => isManualConfidence(c, piece.progress)).length;
+    const flagged = revivalItems.filter((c) => (piece.progress[c.id] || {}).flag);
+    // Combos whose underlying content (anchor chunk, or an overlapping
+    // neighbor) has produced a real fail since this revival run started —
+    // see computeComboEscalations for why this is computed live rather
+    // than written into revival.plan.
+    const comboEscalations = computeComboEscalations(piece, chunkSet);
+    // For the single, shared bottom-of-plan ReassessPanel. Deliberately
+    // NOT filtered to "logged today" the way the ordinary, non-revival
+    // `todaysRanges` above is — revival has no day-scheduling (a plan's
+    // dayNumber is a pacing bucket only, not a calendar date — see
+    // docs/Algorithms.md#revival), so gating on "today" the same way would
+    // mean this panel stays invisible on every visit until something
+    // happens to get logged first, which defeats the point of having a
+    // reliable, always-reachable way to reassess a chunk you're looking
+    // at (confirmed live: this is exactly what happened before this fix —
+    // the panel simply never appeared). Every id a revival card can show
+    // (plan items + escalated combos) is offered unconditionally instead,
+    // same as the per-card control this replaced always was (each card's
+    // own range, never gated on same-day logging either).
+    const revivalTodaysRanges = Object.values(revivalChunkById).map((c) => ({ start: c.start, end: c.end }));
+
     return (
       <div className="tab-pane">
-        <div className="tab-header">
-          <h1>Daily Practice</h1>
+        <div className="tab-header day-nav">
+          <div>
+            <h1>Revival</h1>
+            <p className="hero-sub">Returning "{piece.name}" to its former glory</p>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {/* Redo reassessment used to live in a "Reassessment complete"
+                interstitial panel alongside the now-removed Generate/
+                Regenerate plan button (Pass 88 — finishing reassessment
+                generates the plan immediately, so that gate panel has
+                nothing left to gate). Relocated next to End revival rather
+                than dropped, since it's still a real, still-needed action. */}
+            {revival.reassessmentComplete && (
+              <button className="ghost-btn" onClick={onReopenReassessment}>Redo reassessment</button>
+            )}
+            <button className="ghost-btn" onClick={onEndRevival}>End revival</button>
+          </div>
         </div>
-        <div className="panel">
-          <h3>Set aside during revival</h3>
-          <p className="wizard-hint" style={{ margin: 0 }}>
-            This piece's regular plan is set aside while a revival is running — the Revival tab has what to
-            work on instead.
-          </p>
-          <button className="primary-btn" style={{ marginTop: 12 }} onClick={onOpenRevival}>
-            Go to Revival
-          </button>
-        </div>
+
+        {!revival.reassessmentComplete ? (
+          revivalBaseChunks.length > 0 && (
+            <ReassessSequencePanel
+              piece={piece}
+              chunks={revivalBaseChunks}
+              currentDay={currentDay}
+              ratedCount={ratedCount}
+              onUpdateBPM={onUpdateBPM}
+              onSetManualConfidence={onSetManualConfidence}
+              onSetMemoryAnchor={onSetMemoryAnchor}
+              onReassessRange={onReassessRange}
+              onLogSession={onLogSession}
+              onAssessmentTimerRiskChange={onAssessmentTimerRiskChange}
+              onConfirmLeaveAssessmentTimer={onConfirmLeaveAssessmentTimer}
+              onFinishReassessment={onFinishReassessment}
+            />
+          )
+        ) : (
+          <>
+            {flagged.length > 0 && (
+              <div className="panel focus-panel">
+                <h3>Flagged chunks</h3>
+                <div className="focus-list">
+                  {flagged.map((c) => (
+                    <div key={c.id} className="focus-row">
+                      <span className="mono">{formatRange(c.start, c.end)}</span>
+                      <span className="tag subtle">{c.kind === "transition" ? "Review" : "Chunk"}</span>
+                      {piece.memoryAnchors && piece.memoryAnchors[c.id] && (
+                        <span className="tip-line" style={{ marginLeft: "auto" }}>{piece.memoryAnchors[c.id]}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {revival.plan && comboEscalations.length > 0 && (
+              <div className="panel focus-panel">
+                <h3>Needs another look</h3>
+                <p className="wizard-hint">
+                  One of the blocks below had a rough pass. Worth practicing on its own rather than
+                  assuming it'll sort itself out.
+                </p>
+                <div className="checklist">
+                  {comboEscalations.map((combo) => {
+                    const targetBPM = getRevivalTargetBPM(piece, combo);
+                    const ladder = computeTempoLadder(targetBPM, revival.tempoLadderStartFraction ?? 0.6, 5);
+                    return (
+                      <ChecklistItem
+                        key={combo.id}
+                        chunk={combo}
+                        role="combo"
+                        piece={piece}
+                        day={currentDay}
+                        onLogSession={onLogSession}
+                        onUnlogSession={onUnlogSession}
+                        onConfirmProvisionalSession={onConfirmProvisionalSession}
+                        onDiscardProvisionalSession={onDiscardProvisionalSession}
+                        tempoLadder={ladder}
+                        memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[combo.id]}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {revival.plan && (
+              <>
+                <div className="tab-header">
+                  <h1 style={{ fontSize: 19 }}>Revival plan</h1>
+                  <p className="hero-sub">
+                    Suggested order and pacing, weakest first — everything here is loggable any day, in any
+                    order.
+                  </p>
+                </div>
+                <div className="view-all-list">
+                  {revival.plan.days.map((d) => (
+                    <div key={d.dayNumber} className="panel">
+                      <h3>Suggested day {d.dayNumber} — {formatMinutes(d.minutes)}</h3>
+                      <div className="checklist">
+                        {d.itemIds.map((id) => {
+                          const chunk = revivalChunkById[id];
+                          if (!chunk) return null;
+                          const targetBPM = getRevivalTargetBPM(piece, chunk);
+                          const ladder = computeTempoLadder(targetBPM, revival.tempoLadderStartFraction ?? 0.6, 5);
+                          return (
+                            <ChecklistItem
+                              key={id}
+                              chunk={chunk}
+                              role={chunk.kind === "transition" ? "transition" : "review"}
+                              piece={piece}
+                              day={currentDay}
+                              onLogSession={onLogSession}
+                              onUnlogSession={onUnlogSession}
+                              onConfirmProvisionalSession={onConfirmProvisionalSession}
+                              onDiscardProvisionalSession={onDiscardProvisionalSession}
+                              tempoLadder={ladder}
+                              memoryAnchor={piece.memoryAnchors && piece.memoryAnchors[id]}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Random start and the shared Reassess panel move to the very
+                bottom, mirroring ordinary Daily Practice's own layout
+                (SectionRunThroughPanel/RandomStartPanel/ColdStartPanel/
+                ReassessPanel in that order below the day's checklist) —
+                per-card "Reassess difficulty" buttons on every ChecklistItem
+                above were removed at the same time (onReassessRange no
+                longer passed to them) in favor of this one, same as
+                DayChecklist/DueReviewPanel already do for the ordinary,
+                non-revival view. */}
+            <RandomStartPanel piece={piece} revivalItems={revivalItems} sections={piece.sections} />
+            <ReassessPanel piece={piece} todaysRanges={revivalTodaysRanges} onReassessRange={onReassessRange} />
+          </>
+        )}
       </div>
     );
   }
@@ -373,7 +615,12 @@ export function TodayTab({
         timeline={timeline}
         realCurrentDay={realCurrentDay}
         onReschedule={onReschedule}
-        earliestBehindDay={earliestBehindDay}
+        // Already on the earliest behind day: "Go to Day N" would jump nowhere,
+        // so hide it (and, via the banner's own hasCatchUp check, the "or pick
+        // up where you left off" half of its copy). Done here rather than in
+        // ScheduleBanner itself, which Pass 74 made realCurrentDay-only — it
+        // deliberately has no notion of the browsed day.
+        earliestBehindDay={earliestBehindDay === currentDay ? null : earliestBehindDay}
         onDayChange={onDayChange}
       />
       {needsRescheduleNudge && (
@@ -439,17 +686,22 @@ export function TodayTab({
       {/* Pulled out of the segmented view-mode control (Day View/Week
           View/All Tasks) into its own button — entering Interleaved mode
           is a distinct action, not another way to view the same day, so it
-          reads oddly grouped alongside those three. Doesn't route through
-          leaveInterleaved like the others do, since you're never leaving
-          Interleaved mode by clicking this — only entering it. */}
+          reads oddly grouped alongside those three.
+          Pass 94: it's also the way back out. While in Interleaved mode it
+          reads "Exit interleaved practice" and returns to Day View — through
+          leaveInterleaved, like every other way out, so an unconfirmed
+          provisional session still gets the warn-and-discard prompt. The
+          "fewer than two qualifying chunks" disable applies only to
+          ENTERING: if the pool drops below two mid-session, a disabled exit
+          would trap you in the mode. */}
       <button
         type="button"
         className={`ghost-btn interleave-mode-btn ${viewMode === "interleave" ? "active" : ""}`}
         style={{ alignSelf: "flex-start" }}
-        disabled={interleaveItems.length < 2}
-        onClick={() => setViewMode("interleave")}
+        disabled={viewMode !== "interleave" && interleaveItems.length < 2}
+        onClick={() => (viewMode === "interleave" ? leaveInterleaved("day") : setViewMode("interleave"))}
       >
-        Interleaved practice
+        {viewMode === "interleave" ? "Exit interleaved practice" : "Interleaved practice"}
       </button>
       {/* Pass 69 — needs two qualifying chunks to actually rotate between,
           not just one, so the unlock threshold moved from "zero" to "fewer
@@ -468,6 +720,15 @@ export function TodayTab({
 
       <FocusPanel piece={piece} chunks={chunks} currentDay={currentDay} />
 
+      <FocusSpotsPanel
+        piece={piece}
+        chunks={chunks}
+        timeline={timeline}
+        onLogFocusSpotTime={onLogFocusSpotTime}
+        onUnlogFocusSpotTime={onUnlogFocusSpotTime}
+        onResolveFocusSpot={onResolveFocusSpot}
+      />
+
       {viewMode === "day" ? (
         pastPlan ? (
           <DueReviewPanel
@@ -484,6 +745,7 @@ export function TodayTab({
             piece={piece}
             chunks={chunks}
             day={dayForChecklist}
+            timeline={timeline}
             onLogSession={onLogSession}
             onUnlogSession={onUnlogSession}
             onConfirmProvisionalSession={onConfirmProvisionalSession}
@@ -491,6 +753,8 @@ export function TodayTab({
             onLogRunThrough={onLogRunThrough}
             onUnlogRunThrough={onUnlogRunThrough}
             onSetMemoryAnchor={onSetMemoryAnchor}
+            onAddFocusSpot={onAddFocusSpot}
+            onGoToNextOccurrence={handleGoToDay}
           />
         )
       ) : viewMode === "interleave" ? (
@@ -524,6 +788,7 @@ export function TodayTab({
               piece={piece}
               chunks={chunks}
               day={d}
+              timeline={timeline}
               onLogSession={onLogSession}
               onUnlogSession={onUnlogSession}
               onConfirmProvisionalSession={onConfirmProvisionalSession}
@@ -531,6 +796,8 @@ export function TodayTab({
               onLogRunThrough={onLogRunThrough}
               onUnlogRunThrough={onUnlogRunThrough}
               onSetMemoryAnchor={onSetMemoryAnchor}
+              onAddFocusSpot={onAddFocusSpot}
+              onGoToNextOccurrence={handleGoToDay}
             />
           ))}
         </div>

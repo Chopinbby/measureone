@@ -24,6 +24,7 @@ import {
   computeCrossPieceConsistency,
   hasPendingProvisionalSession,
   findRelatedChunks,
+  parseMeasurePosition,
 } from "../src/lib/utils.js";
 
 describe("loggedSessions (Pass 29) — filters out skipped sessions, keeps real ones", () => {
@@ -290,5 +291,52 @@ describe("findRelatedChunks (Pass 50) — findComboUnderlyingChunks (lib/revival
     const related = findRelatedChunks(combo, allChunks);
     const starts = related.map((c) => c.start);
     assert.deepEqual(starts, [...starts].sort((a, b) => a - b));
+  });
+});
+
+describe("[Pass 91 follow-up] parseMeasurePosition — validates a focus spot's measure label", () => {
+  test("a bare measure number parses to a single-measure range", () => {
+    assert.deepEqual(parseMeasurePosition("24", 100), { start: 24, end: 24 });
+  });
+
+  test("a trailing letter (pickup/alternate-ending suffix) is accepted and ignored numerically", () => {
+    assert.deepEqual(parseMeasurePosition("24a", 100), { start: 24, end: 24 });
+  });
+
+  test("a measure range parses both ends, with or without a trailing letter", () => {
+    assert.deepEqual(parseMeasurePosition("24-25", 100), { start: 24, end: 25 });
+    assert.deepEqual(parseMeasurePosition("24a-25b", 100), { start: 24, end: 25 });
+  });
+
+  test("surrounding whitespace and spaced-out hyphens are tolerated", () => {
+    assert.deepEqual(parseMeasurePosition("  24 - 25  ", 100), { start: 24, end: 25 });
+  });
+
+  test("empty or whitespace-only text is rejected", () => {
+    assert.equal(parseMeasurePosition("", 100), null);
+    assert.equal(parseMeasurePosition("   ", 100), null);
+    assert.equal(parseMeasurePosition(undefined, 100), null);
+  });
+
+  test("free text that isn't a measure reference is rejected", () => {
+    assert.equal(parseMeasurePosition("the tricky bit", 100), null);
+    assert.equal(parseMeasurePosition("somewhere near the end", 100), null);
+  });
+
+  test("a reversed range (end before start) is rejected", () => {
+    assert.equal(parseMeasurePosition("25-24", 100), null);
+  });
+
+  test("measure 0 and negative measures are rejected", () => {
+    assert.equal(parseMeasurePosition("0", 100), null);
+  });
+
+  test("a measure beyond totalMeasures is rejected when totalMeasures is given", () => {
+    assert.equal(parseMeasurePosition("101", 100), null);
+    assert.equal(parseMeasurePosition("50-101", 100), null);
+  });
+
+  test("totalMeasures is optional — omitting it parses format only, for lenient recovery of old data", () => {
+    assert.deepEqual(parseMeasurePosition("500"), { start: 500, end: 500 });
   });
 });

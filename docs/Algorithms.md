@@ -367,9 +367,80 @@ for those days (0 minutes, nothing scheduled) alongside the existing
 [Decisions.md](Decisions.md#scheduling) for why this lives inside
 `computeTimeline` rather than in `getCurrentDay`.
 
+**Introduction order is difficulty-first, not raw measure order** (Pass 89
+— `sortPracticeChunksForIntroduction`, run once, immediately before rule 1
+below's effort-spreading loop even sees `practiceChunks`). The loop itself
+(the boundary math rule 1 describes) is completely untouched — this only
+changes what order chunks are *fed into* it. `practiceChunks` is sorted
+into 4 priority tiers; ties within a tier keep the array's own (measure)
+order as a stable secondary key (JS's `Array.prototype.sort` is stable, so
+this falls out of sorting a copy of the array by tier alone):
+
+- **Tier 0** — a chunk whose trouble spots just resolved. No data source
+  for this exists yet (the Trouble-spot pass hasn't shipped), so this tier
+  is a real slot in the ordering that currently produces no reordering on
+  its own — always empty. Built now so that pass only needs to populate
+  the set it's keyed off of, not touch this sort again.
+- **Tier 1** — hard chunks (`difficultyLabel === "hard"`).
+- **Tier 2** — a hard chunk's direct one-degree measure-neighbors: the
+  chunk immediately before or after it, matched by measure boundary
+  (`prevChunk.end + 1 === c.start` / `c.end + 1 === nextChunk.start`), the
+  same adjacency `generateComboChunks` (Pass 5, `lib/chunking.js`) already
+  uses to build a combo around a hard chunk — confirmed to match before
+  building this, not a new adjacency rule invented for this pass.
+  **Boundary matching, not raw array-index adjacency
+  (`practiceChunks[i-1]`/`practiceChunks[i+1]`) — the two agree on the
+  pristine, gapless list `generateAllChunks` produces (this is how the
+  first-cut version of this tier was actually built and shipped), but
+  disagree the moment `practiceChunks` is a *filtered* subsequence, which
+  is exactly what a rescheduled remainder is** (`getEffectiveTimeline`
+  calls this same sort on `subChunkSet.practiceChunks`, built from
+  whatever's left unpracticed — see [Rescheduling](#rescheduling)). Found
+  as a real, reproduced bug, not a hypothetical one: once an already-
+  practiced chunk between a hard chunk and some other chunk drops out of
+  the remainder, array-index adjacency calls them neighbors purely because
+  nothing sits between them *in the filtered list* — wrongly promoting a
+  chunk that was never actually next to the hard one in the piece. Measure-
+  boundary matching doesn't have this failure mode: a missing chunk in
+  between means the boundaries genuinely don't touch, in either context, so
+  no false neighbor is ever created — one fix, no reschedule-specific
+  branch needed.
+- **Tier 3** — everything else.
+
+Transitions' and combos' own placement (rules 2 and 3 below) are
+unaffected by this reorder, since both are driven purely by `introducedDay`
+lookups on their linked chunk(s) — never by chunk-array position — so a
+combo anchored to a hard chunk that's now introduced on day one still lands
+correctly in the back half, never earlier than `sectionsEndDay`.
+
+**Accepted, not chased:** a hard chunk's neighbor's own neighbor (one
+degree further out) stays at tier 3 — see
+[Decisions.md](Decisions.md#scheduling).
+
+**Deliberate UX consequence:** a piece with a hard passage well into its
+raw measure order will now show that passage (and its immediate neighbors)
+on day one, ahead of easier material that comes earlier in the piece — day
+one no longer means "the piece's literal beginning."
+
+The resolved tier for each chunk is threaded out on
+`timeline.introductionTierById` (a plain `{chunkId: 0|1|2|3}` map), read by
+Pass 90's smoothing pass (see rule 5 below) — `computeTimeline` doesn't
+otherwise persist any per-chunk metadata beyond `introducedDay`, so this
+was new. `getEffectiveTimeline` (a rescheduled piece's timeline) merges
+this field the same way it already merges `introducedDay`, so it's
+available there too, not just on a never-rescheduled piece's timeline —
+originally dropped by that wrapper's own explicit return shape, fixed
+alongside the neighbor-adjacency bug above once something (Pass 90) gave
+the field an actual reader. Regression tests: `test/scheduling.test.mjs`,
+describe blocks "[Pass 89] difficulty-first introduction order" and
+"[Pass 90 follow-up] sortPracticeChunksForIntroduction's neighbor detection
+must survive a rescheduled remainder's gaps."
+
 Key scheduling rules, deliberately encoded as constraints rather than "just
 spread everything evenly" (all of them now operate in terms of practice-day
-positions within `learningDaysCalendar`, not raw calendar offsets):
+positions within `learningDaysCalendar`, not raw calendar offsets — and, as
+of Pass 89, `practiceChunks` itself has already been reordered by the
+difficulty-first sort above before rule 1 ever sees it):
 
 1. **The entire piece is introduced within the first half of the learning
    days** (`halfPoint`). New-chunk introduction is spread **evenly by total
@@ -415,10 +486,15 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
    during development: an early version delayed transitions unnecessarily
    via an index-based spread. **If you see an `i % backSpan`-style offset
    reappear on the transitions loop (as opposed to the combos loop, where
-   it belongs), that regression is back.**
+   it belongs), that regression is back.** This is only a transition's
+   *initial* placement — as of Pass 90, rule 5's smoothing pass below can
+   still nudge it later if its day is overloaded (see that rule for why
+   this is safe: nothing is anchored to a transition's own day).
 3. **Combos are reserved for the back half**, spread across it round-robin
    over the pool of remaining back-half practice days (`i % candidates.length`
-   — this is where an index-based offset legitimately belongs).
+   — this is where an index-based offset legitimately belongs). Same
+   caveat as rule 2: this is initial placement only, and rule 5's smoothing
+   pass can still nudge a combo later within the back half if needed.
 4. **Spaced review is driven by the maintenance ladder, not a fixed
    offset.** `computeTimeline` places at most one upcoming review per chunk
    per recompute, in one of two tiers (Pass 5 of the maintenance-ladder
@@ -454,25 +530,69 @@ positions within `learningDaysCalendar`, not raw calendar offsets):
      legacy chunk isn't wrongly told to do a "first touch" review — it
      simply gets no review placed until it's next logged, at which point it
      picks up real ladder state and starts taking the Tier 2 path.
-5. **Review-load smoothing**: after initial placement, a bounded pass (up to
-   3 iterations) looks for learning days sitting more than 10% above the
-   plan's average load and, for each such day's most expensive Tier 2 review
-   item, tries nudging it 1 or 2 days **later** (never before the day after
-   its introduction, never past the end of the plan, never onto a day that
-   already has that same chunk) if doing so meaningfully reduces the
-   overloaded day's load. Tier 1 items are excluded from this pass entirely
-   (see rule 4). This exists because naive placement causes any day with a
-   lot of new introductions to also have a disproportionately heavy review
-   day soon after — the smoothing pass exists specifically to flatten those
-   swings without ever reviewing something before it's actually due.
-   **Forward-only, not ±1/±2 days both ways** — an earlier version of this
-   pass (inherited unchanged from the old `REVIEW_OFFSETS`-based mechanism,
-   which had no specific "due date" to respect) could nudge a Tier 2 review
-   *earlier* than its real due date, discovered via manual browser
-   verification during the Pass 5 build: a chunk due on day 5 could
-   cascade backward across the 3-iteration loop to as early as day 2,
-   chasing whichever neighboring day was least loaded at each step. Fixed
-   by restricting the candidate days to `day + 1`/`day + 2` only.
+5. **Daily-workload smoothing (Pass 90)**: `smoothOverloadedDays`
+   (`lib/scheduling.js`) — a bounded pass (up to 3 iterations, same cap as
+   the mechanism it replaces) that relieves any day sitting outside an
+   acceptable load band by relocating one of that day's own items to a
+   nearby lighter day. Runs **twice**, at two different points in
+   `computeTimeline`, over two different pools — not once over everything
+   at once (see the sequencing note below for why):
+   - **Phase A.5**, immediately after chunks are placed (before rule 2/3
+     compute anything from `introducedDay`): pool = practice chunks only,
+     scoped to `frontDays`, measured against the introduction-only average
+     over just those days (nothing else has been placed on any day yet at
+     this point, so the plan's general `minutesFor` already reads as
+     introduction-only here for free).
+   - **The final pass**, after rule 4's Tier 1/Tier 2 reviews are placed:
+     pool = transitions + combos + Tier 2 reviews together, over every
+     learning day, measured against the whole plan's average load. This
+     replaces what used to be a narrower version of this same idea that
+     only ever moved Tier 2 reviews — see the "confirmed before building"
+     decision record below for why the two weren't kept running side by
+     side. **Tier 1 items are excluded from this pool entirely** (see rule
+     4) — schedule pressure never gets absorbed there, in either phase.
+   - **The band**: scheduleMode-aware (`scheduleBand`, `lib/scheduling.js`)
+     — ceiling 125%/floor 80% of the relevant average for `scheduleMode:
+     "days"`; ceiling 110%/floor 90% of `piece.minutesPerDay` for
+     `scheduleMode: "minutes"` (a fixed target, not a derived average, matching
+     that mode's whole premise). A day at or above the floor is left alone —
+     the pass settles once every day is in-band, not once load is perfectly
+     even.
+   - **Which item moves**: on an over-ceiling day, the lowest-priority item
+     (Pass 89's tier — an item with no assigned tier, i.e. a transition,
+     combo, or a review of one, defaults to tier 3) moves first; same-tier
+     ties break by smallest size. Priority always wins outright over size.
+   - **Where it can move**: only forward, only 1 or 2 days out (mirrors the
+     mechanism this replaces — a Tier 2 review has a real due date, so
+     nudging it earlier isn't "smoothing," it's reviewing before it's due;
+     kept uniform across all three item kinds in the final pool rather than
+     special-casing just reviews), never onto a day that already carries
+     that same item, never past the plan's own days.
+   - **Whether a candidate move is worth taking**: only if it strictly
+     reduces the *combined* `bandOvershoot` of the source (after removal)
+     and the candidate destination (after addition) versus leaving the
+     source as it is — a move that would just relocate the same overshoot
+     elsewhere (or make the total worse) is declined. When more than one
+     forward candidate would improve things, the one with the smaller
+     resulting combined overshoot wins — the tie-break for "moving either
+     candidate would push a day over its own band."
+   - **Sequencing, confirmed before building, not guessed at:** running one
+     single pass over introduction + transitions/combos + reviews together
+     (as originally proposed) can't work as-is, because rules 2-4 below
+     compute transitions'/combos'/reviews' placement *directly from*
+     `introducedDay` — if introduction could still move after those
+     existed, whatever was anchored to a moved chunk's old day would go
+     stale. The two options on the table were: settle introduction first
+     (Phase A.5, above), or let anything move and then reflow whatever was
+     anchored to it. This codebase has no existing mechanism for that kind
+     of reflow, and building one would be a meaningfully bigger, riskier
+     piece of new logic than sequencing this one phase earlier — settling
+     introduction first was chosen for that reason. One direct consequence:
+     once Phase A.5 finishes, a practice chunk's `introducedDay` never
+     moves again — only transitions/combos/reviews are eligible for the
+     final pass, since by then nothing is anchored to *those* three.
+   - Regression tests: `test/scheduling.test.mjs`, describe blocks
+     `[Pass 90] smoothOverloadedDays` and `[Pass 90] sequencing`.
 6. **Only the final day** (if the plan is ≥5 days) is a pure "no new
    material, full run-through" consolidation day. Earlier iterations
    reserved a much bigger tail for this; that was deliberately walked back
@@ -513,13 +633,20 @@ the same way.
 
 Every consumer of `timeline.days[]` gets the corrected `reviewChunkIds` for
 free from this one change: `classifyDayCompletion`/`countBehindDays` stop
-reading a stale review as still-incomplete work, and the four rendering
-surfaces that already had an "explain what happened to this content"
-precedent (`isDayFullySwept`'s "Tasks rescheduled") each show a small note
-("Now due — see today" / "Already due — see Daily Practice") instead of
-the item silently vanishing. Overview's first-week list needed no change
-at all — it already just sums `reviewChunkIds` into a measure count, so it
-automatically stops counting a stale review, just without an explicit note
+reading a stale review as still-incomplete work, and the item stops
+silently vanishing from the four rendering surfaces without explanation.
+**Since Pass 92**, the explanation is no longer a dedicated note — a day
+emptied purely by this collapses into `classifyDayEmptyState`'s ordinary
+`"empty"` result, the same "Nothing scheduled." every other genuinely
+empty day reads as; the two notes this originally shipped with ("Now due
+— see today" on Timeline/Week view/Master Agenda, "Already due — see
+Daily Practice" on Day view) are gone outright, per direct request, since
+a day emptied by staleness doesn't need a different explanation from any
+other empty day. See
+[Decisions.md](Decisions.md#scheduling) for that decision. Overview's
+first-week list needed no change at all, then or now — it already just
+sums `reviewChunkIds` into a measure count, so it automatically stops
+counting a stale review, just without an explicit note
 pointing at where it went (a deliberate, accepted asymmetry, not an
 oversight). See [Decisions.md](Decisions.md#open-questions) for the full
 investigation history, including why the original two-reading framing
@@ -918,7 +1045,7 @@ real schema surface for a case the existing marker pattern already
 handles cleanly with none.
 
 **Placement note:** the Piece Map tile already uses all four corner slots
-(`map-cell-diff-dot` top-right, `map-cell-recurring` bottom-right,
+(`map-cell-diff-icon` top-right, `map-cell-recurring` bottom-right,
 `map-cell-flag` bottom-left, `map-cell-relearning` top-left) — there was no
 fifth open corner to give this marker the same `position: absolute`
 treatment those four use. It's inline instead, in the same flow position
@@ -1363,8 +1490,9 @@ tempo-ratchet math a pass's step size floors at 1 BPM whenever there's a
 real gap left to close (`tempoRatchetStepSize`'s own `Math.max(1, ...)`),
 so in practice this loop already terminates well under the cap for
 realistic BPM ranges. But the cap isn't decorative: `ladderConfig.
-tempoRatchet.kCapBpm` is user-editable (Settings' `LadderConfigEditor`,
-Pass 17), and a `kCapBpm` of exactly `0` collapses that floor's outer
+tempoRatchet.kCapBpm` is per-piece stored config (`LadderConfigEditor` has
+never exposed it, but a hand-edited backup import could set it), and a
+`kCapBpm` of exactly `0` collapses that floor's outer
 `Math.min` to `0` — every simulated step then moves `practiceBPM` by
 exactly zero, forever, with nothing left in the formula to break the tie.
 A chunk in that state genuinely cannot converge; the cap is what stops the
@@ -1769,10 +1897,17 @@ cutoff `computeComboEscalations` uses to decide which logged sessions
 belong to the current run, and that function still reads it directly — as
 a timestamp, not as a flag. Each field now does only what it is for.
 
-Every boolean revival gate routes through this function: `App.jsx` (nav
-item, revival tab render, `handleOpenRevival`), `OverviewTab`, `TodayTab`,
-`MasterAgendaTab`, `computeDueReviews`, `getRevivalTargetBPM`, and
-`storage.js`'s `mergeImportedPiece`. Behaviour is unchanged at every one.
+Every boolean revival gate routes through this function: `App.jsx`'s
+`handleOpenRevival` (redirects to Daily Practice if a piece is already in
+revival — there's no more nav item or `activeTab === "revival"` branch to
+gate either one, both retired by Pass 88), `OverviewTab`, `TodayTab`
+(both its own ordinary-view suppression and the revival branch it
+suppresses in favor of, since Pass 88), `MasterAgendaTab` (excluding
+revival pieces from its other two subtabs, and including them in its
+own), `SettingsTab` (gating the "Revival settings" panel), `computeDueReviews`
+(`lib/maintenance.js`), `withLiveReviewStatus`/`eligiblePieceContext`/
+`computeAbandonedPlanReminder` (`lib/scheduling.js`), `getRevivalTargetBPM`,
+and `storage.js`'s `mergeImportedPiece`. Behaviour is unchanged at every one.
 See [Decisions.md](Decisions.md#revival).
 
 **Since Pass 78, `TodayTab` reads this function at the top level of its own
@@ -1972,6 +2107,65 @@ are expected states, not a sign anything went wrong.
 > tab**, every panel, not just the history row. Case 3 above is not an edge
 > case: any piece with a logged section run-through hit it. See
 > [Decisions.md](Decisions.md#ux).
+
+### Historical cards on Daily Practice
+
+Added on direct request: a day's own `newChunkIds`/`specialChunkIds`/
+`reviewChunkIds` are `computeTimeline`'s *live* projection, recomputed fresh
+on every render — not a permanent record of what that day originally
+showed. A transition or combo Pass 90's daily-workload smoothing relocates,
+or a review whose `nextDueDate` has since advanced past this specific
+occurrence, simply stops appearing on the day it actually happened, on the
+very next render — even though `piece.progress[id].doneDays`/`sessions[]`
+never lost the record. Browsing back to that day in Daily Practice (single
+day or "All Tasks") used to show nothing there at all.
+
+`findHistoricalItemsForDay(piece, chunks, timeline, day)` (`lib/history.js`)
+closes this gap for `DayChecklist.jsx`: for the day being viewed, it finds
+every id with `doneDays` including that day which ISN'T already part of
+that day's own live arrays, resolves it against the current chunk set, and
+returns it with `findNextOccurrenceDay(timeline, id, day)` — the next day
+(skipping the consolidation day, which lists every practice chunk
+unconditionally and would otherwise trivially "match" everything) that id
+appears anywhere in the live schedule, or `null` if it doesn't appear again
+within this plan's own bounded view. Scoped to real chunk-set items only
+(kind `"section"`/`"transition"`/`"combo"`) — the synthetic progress keys
+(`__consolidation__`, `__cold_start__`, `sr_<sectionId>`) each already have
+their own dedicated panel that doesn't fit a chunk-shaped card, and
+`computePracticeHistory` above already covers them for its own text-summary
+case.
+
+`DayChecklist.jsx` renders each result as an ordinary `ChecklistItem`, with
+a new `historical` prop that switches it to a read-only mode: the timer,
+reps/BPM inputs, "Needs more work" checkbox, log/undo buttons, and note
+editing are all hidden (acting on a day that isn't this item's current live
+slot could produce confusing data — a fresh log entry dated to a day the
+ladder no longer treats as due). **Same-session follow-up, on direct
+request:** the requirement line ("Need N reps...") and the Spaced
+Repetition status line are hidden too — both describe what's still needed
+*going forward*, which isn't this card's question once the "Logged: ..."
+line already states what actually happened — and the separate `Completed
+here` tag was dropped outright, since a card's presence on a specific day
+already implies that; the dashed card border alone now carries the
+"historical" signal. What's left (measure range, difficulty, confidence,
+the "Logged: ..." line — which correctly reports *that specific day's*
+session, since `day` passed in is the historical day itself, not the
+chunk's latest) is exactly the record of what happened, nothing about
+what's next. A `Go to next scheduled practice (Day N) →` link (wired
+through `TodayTab.jsx`'s `handleGoToDay`, the same drop-into-day-view
+pattern `handleSelectWeekDay` already uses for Week view) answers that
+separately, jumping straight to wherever the item actually lives now, or a
+plain "not currently scheduled again" note when `findNextOccurrenceDay`
+finds nothing.
+
+**Scoped to Daily Practice only, for now, on direct request** — Timeline,
+Week view, and Master Agenda don't render individual per-item cards today
+(they show rolled-up measure-range badges per bucket instead), so giving
+them the same treatment is a distinct, larger change, deliberately not
+built here. `findHistoricalItemsForDay`/`findNextOccurrenceDay` are kept as
+plain, general-purpose `lib/` functions (not reaching into `DayChecklist`'s
+own state) specifically so a future pass extending this to those screens
+doesn't need to redo the underlying lookup.
 
 ## Behind-schedule detection
 
@@ -2618,6 +2812,54 @@ prop from `App.jsx`: `WeekView` already receives `piece` from `TodayTab`,
 and `MasterAgendaTab` already builds `chunkSet`/`chunkById` per piece
 internally.
 
+**Since Pass 92**, the four day-list surfaces' own separate
+`items.length`/`isDayFullySwept`/`staleReviewIds` checks are consolidated
+into one shared classification: `classifyDayEmptyState(day, piece,
+chunkById = {})` (`lib/scheduling.js`) reuses `isDayFullySwept` internally
+(untouched by this pass, along with `withLiveReviewStatus` — only how
+their outputs get turned into display copy changes) and returns one of
+three values. `null` means real content remains after both filters — the
+caller renders the day normally, with no note. `"rescheduled"` means
+`isDayFullySwept` is true — every item this day originally scheduled ended
+up moved by a reschedule; unchanged, still "Tasks rescheduled." `"empty"`
+means nothing remains and `isDayFullySwept` is false — collapsing two
+previously-distinct cases into one display string: a day that genuinely
+never had anything scheduled (Timeline previously rendered nothing at all
+in this case — this pass is what actually adds "Nothing scheduled." there
+for the first time), and a day whose only content was a review
+`withLiveReviewStatus` has since pulled out for staleness (`day.
+staleReviewIds`), with no `rescheduleMarker` sweep involved either way.
+The two separate strings that used to distinguish the staleness case
+specifically — Day view's "Already due — see Daily Practice" and
+Timeline/Week view/Master Agenda's "Now due — see today" — are deleted
+outright, per the request, with no replacement copy of their own: a day
+emptied purely by staleness now just reads "Nothing scheduled.", the same
+as any other empty day. `DayChecklist.jsx`, `TimelineTab.jsx`,
+`WeekView.jsx`, and `MasterAgendaTab.jsx` each replaced their own local
+check with one `classifyDayEmptyState` call and now render exactly two
+possible non-null strings, matching `DayChecklist`'s pre-existing exact
+wording ("Tasks rescheduled" / "Nothing scheduled.", period included) —
+Week view's own "Nothing scheduled" (no period) and Master Agenda's own
+"No tasks scheduled" both changed to match. Master Agenda's two other,
+unrelated "nothing scheduled"-adjacent strings (the whole-agenda summary
+label and the Learning sub-tab's whole-list empty state) answer a
+different question — every piece for the whole day, not one piece's one
+day — and are untouched.
+
+**Same-session follow-up, per direct request:** Timeline and Week view no
+longer special-case `d.type === "rest"` with its own "Rest day" copy — a
+rest day now falls through to the same `classifyDayEmptyState` check as
+any other day with nothing scheduled and reads "Nothing scheduled.",
+matching what Day view and Master Agenda already showed for a rest day
+(neither of those two ever had a "Rest day" branch to begin with). The
+reasoning: Interleaved practice and section run-throughs remain accessible
+from Daily Practice regardless of whether the current day has any
+scheduled chunks, so labeling a rest day differently from any other empty
+day implied a harder stop than actually exists. `d.type`'s own value is
+untouched and still drives the day-card's CSS class (`` `day-card
+clickable ${d.type}` ``) for whatever visual styling exists — only the
+text branch was removed.
+
 ## Revival
 
 Data shapes: [Data-Model.md](Data-Model.md#revival). Recovering a piece that
@@ -2639,9 +2881,12 @@ may still carry that field, but nothing reads it.)
 `targetBPM` itself, inclusive. Rounding can collapse steps together when
 `startFraction` is close to 1; the result is deduplicated rather than
 showing a misleading run of repeated values. `tempoLadderStartFraction` is
-collected once at revival entry (`RevivalEntryModal`) and stays editable
-afterward from a "Revival settings" panel in `RevivalTab` — see
-[Decisions.md](Decisions.md#revival).
+collected once at revival entry (`RevivalEntryModal`) and, as of Pass 88,
+has no on-page control to change it afterward at all — an editable
+"Revival settings" panel existed briefly (first in `RevivalTab`, then
+relocated to Settings for one session) and was removed outright, not
+relocated a third time. The stored value and its `?? 0.6` fallback are
+otherwise completely unchanged — see [Decisions.md](Decisions.md#revival).
 
 `computeRevivalPlan(piece, chunkSet, currentDay)` builds the ordered
 day-by-day revival plan: practice chunks and transitions (**not** combos —
@@ -2649,9 +2894,10 @@ a combo relearns through its underlying content, which is already in this
 list as ordinary practice chunks), sorted flagged-first (rough or lost —
 `progress[id].flag`, as of Pass 6; was `weakSpot` before) then
 lowest-confidence-first. This sort itself is untouched by Pass 54, which
-only changed *where* `flag` can be set from — the toggle is hidden on the
-`sequentialMode` reassessment card now (ordinary Piece Map only), so a
-chunk reaches this sort's flagged branch only if it was flagged outside
+only changed *where* `flag` can be set from — the flag toggle never
+rendered on the reassessment card (`ReassessSequencePanel` as of Pass 87,
+`PieceMapTab`'s `sequentialMode` branch before it — ordinary Piece Map
+only, both before and after), so a chunk reaches this sort's flagged branch only if it was flagged outside
 revival; a "Lost" quick-rate during reassessment reaches the front of the
 plan through the confidence tiebreaker instead, unassisted. Greedily
 packed into days against
@@ -2671,7 +2917,8 @@ explicit task — a combo whose anchor chunk or an overlapping neighbor
 `piece.revival.startedAt`. This is a pure derivation off `piece.progress`,
 recomputed on every render (same pattern as `chunkSet`/`timeline`) rather
 than a task written into and later cleared from `revival.plan` — which is
-exactly what let `computeRevivalPlan` above stay static. `RevivalTab`
+exactly what let `computeRevivalPlan` above stay static. `TodayTab.jsx`
+(Pass 88 — this content used to live in the now-retired `RevivalTab.jsx`)
 renders any escalated combos as a separate "Needs another look" panel, not
 folded into the day-by-day list. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance) and
@@ -2693,14 +2940,82 @@ or `getEffectiveTimeline` directly.
 
 A revival plan's `dayNumber` is a **suggested pacing bucket only** — it does
 not map onto the main timeline's day numbers, and logging a revival item
-does not require "being on" its suggested day. `RevivalTab` passes the
-piece's real `currentDay` (the same value `TodayTab` uses) to every
-`ChecklistItem` it renders, regardless of which plan day that item sits
-under, so session recency math (`computeAutoConfidence`'s day-since-last-
-practice decay) stays correct. There is intentionally no revival-specific
+does not require "being on" its suggested day. `TodayTab.jsx`'s revival
+branch passes the piece's real `currentDay` (the same value its ordinary,
+non-revival rendering uses) to every `ChecklistItem` it renders, regardless
+of which plan day that item sits under, so session recency math
+(`computeAutoConfidence`'s day-since-last-practice decay) stays correct.
+There is intentionally no revival-specific
 session-day numbering — see
 [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about) generally for why this
 codebase avoids parallel data model concepts.
+
+#### The reassessment panel (Pass 87, folded into Today's Practice by Pass 88)
+
+`ReassessSequencePanel` (`components/tabs/revival/`) is the whole UI for
+"rate your confidence on each chunk" — `TodayTab.jsx`'s revival branch
+renders it (`RevivalTab.jsx` rendered it through Pass 87; that component no
+longer exists), passing `chunks={revivalBaseChunks}` — practice chunks
+only, **not** the broader `revivalItems` (practice chunks + transitions)
+`computeRevivalPlan` above still reads. A transition still gets scheduled
+for practice in the generated plan; it's just not individually walked and
+Quick-rated during reassessment — a same-session follow-up, once it came up
+that a transition (labelled "Review" elsewhere in this same UI) was showing
+up as something to rate, which wasn't the intent. See
+[Decisions.md](Decisions.md#revival) for the full reasoning, including a
+related-but-separate bug this surfaced and fixed along the way (a
+`relatedChunkPool` prop feeding a "Related chunks" field) before that field
+was itself removed outright, same session, on direct follow-up — this
+panel has no "Related chunks" field at all as of that follow-up; ordinary
+(non-revival) Piece Map's own field of the same name is a separate render
+path, untouched either way. It owns its own selection state (`selected`, initialized to the
+first not-yet-rated chunk via the same `isManualConfidence` check
+`TodayTab` uses for `ratedCount`, itself also now computed off
+`revivalBaseChunks`) and shows exactly one chunk's detail at a time — no
+grid of cells, no modal-over-grid. Before Pass 87 this same one-chunk-at-a-time UI was a mode
+flag (`sequentialMode`) threaded through `PieceMapTab`, the ordinary Piece
+Map component, sharing (and conditionally hiding) most of its markup; that
+sharing is gone. `PieceMapTab` no longer accepts `sequentialMode`,
+`initialSelectedId`, `onFinishSequential`, or `hideHeader` at all.
+`onFinishReassessment` (`App.jsx`) computes and stores the revival plan in
+the same call as of Pass 88 — see that pass's entry in `CLAUDE.md`'s
+Roadmap section for the mechanics; nothing about this panel's own props or
+behavior changed to make that true, it's purely a change to what its
+`onFinishReassessment` callback does.
+
+Two small pieces of UI exist only here, not in `PieceMapTab`:
+
+- A **segmented progress bar** — one small block per chunk in `chunks`,
+  rendered directly (not derived through any new helper function): filled
+  when `isManualConfidence(c, piece.progress)`, unfilled otherwise. This is
+  the same boolean `ratedCount`/`firstUnratedId` already check, just
+  applied per-chunk instead of summed — deliberately a real per-chunk
+  grid, not a percentage-width bar, so "which specific chunks are left" is
+  legible from the bar itself, not just the count next to it.
+- A **"Progress" modal** — a second, independent `.modal-overlay`/`.modal`
+  (not layered over any grid), opened by a small grid-icon button next to
+  the bar. One square per chunk, background `DIFFICULTY_META[c.
+  difficultyLabel].color` (the same per-difficulty color used by
+  `Manuscript.jsx`'s strip and the Wizard/Settings difficulty grid — see
+  [`CLAUDE.md`](../CLAUDE.md)'s Pass 52 entry for why that's a color, not
+  the neutral-gray Pass 86 icon), full opacity plus a black checkmark once
+  rated, the same color at reduced opacity with no checkmark when not.
+  Deliberately no in-cell measure-range numbers at any chunk count — the
+  range is available on hover (`title={formatRange(...)}`) instead, one
+  rule regardless of piece size rather than a size-dependent threshold.
+  Clicking a square calls the same `changeSelected` used by Previous/Next/
+  Related-chunk links, so the assessment-timer leaving-guard (next
+  paragraph) fires before the jump, and closes the modal only if the guard
+  actually allows the jump to happen.
+
+The assessment timer (Pass 76), its cross-tab risk reporting
+(`onAssessmentTimerRiskChange`) and the leaving-guard it feeds
+(`onConfirmLeaveAssessmentTimer`, owned by `App.jsx`) are unchanged in
+mechanism — they just live in `ReassessSequencePanel` now instead of
+`PieceMapTab`'s `sequentialMode` branch. See
+[Decisions.md](Decisions.md#revival) for the full design writeup on this
+pass, including a pre-existing gap (an unwired "Clear, resume review"
+button) that was found and deliberately reproduced rather than fixed.
 
 #### Surfacing revival on Master Agenda (highest-priority items)
 
@@ -2724,8 +3039,10 @@ ranges.
 Which plan it reads depends on whether one exists yet:
 
 - **Plan generated** → the **stored** `piece.revival.plan.days`, so Master
-  Agenda agrees with what `RevivalTab` displays rather than silently
-  diverging if progress has moved on since the plan was generated.
+  Agenda agrees with what Today's Practice's revival branch displays
+  (`RevivalTab.jsx` through Pass 87; folded into `TodayTab.jsx` by Pass 88)
+  rather than silently diverging if progress has moved on since the plan
+  was generated.
 - **Mid-reassessment** (no plan yet) → a live `computeRevivalPlan(piece,
   chunkSet, currentDay)` call. This works because that function is a pure
   function of `progress` + `chunkSet` and never reads `revival.plan`, so
@@ -2738,13 +3055,12 @@ work, and revival items are explicitly not scheduled to a day. Showing a
 time would imply a commitment the plan does not make.
 
 Reassessment itself does not have a dedicated compute function — it *is*
-`progress[id].manualConfidence`, set through `PieceMapTab`'s existing
-confidence-override UI (extended with `CONFIDENCE_PRESETS`, a 5-button fast
-path over the same 0-100 field, plus a `sequentialMode` Prev/Next/Finish
-flow so the same grid-and-modal component can be stepped through
-chunk-by-chunk instead of reopened per cell). See
-[Decisions.md](Decisions.md#revival) for why this reuses `manualConfidence`
-rather than introducing a separate scale.
+`progress[id].manualConfidence`, set through `ReassessSequencePanel`'s
+"Quick rate" row (`CONFIDENCE_PRESETS`, a 5-button fast path over the same
+0-100 field) while stepping chunk-by-chunk via Previous/Next/Finish, scoped
+to base practice chunks only as of the same-session follow-up described
+above. See [Decisions.md](Decisions.md#revival) for why this reuses
+`manualConfidence` rather than introducing a separate scale.
 
 ### Revival auto-triggers (Pass 7, gated on plan completion since Pass 83)
 
@@ -2819,3 +3135,344 @@ account.
 The banner itself is suppressed whenever `piece.revival.active` is
 already true — `OverviewTab` already shows "Continue revival" in that
 state, so there's nothing to additionally suggest.
+
+## Focus spots (v1)
+
+**Experimental, Pass 91.** See
+[Data-Model.md](Data-Model.md#focus-spots-v1) for the `TroubleSpot` shape
+and the two entry points that create one. This section is the mechanism:
+how an unresolved spot changes what `computeTimeline` does.
+
+### `focusSpotGate` — the one predicate everything else reads
+
+`focusSpotGate(entry)` (`lib/scheduling.js`) is a pure read off a chunk's
+own `progress` entry:
+
+```js
+{
+  unresolved,          // TroubleSpot[] — every spot on this chunk that
+                        // isn't resolved yet
+  allResolved,         // boolean — true only when troubleSpots.length > 0
+                        // AND every one of them is resolved. The length
+                        // check is load-bearing: [].every(...) is
+                        // vacuously true in JS, so without it, an ordinary
+                        // chunk that has never had a trouble spot at all
+                        // would read as "just resolved" too.
+  gatesIntroduction,    // boolean — true when `unresolved` contains at
+                        // least one spot with fromSetup: true.
+}
+```
+
+Every other piece of this mechanism — `computeTimeline`'s introduction
+skip, the Daily Practice "paused" display, the Focus Spots panel's own
+contents — calls this one function rather than re-deriving the same check.
+
+### Why `fromSetup`, not "was this chunk already introduced"
+
+The pass's own requirement is two-sided: a spot flagged **before**
+introduction must hold the chunk back entirely (no day, no
+`introducedDay`); a spot discovered **after** introduction must never
+retroactively pull an already-scheduled chunk back off the plan. The
+obvious-looking implementation — check whether the chunk currently has an
+`introducedDay` before deciding whether to gate it — doesn't work:
+`chunkSet`/`timeline` are pure derivations, recomputed from scratch on
+every render (CLAUDE.md), so `computeTimeline` has no memory of what it
+computed last time to compare against. A chunk introduced on day 5 that
+picks up a spot on day 9 would, under a purely-current-state rule, simply
+vanish from `introducedDay` on the very next recompute — exactly the
+retroactive removal the pass says must not happen.
+
+The two entry points resolve this for free, once the distinction is
+captured at creation time instead of re-derived later: a spot can only
+ever be created via the Wizard (before the piece has any practice history
+at all) or via a chunk's own Daily Practice card (which, by construction,
+only exists once that chunk is already on the schedule). `fromSetup` just
+records which one happened. `computeTimeline` never has to ask "was this
+chunk already introduced" — it only ever asks "was this specific spot
+flagged at setup," which is a fact fixed forever at creation, not
+something that has to be reconstructed from a stateless recompute.
+
+### The introduction-skip itself
+
+Inside `computeTimeline`, before any placement math runs:
+
+```js
+troubleSpotGatedIds = { chunk ids where focusSpotGate(...).gatesIntroduction }
+troubleSpotResolvedIds = { chunk ids where focusSpotGate(...).allResolved }
+introducibleChunks = practiceChunks.filter(not in troubleSpotGatedIds)
+```
+
+`introducibleChunks` — not raw `practiceChunks` — is what the front-half
+effort-spreading boundary math (rule 1,
+[#timeline--scheduler](#timeline--scheduler)) is computed against, and
+what's fed into `sortPracticeChunksForIntroduction`. A gated chunk's
+effort never eats into the budget every other chunk is being spread
+across, and it simply never appears in `introOrder`, so it never receives
+a day or an `introducedDay` — "no day, no introducedDay" falls out of the
+filter, not a separate skip branch inside the placement loop itself.
+
+`troubleSpotResolvedIds` is passed straight into
+`sortPracticeChunksForIntroduction` as the tier-0 set Pass 89 built a slot
+for but left permanently empty (["Introduction order is
+difficulty-first"](#timeline--scheduler)) — a chunk whose spots have all
+just resolved sorts ahead of even the hard-chunk tier on its very next
+recompute. Nothing about the sort itself changed; only what populates
+that one input.
+
+### Transitions and combos: gated by `troubleSpotGatedIds`, not by a missing `introducedDay`
+
+A transition or combo touching a gated chunk must not be placed either —
+otherwise a "Review" tile would show up on the schedule connecting to
+content that isn't anywhere else in the plan. The natural-looking guard
+("skip if either linked chunk lacks an `introducedDay`") is wrong, and
+was caught by the existing test suite while building this: a rescheduled
+remainder's `linkedIds` can already point at a chunk that's been fully
+completed and filtered out of `practiceChunks` entirely, for a reason
+that has nothing to do with trouble spots — and the `|| sectionsEndDay`
+fallback on the very next line exists specifically so that "stuck"
+transition still gets placed instead of stranded (three pre-existing
+tests in `test/scheduling.test.mjs` cover exactly this and failed
+immediately under the missing-`introducedDay` version of this guard). The
+fix checks `troubleSpotGatedIds.has(...)` directly instead — targeted at
+the one real cause, leaving the pre-existing "stuck connector" fallback
+completely untouched. See that test file's own
+`[Pass 91, experimental v1]` describe block, including a test that pins
+the stuck-connector fallback directly, not just via the three tests that
+happened to already cover it.
+
+The whole-piece consolidation day (rule 6) is filtered the same way —
+`introducibleChunks`, not `practiceChunks` — since a chunk that's never
+been introduced has nothing to "play through" yet.
+
+### Resolution: minutes logged, then one gate
+
+A focus spot's own practice card (`FocusSpotCard.jsx`, rendered by
+`FocusSpotsPanel` in `TodayTab.jsx` — one card per unresolved spot, not
+one per chunk, so a chunk with two open spots shows two cards) is
+minutes-based, not reps/BPM-based: a timer, and a single prompt, "Can you
+play this cleanly at a low tempo yet?" "Not yet, log time" (originally
+labeled "Log time" — renamed same-session, before this ever shipped, per
+direct request) calls `handleLogFocusSpotTime` (`App.jsx`), which just
+appends a session to that spot's own `sessions` array — never touches the
+parent chunk's `sessions`, `stage`, or anything else `computeConfidence`/
+the ladder reads. "Yes, log BPM" (originally "Achieved / Doable") prompts
+for the clean BPM and, on confirm (`handleResolveFocusSpot`), sets
+`resolved`/`resolvedBpm`/`resolvedAt` on that one spot.
+
+**Same-session follow-up: neither action is reachable until a minimum
+practice time is met.** `piece.troubleSpotDefaultMinutes` (Settings/Wizard,
+default 5 for a piece created after this follow-up, `min={1}` enforced in
+both editors so it can never be 0) sets a floor both buttons check —
+`currentSeconds() >= requiredMinutes * 60` — checked against whichever is
+larger, the running timer's live elapsed time or a manually-typed "minutes
+practiced" value (both already fed through the same `currentSeconds()`
+this component already used). Below the floor, both buttons are disabled
+with an explanatory tooltip and a "Practice for at least N minutes before
+logging" line. The timer display itself counts *down* toward the target
+while below it, then flips to counting *up* past it once met, so it's
+always showing something meaningful — time still needed, or total time
+actually spent. Raised directly by the user, who pointed out that without
+this, "Yes, log BPM" could resolve a spot — and permanently seed the
+parent chunk's `practiceBPM` from it (see below) — off zero seconds of
+actual drilling; closing that gap was the entire point of the gate.
+
+**Also same-session follow-up: the checkbox on the card's own head row
+(shows once `loggedToday` — any session logged today — is true) is a real
+undo control, not decoration.** Clicking it (`handleUnlogFocusSpotTime`,
+`App.jsx`) clears *every* session logged today for that spot, not just the
+most recent one — found and fixed after the first cut (removing only the
+latest entry) left the checkbox looking stuck checked whenever a second
+time-log had already happened the same day, since `loggedToday` only cares
+whether *any* session exists for today, not which one. One click now
+always fully unchecks it, regardless of how many times time was logged
+that day.
+
+If that was the chunk's last unresolved spot, the same handler additionally
+seeds the chunk's own `progress[id].practiceBPM` — the "hands the spot to
+the existing tempo-ladder machinery" the pass calls for — as the **minimum**
+`resolvedBpm` across every spot on the chunk (conservative: the chunk as a
+whole can only go as fast as its slowest cleared spot), and only when
+`practiceBPM` isn't already set. This is a direct seed, the same rule
+`handleLogSession` already uses for a chunk's first-ever real session
+(`practiceBPM` is seeded from whatever the learner actually logs the first
+time they touch a chunk) — not a `computeLadderAdvance` call, since no
+rep/pass-fail outcome is being judged here, only a tempo. `stage` stays
+`null`; the chunk's very next *real* logged session is what actually puts
+it on the ladder for the first time, same as any other never-logged
+chunk, just starting from a non-null `practiceBPM` instead of guessing.
+
+### Display: gated vs. paused
+
+`FocusSpotsPanel` renders a card for every unresolved spot on every
+practice chunk, keyed off `piece.progress` directly — not off
+`timeline.days[]` — which is what makes a gated chunk's drill reachable
+even though the chunk itself is nowhere in any day's checklist. Each
+card's `gated` prop (`timeline.introducedDay[chunk.id] == null`) is
+display-only: it only changes the bottom note's wording ("will be
+introduced" vs. "will resume") — the actual scheduling consequence
+already happened inside `computeTimeline` by the time this renders.
+
+On the chunk's own Daily Practice card (`ChecklistItem.jsx`), an
+unresolved spot — regardless of `fromSetup` — suppresses the card's
+regular practice UI (requirement line, timer, log inputs, the log button,
+**and the leading checkmark "mark done" button** — see the same-session
+follow-up below; the first four are simple conditional rendering, but the
+checkmark button sits outside all of it and needed `isPaused` folded
+directly into `canLog` to actually block it) in favor of a `.paused-note`,
+the same suppression-without-removal treatment `needsRelearning` already
+gets on an in-progress chunk's review, plus the card itself carrying a
+`.paused` class (dashed border, tinted background). "+ Add a focus spot"
+itself only shows on a chunk that ISN'T already paused, has
+`chunk.kind === "section"` (never on a transition/combo card), and only
+while `piece.troubleSpotsEnabled`.
+
+### Same-session follow-up: position-based reassociation
+
+**A spot's chunk association is no longer purely an id it happens to be
+nested under.** `position` is now required and validated —
+`parseMeasurePosition(text, totalMeasures)` (`lib/utils.js`) parses "24",
+"24a" (a trailing letter is accepted but not itself meaningful — only the
+numeric measure(s) matter), or "24-25" into `{start, end}`, rejecting
+anything that doesn't parse or falls outside the piece's own measures. The
+parsed numbers are stored on the spot as `startMeasure`/`endMeasure` at
+creation time (both entry points — Wizard's `FocusSpotsStep`,
+`ChecklistItem`'s inline form — call the same function, so they can't
+drift into accepting different formats) and re-derived on edit (the
+Wizard's own edit path is the only one that currently supports editing an
+existing spot).
+
+`reassociateTroubleSpots(progress, practiceChunks)` (`lib/chunking.js`)
+uses that measure as ground truth: for every spot nested anywhere in
+`progress`, it finds whichever CURRENT chunk's `[start, end]` range
+actually contains `spot.startMeasure`, and moves the spot there if that's
+not where it already is — falling back to leaving it under its current id
+untouched if no chunk contains it at all (the piece itself got shorter) or
+the spot has no `startMeasure` to check (data from before this validation
+existed, unrecoverable from its own position text either). Returns the
+same `progress` reference when nothing needs to move, so a caller can tell
+cheaply whether anything changed.
+
+This is a deliberately narrower, more precise tool than
+`migrateOrphanedProgress` (`lib/chunking.js`, existing): that function
+reattaches a *whole* progress entry (sessions, `doneDays`, `practiceBPM`,
+and any nested `troubleSpots` along with it) by whichever new chunk has
+the greatest *measure-range overlap* with the old one, and only even
+considers an id that's disappeared from the new chunk set outright. It
+can't catch — and was never meant to catch — an id that's still present
+but now covers different measures: chunk ids are `c${start}`, so
+`customChunkSize` 8 → 4 produces a "c9" under both chunkings, at measures
+9–16 then 9–12. An existence check alone reads that as continuity;
+`reassociateTroubleSpots` checks each spot's own measure instead, so a
+spot at measure 14 correctly moves off a "c9" that still exists but no
+longer contains it. `reassociateTroubleSpots` only ever touches the
+`troubleSpots` array itself, never the rest of an entry's fields — at the
+two call sites that matter (below), `migrateOrphanedProgress` (or nothing,
+in the Wizard, where there's no "old piece" to diff against yet) already
+ran first and settled where the bulk of an entry belongs; this is a
+second, spot-precise correction on top, not a replacement.
+
+Three call sites:
+
+1. **`Wizard.jsx`**, reactively — a `useEffect` keyed on
+   `chunkSet.practiceChunks` re-associates `draft.progress` on every
+   change, so the Focus Spots step is always showing what's actually
+   there even if the learner backtracks and changes `totalMeasures` or
+   chunk size after already adding spots — not just fixed invisibly once
+   the wizard finishes.
+2. **`App.jsx`'s `handleSavePiece`** (a Settings edit) — chained right
+   after `migrateOrphanedProgress`, against the *edited* piece's real,
+   post-save chunk set.
+3. **`validateAndMigratePiece`** (`lib/storage.js`), unconditionally on
+   every load — a defensive third pass that self-heals a piece already
+   left mismatched from before this fix existed, or a hand-edited import,
+   with no user action required. Guarded on
+   `Array.isArray(migrated.measureDifficulty)` specifically: unlike every
+   other field this migration backfills, `measureDifficulty` itself was
+   never defaulted here (nothing needed it before), and calling
+   `generatePracticeChunks` without it throws — caught by the existing
+   test suite (four unrelated, pre-existing tests failed) before this was
+   ever treated as working.
+
+A spot saved before this validation existed gets a best-effort recovery of
+`startMeasure`/`endMeasure` on migration — `backfillSpotMeasures`
+(`lib/storage.js`) re-parses the spot's own already-stored `position` text
+the same way a new spot's position is validated at creation. A spot whose
+old text was genuine free text (or empty) simply keeps no `startMeasure` —
+nothing to recover, not an error, and `reassociateTroubleSpots` already
+treats that case as "leave it exactly where it is."
+
+### Piece Map: focus spots linked to Today's Practice (Pass 96)
+
+The chunk-detail modal's "Related chunks" field moved up to sit directly
+under the card details (`detailStats`) — it used to share that spot with
+a "Run-through flag" field, which moved down to sit directly above the
+Current BPM/Target BPM row instead, keeping the button itself (its own
+text already says what it does at every state — `FLAG_LABEL`) but
+dropping the redundant "Run-through flag" span above it. Related chunks
+and a new Focus spots field now sit side by side in a `.related-focus-row`
+(App.jsx CSS) — each a normal `.field`, `flex: 1 1 180px`, wrapping to a
+stacked layout only once the modal is too narrow to fit both floors side
+by side. Either field is simply omitted (not rendered as an empty column)
+when it has nothing to show, so the other one fills the row alone —
+`(relatedChunks.length > 0 || focusSpots.length > 0)` gates the row
+itself, and each `.field` inside it is gated independently. `focusSpots`
+is `selectedEntry.troubleSpots || []`, gated on `selectedChunk.kind ===
+"section"` first — a transition or combo can never carry spots (Pass 91),
+so this is a `kind` check, not just an emptiness check, even though the
+two happen to coincide today.
+
+Each spot row shows its name, its position tag (`m. {spot.position}`,
+mono — the same format `FocusSpotCard`/`ChecklistItem`'s own inline
+add-spot form use), and Open/Resolved. It's a link to that spot's task on
+Daily Practice, using the same App.jsx state (`scrollToOnArrival`) and
+effect `focusTargetDateOnSettings` already established the pattern for:
+set a flag, navigate, then scroll-and-briefly-highlight (`.arrival-
+highlight`, a `box-shadow` pulse — not `background`/`border-color`, both
+of which are already meaningful state on these cards) once the target tab
+has actually re-rendered, since Today's Practice mounts fresh on every
+navigation into it and the target DOM node doesn't exist until then.
+`onSelectDay` (`handleSelectDay`, App.jsx) gained an optional second
+argument, `scrollTargetId`, defaulted to `null` and always set (not only
+when truthy) so every *other* caller of the same prop (Timeline, Master
+Agenda, Overview, Week view) reliably clears a stale target left over from
+an earlier focus-spot click instead of only doing so when it happens to
+pass one of its own.
+
+- **Open spot:** always `onSelectDay(null, "focus-spot-{spot.id}")` — real
+  today, no other day is meaningful for `FocusSpotsPanel` (it isn't scoped
+  to a single day). `FocusSpotCard` carries that id on its own root
+  element.
+- **Resolved spot:** `findNextScheduledDay(piece, timeline, chunkId,
+  realCurrentDay)` (`lib/history.js`) — a thin wrapper around
+  `findNextOccurrenceDay`, kept as its own function specifically so this
+  distinction can carry a regression test: that function searches strictly
+  *after* its `afterDay` argument, so returning "today, if the chunk is
+  scheduled today and not yet logged" needs `realCurrentDay - 1`, while
+  "today's occurrence is already logged, so skip to the next one" needs
+  `realCurrentDay` itself (checked via `doneDays.includes(realCurrentDay)`).
+  A `null` result (searched the live, bounded `timeline.days`, found
+  nothing) renders the spot as plain text plus the same muted line
+  `ChecklistItem`'s own historical card already uses verbatim ("Not
+  currently scheduled again within this plan.") — deliberately no
+  live-due-review fallback in v1. Otherwise, `onSelectDay(day ===
+  realCurrentDay ? null : day, "checklist-item-{chunkId}")` —
+  `ChecklistItem`'s root element carries that id (a known, accepted
+  imperfection: "All Tasks" view renders one `DayChecklist` per plan day
+  and can legitimately show the same chunk more than once, which would
+  repeat the id there; the link always lands on the default Day view,
+  where it's unique).
+- **Mid-revival** (`isInRevival(piece)`): every spot renders as plain text,
+  no link — Today's Practice shows neither a day view nor the Focus spots
+  panel while a revival is active (`TodayTab.jsx`'s own `isInRevival`
+  short-circuit), so there is nowhere for either target to land.
+
+Scope stays display plus navigation: `PieceMapTab` gained exactly three
+new props (`timeline`, `realCurrentDay`, `onSelectDay`) and no handler for
+adding, resolving, or deleting a spot — that still only happens from a
+chunk's own Daily Practice card or the Wizard's Focus spots step, matching
+CLAUDE.md's existing "Piece Map is display-only for this feature" scope.
+Leaving the Piece Map tab entirely closes the chunk modal on its own
+(`selected` is this component's own local state, and the whole component
+unmounts on tab switch — no explicit close call needed, same as Today's
+Practice's `viewMode` resetting on every fresh mount elsewhere in this
+same pass).

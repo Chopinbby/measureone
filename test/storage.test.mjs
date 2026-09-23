@@ -1017,3 +1017,145 @@ describe("mergeImportedPiece — Pass 32a follow-up: orderChoice wiring", () => 
     assert.equal(merged.sortOrder, 5);
   });
 });
+
+describe("[Pass 91, experimental v1] focus spots — backfill and import merge", () => {
+  test("validateAndMigratePiece backfills troubleSpots to null (not []) on a pre-existing progress entry, same as every other ladder-state field", () => {
+    const migrated = validateAndMigratePiece({ ...fresh, id: "p_ts_backfill", progress: { c1: { doneDays: [1], sessions: [] } } });
+    assert.equal(migrated.progress.c1.troubleSpots, null, "backfilling to a materialized [] risks the exact false-import-conflict bug tempoRatchetK/holdingReviewCount already document — see storage.js");
+  });
+
+  test("validateAndMigratePiece backfills the two new piece-level fields for an old piece that predates this pass", () => {
+    const migrated = validateAndMigratePiece({ ...fresh, id: "p_ts_piece_backfill" });
+    assert.equal(migrated.troubleSpotsEnabled, false);
+    assert.equal(migrated.troubleSpotDefaultMinutes, 5);
+  });
+
+  function spot(overrides) {
+    return {
+      id: "fs1",
+      name: "left-hand leap",
+      position: "18a",
+      length: null,
+      fromSetup: true,
+      resolved: false,
+      resolvedBpm: null,
+      resolvedAt: null,
+      sessions: [],
+      ...overrides,
+    };
+  }
+
+  test("mergeImportedPiece merges troubleSpots additively by id — a spot only one side has survives the merge", () => {
+    const existingPiece = { ...fresh, id: "p_ts_merge", progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot()] } } };
+    const imported = { ...fresh, id: "p_ts_merge", progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot({ id: "fs2", name: "RH run", position: "24" })] } } };
+    const merged = mergeImportedPiece(existingPiece, imported);
+    const ids = merged.progress.c1.troubleSpots.map((s) => s.id).sort();
+    assert.deepEqual(ids, ["fs1", "fs2"], "a spot present on only one side must not be discarded by the merge");
+  });
+
+  test("mergeImportedPiece unions a shared spot's sessions from both sides — a trouble-spot session is real practice history and must never silently disappear on re-import, same rule this file already enforces for a chunk's own sessions", () => {
+    const sessionA = { loggedAt: 1000, loggedDate: "2026-07-01", durationSeconds: 300 };
+    const sessionB = { loggedAt: 2000, loggedDate: "2026-07-03", durationSeconds: 180 };
+    const existingPiece = { ...fresh, id: "p_ts_sessions", progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot({ sessions: [sessionA] })] } } };
+    const imported = { ...fresh, id: "p_ts_sessions", progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot({ sessions: [sessionB] })] } } };
+    const merged = mergeImportedPiece(existingPiece, imported);
+    assert.equal(merged.progress.c1.troubleSpots.length, 1, "same spot id on both sides must merge into one spot, not duplicate");
+    assert.equal(merged.progress.c1.troubleSpots[0].sessions.length, 2, "sessions logged on either side before the re-import must both survive");
+  });
+
+  test("mergeImportedPiece keeps an unresolved existing spot resolved-side-wins when the import already has it resolved (general {...e, ...i} field convention, same as every other per-chunk scalar field)", () => {
+    const existingPiece = { ...fresh, id: "p_ts_resolve", progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot({ resolved: false })] } } };
+    const imported = { ...fresh, id: "p_ts_resolve", progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot({ resolved: true, resolvedBpm: 92 })] } } };
+    const merged = mergeImportedPiece(existingPiece, imported);
+    assert.equal(merged.progress.c1.troubleSpots[0].resolved, true);
+    assert.equal(merged.progress.c1.troubleSpots[0].resolvedBpm, 92);
+  });
+});
+
+describe("[Pass 91 follow-up] focus spots — position-based measure backfill and load-time self-heal", () => {
+  function spot(overrides) {
+    return {
+      id: "fs1",
+      name: "left-hand leap",
+      position: "18a",
+      length: null,
+      fromSetup: true,
+      resolved: false,
+      resolvedBpm: null,
+      resolvedAt: null,
+      sessions: [],
+      ...overrides,
+    };
+  }
+
+  test("a spot saved before startMeasure existed gets it recovered from its own old position text, if that text is actually a real measure reference", () => {
+    const migrated = validateAndMigratePiece({
+      ...fresh,
+      id: "p_ts_recover",
+      progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot()] } }, // position: "18a"
+    });
+    assert.equal(migrated.progress.c1.troubleSpots[0].startMeasure, 18);
+    assert.equal(migrated.progress.c1.troubleSpots[0].endMeasure, 18);
+  });
+
+  test("a spot whose old position text was never a real measure reference (free text, or empty) is left without startMeasure — nothing to recover, not an error", () => {
+    const migrated = validateAndMigratePiece({
+      ...fresh,
+      id: "p_ts_no_recover",
+      progress: {
+        c1: {
+          doneDays: [],
+          sessions: [],
+          troubleSpots: [spot({ id: "fs1", position: "the tricky bit" }), spot({ id: "fs2", position: "" })],
+        },
+      },
+    });
+    assert.equal(migrated.progress.c1.troubleSpots[0].startMeasure, undefined);
+    assert.equal(migrated.progress.c1.troubleSpots[1].startMeasure, undefined);
+  });
+
+  test("a spot that already has a real startMeasure is left alone, not re-derived from position text again", () => {
+    const migrated = validateAndMigratePiece({
+      ...fresh,
+      id: "p_ts_already_has_it",
+      // position text deliberately disagrees with startMeasure, so a
+      // (wrong) re-derivation would be obvious if it happened.
+      progress: { c1: { doneDays: [], sessions: [], troubleSpots: [spot({ position: "5", startMeasure: 18, endMeasure: 18 })] } },
+    });
+    assert.equal(migrated.progress.c1.troubleSpots[0].startMeasure, 18, "the already-trustworthy value wins, not a fresh parse of position");
+  });
+
+  // Exercises validateAndMigratePiece's own reassociateTroubleSpots call
+  // (lib/storage.js), not reassociateTroubleSpots directly (already covered
+  // in test/chunking.test.mjs) — this is what actually runs on every real
+  // app load, so it needs its own coverage: a piece whose stored progress
+  // is already mismatched against its OWN current chunking (simulating
+  // either genuinely old, pre-fix data, or a hand-edited import) self-heals
+  // the moment it's loaded, with no user action required.
+  function reassociablePiece(progressOverrides) {
+    return {
+      ...fresh,
+      id: "p_ts_selfheal",
+      totalMeasures: 12,
+      measureDifficulty: Array(12).fill(1),
+      chunkMode: "custom",
+      customChunkSize: 4, // chunks: c1 (1-4), c5 (5-8), c9 (9-12)
+      progress: progressOverrides,
+    };
+  }
+
+  test("a spot nested under a chunk id that no longer exists in this piece's own current chunking is moved to the right one on load", () => {
+    const migrated = validateAndMigratePiece(
+      reassociablePiece({ c6: { doneDays: [], sessions: [], troubleSpots: [spot({ position: "6", startMeasure: 6, endMeasure: 6 })] } })
+    );
+    assert.deepEqual((migrated.progress.c6 && migrated.progress.c6.troubleSpots) || [], []);
+    assert.deepEqual(migrated.progress.c5.troubleSpots.map((s) => s.id), ["fs1"], "measure 6 belongs under c5 (5-8) in this piece's real chunking");
+  });
+
+  test("a piece with no mismatched spots at all migrates without incident (the guard that skips reassociation when measureDifficulty is missing doesn't also skip it when measureDifficulty IS present)", () => {
+    const migrated = validateAndMigratePiece(
+      reassociablePiece({ c1: { doneDays: [], sessions: [], troubleSpots: [spot({ position: "2", startMeasure: 2, endMeasure: 2 })] } })
+    );
+    assert.deepEqual(migrated.progress.c1.troubleSpots.map((s) => s.id), ["fs1"]);
+  });
+});

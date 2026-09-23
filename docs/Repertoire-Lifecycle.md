@@ -150,8 +150,11 @@ Automatic entry triggers (rather than manual-only, as it was before Pass
 below.
 
 **Since Pass 37**, the reassessment card (the embedded `PieceMapTab` modal,
-`sequentialMode`) looks different from ordinary Piece Map's chunk-detail
-card, not just narrower: stats (difficulty/confidence/sessions/stage) move
+`sequentialMode`, at the time — relocated wholesale into its own dedicated
+component, `ReassessSequencePanel`, by Pass 87; see
+[Architecture.md](Architecture.md) and
+[Decisions.md](Decisions.md#revival)) looks different from ordinary Piece
+Map's chunk-detail card, not just narrower: stats (difficulty/confidence/sessions/stage) move
 into a collapsed "Chunk Info" section at the bottom instead of sitting at
 the top; Target BPM shows as a read-only "N BPM — set at piece setup" line
 with a "Change for this chunk" button, rather than an always-open input,
@@ -335,9 +338,11 @@ ambiguity concrete:
   slower-growing — a technically-passing but shaky review is exactly when
   the next check-in should come sooner, not later.
 - Stage lengths, graduation pass-counts, tempo floors, **and the
-  practiceBPM ratchet step sizes below** are **piece-level tunable data,
-  not hardcoded constants** (a future per-chunk override is explicitly
-  flagged as a want, not built yet).
+  practiceBPM ratchet step sizes** are **piece-level tunable data, not
+  hardcoded constants** (a future per-chunk override is explicitly flagged
+  as a want, not built yet). **Since Pass 94, the step sizes are tunable
+  data only, not editable from this editor** — see the "Editing UI built"
+  bullet below.
 - **Editing UI built (Pass 17).** `LadderConfigEditor`
   (`src/components/fields/LadderConfigEditor.jsx`), wired into
   `SettingsTab`'s edit view only (not the Wizard — no setup-time use case
@@ -353,7 +358,18 @@ ambiguity concrete:
   gets a "Clear (no floor)" button next to it, the same pattern
   `PieceMapTab`'s manual-confidence override already uses to get back to
   `null`, since a plain `NumberInput` can't commit a cleared field to
-  `null` on its own.
+  `null` on its own. **Since Pass 94, the "Tempo ratchet" sub-section (the
+  three `ladderConfig.bpmSteps` fields — full pass / partial pass / fail
+  fallback) is no longer in this editor**, and its intro sentence no longer
+  promises control over how much practice tempo moves after each session:
+  that movement is now the gap-proportional `tempoRatchet` (Pass 59, never
+  editable here), and `bpmSteps` survives only as the fallback for a chunk
+  with no target BPM. `ladderConfig.bpmSteps` itself is untouched in the
+  config, storage, the Wizard defaults and `lib/ladder.js` — a piece that
+  had customized those values keeps them, they're just no longer editable.
+  The stage lengths, graduation counts and the Stabilizing/Settling "Tempo
+  floor (fraction of target)" fields are unchanged. See
+  [Decisions.md](Decisions.md#ux).
 
 ### Introduction-window review scheduling: Tier 1 / Tier 2
 
@@ -422,7 +438,10 @@ not obvious from the design above:**
   ladder state and starts taking the Tier 2 path like any other chunk.
 - **"Rolls to the next day" is enforced as strictly forward-only, not a
   bidirectional nudge.** The review-load-smoothing mechanism Tier 2 reuses
-  (Algorithms.md#timeline--scheduler, rule 5) was inherited from the
+  (Algorithms.md#timeline--scheduler, rule 5 — **since Pass 90, a broader
+  mechanism that also covers introduction and transitions/combos, not a
+  Tier-2-only pass anymore**, though the forward-only rule below still
+  applies to a review exactly as it always has) was inherited from the
   pre-ladder fixed-offset system, which nudged a review ±1 or ±2 days in
   *either* direction — harmless there, since it had no specific "due date"
   to respect. Discovered via manual browser verification during the Pass 5
@@ -744,7 +763,12 @@ doesn't distinguish which):
   `flag`. `computeRevivalPlan`'s flagged-first sort and `RevivalTab`'s
   "Flagged chunks" panel (below) still read the same field, unchanged —
   they just won't have anything to show unless a chunk was flagged outside
-  of revival. See [Decisions.md](Decisions.md#revival).
+  of revival. See [Decisions.md](Decisions.md#revival). **`RevivalTab`
+  itself is gone as of Pass 88** (revival folded into Daily Practice,
+  no standalone tab) — the "Flagged chunks" panel this paragraph describes
+  now renders from `TodayTab.jsx`'s revival branch instead, reading the
+  exact same `flag` field the same way; nothing about this mechanism
+  changed, only which file renders it.
 - **Confidence cap, not a `stage`/ladder read.** Rough/lost flags must
   immediately affect displayed confidence everywhere it shows (Overview,
   Progress — including its confidence-by-difficulty bars — Piece Map, and
@@ -983,8 +1007,10 @@ neighbors, so this is partial territory in both, not just the anchor;
 `findComboUnderlyingChunks`, `src/lib/revival.js`, computes this fresh via
 `rangesOverlap` rather than trusting `combo.linkedIds`, which only stores
 the anchor). If any of that underlying content produces a real fail during
-revival, the combo escalates into its own explicit revival task, shown in
-`RevivalTab.jsx` as a "Needs another look" panel. If everything relearns
+revival, the combo escalates into its own explicit revival task, shown as
+a "Needs another look" panel (`RevivalTab.jsx` originally; `TodayTab.jsx`'s
+revival branch as of Pass 88, same panel, no mechanism change — see
+[Decisions.md](Decisions.md#revival)). If everything relearns
 cleanly, no combo-specific task is ever generated. **Resolved: escalation
 fires on a single real fail**, not the ladder's two-consecutive-fails
 threshold — confirmed with the user: revival is already "something's
@@ -1199,7 +1225,7 @@ actually left Stabilizing.
   - **Narrowed by a later follow-up**: "resolve it whenever" above is no
     longer unconditional. Leaving Interleaved mode itself — switching to
     Day view/Week/View all, a different app tab, switching to a different
-    piece, opening the "Edit piece" settings, or finishing the "Add new
+    piece, opening "Edit piece settings", or finishing the "Add new
     piece" wizard (the last two added on a subsequent review pass, after
     being missed in the original build — same warning, same guard function,
     just two more call sites) — while a provisional from the current

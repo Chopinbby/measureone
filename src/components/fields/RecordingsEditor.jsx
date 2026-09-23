@@ -39,6 +39,8 @@ export function RecordingsEditor({ draft, set }) {
             </button>
           </div>
         ))}
+        {/* Sized to its content by the shared `.pairs-list > .ghost-btn` rule
+            (App.jsx CSS, Pass 94), not a per-button patch here. */}
         <button className="ghost-btn" onClick={addRecording}>
           <Plus size={14} /> Add recording
         </button>

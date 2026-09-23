@@ -12,7 +12,6 @@ import {
   ChevronDown,
   GripVertical,
   Pencil,
-  RefreshCw,
   Upload,
   Download,
   X,
@@ -20,12 +19,13 @@ import {
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
-import { generateAllChunks, migrateOrphanedProgress } from "./lib/chunking";
+import { generateAllChunks, migrateOrphanedProgress, reassociateTroubleSpots } from "./lib/chunking";
 import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
+import { mergeEditedPiece } from "./lib/pieceEdit";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
   loadPiecesFromStorage,
@@ -57,7 +57,6 @@ import { TimelineTab } from "./components/tabs/TimelineTab";
 import { PieceMapTab } from "./components/tabs/PieceMapTab";
 import { TodayTab } from "./components/tabs/TodayTab";
 import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
-import { RevivalTab } from "./components/tabs/RevivalTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
 import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
@@ -75,7 +74,6 @@ const NAV_BASE = [
   { key: "progress", label: "Progress", icon: LineChart },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
-const REVIVAL_NAV_ITEM = { key: "revival", label: "Revival", icon: RefreshCw };
 
 // Fields that regenerate practice-chunk IDENTITY (ids/boundaries) —
 // generatePracticeChunks (lib/chunking.js) builds `id: c${start}` from a
@@ -143,8 +141,8 @@ export default function App() {
   const [interleaveRisk, setInterleaveRisk] = useState(null);
   // Same idea as interleaveRisk immediately above, for a second, unrelated
   // kind of unsaved work: Revival's per-chunk assessment timer
-  // (PieceMapTab's sequentialMode instance, rendered inside RevivalTab).
-  // Reported by PieceMapTab itself (it owns the timer state) via
+  // (ReassessSequencePanel, rendered inside Today's Practice as of Pass 88).
+  // Reported by that component itself (it owns the timer state) via
   // onAssessmentTimerRiskChange, so App.jsx can gate navigation that
   // component has no say over — see guardLeavingActiveWork below, which
   // checks both risks through one call instead of every gate point having
@@ -174,6 +172,35 @@ export default function App() {
   // clear, a declined guard here would leave this flag pending to
   // incorrectly fire on some later, unrelated arrival at Settings.
   const [focusTargetDateOnSettings, setFocusTargetDateOnSettings] = useState(false);
+  // Pass 96 — a one-shot "scroll to and briefly highlight this DOM id once
+  // Today's Practice has actually rendered" request, same
+  // set-a-flag-then-scroll-in-an-effect shape as focusTargetDateOnSettings
+  // just above (see that state's own comment for why the flag can't be
+  // cleared synchronously in the same pass that schedules the timer).
+  // Set by handleSelectDay's own optional second argument — Piece Map's
+  // focus-spot links are the only caller that passes one; every existing
+  // caller (Timeline, Master Agenda, Overview, Week view) is unaffected
+  // and this always resets to null on THEIR navigations too, so a stale
+  // target from an earlier focus-spot click can never misfire on a later,
+  // unrelated day-select.
+  const [scrollToOnArrival, setScrollToOnArrival] = useState(null);
+  useEffect(() => {
+    if (!scrollToOnArrival) return;
+    if (activeTab !== "today") {
+      setScrollToOnArrival(null);
+      return;
+    }
+    const id = setTimeout(() => {
+      const el = document.getElementById(scrollToOnArrival);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("arrival-highlight");
+        setTimeout(() => el.classList.remove("arrival-highlight"), 1600);
+      }
+      setScrollToOnArrival(null);
+    }, 50);
+    return () => clearTimeout(id);
+  }, [scrollToOnArrival, activeTab]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -306,13 +333,6 @@ export default function App() {
     if (extension) updatePiece((p) => ({ ...p, ...extension }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, piece, chunkSet, timeline, settingsEditing]);
-
-  const navItems = useMemo(() => {
-    if (!isInRevival(piece)) return NAV_BASE;
-    const items = [...NAV_BASE];
-    items.splice(items.findIndex((n) => n.key === "progress"), 0, REVIVAL_NAV_ITEM);
-    return items;
-  }, [isInRevival(piece)]);
 
   // `tab` defaults to "overview" (every call site before Master Agenda's
   // "Log practice"/"Pick a random piece" below), which land on Today's
@@ -564,7 +584,14 @@ export default function App() {
     return () => clearTimeout(id);
   }, [focusTargetDateOnSettings, activeTab]);
   const setEditDraft = (patch) => setEditDraftState((d) => ({ ...d, ...patch }));
-  const handleSavePiece = (updated) => {
+  const handleSavePiece = (draft) => {
+    // `draft` is the edit form's copy of the piece from when editing started
+    // (or last saved). Only the fields the form owns are taken from it — see
+    // mergeEditedPiece (lib/pieceEdit.js) — so Save can't undo practice
+    // logged, ratings, chunk notes, a Pause/Archive, or an ended revival
+    // that happened elsewhere while the form was open. `updated` below is
+    // the live piece with just the form's edits applied.
+    const updated = mergeEditedPiece(piece, draft);
     // Typing a work title on a standalone piece promotes it into a work;
     // clearing it pulls the piece back out. See lib/works.js.
     //
@@ -575,7 +602,15 @@ export default function App() {
     // closure's own current value, not `updated`), so it's the "old" side
     // of the comparison. A no-op, same object back, when nothing was
     // actually orphaned by this edit.
-    const progress = migrateOrphanedProgress(piece, updated);
+    // reassociateTroubleSpots (lib/chunking.js) is a second, more precise
+    // pass on top of migrateOrphanedProgress: the latter only catches a
+    // chunk id that's disappeared outright, not one that still exists but
+    // now covers different measures (customChunkSize 8 -> 4 both produce a
+    // "c9", just at 9-16 vs 9-12) — a case migrateOrphanedProgress reads as
+    // pure continuity. Each focus spot's own startMeasure is checked
+    // against `updated`'s real, current chunks regardless of which id it's
+    // currently nested under.
+    const progress = reassociateTroubleSpots(migrateOrphanedProgress(piece, updated), generateAllChunks(updated).practiceChunks);
     // A save that doesn't regenerate chunk ids (see CHUNK_STRUCTURE_FIELDS)
     // — pacing fields, or a difficulty/recurring reassessment — used to
     // still always drop rescheduleMarker to null, same as every other edit,
@@ -990,6 +1025,137 @@ export default function App() {
     });
   };
 
+  // Pass 91 (experimental v1) — focus spots (docs/Data-Model.md#focus-spots-v1).
+  // A spot discovered on a chunk's own Daily Practice card (ChecklistItem's
+  // "+ Add a focus spot"), so this handler only ever exists for a chunk
+  // that's already introduced. fromSetup is hardcoded false here — see
+  // lib/scheduling.js's focusSpotGate for why that matters (only a
+  // fromSetup spot gates introduction; a spot added here must never
+  // retroactively pull an already-scheduled chunk back off the plan). The
+  // Wizard's own equivalent (FocusSpotsStep, Wizard.jsx) writes fromSetup:
+  // true directly onto its local draft instead of going through this
+  // handler, since the piece doesn't exist yet at that point for
+  // updatePiece to target.
+  const handleAddFocusSpot = (chunkId, { name, position, startMeasure, endMeasure }) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId] || { doneDays: [] };
+      const spot = {
+        id: `fs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        position: position || "",
+        // Validated by the caller (ChecklistItem's add-spot form) before
+        // this ever runs — see lib/utils.js's parseMeasurePosition. This is
+        // what reassociateTroubleSpots (lib/chunking.js) matches against if
+        // this piece's measures/chunking ever change later.
+        startMeasure: typeof startMeasure === "number" ? startMeasure : null,
+        endMeasure: typeof endMeasure === "number" ? endMeasure : null,
+        length: null,
+        fromSetup: false,
+        resolved: false,
+        resolvedBpm: null,
+        resolvedAt: null,
+        sessions: [],
+      };
+      progress[chunkId] = { ...prevEntry, troubleSpots: [...(prevEntry.troubleSpots || []), spot] };
+      return { ...p, progress };
+    });
+  };
+
+  // "Log time" on FocusSpotCard — records that time was spent without
+  // claiming the spot is clean yet. Deliberately separate from
+  // handleLogSession's chunk-level sessions array: a trouble-spot session is
+  // not evidence of whole-chunk practice, so nothing here ever touches
+  // piece.progress[chunkId].sessions or the chunk's own ladder state — only
+  // this one spot's own nested sessions array.
+  const handleLogFocusSpotTime = (chunkId, spotId, durationSeconds) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const loggedDate = todayISODate();
+      const nextSpots = (prevEntry.troubleSpots || []).map((s) =>
+        s.id === spotId
+          ? { ...s, sessions: [...(s.sessions || []), { loggedAt: Date.now(), loggedDate, durationSeconds }] }
+          : s
+      );
+      progress[chunkId] = { ...prevEntry, troubleSpots: nextSpots };
+      return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
+  // Undo for the checkbox on FocusSpotCard's own head row (same click-to-
+  // undo pattern ChecklistItem's leading checkmark already uses) — clears
+  // EVERY session logged today for this one spot, not just the most recent.
+  // loggedToday (FocusSpotCard.jsx) is "does any session exist for today,"
+  // so removing only the last one left the checkbox looking stuck checked
+  // whenever a second time-log had already happened the same day (log some
+  // time, come back later and log more — an entirely normal thing to do) —
+  // one click looked like it did nothing. Removing every today-dated entry
+  // makes the checkbox behave as an actual toggle: one click always fully
+  // unchecks it, regardless of how many times time was logged today.
+  const handleUnlogFocusSpotTime = (chunkId, spotId) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const today = todayISODate();
+      const nextSpots = (prevEntry.troubleSpots || []).map((s) => {
+        if (s.id !== spotId) return s;
+        const sessions = s.sessions || [];
+        if (!sessions.some((sess) => sess.loggedDate === today)) return s;
+        return { ...s, sessions: sessions.filter((sess) => sess.loggedDate !== today) };
+      });
+      progress[chunkId] = { ...prevEntry, troubleSpots: nextSpots };
+      return { ...p, progress };
+    });
+  };
+
+  // "Achieved / Doable" on FocusSpotCard — the one gate the pass describes:
+  // hitting this, with the BPM it was played cleanly at, both ends this
+  // spot's own tracking and, once every spot on the chunk has cleared,
+  // hands the whole chunk to the existing tempo-ladder machinery. That
+  // handoff is a direct practiceBPM seed (the same "practiceBPM is seeded
+  // from whatever the learner actually logs the first time they touch a
+  // chunk" rule handleLogSession already uses above, just triggered by a
+  // trouble-spot resolution instead of a first real session) — not a
+  // computeLadderAdvance call, since no rep/pass-fail outcome is being
+  // judged here, only a tempo. The chunk still starts at stage: null, same
+  // as any other never-logged chunk; its very next *real* logged session is
+  // what actually puts it on the ladder for the first time. Seeded as the
+  // minimum resolvedBpm across every spot on the chunk — conservative, since
+  // the chunk as a whole can only go as fast as its slowest cleared spot —
+  // and only when practiceBPM isn't already set (a chunk this handler can
+  // resolve the last spot on was, by construction, gated, so it should
+  // never have one yet; guarded anyway rather than assumed).
+  const handleResolveFocusSpot = (chunkId, spotId, bpm, durationSeconds = 0) => {
+    updatePiece((p) => {
+      const progress = { ...p.progress };
+      const prevEntry = progress[chunkId];
+      if (!prevEntry) return p;
+      const loggedDate = todayISODate();
+      const resolvedAt = Date.now();
+      const nextSpots = (prevEntry.troubleSpots || []).map((s) =>
+        s.id === spotId
+          ? {
+              ...s,
+              resolved: true,
+              resolvedBpm: bpm,
+              resolvedAt,
+              sessions: [...(s.sessions || []), { loggedAt: resolvedAt, loggedDate, durationSeconds }],
+            }
+          : s
+      );
+      const allResolved = nextSpots.length > 0 && nextSpots.every((s) => s.resolved);
+      const seededPracticeBPM =
+        allResolved && prevEntry.practiceBPM == null
+          ? Math.min(...nextSpots.map((s) => s.resolvedBpm).filter((n) => typeof n === "number"))
+          : prevEntry.practiceBPM;
+      progress[chunkId] = { ...prevEntry, troubleSpots: nextSpots, practiceBPM: seededPracticeBPM };
+      return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
   // Pass 29 follow-up — resolves a provisional session (see handleLogSession
   // above) by finally running it through computeLadderAdvance, using the
   // real reps/BPM/outcome it already recorded. Operates on the most recent
@@ -1313,21 +1479,15 @@ export default function App() {
     updatePiece((p) => ({ ...p, status }));
   };
 
-  // Manual escape hatch for a piece finished away from the app — see
-  // isPlanActuallyComplete's markedLearnedElsewhere check (lib/scheduling.js)
-  // for what this unlocks. Freely reversible, same low-ceremony pattern as
-  // handleSetPieceStatus above — no confirmation dialog, matching Pause/
-  // Archive's own precedent.
-  const handleSetMarkedLearnedElsewhere = (value) => {
-    updatePiece((p) => ({ ...p, markedLearnedElsewhere: value }));
-  };
-
   const handleUpdateRevival = (patch) => {
     updatePiece((p) => ({ ...p, revival: { ...(p.revival || {}), ...patch } }));
   };
 
+  // Pass 88 — Revival no longer has its own tab; a piece already in
+  // revival routes to Today's Practice, which renders the reassessment
+  // panel or the plan itself depending on revival.reassessmentComplete.
   const handleOpenRevival = () => {
-    if (isInRevival(piece)) setActiveTab("revival");
+    if (isInRevival(piece)) setActiveTab("today");
     else setRevivalModalOpen(true);
   };
 
@@ -1348,7 +1508,7 @@ export default function App() {
       },
     }));
     setRevivalModalOpen(false);
-    setActiveTab("revival");
+    setActiveTab("today");
   };
 
   const closeRescheduleModal = () => {
@@ -1457,10 +1617,10 @@ export default function App() {
 
   const handleEndRevival = () => {
     // This button lives on the same screen the assessment timer runs on
-    // (Revival's reassessment pass, PieceMapTab's sequentialMode instance)
-    // — ending revival unmounts it exactly like a tab/piece switch would,
-    // so it needs the same guard those get, checked before the "end this
-    // cycle?" confirm below rather than after (declining because of
+    // (Revival's reassessment pass, rendered inside Today's Practice as of
+    // Pass 88) — ending revival unmounts it exactly like a tab/piece switch
+    // would, so it needs the same guard those get, checked before the "end
+    // this cycle?" confirm below rather than after (declining because of
     // unlogged timer work shouldn't still prompt to end the cycle).
     if (!guardLeavingActiveWork()) return;
     if (!window.confirm("End this revival cycle? Weak-spot flags and confidence ratings stay, but the revival plan will be cleared.")) return;
@@ -1478,10 +1638,6 @@ export default function App() {
     setActiveTab("overview");
   };
 
-  const handleGenerateRevivalPlan = () => {
-    handleUpdateRevival({ plan: computeRevivalPlan(piece, chunkSet, currentDay) });
-  };
-
   const handleReassessRange = (from, to, level) => {
     const levelNum = level === "easy" ? 1 : level === "medium" ? 2 : 3;
     updatePiece((p) => {
@@ -1493,9 +1649,17 @@ export default function App() {
     });
   };
 
-  const handleSelectDay = (dayNumber) => {
+  // `scrollTargetId` (optional) is Pass 96's addition — Piece Map's focus-
+  // spot links are the only caller that passes one. Set unconditionally
+  // (to null when omitted), not only when truthy, so this always clears
+  // whatever an earlier focus-spot click left pending — every other
+  // caller of this same onSelectDay prop (Timeline, Master Agenda,
+  // Overview, Week view) has nothing to scroll to and shouldn't
+  // accidentally inherit a stale target from a previous, unrelated click.
+  const handleSelectDay = (dayNumber, scrollTargetId = null) => {
     setDayOverride(dayNumber);
     setActiveTab("today");
+    setScrollToOnArrival(scrollTargetId);
   };
 
   const openRescheduleModal = (targets, title, message, suggestion = null) => {
@@ -1931,7 +2095,7 @@ export default function App() {
             </div>
 
             <div className="nav-list">
-              {navItems.map((n) => {
+              {NAV_BASE.map((n) => {
                 const Icon = n.icon;
                 return (
                   <button
@@ -1946,11 +2110,9 @@ export default function App() {
               })}
             </div>
             <div className="sidebar-foot">
-              {activeTab === "overview" && (
-                <button className="ghost-btn full" onClick={startEditing}>
-                  <Pencil size={14} /> Edit piece
-                </button>
-              )}
+              <button className="ghost-btn full" onClick={startEditing}>
+                <Pencil size={14} /> Edit piece settings
+              </button>
               <button className="ghost-btn full" onClick={() => openWizard()}>
                 <Plus size={14} /> Add new piece
               </button>
@@ -2003,6 +2165,9 @@ export default function App() {
                 piece={piece}
                 chunks={chunks}
                 currentDay={currentDay}
+                timeline={timeline}
+                realCurrentDay={realCurrentDay}
+                onSelectDay={handleSelectDay}
                 onUpdateBPM={handleUpdateBPM}
                 onSetManualConfidence={handleSetManualConfidence}
                 onSetFlag={handleSetFlag}
@@ -2010,32 +2175,11 @@ export default function App() {
                 onClearRelearning={handleClearRelearning}
               />
             )}
-            {activeTab === "revival" && isInRevival(piece) && (
-              <RevivalTab
-                piece={piece}
-                chunkSet={chunkSet}
-                currentDay={currentDay}
-                onUpdateBPM={handleUpdateBPM}
-                onSetManualConfidence={handleSetManualConfidence}
-                onSetMemoryAnchor={handleSetMemoryAnchor}
-                onFinishReassessment={() => handleUpdateRevival({ reassessmentComplete: true })}
-                onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
-                onGeneratePlan={handleGenerateRevivalPlan}
-                onSetTempoLadderFraction={(n) => handleUpdateRevival({ tempoLadderStartFraction: n })}
-                onReassessRange={handleReassessRange}
-                onLogSession={handleLogSession}
-                onUnlogSession={handleUnlogSession}
-                onConfirmProvisionalSession={handleConfirmProvisionalSession}
-                onDiscardProvisionalSession={handleDiscardProvisionalSession}
-                onEndRevival={handleEndRevival}
-                onAssessmentTimerRiskChange={setAssessmentTimerRisk}
-                onConfirmLeaveAssessmentTimer={confirmLeavingAssessmentTimer}
-              />
-            )}
             {activeTab === "today" && (
               <TodayTab
                 piece={piece}
                 chunks={chunks}
+                chunkSet={chunkSet}
                 timeline={timeline}
                 currentDay={currentDay}
                 realCurrentDay={realCurrentDay}
@@ -2056,7 +2200,19 @@ export default function App() {
                 onSetMemoryAnchor={handleSetMemoryAnchor}
                 onInterleaveRiskChange={setInterleaveRisk}
                 onConfirmLeaveInterleaved={confirmAndDiscardProvisional}
-                onOpenRevival={handleOpenRevival}
+                onUpdateBPM={handleUpdateBPM}
+                onSetManualConfidence={handleSetManualConfidence}
+                onFinishReassessment={() =>
+                  handleUpdateRevival({ reassessmentComplete: true, plan: computeRevivalPlan(piece, chunkSet, currentDay) })
+                }
+                onReopenReassessment={() => handleUpdateRevival({ reassessmentComplete: false })}
+                onEndRevival={handleEndRevival}
+                onAssessmentTimerRiskChange={setAssessmentTimerRisk}
+                onConfirmLeaveAssessmentTimer={confirmLeavingAssessmentTimer}
+                onAddFocusSpot={handleAddFocusSpot}
+                onLogFocusSpotTime={handleLogFocusSpotTime}
+                onUnlogFocusSpotTime={handleUnlogFocusSpotTime}
+                onResolveFocusSpot={handleResolveFocusSpot}
               />
             )}
             {activeTab === "progress" && (
@@ -2096,7 +2252,6 @@ export default function App() {
                 onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
-                onSetMarkedLearnedElsewhere={handleSetMarkedLearnedElsewhere}
               />
             )}
           </main>
@@ -2474,10 +2629,7 @@ const CSS = `
 .map-cell-kind { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); }
 .map-cell-range { font-size: 12.5px; font-weight: 600; }
 .map-cell-conf { font-size: 15px; font-weight: 600; color: var(--ink); display: flex; align-items: center; }
-.map-cell-diff-dot { position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; }
-.diff-dot-easy { background: var(--teal); }
-.diff-dot-medium { background: var(--brass); }
-.diff-dot-hard { background: var(--brick); }
+.map-cell-diff-icon { position: absolute; top: 10px; right: 10px; color: var(--ink-faint); }
 .map-cell-recurring { position: absolute; bottom: 10px; right: 10px; font-size: 13px; color: var(--ink-faint); }
 .map-cell-flag { position: absolute; bottom: 10px; left: 10px; display: inline-flex; }
 .map-cell-flag.flag-rough { color: var(--brass); }
@@ -2516,6 +2668,8 @@ const CSS = `
 .checklist { display: flex; flex-direction: column; gap: 10px; }
 .checklist-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
 .checklist-item.checked { background: rgba(46,110,99,0.08); border-color: rgba(46,110,99,0.35); }
+.checklist-item.historical { border-style: dashed; }
+.checklist-item.historical .checklist-check { border-style: dashed; background: transparent; }
 .checklist-check { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--teal); background: rgba(46,110,99,0.15); flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--teal); margin-top: 2px; }
 .checklist-check-empty { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--ink-faint); background: var(--white); flex-shrink: 0; margin-top: 2px; padding: 0; cursor: pointer; transition: border-color .15s, background .15s; }
 .checklist-check-empty:hover:not(:disabled) { border-color: var(--teal); background: rgba(46,110,99,0.08); }
@@ -2544,6 +2698,61 @@ const CSS = `
 .log-row input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
 .fail-override-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-soft); font-weight: 600; margin-top: 8px; }
 .primary-btn.sm { padding: 7px 14px; font-size: 12.5px; }
+
+/* Pass 91 (experimental v1) — focus spots. .ts- prefix is shared by the
+   Wizard's setup-time spot list (Wizard.jsx's FocusSpotsStep) and Settings'
+   own on/off panel; .focus-spot- prefix is Daily Practice's own gated/
+   paused practice card (components/tabs/today/FocusSpotCard.jsx). */
+.ts-chunk-list { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ts-chunk-row { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; background: var(--white); }
+.ts-chunk-row-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ts-chunk-row-main .grow { flex: 1; }
+.ts-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ts-chip { display: inline-flex; align-items: center; background: rgba(32,42,51,0.06); border-radius: 20px; padding: 2px; }
+.ts-chip-label { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: none; padding: 3px 4px 3px 8px; font-size: 12px; color: var(--ink); font-family: inherit; cursor: pointer; }
+.ts-chip-label .mono { color: var(--ink-soft); font-size: 11px; }
+.ts-chip-label:hover { color: var(--brass-deep); }
+.ts-chip-remove { background: transparent; border: none; color: var(--ink-faint); width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; flex-shrink: 0; }
+.ts-chip-remove:hover { background: rgba(181,71,58,0.15); color: var(--brick); }
+.ts-add-form { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px 6px; margin-top: 10px; }
+.ts-add-form .field { margin-bottom: 10px; }
+.ts-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 10px 0 4px; }
+
+.focus-spot-panel { border-color: rgba(185,138,62,0.4); }
+.focus-spot-summary { font-size: 12.5px; color: var(--ink-soft); margin: -6px 0 14px; }
+.focus-spot-cards { display: flex; flex-direction: column; gap: 12px; }
+.focus-spot-card { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; background: var(--white); padding: 14px 15px; }
+.focus-spot-card.resolved { background: rgba(46,110,99,0.08); border-color: rgba(46,110,99,0.35); }
+.focus-spot-card-body { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.focus-spot-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.focus-spot-name { font-weight: 700; }
+.focus-spot-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--brass-deep); }
+.focus-spot-count { font-size: 11.5px; color: var(--brass-deep); background: rgba(185,138,62,0.12); border-radius: 20px; padding: 2px 9px; font-weight: 600; }
+.focus-spot-prompt { font-size: 13px; margin: 0; }
+.focus-spot-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.focus-spot-bpm-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.focus-spot-bpm-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink-soft); font-weight: 600; }
+.focus-spot-bpm-form input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; font-size: 13.5px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
+.focus-spot-resolved-line { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--teal); margin: 0; }
+
+/* Pass 96 — a brief flash on whatever Piece Map's focus-spot links scroll
+   to (a FocusSpotCard or a ChecklistItem's card), so landing on the right
+   card is obvious even though nothing about its own border/background
+   otherwise changed. box-shadow rather than background/border-color: both
+   of those are already meaningful state on these two cards (checked/
+   paused/resolved), so animating either would fight that instead of
+   layering cleanly on top of it. Automatically skipped for
+   prefers-reduced-motion via the existing app-wide rule near the top of
+   this stylesheet. */
+.arrival-highlight { animation: arrival-pulse 1.6s ease-out; }
+@keyframes arrival-pulse {
+  0% { box-shadow: 0 0 0 3px rgba(185,138,62,0.55); }
+  100% { box-shadow: 0 0 0 3px rgba(185,138,62,0); }
+}
+
+.checklist-item.paused { border-style: dashed; border-color: var(--brass); background: rgba(185,138,62,0.05); }
+.paused-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; background: rgba(185,138,62,0.08); border-radius: 8px; padding: 10px 11px; }
+.paused-note svg { flex-shrink: 0; margin-top: 1px; color: var(--brass-deep); }
 
 .view-all-list { display: flex; flex-direction: column; gap: 14px; }
 
@@ -2621,18 +2830,43 @@ const CSS = `
 .modal-step.done:hover { color: var(--brass-deep); }
 .modal-step-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
 .modal-body { padding: 26px 26px 10px; overflow-y: auto; flex: 1; }
-.modal-foot { display: flex; justify-content: space-between; padding: 18px 26px; border-top: 1px solid var(--line); }
+.modal-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 26px; border-top: 1px solid var(--line); }
 
 .wizard-pane h2 { font-size: 20px; margin-bottom: 6px; }
 .wizard-hint { color: var(--ink-soft); font-size: 13.5px; margin: 0 0 20px; line-height: 1.5; }
 
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .field > span { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+/* One width rule for every toggle/button that sits directly in a form field or
+   an add-row list: size to the content instead of stretching to the column's
+   full width (a flex column's default align-items: stretch). Text inputs,
+   selects and textareas are deliberately not listed — they stay full width.
+   The sidebar's .ghost-btn.full is its own, intentionally full-width thing. */
+.field > .segmented, .field > .ghost-btn, .field > .primary-btn, .field > .danger-btn,
+.pairs-list > .ghost-btn { align-self: flex-start; }
 .field input[type="text"], .field input[type="number"], .field input[type="date"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
 .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); font-family: inherit; resize: vertical; }
 .field input:disabled { color: var(--ink-faint); background: var(--paper); }
 .field-row { display: flex; gap: 16px; }
 .field-row .field { flex: 1; }
+/* Piece Map's chunk detail modal (Pass 96) — Related chunks and Focus
+   spots side by side, each sized to content down to a 180px floor rather
+   than a fixed 50/50 split (a short Related-chunks list next to a longer
+   Focus spots one shouldn't force them to match widths), stacking only
+   once the row can no longer fit two of those floors side by side —
+   .detail-modal's own 480px cap already fits two comfortably, so this
+   only actually triggers on a narrower viewport. Unlike .field-row above
+   (never wraps — Current BPM/Target BPM must always stay side by side),
+   deliberately its own class rather than a shared one. When only one of
+   the two sections has anything to show, it's the sole flex child and
+   fills the row on its own — no extra rule needed for that case. */
+.related-focus-row { display: flex; flex-wrap: wrap; gap: 20px; }
+.related-focus-row > .field { flex: 1 1 180px; min-width: 0; }
+/* One spot row (icon, name, position tag, resolved state) — shared by the
+   link, the muted "not currently scheduled" variant, and the plain-text
+   revival variant, so all three line up identically regardless of which
+   one a given spot renders as. */
+.focus-spot-map-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; text-align: left; font-size: 13px; }
 
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; flex-wrap: wrap; }
 .segmented button { border: none; background: var(--white); color: var(--ink-soft); padding: 8px 14px; font-size: 13px; font-weight: 500; border-right: 1px solid var(--line); }

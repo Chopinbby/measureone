@@ -54,6 +54,10 @@ it:
 - The Reassess-difficulty panel's "Apply" both commits the change and closes
   the panel in one action — it used to be two separate steps and that read
   as unfinished rather than deliberate.
+- Revival reassessment's timer works the same way: stopping it logs the
+  time directly, rather than requiring a separate "Log assessed time"
+  button afterward — the two actions were "essentially the same thing"
+  already (direct user feedback), so they collapsed into one.
 
 The test for "should this collapse into one action": would a second step
 ever change the user's mind, or is it just friction restating what they
@@ -72,6 +76,36 @@ only while a provisional is actually pending, never on ordinary
 navigation with nothing at stake — so the common case still gets zero
 friction. See
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+
+**Since Pass 93**, "Mark as learned elsewhere" (Settings' edit page) gets
+the same treatment, for the same reason: one click flips a piece into
+maintenance mode wholesale — unlocking Archive and Start revival, and
+switching Daily Practice/Master Agenda over to review-only scheduling —
+which is exactly the kind of consequence the test above is asking about.
+The rest of that same panel (Focus spots, the revival tempo field) stays
+frictionless, since toggling either genuinely doesn't cost anything to
+reconsider.
+
+## A mode lives inside its tab, not a standing nav entry
+
+When a piece enters a special way of practicing — Interleaved rotation,
+or a full Revival — that mode renders from *within* Daily Practice,
+gated on live state (`viewMode === "interleaved"`, `isInRevival(piece)`),
+rather than getting its own sidebar item that appears and disappears
+depending on whether the mode happens to be active right now. Interleaved
+mode set this precedent first; Revival explicitly followed it as of Pass
+88, when the standalone Revival tab was retired and its whole
+reassessment/plan flow moved into Daily Practice's own render tree
+instead — a deliberate, named-as-precedent choice, not an incidental
+side effect of the rewrite (see [Decisions.md](Decisions.md#revival)).
+
+The test: if the thing you're building only exists for a piece in a
+particular state, and that state already has a natural "home" tab (Daily
+Practice, for anything about what to actually practice right now), route
+it through that tab's own render branch instead of reaching for a new
+`activeTab` value or nav item. A nav item that blinks in and out of the
+sidebar depending on background state is a worse experience than one tab
+that knows how to show more than one thing.
 
 ## Detail-on-demand uses a real modal, not inline expansion
 
@@ -193,3 +227,17 @@ codebase — as the fix for the specific bug shape above, and as a general
 "only show this on real today" tool for ordinary display decisions — so
 finding it somewhere doesn't by itself imply a leak was being fixed there.
 See [Decisions.md](Decisions.md#ux).
+
+**Since Pass 90, a new function was built adjacent to this exact trap and
+correctly avoids it from the start — a positive example worth keeping
+alongside the four fixes above.** `findHistoricalItemsForDay`
+(`lib/history.js`), which finds what was genuinely completed on a day the
+live schedule no longer lists it on, takes `day` as an explicit parameter
+and reads that specific day's own `doneDays`/`sessions` — never a live,
+un-dated "what's true right now" computation. Rendered from a component
+(`DayChecklist`) that also renders real today, a past day, a future day,
+and (in "View all") every day at once, this is exactly the shape the
+mistake above needs to occur in — and doesn't, because the underlying
+function was written dated from the outset rather than needing a
+display-layer `isRealToday` gate bolted on after the fact. See
+[Algorithms.md](Algorithms.md#historical-cards-on-daily-practice).

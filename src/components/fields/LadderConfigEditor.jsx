@@ -2,10 +2,12 @@ import { NumberInput } from "../NumberInput";
 
 /* ------------------------------------------------------------------ */
 /*  Editor for piece.ladderConfig — the spaced-repetition maintenance */
-/*  ladder's tunable stage lengths, graduation counts, tempo floors,  */
-/*  and practiceBPM ratchet step sizes. Hand-picked defaults (see     */
-/*  lib/storage.js's DEFAULT_LADDER_CONFIG); this editor makes them   */
-/*  adjustable, not evidence-based — see docs/Research.md.            */
+/*  ladder's tunable stage lengths, graduation counts and tempo       */
+/*  floors. Hand-picked defaults (see lib/storage.js's                */
+/*  DEFAULT_LADDER_CONFIG); this editor makes them adjustable, not    */
+/*  evidence-based — see docs/Research.md. The practiceBPM step sizes */
+/*  (ladderConfig.bpmSteps) are deliberately not editable here — see  */
+/*  docs/Decisions.md.                                                */
 /* ------------------------------------------------------------------ */
 
 // Sub-section label, styled inline off the existing .wizard-hint class
@@ -30,15 +32,14 @@ export function LadderConfigEditor({ draft, set }) {
 
   const updateStage = (stage, patch) =>
     set({ ladderConfig: { ...config, [stage]: { ...config[stage], ...patch } } });
-  const updateBpmSteps = (patch) => set({ ladderConfig: { ...config, bpmSteps: { ...config.bpmSteps, ...patch } } });
 
   return (
     <div>
       <p className="wizard-hint">
         Advanced tuning for the spaced-repetition maintenance ladder — how often a chunk comes back
-        for review, how many clean passes it takes to move up a stage, and how much its practice
-        tempo moves after each session. These are hand-picked starting points, not settings tuned
-        from real data — change them if your own experience says otherwise.
+        for review, how many clean passes it takes to move up a stage, and the tempo floors that
+        apply along the way. These are hand-picked starting points, not settings tuned from real
+        data — change them if your own experience says otherwise.
       </p>
 
       <SubHeading>Stabilizing</SubHeading>
@@ -128,28 +129,6 @@ export function LadderConfigEditor({ draft, set }) {
             min={1}
             onCommit={(n) => updateStage("holding", { maxIntervalDays: n })}
           />
-        </label>
-      </div>
-
-      <SubHeading>Tempo ratchet</SubHeading>
-      <p className="wizard-hint">
-        How practiceBPM moves after each logged session, at any stage. A full pass steps up by this
-        much; a partial pass steps down. A real fail usually resets straight to this chunk's
-        recorded tempo for the stage it drops into, falling back to this step only when nothing's
-        recorded yet.
-      </p>
-      <div className="field-row">
-        <label className="field">
-          <span>Full pass (+BPM)</span>
-          <NumberInput value={config.bpmSteps.pass} onCommit={(n) => updateBpmSteps({ pass: n })} />
-        </label>
-        <label className="field">
-          <span>Partial pass (BPM)</span>
-          <NumberInput value={config.bpmSteps.softMiss} onCommit={(n) => updateBpmSteps({ softMiss: n })} />
-        </label>
-        <label className="field">
-          <span>Fail fallback (BPM)</span>
-          <NumberInput value={config.bpmSteps.fail} onCommit={(n) => updateBpmSteps({ fail: n })} />
         </label>
       </div>
     </div>

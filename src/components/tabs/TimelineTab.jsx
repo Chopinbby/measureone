@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import { formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
-import { classifyDayCompletion, isDayFullySwept, movedIdsForDay } from "../../lib/scheduling";
+import { classifyDayCompletion, classifyDayEmptyState, movedIdsForDay } from "../../lib/scheduling";
 import { ScheduleBanner } from "../ScheduleBanner";
 
 export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, realCurrentDay, onSelectDay, onReschedule }) {
@@ -33,14 +33,12 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, rea
               // from asOfDay onward, so an untouched day further back keeps
               // showing the exact list that got swept into the reschedule,
               // duplicating tasks that now also appear on their new day.
-              // isDayFullySwept (lib/scheduling.js, shared with TodayTab.jsx
-              // and DayChecklist.jsx — Pass 74 follow-up consolidated what
-              // used to be three separate copies of this exact check)
-              // collapses this card only when EVERY id the day originally
-              // scheduled ended up moved — a day with any real remaining
-              // content (done or still legitimately scheduled) renders
-              // normally.
-              const isFullySwept = isDayFullySwept(d, piece, chunkById);
+              // classifyDayEmptyState (lib/scheduling.js, shared across all
+              // four day-list surfaces as of Pass 92) collapses this card
+              // only when EVERY id the day originally scheduled ended up
+              // moved — a day with any real remaining content (done or
+              // still legitimately scheduled) renders normally.
+              const emptyState = classifyDayEmptyState(d, piece, chunkById);
               // A day that ISN'T fully swept (e.g. a genuinely still-open
               // review keeps it from collapsing above) can still have SOME
               // of its own ids individually relocated elsewhere by the
@@ -66,10 +64,10 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, rea
                   </div>
                   {d.type === "consolidation" ? (
                     <p className="day-card-note">Full run-through of the piece</p>
-                  ) : d.type === "rest" ? (
-                    <p className="day-card-note">Rest day</p>
-                  ) : isFullySwept ? (
+                  ) : emptyState === "rescheduled" ? (
                     <p className="day-card-note"><em>Tasks rescheduled</em></p>
+                  ) : emptyState === "empty" ? (
+                    <p className="day-card-note">Nothing scheduled.</p>
                   ) : (
                     <>
                       {visibleNewIds.length > 0 && (
@@ -97,17 +95,6 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, rea
                             <span key={`${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                           ))}
                         </div>
-                      )}
-                      {/* withLiveReviewStatus (lib/scheduling.js) already
-                          pulled a passed-due review out of
-                          d.reviewChunkIds above — it's already live and
-                          actionable on today's own screen
-                          (mergeLiveDueReviews), not stuck here. This just
-                          says so instead of it silently vanishing. */}
-                      {d.staleReviewIds && d.staleReviewIds.length > 0 && (
-                        <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic", marginTop: 4 }}>
-                          Now due — see today
-                        </p>
                       )}
                     </>
                   )}

@@ -96,6 +96,9 @@ export function BpmZonesEditor({ draft, set }) {
             </button>
           </div>
         ))}
+        {/* Both sized to their content by the shared `.pairs-list >
+            .ghost-btn` rule (App.jsx CSS, Pass 94), not a per-button patch
+            here. */}
         <button className="ghost-btn" onClick={addZone}>
           <Plus size={14} /> Add tempo zone
         </button>

@@ -2,7 +2,8 @@ import { useState } from "react";
 import { ChecklistItem } from "./ChecklistItem";
 import { NumberInput } from "../../NumberInput";
 import { formatMinutes } from "../../../lib/utils";
-import { isDayFullySwept, movedIdsForDay } from "../../../lib/scheduling";
+import { classifyDayEmptyState, movedIdsForDay } from "../../../lib/scheduling";
+import { findHistoricalItemsForDay } from "../../../lib/history";
 
 // Consolidation-day logging: stop count replaces the old bare "mark
 // complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
@@ -58,6 +59,7 @@ export function DayChecklist({
   piece,
   chunks,
   day,
+  timeline,
   onLogSession,
   onUnlogSession,
   onConfirmProvisionalSession,
@@ -65,8 +67,19 @@ export function DayChecklist({
   onLogRunThrough,
   onUnlogRunThrough,
   onSetMemoryAnchor,
+  onAddFocusSpot,
+  onGoToNextOccurrence,
 }) {
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
+  // What was actually practiced on this exact day that the current live
+  // schedule no longer lists here — a transition/combo Pass 90's smoothing
+  // has since relocated, or a review whose ladder has moved past this
+  // occurrence. `timeline` is optional (View all's per-day loop and the
+  // single-day view both already have it in scope; a future caller that
+  // doesn't pass it just sees none, rather than crashing) — see
+  // findHistoricalItemsForDay, lib/history.js.
+  const historicalItems =
+    day.type === "consolidation" || !timeline ? [] : findHistoricalItemsForDay(piece, chunks, timeline, day.dayNumber);
 
   if (day.type === "consolidation") {
     return (
@@ -89,27 +102,43 @@ export function DayChecklist({
   // stable, so relative order otherwise is unaffected.
   items.sort((a, b) => (a.role === "combo" ? 1 : 0) - (b.role === "combo" ? 1 : 0));
 
-  // withLiveReviewStatus (lib/scheduling.js) already stripped any review
-  // here whose due date has passed out of day.reviewChunkIds before this
-  // component ever saw it — it's already live and actionable on today's
-  // own screen (mergeLiveDueReviews), so re-showing it here as a
-  // still-open task would just duplicate it. staleReviewIds is what got
-  // pulled, kept around only so this note can say so instead of the item
-  // silently vanishing with no explanation.
-  const staleReviewNote = day.staleReviewIds && day.staleReviewIds.length > 0 && (
-    <p className="wizard-hint" style={{ fontStyle: "italic", margin: "8px 0 0" }}>
-      {day.staleReviewIds.length === 1 ? "1 review" : `${day.staleReviewIds.length} reviews`} originally scheduled
-      here {day.staleReviewIds.length === 1 ? "is" : "are"} now tracked as due — see Daily Practice.
-    </p>
-  );
+  // classifyDayEmptyState (lib/scheduling.js — Pass 92, consolidates what
+  // used to be four surfaces' own separate items.length/isDayFullySwept/
+  // staleReviewIds checks into one shared function) reuses isDayFullySwept
+  // internally, so this single call covers both the "reschedule swept
+  // everything" and "nothing here at all (including a day emptied purely
+  // by review staleness)" cases this component used to check separately.
+  const emptyState = classifyDayEmptyState(day, piece, chunkById);
 
-  if (items.length === 0) {
+  // A historical entry's role for tag/label purposes: a plain chunk
+  // (kind "section") only ever shows up here for a completed REVIEW
+  // occurrence that's since moved — its own introduction day never
+  // disappears — so "review" is correct for it, same as for an id with no
+  // kind of its own. Transitions/combos use their own kind directly.
+  const roleForHistorical = (chunk) => (chunk.kind === "combo" ? "combo" : chunk.kind === "transition" ? "transition" : "review");
+
+  if (emptyState === "empty") {
     return (
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
-        <p className="wizard-hint" style={{ margin: 0 }}>
-          {staleReviewNote ? <em>Already due — see Daily Practice</em> : "Nothing scheduled."}
-        </p>
+        {historicalItems.length === 0 ? (
+          <p className="wizard-hint" style={{ margin: 0 }}>Nothing scheduled.</p>
+        ) : (
+          <div className="checklist">
+            {historicalItems.map(({ chunk, nextOccurrenceDay }) => (
+              <ChecklistItem
+                key={chunk.id + "-historical"}
+                chunk={chunk}
+                role={roleForHistorical(chunk)}
+                piece={piece}
+                day={day.dayNumber}
+                historical
+                nextOccurrenceDay={nextOccurrenceDay}
+                onGoToNextOccurrence={onGoToNextOccurrence}
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -119,19 +148,18 @@ export function DayChecklist({
   // (lib/scheduling.js) only replaces days from asOfDay onward, so an
   // untouched day further back keeps showing the exact list that got swept
   // into the reschedule, duplicating tasks that now also appear on their new
-  // day. isDayFullySwept (lib/scheduling.js, shared with TodayTab.jsx and
-  // TimelineTab.jsx — Pass 74 follow-up consolidated what used to be three
-  // separate copies of this exact check) collapses this only when EVERY
-  // item this day originally scheduled ended up moved — a day with any real
+  // day. classifyDayEmptyState (lib/scheduling.js, shared across all four
+  // day-list surfaces as of Pass 92) collapses this only when EVERY item
+  // this day originally scheduled ended up moved — a day with any real
   // remaining content (done or still legitimately scheduled) renders
   // normally. Shared by both View all (one DayChecklist per timeline day)
   // and the single-day view — day nav has no logic that skips a
   // fully-swept day, so this same check is what keeps that reachable case
   // from showing stale duplicates too. `items` maps 1:1 off the same
-  // newChunkIds/specialChunkIds/reviewChunkIds isDayFullySwept reads
+  // newChunkIds/specialChunkIds/reviewChunkIds classifyDayEmptyState reads
   // directly off `day`, just relabeled with a role — passing `day` itself
   // checks the identical id set.
-  if (isDayFullySwept(day, piece, chunkById)) {
+  if (emptyState === "rescheduled") {
     return (
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
@@ -168,10 +196,22 @@ export function DayChecklist({
             onConfirmProvisionalSession={onConfirmProvisionalSession}
             onDiscardProvisionalSession={onDiscardProvisionalSession}
             onSetMemoryAnchor={onSetMemoryAnchor}
+            onAddFocusSpot={onAddFocusSpot}
+          />
+        ))}
+        {historicalItems.map(({ chunk, nextOccurrenceDay }) => (
+          <ChecklistItem
+            key={chunk.id + "-historical"}
+            chunk={chunk}
+            role={roleForHistorical(chunk)}
+            piece={piece}
+            day={day.dayNumber}
+            historical
+            nextOccurrenceDay={nextOccurrenceDay}
+            onGoToNextOccurrence={onGoToNextOccurrence}
           />
         ))}
       </div>
-      {staleReviewNote}
     </div>
   );
 }

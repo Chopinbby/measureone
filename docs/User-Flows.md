@@ -18,16 +18,21 @@
 Entry points: "Start a new piece" (empty state), "Add new piece" (Overview,
 sidebar switcher, Settings).
 
-`Wizard` walks through six steps: **Piece → Sections → Difficulty → Repeats →
-Timeline → Review**. Each step's fields are the same shared editor components
-used later in Settings (`BasicsFields`, `SectionsEditor`, `DifficultyEditor`,
-`RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`,
-`DocumentsEditor`) — see
+`Wizard` walks through seven steps: **Piece → Sections → Repeats →
+Difficulty → Focus spots → Timeline → Review**. Every step but one reuses
+the same shared editor components Settings uses later (`BasicsFields`,
+`SectionsEditor`, `RecurringEditor`, `DifficultyEditor`, `ScheduleFields`,
+`BpmZonesEditor`, `RecordingsEditor`, `DocumentsEditor`) — see
 [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows).
-The Review step shows a `ManuscriptStrip` preview of the generated chunks
-before the piece is created. Completing the wizard calls
-`generateAllChunks` + `computeTimeline` for the first time and persists the
-new piece to `localStorage`.
+**Focus spots (Pass 91, experimental v1) is the one exception**: a yes/no
+toggle for `piece.troubleSpotsEnabled`, and — only when "Yes" — a
+paginated, chunk-by-chunk spot editor (`FocusSpotsStep`) that exists only
+in `Wizard.jsx`, not in Settings' shared `fields/` — see
+[Decisions.md](Decisions.md#focus-spots-v1) for why this one step doesn't
+follow the shared-editor pattern. The Review step shows a `ManuscriptStrip`
+preview of the generated chunks before the piece is created. Completing the
+wizard calls `generateAllChunks` + `computeTimeline` for the first time and
+persists the new piece to `localStorage`.
 
 Step 1 is also where the user says whether this is a single piece or one
 movement of a larger work, and whether they're learning it fresh or reviving
@@ -64,6 +69,21 @@ week, chunk size).
 The Wizard is **create-only** — an existing piece is never edited through it;
 editing always goes through Settings instead.
 
+**Since Pass 93, Settings is split in two.** The Settings tab itself keeps
+only what isn't about the current piece — "Pieces" (Add new piece) and
+"Backup & restore" — plus a read-only "Current piece details" summary sitting
+directly above the "Edit piece settings" button. Everything about the
+current piece lives behind that button, on the "Edit piece settings" page,
+which is also reachable from the sidebar on every tab (previously Overview
+only). That page is a draft-and-save form (Save changes / Discard changes) —
+including Focus spots, Revival settings (only while in revival) and "Mark as
+learned elsewhere" (which asks "are you sure?" before it marks the draft) —
+followed by a separate, clearly labelled **"Applies immediately"** group
+below the Save/Discard row holding Practice status (Pause/Archive/Resume/
+Reactivate) and Delete this piece, which act on the live piece the moment
+they're clicked and are unaffected by Discard. The button was called "Edit
+piece" before this pass.
+
 ### 1a. Adding a movement to an existing work
 
 "Add a movement" on the Overview `PartSwitcher` reopens the same wizard with a
@@ -85,7 +105,17 @@ than jumping to a specific day.
    (`computeScheduleStatus`) and offers rescheduling — see flow 4.
 2. `FocusPanel` surfaces what most needs attention right now, independent of
    what's scheduled for today.
-3. `DayChecklist` lists today's actual scheduled items (new chunks, reviews,
+3. **Since Pass 91 (experimental v1)**, `FocusSpotsPanel` renders next,
+   whenever any practice chunk has an unresolved focus spot — a
+   `FocusSpotCard` per spot (not per chunk), reading `piece.progress`
+   directly rather than the current day's own schedule, so a spot on a
+   chunk that isn't introduced yet is still reachable. Each card gates on
+   a minimum practice time (`piece.troubleSpotDefaultMinutes`, default 5)
+   before either action button enables — a countdown timer counting down
+   to that target, then up past it once met. "Not yet, log time" logs the
+   time and leaves the spot open; "Yes, log BPM" resolves it. See
+   [Algorithms.md](Algorithms.md#focus-spots-v1).
+4. `DayChecklist` lists today's actual scheduled items (new chunks, reviews,
    transitions, combos). Each `ChecklistItem` has a start/stop timer (or a
    manual minutes field, which wins over the timer when filled) and clean
    reps / BPM-achieved inputs, auto-classified into a pass/soft-miss/fail
@@ -94,8 +124,14 @@ than jumping to a specific day.
    [UX-Principles.md](UX-Principles.md#direct-manipulation-over-confirmation-ceremony)).
    **Since Pass 23**, each item also carries an inline, editable free-text
    note (reusing `piece.memoryAnchors`, labeled "Notes" in the UI) — "+ Add
-   a note" / "Edit note," committing on blur.
-4. `SectionRunThroughPanel` appears once it has anything to show — since
+   a note" / "Edit note," committing on blur. **Since Pass 90**, a day can
+   also show read-only cards for something genuinely completed there that
+   the live schedule no longer lists on that day (a transition/combo
+   Pass 90's own smoothing relocated, or a review whose due date has since
+   moved past this occurrence) — no timer/inputs/log button, just the
+   logged outcome and a link to wherever the item is scheduled now. See
+   [Algorithms.md](Algorithms.md#historical-cards-on-daily-practice).
+5. `SectionRunThroughPanel` appears once it has anything to show — since
    Pass 49, that's not a one-time unlock but a repeating gate (due, then
    not due, then due again as practice continues), plus a locked/grayed
    preview the day before the next threshold is crossed; see
@@ -104,11 +140,11 @@ than jumping to a specific day.
    browsing to a past or future day hides it entirely, in every view mode
    (Day view, Week, View all, Interleaved alike), rather than showing
    today's live due-state mislabeled as that day's own.
-5. **Since Pass 57**, `RandomStartPanel` appears once 2+ chunks/transitions/
+6. **Since Pass 57**, `RandomStartPanel` appears once 2+ chunks/transitions/
    combos in the piece have 2+ logged sessions each — "Pick a starting
    point" picks one at random, so a practice session doesn't always start
    from the same place. Hidden entirely below that threshold.
-6. **Since Pass 56**, `ColdStartPanel` appears once every section's own
+7. **Since Pass 56**, `ColdStartPanel` appears once every section's own
    run-through has been logged at least once, at a widening gap (3, 7,
    14, 28, ... days) since the piece was last touched at all — a
    whole-piece cold play-through (no warm-up), logging average BPM and
@@ -118,7 +154,7 @@ than jumping to a specific day.
    short, optional "rate the piece overall right now?" prompt (five
    quick-tap options, or Skip) that feeds Progress's new "Overall
    confidence" stat — see flow 3 below.
-7. `ReassessPanel` is available for re-rating difficulty on today's measure
+8. `ReassessPanel` is available for re-rating difficulty on today's measure
    ranges after practicing them — see flow 5.
 
 Today has four view modes, not just one: **Day view** (the numbered steps
@@ -138,6 +174,11 @@ logging an outcome), and a rough auto-classified result gets saved
 chunk's card anywhere it's shown, rather than it silently affecting the
 ladder right away. Leaving Interleaved mode with an unresolved provisional
 still pending (switching view, tab, or piece) prompts a confirmation first.
+**Since Pass 94**, the "Interleaved practice" button is also the way out: in
+Interleaved mode it reads "Exit interleaved practice" and returns to Day
+View, through the same leave-confirmation as every other exit. The
+"needs two qualifying chunks" disable applies only to *entering* — if the
+pool drops below two mid-session the exit button stays clickable.
 See [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
 for the full mechanism.
 
@@ -187,8 +228,9 @@ first answer too: a "View all pieces" button on Progress opens
 `AllPiecesTab`** — one row per piece (progress %, confidence %, days since
 last touched, time practiced *this week*), a this-week-total stat, and a
 14-day cross-piece consistency heatmap (any piece touched counts that
-day). Not a sidebar tab — reached only from that button, same pattern the
-Revival tab uses; a "Back to {current piece}" button in its own header
+day). Not a sidebar tab — reached only from that button (the old Revival
+tab worked the same way, before Pass 88 folded revival into Daily
+Practice itself — see [Decisions.md](Decisions.md#revival)); a "Back to {current piece}" button in its own header
 returns the way you'd expect. Clicking a row calls `switchToPiece`,
 landing on that piece's Overview. See
 [Decisions.md](Decisions.md#cross-piece-views) for what this still
@@ -217,7 +259,10 @@ week-vs-all-time and heatmap-window choices.
    pre-check this used to have, which could hide the button even when a
    past transition or review was genuinely still incomplete (Overview and
    Timeline don't get this second button, and render the banner exactly as
-   before).
+   before). **Since Pass 94, it's hidden while you're already browsing that
+   earliest day** — the button would jump nowhere, and the banner's "or pick
+   up where you left off" half of its copy goes with it; browse anywhere else
+   and both return.
 3. `handleReschedule` estimates whether the remaining material can
    realistically fit in the remaining days at the current pace. If it
    can't, the confirmation dialog names the shortfall and offers a way past
@@ -275,15 +320,19 @@ conditions and a piece can meet both at once. See
 **Since Pass 75, a stale review no longer just sits, unaddressed, on the
 past day it was originally placed on** — Timeline, Week view, Daily
 Practice, and Master Agenda all stop listing a Tier 2 review there once
-it's overdue and wasn't logged that day, showing a short note instead
-("Now due — see today," or Daily Practice's own day view's longer
-"…now tracked as due — see Daily Practice") pointing at where it's
-actually live now.
-Unrelated to rescheduling — this fires whether or not the piece has ever
-been rescheduled. A Tier 1 "first touch" review and a consolidation day are
-both untouched by this. See
+it's overdue and wasn't logged that day, since it's already live and
+actionable on today's own screen instead. **Since Pass 92, a day emptied
+this way reads exactly like any other day with nothing scheduled**
+("Nothing scheduled.") — the two notes this originally shipped with
+("Now due — see today," Daily Practice's own longer "…now tracked as due
+— see Daily Practice") are gone; a day emptied purely by staleness
+doesn't get its own explanation any more than a day that was simply never
+scheduled does. Unrelated to rescheduling — this fires whether or not the
+piece has ever been rescheduled. A Tier 1 "first touch" review and a
+consolidation day are both untouched by this. See
 [Algorithms.md](Algorithms.md#timeline--scheduler) for the mechanism
-(`withLiveReviewStatus`).
+(`withLiveReviewStatus`, `classifyDayEmptyState`) and
+[Decisions.md](Decisions.md#scheduling) for the Pass 92 decision.
 
 **Since Pass 39, Daily Practice can also show a second, separate banner**
 below the "N days behind schedule" one (a day-count since Pass 70, not the
@@ -342,9 +391,10 @@ still left out) and the storage-safety fix behind it.
 switches the active piece to a random one that has real work today
 (scheduled learning or a due maintenance review) — offered only once two or
 more pieces qualify. The Maintenance-due tab has a parallel "Random start"
-panel (the same mechanism `RevivalTab` already used to suggest a starting
-point) pooling every due spot across every piece, so a review session
-doesn't always start at the top of the same list.
+panel (the same mechanism revival's own plan view uses to suggest a
+starting point — see flow 8 below) pooling every due spot across every
+piece, so a review session doesn't always start at the top of the same
+list.
 
 ## 5. Reassessing difficulty mid-practice
 
@@ -368,12 +418,16 @@ learning-phase, maintenance-due, or "needs reschedule" card) and "Pick a
 random piece to practice" pass `"today"` instead, landing directly on
 Daily Practice for that piece rather than the dashboard — you clicked
 something that means "go practice," so you land where you'd actually log
-it. Revival's "Open piece →" button deliberately still lands on Overview,
-unchanged — a revival-mode piece has its own separate tab, and Daily
-Practice isn't a meaningful destination for it mid-revival.
+it. Master Agenda's Revival subtab is the exception: its "Open piece →"
+still lands on Overview, not Daily Practice — unchanged by Pass 88, which
+folded revival's actual content *into* Daily Practice (see flow 8 below).
+That makes this button inconsistent with the other two subtabs' own
+"land where you'd act on it" reasoning above; not fixed here — see
+[Decisions.md](Decisions.md#open-questions) for why it wasn't treated as
+an obvious bug to silently correct.
 
 **Since Pass 29 follow-up**, switching pieces (or navigating to a different
-sidebar tab, or clicking "Edit piece") while the piece you're leaving has
+sidebar tab, or clicking "Edit piece settings") while the piece you're leaving has
 Interleaved mode open with an unresolved provisional log first asks for
 confirmation — see flow 2 above and
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29).
@@ -407,3 +461,62 @@ offers a "keep what's here" / "use the imported order" choice for switcher
 order — one pick for the whole import, not per piece, shown only when at
 least one candidate actually matches something already here. See
 [Decisions.md](Decisions.md#ux).
+
+## 8. Revival
+
+Entry: Piece Overview's "Start/Continue revival" button (a `primary-btn`),
+enabled once a piece's plan is actually complete (`isPlanActuallyComplete`)
+— disabled with an inline reason before that, since revival is for a piece
+already learned, not one still mid-plan. Also auto-suggested via a banner
+on Overview whenever `computeRevivalTriggers` fires (a rough run-through's
+high stop count, a chunk or combo flagged "lost," or 60+ days since
+anything was logged — see
+[Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83)).
+Starting one opens `RevivalEntryModal` — collects the tempo ladder's
+starting point as a straight BPM value — and "Begin revival" sets
+`piece.revival.active`.
+
+**Since Pass 88, revival has no tab of its own.** While
+`piece.revival.active` is true, the sidebar's "Daily Practice" item
+renders the entire revival flow itself, in place of its ordinary
+Day/Week/Interleaved/All Tasks view (which doesn't apply — a revival plan
+isn't scheduled to a calendar):
+
+1. **Reassessment** (while `!revival.reassessmentComplete`):
+   `ReassessSequencePanel` walks every base practice chunk in the piece
+   (transitions/combos are not part of this pass — see
+   [Decisions.md](Decisions.md#revival)), one at a time: a "Log time"
+   timer (stopping it logs the time in one action, no separate log step),
+   Quick rate (five presets, Lost through Solid), Current/Target BPM, an
+   optional note (collapsed to "+ Add a note" until opened), and a
+   collapsible "Chunk Info" stats dropdown. An "N of M rated" count and a
+   grid-icon button (opens a "Progress" modal — a difficulty-tinted,
+   checkmark-when-rated grid, click a square to jump to it) track progress
+   through the pass. Previous/Next move between chunks; "Finish
+   reassessment" generates the plan immediately, no separate step, whether
+   this is the first pass or a redo.
+2. **The plan** (once reassessment is complete): a "Flagged chunks"
+   summary (from ordinary, non-revival Piece Map's rough/lost flag —
+   revival's own reassessment can't set that field), a "Needs another
+   look" panel for any combo whose underlying content has failed recently,
+   then the day-by-day suggested list itself (`revival.plan.days`,
+   flagged-then-weakest-confidence first) — its day numbers are pacing
+   buckets, not calendar days, and every item is loggable on any visit
+   regardless of which suggested day it's under. Below that: "Random
+   start" (jump to a spot you wouldn't have picked yourself) and a shared
+   "Reassess difficulty" quick-pick panel for re-rating any item — chunk,
+   transition, or combo — on the fly, separate from and unscoped by the
+   reassessment pass above. "Redo reassessment" (once reassessment is
+   complete) and "End revival" sit in the header throughout.
+
+`piece.revival.tempoLadderStartFraction` is editable after entry only from
+the "Edit piece settings" page's own "Revival settings" panel (a draft field, saved with Save changes), shown while a revival is active —
+nowhere inside the revival flow itself. Ending revival (`onEndRevival`)
+resets `piece.revival` to its inactive defaults; flags and manual
+confidence set during the run are **not** cleared — they're durable chunk
+metadata, not scoped to a single revival cycle.
+
+See [Algorithms.md](Algorithms.md#revival) and
+[Decisions.md](Decisions.md#revival) for the full mechanics and design
+history, including everything this flow used to look like as a standalone
+tab before Pass 88.

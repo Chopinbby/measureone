@@ -70,8 +70,10 @@ fingerings — same shape and pattern as recordings; see
 (movements as self-contained sibling pieces sharing a `workId` — see
 [Decisions.md](Decisions.md#multi-movement-works)), backup export/import,
 `computeConfidenceAsOf` (used by Progress's "most improved" stat), Revival
-(MVP slice — entry flow, chunk/transition reassessment reusing
-`manualConfidence`, manual flagging (a boolean `weakSpot` at the time;
+(MVP slice — entry flow, base-chunk reassessment reusing
+`manualConfidence` (transitions were also individually reassessed
+through Pass 88; narrowed to base chunks only on a same-session
+follow-up — see [Decisions.md](Decisions.md#revival)), manual flagging (a boolean `weakSpot` at the time;
 merged into Pass 6's tri-state rough/lost `progress[id].flag` — see
 [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging);
 **as of Pass 54, only settable from ordinary Piece Map, not from
@@ -133,11 +135,11 @@ suggestion overlay only, doesn't touch scoring or the ladder. See
 `ChecklistItem` — see
 [Product-Principles.md](Product-Principles.md#recommend-the-highest-impact-next-action).
 **Since Pass 38**, the Overview "Start/Continue revival" button is
-promoted to a `primary-btn`, and revival-mode copy across Overview,
-Revival, and Master Agenda was reworked to read less clinically — see
-[Decisions.md](Decisions.md#revival) for what that dropped (the revival
-tab no longer surfaces why a revival was started or when the piece was
-last played, anywhere).
+promoted to a `primary-btn`, and revival-mode copy across Overview, the
+Revival tab (retired by Pass 88 — see below), and Master Agenda was
+reworked to read less clinically — see [Decisions.md](Decisions.md#revival)
+for what that dropped (why a revival was started, or when the piece was
+last played, is still surfaced nowhere).
 
 **Since Pass 32a**, the sidebar piece switcher is user-reorderable
 (persisted `piece.sortOrder`, up/down controls per row, whole-work blocks
@@ -225,6 +227,103 @@ substitute has a newly-surfaced consequence for a piece "finished away
 from the app" that was never fully logged in-app — see that Decisions.md
 entry for the gap.
 
+> Passes 84-88 shipped a substantial amount too — the Daily Practice
+> rename, a real disabled-state for `.ghost-btn`, Piece Map's difficulty
+> icon, and, biggest of all, **Revival losing its standalone tab
+> entirely**: Pass 87 retired `PieceMapTab`'s shared `sequentialMode`
+> embed in favor of a dedicated `ReassessSequencePanel`, and Pass 88
+> deleted `RevivalTab.jsx` outright, folding the whole reassessment/plan
+> flow into Daily Practice itself (rendered only while a revival is
+> active, same "mode within a tab, not a standing nav entry" precedent
+> Interleaved mode already set) — plus several same-session follow-ups on
+> direct request (the tempo-ladder-starting-point control relocating more
+> than once before settling back in Settings; per-card reassess buttons
+> replaced by one shared bottom panel; the reassessment sequence itself
+> narrowed to base practice chunks only, not transitions). See
+> [CLAUDE.md](../CLAUDE.md)'s own changelog and
+> [Decisions.md](Decisions.md#revival) for the full detail this list
+> wasn't kept current enough to carry — same gap, same reason, as the note
+> above.
+
+**Since Pass 89**, introduction order within `computeTimeline` is
+difficulty-first, not raw measure order: hard chunks and their immediate
+measure-neighbors move to the front of the introduction queue, ahead of
+easier material that comes earlier in the piece — so a hard passage late
+in a piece gets more total practice runway before the plan's deadline,
+at the deliberate cost of "day one" no longer always meaning the piece's
+literal opening measures. **Since Pass 90**, a separate, broader
+daily-workload smoothing pass replaces the old reviews-only version:
+introduction, transitions/combos, and Tier 2 reviews are all balanced
+together against a scheduleMode-aware load band, settling once every day
+is in-band rather than chasing a perfectly even load. **Same-session
+follow-up**, once rescheduling was checked against Pass 89's reorder: a
+neighbor-detection bug specific to a rescheduled remainder (a chunk could
+look adjacent to a hard chunk purely because whatever used to sit between
+them had already been practiced and dropped out of the list) was found
+and fixed. See
+[Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
+and [Decisions.md](Decisions.md#scheduling) for both.
+
+**Same broader session**, on direct request: Daily Practice can now show a
+read-only card for something genuinely completed on a day whose live
+schedule no longer lists it there (an item Pass 90's smoothing relocated,
+or a review whose due date has since advanced past that occurrence) — the
+underlying session record was never actually lost, but the day-by-day
+views only ever showed the *current* live projection until now. Scoped to
+Daily Practice only for now; Timeline/Week view/Master Agenda don't render
+individual item cards today, only rolled-up range badges, so extending
+this there is a distinct, larger change. See
+[Algorithms.md#historical-cards-on-daily-practice](Algorithms.md#historical-cards-on-daily-practice)
+and [Decisions.md](Decisions.md#ux).
+
+**Since Pass 91 (experimental v1)**, a **focus spots** mechanism: flag a
+specific passage inside a practice chunk (measure-position-validated, a new
+Wizard step and a matching Settings toggle) that needs slow, minutes-based
+drilling before it joins the chunk's normal reps/BPM tracking. A spot
+flagged at setup holds its whole chunk back from introduction entirely; one
+added later from a chunk's own Daily Practice card never pulls an
+already-scheduled chunk back off the plan. A dedicated practice card gates
+on a minimum practice time (`piece.troubleSpotDefaultMinutes`, default 5)
+before it can be logged or resolved — a countdown timer, not just a
+suggestion. Marked experimental/v1 deliberately: no Settings-side spot
+management list, and focus-spot minutes don't yet feed any cross-piece
+"time practiced" total — see
+[Decisions.md](Decisions.md#focus-spots-v1) for the full scope-fence and
+[Algorithms.md](Algorithms.md#focus-spots-v1) for the mechanism.
+
+**Passes 92-96 were a maintenance/polish arc, not backlog items** —
+worth naming here so a jump from Pass 91 straight to Pass 96 elsewhere in
+this doc doesn't read as a documentation gap the way the Pass 59-82/84-88
+jumps above do. **Pass 92** consolidated the four day-list surfaces' own
+separate "nothing left here" checks (`items.length`/`isDayFullySwept`/
+`staleReviewIds`) into one shared `classifyDayEmptyState`
+(`lib/scheduling.js`): every surface now shows exactly "Tasks
+rescheduled" or "Nothing scheduled." for an empty day, the staleness-
+specific notes ("Now due — see today," etc.) are gone, Timeline gained a
+real empty-day fallback it never had, and Timeline/Week view stopped
+special-casing rest days with their own label. **Pass 93** split Settings
+into app-wide settings (Pieces, Backup & restore) and a separate "Edit
+piece settings" page reachable from the sidebar on every tab, and fixed a
+real data-loss bug found in the process: Save used to write the edit
+form's whole draft back over the live piece, silently undoing anything
+that changed elsewhere while the form was open. **Pass 94** was five
+small UI fixes: one shared CSS rule for form-control widths (replacing
+scattered inline patches), an exit path for Interleaved mode, the
+schedule banner's catch-up button hidden while already on that day, modal
+footer spacing, and the obsolete "Tempo ratchet" editor removed from
+`LadderConfigEditor` (the field it edited had been unreachable UI since
+Pass 59's gap-proportional ratchet replaced it as the live mechanism).
+**Pass 96** redesigned the Piece Map chunk card: a new Focus spots
+column next to Related chunks, each spot linking into Daily Practice —
+an open spot to its practice card, a resolved one to the chunk's next
+scheduled day, or plain text mid-revival. See
+[CLAUDE.md](../CLAUDE.md)'s own changelog and
+[Decisions.md](Decisions.md#scheduling),
+[Decisions.md](Decisions.md#ux), and
+[Decisions.md](Decisions.md#focus-spots-v1) for the full detail (Passes
+92, 94, and 96's own decision entries respectively; Pass 93's own entry
+sits earlier in [Decisions.md](Decisions.md#ux), just above Pass 94's).
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold
@@ -260,11 +359,17 @@ assuming this section is stale.
    `handleLogSession` on every logged session) — see
    [Data-Model.md](Data-Model.md#the-piece-object) and
    [Algorithms.md#session-outcomes--the-maintenance-ladder](Algorithms.md#session-outcomes--the-maintenance-ladder).
-   **The Tier 1/Tier 2 split resolving budget contention during the
-   front-loaded introduction window is also built** (`computeTimeline`,
+   **The Tier 1/Tier 2 split placing review during the front-loaded
+   introduction window is also built** (`computeTimeline`,
    `src/lib/scheduling.js` — see
    [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
-   rule 4). **Post-run-through logging is also built**: the consolidation-day
+   rule 4). **Since Pass 90, the budget-contention part of that story is a
+   separate, broader mechanism**: daily-workload smoothing now covers
+   introduction, transitions/combos, and Tier 2 reviews together against a
+   scheduleMode-aware load band, replacing what used to be a narrower
+   pass that could only ever relieve an overloaded day by moving reviews —
+   see [Algorithms.md#timeline--scheduler](Algorithms.md#timeline--scheduler)
+   rule 5 and [Decisions.md](Decisions.md#scheduling). **Post-run-through logging is also built**: the consolidation-day
    checklist captures a stop count, and the Piece Map's rough/lost flag
    demotes a chunk's ladder stage and pins its next review to today (see
    [Repertoire-Lifecycle.md#post-run-through-logging](Repertoire-Lifecycle.md#post-run-through-logging)).

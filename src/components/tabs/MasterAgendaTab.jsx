@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, isDayFullySwept, movedIdsForDay } from "../../lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, classifyDayEmptyState, movedIdsForDay } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
@@ -204,15 +204,16 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
           // same computation ScheduleBanner uses, called once per piece.
           const behindDaysCount = countBehindDays(piece, timeline, dayNumber, chunkById);
 
-          // Pass 75 — same isDayFullySwept check DayChecklist/TodayTab/
-          // TimelineTab already apply (Pass 48, widened Pass 73): a day
-          // before the reschedule marker's asOfDay still carries its stale
-          // pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds,
-          // duplicating tasks that now also appear on their new day. Master
-          // Agenda had never had this check at all, so a rescheduled day
-          // showed real, clickable-looking tasks here that Day view already
-          // knew to collapse to "Tasks rescheduled".
-          const isFullySwept = isDayFullySwept(day, piece, chunkById);
+          // Pass 75 — same shared check DayChecklist/TodayTab/TimelineTab
+          // already apply (Pass 48, widened Pass 73; consolidated into
+          // classifyDayEmptyState, Pass 92): a day before the reschedule
+          // marker's asOfDay still carries its stale pre-reschedule
+          // newChunkIds/specialChunkIds/reviewChunkIds, duplicating tasks
+          // that now also appear on their new day. Master Agenda had never
+          // had this check at all, so a rescheduled day showed real,
+          // clickable-looking tasks here that Day view already knew to
+          // collapse to "Tasks rescheduled".
+          const emptyState = classifyDayEmptyState(day, piece, chunkById);
 
           items.push({
             pieceId,
@@ -223,7 +224,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             specialRanges,
             reviewRanges,
             specialIsCombo,
-            isFullySwept,
+            emptyState,
             totalTime: day.minutes,
             behindDaysCount,
           });
@@ -380,7 +381,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
     )
   );
 
-  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, isFullySwept, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
+  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, emptyState, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
     <div key={pieceId} className="piece-card">
       <div className="piece-card-head">
         <div>
@@ -404,8 +405,10 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
         </div>
       ) : day.type === "consolidation" ? (
         <p className="day-card-note">Full run-through of the piece</p>
-      ) : isFullySwept ? (
+      ) : emptyState === "rescheduled" ? (
         <p className="day-card-note"><em>Tasks rescheduled</em></p>
+      ) : emptyState === "empty" ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>Nothing scheduled.</div>
       ) : (
         <>
           {newRanges.length > 0 && (
@@ -431,18 +434,6 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
                 <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
               ))}
             </div>
-          )}
-          {/* withLiveReviewStatus (lib/scheduling.js) already pulled a
-              passed-due review out of day.reviewChunkIds (hence
-              reviewRanges above) — it's already live and actionable on
-              today's own card elsewhere, not stuck here. This just says
-              so instead of it silently vanishing. */}
-          {day.staleReviewIds && day.staleReviewIds.length > 0 && (
-            <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic" }}>Now due — see today</p>
-          )}
-          {newRanges.length === 0 && specialRanges.length === 0 && reviewRanges.length === 0 &&
-            !(day.staleReviewIds && day.staleReviewIds.length > 0) && (
-            <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>No tasks scheduled</div>
           )}
         </>
       )}

@@ -325,7 +325,7 @@ Worked example (Pass 29 follow-up): a "warn before leaving Interleaved mode
 with unresolved data" guard was built and verified against three routes —
 the view-mode buttons, the sidebar nav list, the piece switcher. A later
 review pass grepped every `setActiveTab`/`setActivePieceId` call site in
-`App.jsx` and found two more the sidebar can trigger ("Edit piece,"
+`App.jsx` and found two more the sidebar can trigger ("Edit piece settings,"
 finishing the "Add new piece" wizard) that had simply never been
 considered, let alone tested, because they weren't part of the three
 routes the feature was scoped around while building it. Not a subtle bug —
@@ -753,6 +753,208 @@ produced, not just in the source line that was edited. The console output
 is truncated past roughly 200 characters, so a long message needs its tail
 confirmed separately (here, by having already read the exact source line)
 rather than assumed complete from the console alone.
+
+## A console error right after a sequence of edits may be a stale HMR artifact, not a live bug
+
+Vite's dev server hot-reloads on every file save, and the in-session
+browser tool's console-message log is cumulative — it can still be holding
+an error thrown during a *transitional* state between two of your edits
+(an import removed one call before its last usage was removed, for
+instance), not the file's current, fully-consistent state. Seeing an error
+in the log is not the same as the error being live right now.
+
+Worked example (same session, twice): removing a "Related chunks" field
+from `ReassessSequencePanel.jsx` took five sequential edits — dropping the
+`findRelatedChunks` import first, then the prop, a comment, the
+computation, and finally the JSX block that used it. Reading the console
+after all five edits landed showed `ReferenceError: findRelatedChunks is
+not defined`, thrown from the exact component just edited — looked like a
+real regression. It wasn't: `grep`ping the finished file for the name
+found zero references, `npm run build` succeeded cleanly, and a live
+screenshot showed the panel rendering correctly with no crash overlay.
+Reloading the page and re-triggering the same code path reproduced the
+*identical* cached error (same file-revision timestamp in the stack
+trace) rather than a fresh one — confirming it was a leftover log entry
+from the moment between "import removed" and "usage removed," not
+anything currently reproducing. This exact pattern recurred several times
+earlier in the same broader session (`NumberInput is not defined`,
+`navItems is not defined`, `revivalTodaysRanges is not defined`), each
+time costing a full re-verification cycle before being recognized as
+stale.
+
+The generalizable habit: when a console error appears right after a batch
+of edits to the same file, don't treat it as proven live before
+cross-checking against the file's *current, saved* state — `grep` for the
+symbol, confirm the build succeeds, and take a fresh screenshot/interact
+with the actual feature. Only escalate to "this is a real bug" once the
+error reproduces against code you've re-read and confirmed is what's
+currently on disk.
+
+## Before narrowing what a shared variable contains, check every other consumer of that same variable
+
+When a variable, prop, or list is read for more than one purpose within
+the same component or module, changing what it contains to fix one of
+those purposes can silently break the others — especially when the
+breakage is a *value*, not a crash (an empty list, a `null` lookup that
+falls back quietly), so nothing errors and the change looks finished.
+`grep` every read of the variable you're about to narrow before treating
+the narrowing as safe, not just the one call site the request is actually
+about.
+
+Worked example (same session): asked to scope revival's reassessment
+sequence down to base practice chunks only (excluding transitions),
+`ReassessSequencePanel`'s `chunks` prop was the obvious thing to narrow —
+it fed the walk-through list, the "N of M rated" count, *and* (unnoticed
+at first) a `findRelatedChunks(selectedChunk, chunks)` call for the
+"Related chunks" field. Narrowing `chunks` without checking that third
+consumer would have made "Related chunks" always return empty — base
+practice chunks never overlap each other's measure ranges by
+construction, so a search restricted to that same narrowed list can never
+find anything, ever, for any chunk. Caught only because the field was
+manually checked in-browser after the change, not assumed safe from
+reading the diff. Fixed by giving the unrelated consumer its own,
+separately-scoped input (a `relatedChunkPool` prop, left at the broader
+list) instead of sharing the one variable being narrowed for a different
+reason. (The field was later removed outright in the same session on
+direct follow-up request — the pool-scoping bug and its fix are still
+worth knowing, since a future re-add of a similar field would reintroduce
+the identical trap.)
+
+## Position-based logic is only correct for the caller whose list it was written against
+
+When new logic derives a relationship from *array position* (previous/next
+element, index adjacency) rather than from the data's own identifying
+fields, it's only actually correct for whichever callers pass the array in
+its pristine, complete form. Before trusting it, grep for every existing
+caller of the function that will receive this array and check whether any
+of them pass a *filtered subset* instead — removing an element from the
+middle silently makes two originally-non-adjacent elements look adjacent by
+position, with no error and no obviously wrong output to notice.
+
+Worked example (Pass 89, caught only once the user asked for rescheduling
+to be checked against it): `sortPracticeChunksForIntroduction`'s original
+"is this chunk a hard chunk's neighbor" check compared array position
+(`practiceChunks[i-1]`/`[i+1]`) — correct for `generateAllChunks`'s
+pristine, gapless output, which is what every *other* existing caller of
+`computeTimeline` passes. But `getEffectiveTimeline` (rescheduling) calls
+the same `computeTimeline` on `subChunkSet.practiceChunks` — a *filtered*
+list containing only whatever's left unpracticed, with gaps wherever an
+already-done chunk used to sit. Once a chunk that genuinely sat between a
+hard chunk and some other chunk got marked done and dropped from that
+filtered list, the other chunk became array-adjacent to the hard chunk
+purely because nothing sat between them *in the filtered list* — wrongly
+promoting it to the hard chunk's priority tier, despite not actually being
+next to it in the piece. Reproduced directly (a hand-built reschedule
+marker, checked before and after the fix) rather than reasoned about only.
+Fixed by matching on actual measure boundaries
+(`prevChunk.end + 1 === c.start`) instead of array index — equivalent to
+the position-based version on a pristine list, and correctly finds no
+match across a gap instead of inventing one. See
+[Decisions.md](Decisions.md#scheduling) for the full incident.
+
+**Recurred in a later session (Pass 91, experimental v1), same general
+shape, different specific proxy for "identity."** A focus spot was
+originally re-homed after a chunking edit purely by checking whether its
+parent chunk *id* still existed in the new chunk set — correct only as
+long as an id, once reused, still means the same thing. It doesn't: chunk
+ids are `c${start}`, so `customChunkSize` 8 → 4 produces a "c9" under
+*both* chunkings, just meaning measures 9–16 under the first and only
+9–12 under the second. An id-existence check reads that as pure
+continuity; a spot logged at measure 14 would have silently stayed under
+a "c9" that no longer actually covers it. Fixed the same way as the Pass
+89 case — the same category of fix, not just the same category of bug —
+by checking the spot's own recorded measure position against each
+current chunk's real range (`reassociateTroubleSpots`,
+`lib/chunking.js`), never trusting the id it happens to be nested under.
+The general habit this reinforces: when *anything* acts as a stand-in for
+"this is the same thing as before" — array position, an id derived from a
+value that can itself change meaning — check what happens when the
+underlying structure it was derived from changes shape, not just whether
+the stand-in still technically exists. See
+[Decisions.md](Decisions.md#focus-spots-v1) for the full incident.
+
+## A new call added inside a widely-shared function can break every existing caller's assumptions, not just the one you're fixing
+
+`validateAndMigratePiece` (`lib/storage.js`) runs on every piece load, and
+dozens of pre-existing tests across the suite call it directly with
+deliberately minimal fixtures — that's the whole point of a migration
+function, tolerating incomplete data. Adding a *new* call inside it to a
+function that has stricter requirements than anything the migration path
+previously needed can crash every one of those callers at once, not just
+the piece shape you were actually trying to fix, and nothing about the
+new code being locally correct protects against this — it's the calling
+context's pre-existing looseness that breaks.
+
+Worked example (Pass 91, experimental v1, self-healing focus-spot
+reassociation): adding a call to `generatePracticeChunks` inside
+`validateAndMigratePiece` — to re-check a spot's chunk association on
+every load — assumed every piece reaching that point already has
+`measureDifficulty` set, since every *other* consumer of that function
+(`App.jsx`'s own `chunkSet` derivation, chiefly) always receives a
+fully-formed piece. `validateAndMigratePiece` itself had never defaulted
+that field, because nothing inside it had ever needed to read it before —
+and several of `test/storage.test.mjs`'s own long-standing fixtures
+(`fresh`, used across many unrelated tests) don't set it. Running the full
+suite immediately failed four pre-existing, unrelated tests with the same
+`TypeError` — caught before this was ever treated as working, not
+discovered later. Fixed by guarding the new call
+(`Array.isArray(migrated.measureDifficulty)`) rather than assuming the
+input was always safe. **A second, narrower instance of the same root
+issue was caught the same way, in the same function, immediately after**:
+the new field's own backfill line (`entry.troubleSpots !== undefined ?
+entry.troubleSpots.map(...) : null`) crashed on a *second* migration pass
+over already-migrated output, because a prior pass had already backfilled
+the field to `null` — and `!== undefined` is true for `null`, so `.map`
+ran on it. A dedicated idempotency test (`validateAndMigratePiece` called
+twice on its own output) already existed in the suite for unrelated
+reasons and caught it on the first run.
+
+The generalizable habit: before adding a call to a function with its own
+data requirements inside a widely-shared entry point, run the full test
+suite — not just tests for the specific change — before calling it done.
+A new dependency's requirements are a property of every *existing* caller
+of the function you added it to, not just the one you're actively
+thinking about.
+
+## A scripted multi-file or multi-substitution edit needs its actual diff read, not just its exit code
+
+A single Python (or similar) script making several string substitutions
+across one or more files is convenient for repetitive doc edits, but it
+fails in a way that's easy to miss: if one substitution's `assert
+s.count(old) == 1` trips partway through, the whole script raises and
+stops — every substitution *after* the failing one silently never runs,
+even in files that had nothing wrong with them. The script's own error
+output makes this obvious in the moment, but if the next step is "fix
+the one that failed and move on" rather than "check whether anything
+*after* it in the same script also never landed," a change gets reported
+as done when part of it quietly wasn't.
+
+Worked example (Pass 94, this same session): a batch script updated a
+short comment across five sibling field-editor files. The fourth
+substitution's expected indentation didn't match the real file, the
+script raised, and the fix-and-retry that followed only re-included the
+file that had actually failed — not the fifth file, which had never run
+at all in the original batch. It shipped, was reviewed, and the gap
+wasn't caught until a later, unrelated critical-review pass compared the
+full file list against `git diff --stat` and noticed one expected file
+simply wasn't in it.
+
+**A second, related failure mode:** a naive string-replace can succeed
+(the target string is found and swapped) while still landing in the
+*wrong place* — splicing new text into the middle of an existing sentence
+because the `old` string being matched was a prefix of a longer sentence,
+not the whole thing. This doesn't raise anything; the file changes
+exactly as instructed and still reads as broken prose. Also caught only
+by a later pass re-reading the actual diff, not by the edit itself
+reporting success.
+
+The generalizable habit: after any scripted edit — especially one
+touching several files or several spots in one file — read the real
+`git diff` (or the file itself) for every file the script was *supposed*
+to touch, not just confirm the script exited without error. A clean exit
+code proves the substitutions that ran, ran; it says nothing about
+substitutions that never got the chance to, or ones that ran in the wrong
+spot.
 
 ## When you're not sure
 

@@ -265,6 +265,19 @@ piece = {
                          // absent until first migrated or first overridden, which every
                          // reader already treats identically to null.
   revival,               // see #revival below
+  troubleSpotsEnabled,   // boolean, default false — Pass 91 (experimental v1), see #focus-spots-v1
+                         // below. Set from the Wizard's yes/no step, changeable later from
+                         // Settings. Scoped to UI only: it gates whether the "add a focus
+                         // spot" affordances are offered, never whether an already-flagged
+                         // spot keeps gating/pausing its chunk — scheduling reads
+                         // focusSpotGate (lib/scheduling.js) directly off
+                         // progress[id].troubleSpots, not off this flag.
+  troubleSpotDefaultMinutes, // number, default 5 (was 10 — lowered same-session, before this
+                         // ever shipped) — Pass 91 (experimental v1). Enforced, not just
+                         // suggested: FocusSpotCard.jsx disables both "Not yet, log time" and
+                         // "Yes, log BPM" until this many minutes are logged (timer or the
+                         // manual field), min={1} enforced in both editors so it can never be
+                         // 0 and trivially bypassed. Piece-level only; no per-spot override.
 }
 
 ChunkProgress = {
@@ -561,6 +574,11 @@ ChunkProgress = {
                                 // recomputed-every-time decision (stage:null and zero sessions) —
                                 // it doesn't write back to this field, so tier1Done stays
                                 // permanently false and unused even now that Tier 1 itself exists.
+  troubleSpots,                 // TroubleSpot[] | null, default null (Pass 91, experimental v1) —
+                                // see #focus-spots-v1 below for the full shape and mechanism.
+                                // Backfills to null, not [], same false-import-conflict reasoning
+                                // as every ladder-state field above — every reader treats
+                                // `entry.troubleSpots || []` identically either way.
 }
 ```
 
@@ -923,10 +941,13 @@ revival = {
                               // this doesn't change what happens to old data.
   tempoLadderStartFraction,  // number, default 0.6 — starting point for computeTempoLadder,
                               // as a fraction of target BPM. Collected at revival entry
-                              // (RevivalEntryModal) and editable afterward from RevivalTab's
-                              // "Revival settings" panel — see Algorithms.md#revival
-  reassessmentComplete,      // boolean — gates the RevivalTab UI between the reassessment
-                              // pass and the generated plan
+                              // (RevivalEntryModal) and editable afterward from SettingsTab's
+                              // "Revival settings" panel (shown only while isInRevival(piece);
+                              // RevivalTab's own panel of the same name before Pass 88, which
+                              // deleted RevivalTab.jsx) — see Algorithms.md#revival
+  reassessmentComplete,      // boolean — gates whether TodayTab's revival branch (Pass 88;
+                              // RevivalTab before it) shows the reassessment pass or the
+                              // generated plan
   plan,                      // null | { days: [{ dayNumber, itemIds, minutes }], totalItems,
                               //          generatedAt } — see computeRevivalPlan, Algorithms.md#revival
 }
@@ -937,12 +958,6 @@ when a piece-wide tempo override existed — left stored-but-unread rather than
 migrated away (non-destructive; nothing reads it). New and freshly-defaulted
 `revival` objects (`defaultPiece()` in Wizard.jsx, and storage.js's
 fallback for a piece with no `revival` object at all) no longer include it.
-  reassessmentComplete,      // boolean — gates the RevivalTab UI between the reassessment
-                              // pass and the generated plan
-  plan,                      // null | { days: [{ dayNumber, itemIds, minutes }], totalItems,
-                              //          generatedAt } — see computeRevivalPlan, Algorithms.md#revival
-}
-```
 
 `handleEndRevival` resets this object back to its `active: false` defaults
 (clearing `startedAt` in the same write); it does **not** clear
@@ -968,6 +983,102 @@ through a faster 5-preset UI (`CONFIDENCE_PRESETS`, `src/lib/constants.js`
 — labels relabeled Lost/Rough/OK/Comfortable/Solid in Pass 54, same five
 0/25/50/75/100 values) rather than a new 0-100 (or 0-4) field. See
 [Decisions.md](Decisions.md#revival) for why.
+
+## Focus spots (v1)
+
+**Experimental, Pass 91.** A focus spot is a specific passage within a
+practice chunk that needs slow, deliberate, minutes-based drilling before
+it's ready for the chunk's normal reps/BPM tracking — an awkward stretch, a
+tricky rhythm, a spot that keeps getting forgotten; deliberately not framed
+as purely technical (see [Decisions.md](Decisions.md#focus-spots-v1) for
+the naming history). Built additively on top of the existing data model,
+same spirit as Revival above: no separate top-level collection, just a new
+array nested under the chunk's own `progress[id]`.
+
+```js
+TroubleSpot = {
+  id,           // string, e.g. "fs_<timestamp>_<random>"
+  name,         // string — what the learner called it
+  position,     // string, required (not optional as of the same-session
+                // follow-up below) — a measure label like "47", "47a", or
+                // "47-49", validated by parseMeasurePosition (lib/utils.js)
+                // against the piece's own totalMeasures at both creation
+                // points (Wizard's FocusSpotsStep, ChecklistItem's inline
+                // add-spot form). Still just the display string — the
+                // parsed numbers below are what anything actually reads.
+  startMeasure, // number | null — parsed from position at creation time
+  endMeasure,   // (or edit time, for the Wizard's own edit path). null on
+                // a spot saved before this validation existed and never
+                // recoverable from its old position text either (see
+                // backfillSpotMeasures, lib/storage.js) — no ground truth
+                // to check, so it's left exactly as it is rather than
+                // guessed at. This is what reassociateTroubleSpots
+                // (lib/chunking.js) matches against a chunk's own
+                // start/end range to find this spot's real current home,
+                // instead of trusting whichever chunk id it happens to be
+                // nested under — see Algorithms.md#focus-spots-v1.
+  length,       // reserved, always null in v1 — no UI reads or writes it.
+                // Kept in the schema now specifically so a future pass
+                // (merging resolved spots upward into larger units) has
+                // somewhere to put it without a schema change — deliberately
+                // deferred, not built, this pass.
+  fromSetup,    // boolean — true only for a spot created via the Wizard's
+                // "Focus spots" step; false for one added later from a
+                // chunk's own Daily Practice card ("+ Add a focus spot",
+                // ChecklistItem.jsx). This is the one field the whole
+                // scheduling mechanism turns on — see focusSpotGate,
+                // lib/scheduling.js, and Algorithms.md#focus-spots-v1 for
+                // why the distinction has to be captured at creation time
+                // rather than derived later.
+  resolved,     // boolean, default false
+  resolvedBpm,  // number | null — the clean BPM entered when "Achieved /
+                // Doable" was confirmed. Also what seeds the parent chunk's
+                // own progress[id].practiceBPM once every spot on it
+                // resolves (App.jsx's handleResolveFocusSpot) — see
+                // Algorithms.md#focus-spots-v1.
+  resolvedAt,   // epoch ms | null
+  sessions: [{ loggedAt, loggedDate, durationSeconds }],
+                // One entry per logged attempt against this ONE spot —
+                // structurally separate from the parent chunk's own
+                // `sessions` array above, and deliberately never merged
+                // into it: a trouble-spot session is not evidence of
+                // whole-chunk practice, so nothing that reads
+                // progress[id].sessions for confidence/outcome computation
+                // ever sees these. No `day` (plan-day int) field, unlike a
+                // normal chunk session — a gated chunk has no plan day at
+                // all to attach one to, so this only ever carries a real
+                // calendar date (loggedDate), the same field week-boundary
+                // math and cross-piece totals already key off elsewhere in
+                // this codebase.
+}
+```
+
+**Two entry points**, both writing into the same array, distinguished only
+by `fromSetup`:
+
+1. The Wizard's own "Focus spots" step, right after the difficulty
+   heat-map — a piece-level yes/no (`piece.troubleSpotsEnabled`), and
+   answering yes opens a paginated (15 chunks/page) chunk-by-chunk spot
+   editor inline, writing `fromSetup: true`.
+2. A chunk's own Daily Practice card, "+ Add a focus spot"
+   (`ChecklistItem.jsx`, shown only while `piece.troubleSpotsEnabled` and
+   the chunk isn't already paused) — for a spot discovered mid-practice,
+   writing `fromSetup: false`.
+
+`piece.troubleSpotsEnabled` (see the piece object above) is UI-only — it
+gates whether the "add a spot" affordances are offered, never whether an
+already-flagged spot keeps gating or pausing its chunk.
+`piece.troubleSpotDefaultMinutes` is **not** UI-only in that same sense as
+of a same-session follow-up — see the field's own comment above and
+[Algorithms.md](Algorithms.md#focus-spots-v1) for the enforced minimum it
+now drives on `FocusSpotCard.jsx`. Neither field ever affects
+`focusSpotGate` (`lib/scheduling.js`) or the introduction-gating mechanism
+itself — that reads `progress[id].troubleSpots` directly, regardless of
+either piece-level setting. See
+[Decisions.md](Decisions.md#focus-spots-v1) for the judgment calls behind
+`fromSetup`, the BPM-seeding rule, and what this pass deliberately left
+out (Settings-side spot management, wiring focus-spot minutes into any
+cross-piece "time practiced" total).
 
 ## Known simplifications worth knowing about
 

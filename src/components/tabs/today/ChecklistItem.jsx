@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Check } from "lucide-react";
-import { formatRange, formatDuration, todayISODate } from "../../../lib/utils";
+import { Check, Plus, Target } from "lucide-react";
+import { formatRange, formatDuration, todayISODate, parseMeasurePosition } from "../../../lib/utils";
 import { ROLE_LABEL, DIFFICULTY_META, SESSION_OUTCOME_META } from "../../../lib/constants";
 import {
   computeConfidence,
@@ -11,6 +11,7 @@ import {
   formatLadderStatus,
   resolveRequiredReps,
 } from "../../../lib/confidence";
+import { focusSpotGate } from "../../../lib/scheduling";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
 import { ReassessPanel } from "./ReassessPanel";
@@ -28,8 +29,64 @@ export function ChecklistItem({
   memoryAnchor,
   onSetMemoryAnchor,
   onReassessRange,
+  // Pass 91 (experimental v1) — only passed by DayChecklist's live (non-
+  // historical) render path; a chunk that's already paused by an unresolved
+  // spot doesn't need it (there's nowhere to show it once the paused note
+  // takes over the card body), and it's never offered on a transition/combo
+  // card (chunk.kind !== "section") — see the render below.
+  onAddFocusSpot,
+  // Historical mode (DayChecklist's record-of-what-was-done cards, added
+  // when this item's own live schedule slot has since moved elsewhere —
+  // see findHistoricalItemsForDay, lib/history.js): read-only, no
+  // logging/undo/note-editing controls, since acting on a day that isn't
+  // this item's current live slot could produce confusing data (a fresh
+  // log entry dated to a day the ladder no longer treats as this chunk's
+  // due day). `day` is still the historical day itself, so the "Logged:
+  // ..." line below correctly reports THAT day's own session, not the
+  // chunk's latest one. No separate "completed here" badge — being on a
+  // specific day already implies that, per direct request — and the
+  // requirement/spaced-repetition lines are skipped too, since what
+  // actually happened is already stated by the "Logged: ..." line; those
+  // two describe what's still needed *going forward*, which isn't this
+  // card's question. The dashed card border (`.checklist-item.historical`,
+  // App.jsx) is what marks it as historical now, not any text/tag.
+  historical = false,
+  nextOccurrenceDay,
+  onGoToNextOccurrence,
 }) {
   const entry = piece.progress[chunk.id] || {};
+  // Pass 91 (experimental v1) — an unresolved spot pauses this card's
+  // regular practice UI regardless of *how* it was added (fromSetup only
+  // matters to computeTimeline's introduction gate, lib/scheduling.js —
+  // once a card is showing at all, any open spot pauses it). Never true in
+  // historical mode: a read-only record of a day that's already passed has
+  // nothing to pause.
+  const unresolvedFocusSpots = focusSpotGate(entry).unresolved;
+  const isPaused = !historical && unresolvedFocusSpots.length > 0;
+  const [addFocusSpotOpen, setAddFocusSpotOpen] = useState(false);
+  const [focusSpotName, setFocusSpotName] = useState("");
+  const [focusSpotPosition, setFocusSpotPosition] = useState("");
+  const canAddFocusSpot =
+    !historical && !isPaused && typeof onAddFocusSpot === "function" && chunk.kind === "section" && piece.troubleSpotsEnabled;
+  // Required, not optional — a spot with no real measure reference can't be
+  // matched back to a chunk if this piece's measures/chunking ever change
+  // (reassociateTroubleSpots, lib/chunking.js), so it's validated the same
+  // way at both places a spot can be created (this form and the Wizard's
+  // FocusSpotsStep).
+  const focusSpotPositionParsed = parseMeasurePosition(focusSpotPosition, piece.totalMeasures);
+  const submitAddFocusSpot = () => {
+    const name = focusSpotName.trim();
+    if (!name || !focusSpotPositionParsed) return;
+    onAddFocusSpot(chunk.id, {
+      name,
+      position: focusSpotPosition.trim(),
+      startMeasure: focusSpotPositionParsed.start,
+      endMeasure: focusSpotPositionParsed.end,
+    });
+    setFocusSpotName("");
+    setFocusSpotPosition("");
+    setAddFocusSpotOpen(false);
+  };
   const checked = (entry.doneDays || []).includes(day);
   // Multiple sessions can now legitimately share a plan-day (a Tier 1
   // touch, a due review, a re-attempt) — this surface shows/undoes just
@@ -119,7 +176,17 @@ export function ChecklistItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);
 
-  const canLog = hasRepsDraft && hasBpmDraft;
+  // isPaused belongs here, not just on the blocks below that stop
+  // rendering while paused: the leading checkmark button (right below, in
+  // the render) reads canLog directly and isn't nested inside any of those
+  // isPaused-gated blocks, so without it here a reps/BPM draft typed in
+  // before a focus spot got added to this same chunk left that button
+  // clickable — and clicking it called submitLog for real, silently, on a
+  // card that was telling the learner practice was paused. Found in review,
+  // fixed here rather than by threading a second condition onto the button
+  // itself, so canLog, its tooltip text, and submitLog's own guard all stay
+  // correct together automatically.
+  const canLog = hasRepsDraft && hasBpmDraft && !isPaused;
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   const practiceBPM = entry.practiceBPM ?? null;
   // Single source of truth for "how many reps does this chunk actually
@@ -230,8 +297,23 @@ export function ChecklistItem({
   };
 
   return (
-    <div className={`checklist-item ${checked ? "checked" : ""}`}>
-      {checked ? (
+    <div
+      // Pass 96 — a stable arrival target for Piece Map's resolved-focus-
+      // spot links (App.jsx's scroll-and-highlight effect). Only unique
+      // per screen on Day view / "Due today", which is what that link
+      // always lands on; "All Tasks" renders one DayChecklist per plan
+      // day and can legitimately show the same chunk more than once
+      // (new, then reviewed again later), which would repeat this id —
+      // a known, accepted imperfection (getElementById just finds the
+      // first one), not chased further here.
+      id={`checklist-item-${chunk.id}`}
+      className={`checklist-item ${checked ? "checked" : ""} ${historical ? "historical" : ""} ${isPaused ? "paused" : ""}`}
+    >
+      {historical ? (
+        <span className="checklist-check" aria-hidden="true">
+          <Check size={18} />
+        </span>
+      ) : checked ? (
         <button
           className="checklist-check"
           onClick={() => onUnlogSession(chunk.id, day)}
@@ -242,7 +324,7 @@ export function ChecklistItem({
               : "Removes this log entry, but can't reverse tempo or schedule changes it already caused — a later session has been logged since, or this entry predates undo support."
           }
         >
-          <Check size={16} />
+          <Check size={18} />
         </button>
       ) : (
         <button
@@ -250,7 +332,7 @@ export function ChecklistItem({
           className="checklist-check-empty"
           disabled={!canLog}
           aria-label="Mark done"
-          title={canLog ? "Mark done" : "Fill in reps and BPM first"}
+          title={canLog ? "Mark done" : isPaused ? "Regular practice is paused — resolve the focus spot first" : "Fill in reps and BPM first"}
           onClick={submitLog}
         />
       )}
@@ -263,12 +345,95 @@ export function ChecklistItem({
           <span className="conf-pill mono">{conf}%</span>
         </div>
 
-        {/* Opt-in: only rendered where a caller passes onReassessRange —
-            currently RevivalTab's post-reassessment plan/escalation cards.
-            TodayTab's own day checklist and DueReviewPanel don't pass this
-            prop, so they keep their existing single, shared "today's
-            ranges" ReassessPanel at the bottom of the day instead of
-            gaining a second, per-item one. Unlike PieceMapTab/InterleavePanel
+        {/* Pass 91 (experimental v1) — a chunk with an unresolved focus spot
+            pauses here: the rest of this card's regular practice UI
+            (requirement line, timer, log inputs, the log button itself) is
+            suppressed below, in favor of this one note. Mirrors the
+            suppression-without-removal treatment needsRelearning already
+            gets on an in-progress chunk's review — the card stays, it just
+            isn't actionable the normal way right now. */}
+        {isPaused && (
+          <div className="paused-note">
+            <Target size={14} aria-hidden="true" />
+            <span>
+              Regular practice paused. {unresolvedFocusSpots.length} focus spot{unresolvedFocusSpots.length === 1 ? "" : "s"} to
+              work through first.
+              <br />
+              <button
+                type="button"
+                className="link-btn"
+                style={{ marginTop: 4 }}
+                onClick={() => document.getElementById("focus-spots-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                Jump to focus spot ↑
+              </button>
+            </span>
+          </div>
+        )}
+
+        {canAddFocusSpot && !addFocusSpotOpen && (
+          <button type="button" className="link-btn" onClick={() => setAddFocusSpotOpen(true)}>
+            <Plus size={12} /> Add a focus spot
+          </button>
+        )}
+        {canAddFocusSpot && addFocusSpotOpen && (
+          <div className="ts-add-form">
+            <label className="field">
+              <span>Name</span>
+              <input
+                type="text"
+                value={focusSpotName}
+                onChange={(e) => setFocusSpotName(e.target.value)}
+                placeholder="e.g. the descending run"
+              />
+            </label>
+            <label className="field">
+              <span>Measure</span>
+              <input
+                type="text"
+                value={focusSpotPosition}
+                onChange={(e) => setFocusSpotPosition(e.target.value)}
+                placeholder="e.g. 24, 24a, or 24-25"
+              />
+              {focusSpotPosition.trim() && !focusSpotPositionParsed && (
+                <p className="tip-line">
+                  Enter a measure number within this piece (e.g. 24, 24a, or 24-25). Use{" "}
+                  <em>a</em> or <em>b</em> for half measures.
+                </p>
+              )}
+            </label>
+            <div className="ts-form-actions">
+              <button
+                type="button"
+                className="ghost-btn sm"
+                onClick={() => {
+                  setAddFocusSpotOpen(false);
+                  setFocusSpotName("");
+                  setFocusSpotPosition("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-btn sm"
+                disabled={!focusSpotName.trim() || !focusSpotPositionParsed}
+                onClick={submitAddFocusSpot}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Opt-in: only rendered where a caller passes onReassessRange — no
+            current caller does (revival's post-reassessment plan/escalation
+            cards passed it through Pass 88, then stopped: moved to one
+            shared, bottom-of-plan ReassessPanel instead, mirroring how
+            TodayTab's own day checklist and DueReviewPanel already worked).
+            Left in place rather than removed — a future caller wanting a
+            per-item reassess control still has a working opt-in to reach
+            for. Unlike PieceMapTab/InterleavePanel
             (one stateful "current chunk" slot reused across Previous/Next
             or rotation), each ChecklistItem here is already keyed to one
             stable chunk by its own list .map() — there's no cross-chunk
@@ -345,15 +510,17 @@ export function ChecklistItem({
             Overlearning: practice tempo ({practiceBPM} BPM) is now above target ({targetBPM} BPM).
           </p>
         ) : null}
-        <p className="tip-line"><strong>{requirementText}</strong></p>
-        <p className="tip-line">
-          Spaced Repetition:{" "}
-          {ladderStatus
-            ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
-                ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
-              }`
-            : "not started yet"}
-        </p>
+        {!historical && !isPaused && <p className="tip-line"><strong>{requirementText}</strong></p>}
+        {!historical && !isPaused && (
+          <p className="tip-line">
+            Spaced Repetition:{" "}
+            {ladderStatus
+              ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
+                  ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
+                }`
+              : "not started yet"}
+          </p>
+        )}
         {!isFirstEncounter && practiceBPM == null && targetBPM ? (
           <p className="tip-line">Target tempo: {targetBPM} BPM</p>
         ) : null}
@@ -361,57 +528,61 @@ export function ChecklistItem({
           <p className="tip-line">Tempo ladder: {tempoLadder.join(" → ")} BPM</p>
         )}
 
-        <div className="timer-row">
-          <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
-            {timerRunning ? "Stop" : "Start"} timer
-          </button>
-          {timerRunning ? (
-            <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
-          ) : (
-            <label className="timer-manual">
-              <span>minutes practiced</span>
+        {!historical && !isPaused && (
+          <div className="timer-row">
+            <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
+              {timerRunning ? "Stop" : "Start"} timer
+            </button>
+            {timerRunning ? (
+              <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
+            ) : (
+              <label className="timer-manual">
+                <span>minutes practiced</span>
+                <NumberInput
+                  value={durationSeconds ? Math.round(durationSeconds / 60) : ""}
+                  min={0}
+                  onCommit={(n) => setDurationSeconds(Math.round(n * 60))}
+                  placeholder="e.g. 10"
+                />
+              </label>
+            )}
+          </div>
+        )}
+
+        {!historical && !isPaused && (
+          <div className="log-row">
+            <label>
+              <span>Clean reps (aim {requiredReps})</span>
               <NumberInput
-                value={durationSeconds ? Math.round(durationSeconds / 60) : ""}
+                value={reps}
                 min={0}
-                onCommit={(n) => setDurationSeconds(Math.round(n * 60))}
-                placeholder="e.g. 10"
+                onCommit={(n) => setReps(n)}
+                onDraftChange={(text) => setHasRepsDraft(text !== "")}
+                placeholder={String(requiredReps)}
+                acceptPlaceholderOnTab
               />
             </label>
-          )}
-        </div>
-
-        <div className="log-row">
-          <label>
-            <span>Clean reps (aim {requiredReps})</span>
-            <NumberInput
-              value={reps}
-              min={0}
-              onCommit={(n) => setReps(n)}
-              onDraftChange={(text) => setHasRepsDraft(text !== "")}
-              placeholder={String(requiredReps)}
-              acceptPlaceholderOnTab
-            />
-          </label>
-          <label>
-            <span>BPM achieved</span>
-            <NumberInput
-              value={bpm}
-              min={20}
-              onCommit={(n) => setBpm(n)}
-              onDraftChange={(text) => setHasBpmDraft(text !== "")}
-              acceptPlaceholderOnTab
-              placeholder={
-                practiceBPM != null
-                  ? String(practiceBPM)
-                  : suggestedStartingBPM != null
-                  ? String(suggestedStartingBPM)
-                  : targetBPM
-                  ? String(targetBPM)
-                  : "e.g. 88"
-              }
-            />
-          </label>
-        </div>
+            <label>
+              <span>BPM achieved</span>
+              <NumberInput
+                value={bpm}
+                min={20}
+                onCommit={(n) => setBpm(n)}
+                onDraftChange={(text) => setHasBpmDraft(text !== "")}
+                acceptPlaceholderOnTab
+                placeholder={
+                  practiceBPM != null
+                    ? String(practiceBPM)
+                    : suggestedStartingBPM != null
+                    ? String(suggestedStartingBPM)
+                    : targetBPM
+                    ? String(targetBPM)
+                    : "e.g. 88"
+                }
+              />
+            </label>
+          </div>
+        )}
         {noteText && !noteOpen && <p className="tip-line"><strong>Notes:</strong> {noteText}</p>}
         {canEditNote && (
           noteOpen ? (
@@ -441,13 +612,33 @@ export function ChecklistItem({
             </button>
           )
         )}
-        <label className="fail-override-row">
-          <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />
-          <span>Needs more work (lowers practice tempo, increases chunk visibility)</span>
-        </label>
-        <button className="primary-btn sm" disabled={!canLog} style={{ marginTop: 8, alignSelf: "flex-start" }} onClick={submitLog}>
-          {checked ? "Log another attempt" : "Log practice"}
-        </button>
+        {historical && onGoToNextOccurrence && (
+          nextOccurrenceDay != null ? (
+            <button
+              type="button"
+              className="link-btn"
+              style={{ alignSelf: "flex-start" }}
+              onClick={() => onGoToNextOccurrence(nextOccurrenceDay)}
+            >
+              Go to next scheduled practice (Day {nextOccurrenceDay}) →
+            </button>
+          ) : (
+            <p className="tip-line" style={{ fontStyle: "italic" }}>
+              Not currently scheduled again within this plan.
+            </p>
+          )
+        )}
+        {!historical && !isPaused && (
+          <>
+            <label className="fail-override-row">
+              <input type="checkbox" checked={manualFail} onChange={(e) => setManualFail(e.target.checked)} />
+              <span>Needs more work (lowers practice tempo, increases chunk visibility)</span>
+            </label>
+            <button className="primary-btn sm" disabled={!canLog} style={{ marginTop: 8, alignSelf: "flex-start" }} onClick={submitLog}>
+              {checked ? "Log another attempt" : "Log practice"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

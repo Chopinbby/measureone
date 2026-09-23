@@ -23,6 +23,7 @@ import {
   computeRemainingConnectorIds,
   computeRescheduleRemainder,
   isDayFullySwept,
+  movedIdsForDay,
   withLiveReviewStatus,
   computeAbandonedPlanReminder,
 } from "../src/lib/scheduling.js";
@@ -606,6 +607,56 @@ describe("Pass 75 follow-up — isDayFullySwept also recognizes an id done on a 
     // is real, unaddressed, still-due work — the day must render
     // normally, not collapse.
     assert.equal(isDayFullySwept(day1, piece), false);
+  });
+
+  test("[regression] the exact mixed day above: movedIdsForDay must still identify c1 individually, even though the day as a whole doesn't sweep", () => {
+    // Reported live: checking off the one genuinely-open item on a mixed
+    // day like this (a real review, alongside a chunk the reschedule had
+    // already relocated) left the moved chunk sitting there alone,
+    // looking exactly like a fresh task that had just appeared — it had
+    // been on the day's list the whole time, unfiltered, because every
+    // renderer (DayChecklist, TimelineTab, WeekView, MasterAgendaTab)
+    // only ever had isDayFullySwept's single collapsed boolean to go on:
+    // "not fully swept" meant "render every original id," with no way to
+    // filter out the ones that WERE individually moved. movedIdsForDay is
+    // what those renderers now use instead, filtering per item rather
+    // than deciding only whether to collapse the whole day.
+    const piece = basePiece({
+      progress: {
+        c1: { doneDays: [5] }, // introduced here, but done on day 5 — moved
+        c9: { doneDays: [1] }, // c9's own introduction; today's review is genuinely still open
+      },
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: [], remainingConnectorIds: [], previous: null },
+    });
+    const day1 = { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: ["c9"] };
+    const moved = movedIdsForDay(day1, piece);
+    assert.equal(moved.has("c1"), true, "c1 was done on a different day — it's been relocated and must be filtered from this one");
+    assert.equal(moved.has("c9"), false, "c9's review is genuinely still open here — it must never be treated as moved");
+  });
+
+  test("[regression] a connector genuinely done on its own day must never read as moved just because a linked neighbor is untouched", () => {
+    // Found live while verifying the fix above: t1 (a transition linking
+    // c1 and c5) is logged exactly on day 1 — real, on-time, completed
+    // work — but c5 (one of its two linked chunks) is still untouched and
+    // genuinely due to be relocated by the reschedule. The linkedIds
+    // fallback exists so a connector rides along into the remainder when
+    // a neighbor moves (a forward-looking "does this need fresh
+    // placement" question) — it must never retroactively override
+    // "was today's own task already satisfied", which is a completely
+    // separate, backward-looking question. Without the fix, t1's own
+    // doneDays=[1] was ignored entirely once the fallback fired, and the
+    // day read as though t1 had been swept away too — even though it was
+    // sitting right there, checked off, exactly where and when it was
+    // supposed to be.
+    const piece = basePiece({
+      progress: { t1: { doneDays: [1] } }, // t1 itself done, exactly on day 1
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c5", "c9"], remainingConnectorIds: [], previous: null },
+    });
+    const day1 = { dayNumber: 1, newChunkIds: ["c9"], specialChunkIds: ["t1"], reviewChunkIds: [] };
+    const chunkById = { t1: { kind: "transition", linkedIds: ["c1", "c5"] } };
+    const moved = movedIdsForDay(day1, piece, chunkById);
+    assert.equal(moved.has("t1"), false, "t1 was done exactly on this day — a linked neighbor being untouched must not override that");
+    assert.equal(moved.has("c9"), true, "c9 is genuinely untouched and on the marker — it must still be recognized as moved");
   });
 
   test("[regression] a genuine, not-yet-logged Tier 2 review must never read as swept, no matter how stale its chunk's prior doneDays look", () => {

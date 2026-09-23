@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDaysISO, todayISODate, formatRange, mergeRanges, formatMinutes, clamp } from "../../../lib/utils";
 import { totalDueMinutes, computeDueOnDate } from "../../../lib/maintenance";
-import { isDayFullySwept } from "../../../lib/scheduling";
+import { isDayFullySwept, movedIdsForDay } from "../../../lib/scheduling";
 
 /* ------------------------------------------------------------------ */
 /*  Week view — 7 days at a glance, current day highlighted.           */
@@ -189,7 +189,6 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
       <div className="week-grid">
         {days.map((d) => {
           const isCurrent = d.dayNumber === currentDay;
-          const specialIsCombo = d.specialChunkIds.some((id) => chunkById[id]?.kind === "combo");
           // Pass 75 — same isDayFullySwept check DayChecklist/TodayTab's
           // own single-day view/TimelineTab already apply (Pass 48, widened
           // Pass 73): a day before the reschedule marker's asOfDay still
@@ -200,6 +199,17 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
           // clicking into (Day view) already knew to collapse to "Tasks
           // rescheduled" — the exact report this pass exists to fix.
           const isFullySwept = isDayFullySwept(d, piece, chunkById);
+          // A day that ISN'T fully swept (e.g. a genuinely still-open
+          // review keeps it from collapsing above) can still have SOME of
+          // its own ids individually relocated elsewhere by the
+          // reschedule — filtered out here so a moved chunk doesn't also
+          // render on its old day, duplicating the same range that now
+          // legitimately shows on its new one.
+          const movedIds = movedIdsForDay(d, piece, chunkById);
+          const visibleNewIds = d.newChunkIds.filter((id) => !movedIds.has(id));
+          const visibleSpecialIds = d.specialChunkIds.filter((id) => !movedIds.has(id));
+          const visibleReviewIds = d.reviewChunkIds.filter((id) => !movedIds.has(id));
+          const specialIsCombo = visibleSpecialIds.some((id) => chunkById[id]?.kind === "combo");
           return (
             <button
               key={d.dayNumber}
@@ -232,26 +242,26 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
                 <p className="day-card-note"><em>Tasks rescheduled</em></p>
               ) : (
                 <>
-                  {d.newChunkIds.length > 0 && (
+                  {visibleNewIds.length > 0 && (
                     <div className="day-card-group">
                       <span className="day-card-tag new">New</span>
-                      {mergedRangesFor(d.newChunkIds).map((r) => (
+                      {mergedRangesFor(visibleNewIds).map((r) => (
                         <span key={`new-${r.start}-${r.end}`} className="chip">{formatRange(r.start, r.end)}</span>
                       ))}
                     </div>
                   )}
-                  {d.specialChunkIds.length > 0 && (
+                  {visibleSpecialIds.length > 0 && (
                     <div className="day-card-group">
                       <span className="day-card-tag special">{specialIsCombo ? "Focus" : "Review"}</span>
-                      {mergedRangesFor(d.specialChunkIds).map((r) => (
+                      {mergedRangesFor(visibleSpecialIds).map((r) => (
                         <span key={`special-${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
                       ))}
                     </div>
                   )}
-                  {d.reviewChunkIds.length > 0 && (
+                  {visibleReviewIds.length > 0 && (
                     <div className="day-card-group">
                       <span className="day-card-tag review">Review</span>
-                      {mergedRangesFor(d.reviewChunkIds).map((r) => (
+                      {mergedRangesFor(visibleReviewIds).map((r) => (
                         <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                       ))}
                     </div>
@@ -264,7 +274,7 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
                   {d.staleReviewIds && d.staleReviewIds.length > 0 && (
                     <p className="day-card-note" style={{ fontSize: 11, fontStyle: "italic" }}>Now due — see today</p>
                   )}
-                  {d.newChunkIds.length === 0 && d.specialChunkIds.length === 0 && d.reviewChunkIds.length === 0 &&
+                  {visibleNewIds.length === 0 && visibleSpecialIds.length === 0 && visibleReviewIds.length === 0 &&
                     !(d.staleReviewIds && d.staleReviewIds.length > 0) && (
                     <p className="day-card-note">Nothing scheduled</p>
                   )}

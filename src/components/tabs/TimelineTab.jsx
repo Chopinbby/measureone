@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import { formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
-import { classifyDayCompletion, isDayFullySwept } from "../../lib/scheduling";
+import { classifyDayCompletion, isDayFullySwept, movedIdsForDay } from "../../lib/scheduling";
 import { ScheduleBanner } from "../ScheduleBanner";
 
 export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, realCurrentDay, onSelectDay, onReschedule }) {
@@ -41,6 +41,16 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, rea
               // content (done or still legitimately scheduled) renders
               // normally.
               const isFullySwept = isDayFullySwept(d, piece, chunkById);
+              // A day that ISN'T fully swept (e.g. a genuinely still-open
+              // review keeps it from collapsing above) can still have SOME
+              // of its own ids individually relocated elsewhere by the
+              // reschedule — filtered out here so a moved chunk doesn't
+              // also render on its old day, duplicating the same range
+              // that now legitimately shows on its new one.
+              const movedIds = movedIdsForDay(d, piece, chunkById);
+              const visibleNewIds = d.newChunkIds.filter((id) => !movedIds.has(id));
+              const visibleSpecialIds = d.specialChunkIds.filter((id) => !movedIds.has(id));
+              const visibleReviewIds = d.reviewChunkIds.filter((id) => !movedIds.has(id));
               return (
                 <button
                   key={d.dayNumber}
@@ -62,28 +72,28 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, rea
                     <p className="day-card-note"><em>Tasks rescheduled</em></p>
                   ) : (
                     <>
-                      {d.newChunkIds.length > 0 && (
+                      {visibleNewIds.length > 0 && (
                         <div className="day-card-group">
                           <span className="day-card-tag new">New</span>
-                          {mergedRangesFor(d.newChunkIds).map((r) => (
+                          {mergedRangesFor(visibleNewIds).map((r) => (
                             <span key={`${r.start}-${r.end}`} className="chip">{formatRange(r.start, r.end)}</span>
                           ))}
                         </div>
                       )}
-                      {d.specialChunkIds.length > 0 && (
+                      {visibleSpecialIds.length > 0 && (
                         <div className="day-card-group">
                           <span className="day-card-tag special">
-                            {d.specialChunkIds.some((id) => chunkById[id].kind === "combo") ? "Focus" : "Review"}
+                            {visibleSpecialIds.some((id) => chunkById[id].kind === "combo") ? "Focus" : "Review"}
                           </span>
-                          {mergedRangesFor(d.specialChunkIds).map((r) => (
+                          {mergedRangesFor(visibleSpecialIds).map((r) => (
                             <span key={`${r.start}-${r.end}`} className="chip transition">{formatRange(r.start, r.end)}</span>
                           ))}
                         </div>
                       )}
-                      {d.reviewChunkIds.length > 0 && (
+                      {visibleReviewIds.length > 0 && (
                         <div className="day-card-group">
                           <span className="day-card-tag review">Review</span>
-                          {mergedRangesFor(d.reviewChunkIds).map((r) => (
+                          {mergedRangesFor(visibleReviewIds).map((r) => (
                             <span key={`${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                           ))}
                         </div>

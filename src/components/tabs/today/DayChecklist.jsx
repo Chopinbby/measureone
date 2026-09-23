@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChecklistItem } from "./ChecklistItem";
 import { NumberInput } from "../../NumberInput";
 import { formatMinutes } from "../../../lib/utils";
-import { isDayFullySwept } from "../../../lib/scheduling";
+import { isDayFullySwept, movedIdsForDay } from "../../../lib/scheduling";
 
 // Consolidation-day logging: stop count replaces the old bare "mark
 // complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
@@ -140,11 +140,23 @@ export function DayChecklist({
     );
   }
 
+  // A day that ISN'T fully swept can still have SOME of its own ids
+  // individually relocated by the reschedule — e.g. an untouched chunk
+  // moved to a later day, sitting alongside a genuinely still-open review
+  // that (correctly) kept the whole day from collapsing above. Without
+  // this filter, that moved chunk renders here too — a live, checkable
+  // duplicate of the exact same task now also sitting on its new day.
+  // Reported live: checking off the one item that genuinely still
+  // belonged here left the moved chunk standing alone, looking exactly
+  // like a fresh task that had just appeared.
+  const movedIds = movedIdsForDay(day, piece, chunkById);
+  const visibleItems = items.filter(({ id }) => !movedIds.has(id));
+
   return (
     <div className="panel">
       <h3>Day {day.dayNumber} — {formatMinutes(day.minutes)} planned</h3>
       <div className="checklist">
-        {items.map(({ id, role }) => (
+        {visibleItems.map(({ id, role }) => (
           <ChecklistItem
             key={id + role}
             chunk={chunkById[id]}

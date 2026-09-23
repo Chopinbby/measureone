@@ -839,16 +839,47 @@ export function classifyDayCompletion(day, piece, currentDay) {
 // would misread nearly every genuine, still-open review as stale and
 // silently swallow it into "Tasks rescheduled". Caught before shipping by
 // a regression test built specifically to probe this.
-export function isDayFullySwept(day, piece, chunkById = {}) {
+// Which of a day's own ids has the current rescheduleMarker already
+// relocated elsewhere — extracted from isDayFullySwept's own private
+// isMovedId (below), which used to only ever surface this as a single
+// collapsed "is EVERY id on this day moved" boolean. That's correct for
+// deciding whether to collapse a day to "Tasks rescheduled" wholesale, but
+// wrong for anything that also needs to know WHICH ids specifically — a
+// day with a mix of some moved ids and one genuinely still-open item
+// (e.g. an unresolved Tier 2 review, which is deliberately never
+// "moved" — reviews were never a reschedule candidate to begin with, see
+// the comment on that branch below) doesn't fully sweep, so
+// isDayFullySwept correctly says so — but every current renderer
+// (DayChecklist, TimelineTab, WeekView, MasterAgendaTab) responded to
+// "not fully swept" by rendering the day's ENTIRE original id list
+// unfiltered, including the ids this function already knew were moved.
+// Reported live: checking off the one genuinely-open item on such a day
+// left the moved chunk sitting there alone, looking exactly like a fresh,
+// newly-appeared task — it had been there the whole time, just previously
+// alongside the item that was actually still due, and nothing had ever
+// filtered it out on its own.
+export function movedIdsForDay(day, piece, chunkById = {}) {
   const marker = piece.rescheduleMarker;
-  if (marker == null || day.dayNumber >= marker.asOfDay) return false;
   const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
-  if (!ids.length) return false;
+  if (marker == null || day.dayNumber >= marker.asOfDay || !ids.length) return new Set();
   const introOrConnectorIds = new Set([...day.newChunkIds, ...day.specialChunkIds]);
   const isMovedId = (id) => {
     if (introOrConnectorIds.has(id)) {
       const doneDays = (piece.progress[id] || {}).doneDays || [];
-      if (doneDays.length > 0 && !doneDays.includes(day.dayNumber)) return true;
+      // Genuinely completed on this exact day — never "moved," full stop,
+      // regardless of what the neighbor-inference fallback below would
+      // otherwise say. Found live while verifying the filtering fix this
+      // function exists for: a transition logged exactly on its own day
+      // was still being flagged as moved purely because ITS NEIGHBOR chunk
+      // happened to be untouched — the fallback exists to decide whether a
+      // connector should ride along into a reschedule's remainder (a
+      // forward-looking "does this need fresh placement" question), never
+      // to override the backward-looking "was today's own task already
+      // satisfied" one. Without this, a day with real, on-time completed
+      // work could still collapse to "Tasks rescheduled" solely because a
+      // linked chunk elsewhere hadn't been touched yet.
+      if (doneDays.includes(day.dayNumber)) return false;
+      if (doneDays.length > 0) return true;
     }
     if (marker.remainingChunkOrder.includes(id)) return true;
     if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
@@ -858,7 +889,14 @@ export function isDayFullySwept(day, piece, chunkById = {}) {
       ? marker.remainingChunkOrder.includes(c.linkedIds[0])
       : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
   };
-  return ids.every(isMovedId);
+  return new Set(ids.filter(isMovedId));
+}
+
+export function isDayFullySwept(day, piece, chunkById = {}) {
+  const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
+  if (!ids.length) return false;
+  const moved = movedIdsForDay(day, piece, chunkById);
+  return ids.every((id) => moved.has(id));
 }
 
 // How many distinct timeline days are "behind" (per classifyDayCompletion)

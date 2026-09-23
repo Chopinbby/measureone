@@ -1713,7 +1713,9 @@ export default function App() {
       practiceChunks,
       timeline,
       realCurrentDay,
-      remainingChunkIds
+      remainingChunkIds,
+      [...chunkSet.transitions, ...chunkSet.combos],
+      remainingConnectorIds
     );
 
     const dayWord = (n) => (n === 1 ? "day" : "days");

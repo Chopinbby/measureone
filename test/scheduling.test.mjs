@@ -23,6 +23,7 @@ import {
   computeRemainingConnectorIds,
   computeRescheduleRemainder,
   isDayFullySwept,
+  movedIdsForDay,
   classifyDayEmptyState,
   withLiveReviewStatus,
   computeAbandonedPlanReminder,
@@ -959,6 +960,56 @@ describe("Pass 75 follow-up — isDayFullySwept also recognizes an id done on a 
     assert.equal(isDayFullySwept(day1, piece), false);
   });
 
+  test("[regression] the exact mixed day above: movedIdsForDay must still identify c1 individually, even though the day as a whole doesn't sweep", () => {
+    // Reported live: checking off the one genuinely-open item on a mixed
+    // day like this (a real review, alongside a chunk the reschedule had
+    // already relocated) left the moved chunk sitting there alone,
+    // looking exactly like a fresh task that had just appeared — it had
+    // been on the day's list the whole time, unfiltered, because every
+    // renderer (DayChecklist, TimelineTab, WeekView, MasterAgendaTab)
+    // only ever had isDayFullySwept's single collapsed boolean to go on:
+    // "not fully swept" meant "render every original id," with no way to
+    // filter out the ones that WERE individually moved. movedIdsForDay is
+    // what those renderers now use instead, filtering per item rather
+    // than deciding only whether to collapse the whole day.
+    const piece = basePiece({
+      progress: {
+        c1: { doneDays: [5] }, // introduced here, but done on day 5 — moved
+        c9: { doneDays: [1] }, // c9's own introduction; today's review is genuinely still open
+      },
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: [], remainingConnectorIds: [], previous: null },
+    });
+    const day1 = { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: [], reviewChunkIds: ["c9"] };
+    const moved = movedIdsForDay(day1, piece);
+    assert.equal(moved.has("c1"), true, "c1 was done on a different day — it's been relocated and must be filtered from this one");
+    assert.equal(moved.has("c9"), false, "c9's review is genuinely still open here — it must never be treated as moved");
+  });
+
+  test("[regression] a connector genuinely done on its own day must never read as moved just because a linked neighbor is untouched", () => {
+    // Found live while verifying the fix above: t1 (a transition linking
+    // c1 and c5) is logged exactly on day 1 — real, on-time, completed
+    // work — but c5 (one of its two linked chunks) is still untouched and
+    // genuinely due to be relocated by the reschedule. The linkedIds
+    // fallback exists so a connector rides along into the remainder when
+    // a neighbor moves (a forward-looking "does this need fresh
+    // placement" question) — it must never retroactively override
+    // "was today's own task already satisfied", which is a completely
+    // separate, backward-looking question. Without the fix, t1's own
+    // doneDays=[1] was ignored entirely once the fallback fired, and the
+    // day read as though t1 had been swept away too — even though it was
+    // sitting right there, checked off, exactly where and when it was
+    // supposed to be.
+    const piece = basePiece({
+      progress: { t1: { doneDays: [1] } }, // t1 itself done, exactly on day 1
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c5", "c9"], remainingConnectorIds: [], previous: null },
+    });
+    const day1 = { dayNumber: 1, newChunkIds: ["c9"], specialChunkIds: ["t1"], reviewChunkIds: [] };
+    const chunkById = { t1: { kind: "transition", linkedIds: ["c1", "c5"] } };
+    const moved = movedIdsForDay(day1, piece, chunkById);
+    assert.equal(moved.has("t1"), false, "t1 was done exactly on this day — a linked neighbor being untouched must not override that");
+    assert.equal(moved.has("c9"), true, "c9 is genuinely untouched and on the marker — it must still be recognized as moved");
+  });
+
   test("[regression] a genuine, not-yet-logged Tier 2 review must never read as swept, no matter how stale its chunk's prior doneDays look", () => {
     // The bug this guards against: a chunk under review always has SOME
     // prior doneDays (that's why it's due for review again), almost never
@@ -1784,6 +1835,61 @@ describe("[regression, Codex review] computeDaysNeededForMinutesPerDay's review-
   });
 });
 
+describe("[regression] a reschedule's remainder must not pile every orphaned transition onto the same day", () => {
+  // Reported live: after rescheduling, "today" showed almost 4 hours of
+  // practice scheduled while "tomorrow" showed 15 minutes. Root cause: a
+  // transition's readyDay is `Math.max(introducedDay[flankA] || sectionsEndDay,
+  // introducedDay[flankB] || sectionsEndDay)` — correct in the ordinary,
+  // whole-piece computeTimeline call, where every chunk (so every
+  // transition's flanks) always gets a real introducedDay from the
+  // introduction loop just above it. But computeEffectiveTimeline's
+  // reschedule-remainder sub-schedule calls computeTimeline with
+  // practiceChunks filtered down to only what's still genuinely
+  // untouched — a transition whose BOTH flanks were already practiced
+  // (excluded from that filtered set entirely) has neither flank in this
+  // call's own introducedDay, so every such transition fell back to the
+  // exact same `sectionsEndDay` default and piled onto one single day.
+  // The combos loop right below already avoids the identical shape of
+  // problem for itself via `i % candidates.length`; this gives the
+  // transitions loop the same protection for this one fallback path only
+  // — a transition with at least one tracked flank is completely
+  // unaffected and still schedules strictly off that flank's own real
+  // introduction day.
+  test("every practice chunk already learned, only transitions remain: they spread one-per-day instead of collapsing onto one", () => {
+    const piece = basePiece({
+      totalMeasures: 40, customChunkSize: 4, daysToLearn: 10,
+      // computeRescheduleRemainder anchors asOfDay to elapsedDay(piece) —
+      // basePiece()'s default fixed 2026-01-01 startDate would make that
+      // hundreds of real days out from whenever this test actually runs,
+      // not the "day 11, right after this 10-day plan" this fixture
+      // means to set up. addDaysISO(todayISODate(), -10) keeps today at a
+      // fixed, intended offset from the plan regardless of the real date.
+      startDate: addDaysISO(todayISODate(), -10),
+      // All 10 chunks touched — every transition is still genuinely
+      // unlogged (its own doneDays are empty) but both its flanks are
+      // long since practiced, the exact shape that produced the bug.
+      progress: Object.fromEntries(
+        ["c1", "c5", "c9", "c13", "c17", "c21", "c25", "c29", "c33", "c37"].map((id, i) => [id, { doneDays: [i + 1] }])
+      ),
+    });
+    const chunkSet = generateAllChunks(piece);
+    assert.equal(chunkSet.transitions.length, 9, "test setup sanity check");
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const { marker } = computeRescheduleRemainder(piece, chunkSet, timeline);
+    assert.equal(marker.remainingChunkOrder.length, 0, "test setup sanity check: no practice chunks remain");
+    assert.equal(marker.remainingConnectorIds.length, 9, "test setup sanity check: every transition is still remaining");
+
+    const after = { ...piece, daysToLearn: 20, rescheduleMarker: marker };
+    const sub = getEffectiveTimeline(after, chunkSet);
+    const maxSpecialOnOneDay = Math.max(...sub.days.map((d) => d.specialChunkIds.length));
+    assert.equal(
+      maxSpecialOnOneDay,
+      1,
+      `expected each of the 9 orphaned transitions to land on its own day, but one day got ${maxSpecialOnOneDay} of them`
+    );
+  });
+});
+
 describe("[regression] getEffectiveTimeline must re-base introducedDay onto asOfDay, or the behind-schedule banner never clears", () => {
   // Reported as "the Reschedule remaining days button isn't working on any
   // of my pieces". It was working — the marker saved and the plan really was
@@ -2015,7 +2121,16 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
     const chunkSet = generateAllChunks(piece);
     const timeline = getEffectiveTimeline(piece, chunkSet);
     const { remainingChunkIds } = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, 10);
-    const { requiredDays } = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, 10, remainingChunkIds);
+    const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+    const { requiredDays } = estimateRescheduleFit(
+      piece,
+      chunkSet.practiceChunks,
+      timeline,
+      10,
+      remainingChunkIds,
+      [...chunkSet.transitions, ...chunkSet.combos],
+      remainingConnectorIds
+    );
 
     const [plan] = planRescheduleForPieces({ piece });
     assert.ok(plan.extend, "an extend patch is present");
@@ -2026,6 +2141,27 @@ describe("planRescheduleForPieces — the multi-piece form of Reschedule", () =>
     );
     assert.ok(plan.extend.daysToLearn > piece.daysToLearn, "the plan actually grows");
     assert.equal(plan.extend.targetDate, addDaysISO(piece.startDate, plan.extend.daysToLearn - 1));
+  });
+
+  test("[regression] the marker's own asOfDay is also anchored to elapsedDay, not the clamped getCurrentDay, for a piece already past its own plan", () => {
+    // Sibling bug to the one above, in the same function: eligiblePieceContext's
+    // local `asOfDay` (getCurrentDay, clamped to the CURRENT/pre-extend plan
+    // length) is still exactly right for `fit`/`extend` above — "does what's
+    // left fit in what THIS plan currently has left" is genuinely about the
+    // pre-extension length — but it was also, separately, being used to
+    // anchor the MARKER itself. Once `extend` grows daysToLearn in the same
+    // action, a marker anchored to the OLD plan's last day (10, here) rather
+    // than today (30) leaves every day from 10 to 30 freshly populated with
+    // "remaining" content that was never actually lived through on those
+    // specific days — reported live as a piece reading MORE behind right
+    // after a target-date extension, not less. Reproduces the exact
+    // fixture the `extend` test above uses, since that's precisely the
+    // shape (already past its own plan) where elapsedDay and the clamped
+    // getCurrentDay diverge.
+    const piece = basePiece({ name: "Old", daysToLearn: 10, startDate: startedDaysAgo(20) });
+    const [plan] = planRescheduleForPieces({ piece });
+    assert.equal(elapsedDay(piece), 21, "test setup sanity check");
+    assert.equal(plan.marker.asOfDay, 21, "the marker must anchor to the real elapsedDay (21), not getCurrentDay clamped to the old 10-day plan");
   });
 
   test("a piece that's merely tight but still inside its own plan gets no `extend` — unchanged pack-into-what's-left behavior", () => {
@@ -2357,6 +2493,44 @@ describe("estimateRescheduleFit — the 'will this actually fit' warning", () =>
 
     assert.equal(byId.roomy.fit.fits, true);
     assert.equal(byId.crammed.fit.fits, false);
+  });
+
+  test("[regression] connector effort counts toward the fit check, not just practice-chunk effort", () => {
+    // Reported live (found while verifying a separate transitions-spread
+    // fix): a piece with every practice chunk already learned and 9
+    // untouched transitions still got told everything "fits" into
+    // whatever single day was left, since remainingEffort only ever
+    // summed practiceChunks — 0 remaining chunks meant 0 remaining effort,
+    // trivially "fitting" any number of available days, no matter how
+    // much real transition work was actually outstanding. Reschedule then
+    // had nowhere to put those 9 transitions but the one day it was told
+    // was plenty (confirmed live: ~3 hours crammed onto that single day).
+    const piece = basePiece({
+      totalMeasures: 40, customChunkSize: 4, daysToLearn: 10, minutesPerDay: 40,
+      // All 10 chunks done; every transition still genuinely unlogged.
+      progress: Object.fromEntries(
+        ["c1", "c5", "c9", "c13", "c17", "c21", "c25", "c29", "c33", "c37"].map((id, i) => [id, { doneDays: [i + 1] }])
+      ),
+    });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const remainingConnectorIds = computeRemainingConnectorIds(piece, chunkSet);
+    assert.equal(remainingConnectorIds.length, 9, "test setup sanity check");
+
+    const withoutConnectors = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, 10, []);
+    assert.equal(withoutConnectors.fits, true, "test setup sanity check: omitting connector effort trivially 'fits' with 0 remaining chunks");
+
+    const withConnectors = estimateRescheduleFit(
+      piece,
+      chunkSet.practiceChunks,
+      timeline,
+      10,
+      [],
+      [...chunkSet.transitions, ...chunkSet.combos],
+      remainingConnectorIds
+    );
+    assert.equal(withConnectors.fits, false, "9 untouched transitions' worth of real work must not fit into the single day left in a 10-day plan");
+    assert.ok(withConnectors.requiredDays > 1, "the 9 transitions need real, multi-day room, not just the one day left");
   });
 });
 

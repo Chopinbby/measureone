@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, classifyDayEmptyState } from "../../lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, classifyDayEmptyState, movedIdsForDay } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
@@ -185,10 +185,20 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
           // the Timeline tab's day cards — a row per role (new/special/review)
           // instead of one row per 4-measure chunk.
           const mergedRangesFor = (ids) => mergeRanges(ids.map((id) => chunkById[id]).filter(Boolean));
-          const newRanges = mergedRangesFor(day.newChunkIds);
-          const specialRanges = mergedRangesFor(day.specialChunkIds);
-          const reviewRanges = mergedRangesFor(day.reviewChunkIds);
-          const specialIsCombo = day.specialChunkIds.some((id) => chunkById[id]?.kind === "combo");
+          // A day that isn't fully swept (e.g. a genuinely still-open
+          // review keeps it from collapsing below) can still have SOME of
+          // its own ids individually relocated elsewhere by the
+          // reschedule — filtered out here so a moved chunk doesn't also
+          // render on its old day, duplicating the same range that now
+          // legitimately shows on its new one.
+          const movedIds = movedIdsForDay(day, piece, chunkById);
+          const visibleNewIds = day.newChunkIds.filter((id) => !movedIds.has(id));
+          const visibleSpecialIds = day.specialChunkIds.filter((id) => !movedIds.has(id));
+          const visibleReviewIds = day.reviewChunkIds.filter((id) => !movedIds.has(id));
+          const newRanges = mergedRangesFor(visibleNewIds);
+          const specialRanges = mergedRangesFor(visibleSpecialIds);
+          const reviewRanges = mergedRangesFor(visibleReviewIds);
+          const specialIsCombo = visibleSpecialIds.some((id) => chunkById[id]?.kind === "combo");
 
           // How many days are behind schedule for this piece as of this day —
           // same computation ScheduleBanner uses, called once per piece.

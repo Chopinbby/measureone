@@ -511,6 +511,52 @@ export function computeTimeline(piece, chunkSet) {
 
   const sectionsEndDay = halfPoint;
 
+  // A transition whose BOTH flanking chunks are missing from introducedDay
+  // — not "not yet reached," genuinely absent from this call's own
+  // practiceChunks entirely — only happens in one shape: this is a
+  // reschedule's remainder sub-schedule (computeEffectiveTimeline), and
+  // both flanks were already practiced *before* the reschedule, so they
+  // were excluded from remainingChunks and never passed into this
+  // particular computeTimeline call at all. That's structurally
+  // unreachable in the ordinary, whole-piece call this function also
+  // serves — there every chunk (and so every transition's flanks) gets an
+  // introducedDay from the loop above, by construction. Precomputed
+  // before the loop below runs, since introducedDay only holds chunk
+  // entries at this point — a transition never affects another
+  // transition's readiness.
+  //
+  // Reported live: every such transition fell back to the exact same
+  // `readyDay = sectionsEndDay` default, piling all of them onto one
+  // single day (confirmed: 9 transitions, 90 minutes, one day, while
+  // neighboring days sat empty). Pass 90's smoothOverloadedDays pass below
+  // (merged in after this fix first shipped) helps but isn't enough on its
+  // own for a pile-up this size — confirmed by running this exact fixture
+  // through it directly: bounded to 3 passes, one relocation per
+  // overloaded day per pass, it can only ever peel a handful of items off
+  // the single worst day (tested: 7 of 9 transitions were still stuck on
+  // one day afterward), not fully resolve a many-onto-one pile-up. Spread
+  // pre-emptively here instead, the same way the combos loop below already
+  // spreads its own analogous "readyDay unknown" fallback via
+  // `i % candidates.length` — not a new pattern for this file, and not the
+  // index-based-spread-replacing-real-readiness mistake the comment on
+  // this file's own CLAUDE.md entry warns against: a transition with at
+  // least one tracked flank, or one gated by a trouble spot (below), is
+  // completely untouched by this and still schedules strictly off that
+  // flank's own real introduction day, exactly as before. This only
+  // reaches a transition that has no real per-run readiness signal to
+  // begin with — the previous behavior already fell back to an arbitrary
+  // default for it, just not a spread one. Still fed into transitionItems
+  // below (minDay pinned to the first learning day, since it has no real
+  // readiness floor to respect) so the final smoothing pass can still
+  // nudge it further if its spread-assigned day happens to be overloaded
+  // for other reasons.
+  const orphanedTransitionIds = new Set(
+    transitions
+      .filter((t) => !introducedDay[t.linkedIds[0]] && !introducedDay[t.linkedIds[1]])
+      .map((t) => t.id)
+  );
+  let orphanedTransitionIdx = 0;
+
   const transitionItems = [];
   transitions.forEach((t) => {
     // Pass 91 (experimental v1) — a transition seams two flanking chunks
@@ -526,6 +572,14 @@ export function computeTimeline(piece, chunkSet) {
     // confirmed the hard way, by first writing this guard too broadly and
     // watching those tests fail.
     if (troubleSpotGatedIds.has(t.linkedIds[0]) || troubleSpotGatedIds.has(t.linkedIds[1])) return;
+    if (orphanedTransitionIds.has(t.id)) {
+      const day = learningDaysCalendar[orphanedTransitionIdx % learningDaysCalendar.length];
+      orphanedTransitionIdx++;
+      days[day - 1].specialChunkIds.push(t.id);
+      introducedDay[t.id] = day;
+      transitionItems.push({ id: t.id, minDay: learningDaysCalendar[0], day });
+      return;
+    }
     const readyDay = Math.max(
       introducedDay[t.linkedIds[0]] || sectionsEndDay,
       introducedDay[t.linkedIds[1]] || sectionsEndDay
@@ -1093,16 +1147,47 @@ export function classifyDayCompletion(day, piece, currentDay) {
 // would misread nearly every genuine, still-open review as stale and
 // silently swallow it into "Tasks rescheduled". Caught before shipping by
 // a regression test built specifically to probe this.
-export function isDayFullySwept(day, piece, chunkById = {}) {
+// Which of a day's own ids has the current rescheduleMarker already
+// relocated elsewhere — extracted from isDayFullySwept's own private
+// isMovedId (below), which used to only ever surface this as a single
+// collapsed "is EVERY id on this day moved" boolean. That's correct for
+// deciding whether to collapse a day to "Tasks rescheduled" wholesale, but
+// wrong for anything that also needs to know WHICH ids specifically — a
+// day with a mix of some moved ids and one genuinely still-open item
+// (e.g. an unresolved Tier 2 review, which is deliberately never
+// "moved" — reviews were never a reschedule candidate to begin with, see
+// the comment on that branch below) doesn't fully sweep, so
+// isDayFullySwept correctly says so — but every current renderer
+// (DayChecklist, TimelineTab, WeekView, MasterAgendaTab) responded to
+// "not fully swept" by rendering the day's ENTIRE original id list
+// unfiltered, including the ids this function already knew were moved.
+// Reported live: checking off the one genuinely-open item on such a day
+// left the moved chunk sitting there alone, looking exactly like a fresh,
+// newly-appeared task — it had been there the whole time, just previously
+// alongside the item that was actually still due, and nothing had ever
+// filtered it out on its own.
+export function movedIdsForDay(day, piece, chunkById = {}) {
   const marker = piece.rescheduleMarker;
-  if (marker == null || day.dayNumber >= marker.asOfDay) return false;
   const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
-  if (!ids.length) return false;
+  if (marker == null || day.dayNumber >= marker.asOfDay || !ids.length) return new Set();
   const introOrConnectorIds = new Set([...day.newChunkIds, ...day.specialChunkIds]);
   const isMovedId = (id) => {
     if (introOrConnectorIds.has(id)) {
       const doneDays = (piece.progress[id] || {}).doneDays || [];
-      if (doneDays.length > 0 && !doneDays.includes(day.dayNumber)) return true;
+      // Genuinely completed on this exact day — never "moved," full stop,
+      // regardless of what the neighbor-inference fallback below would
+      // otherwise say. Found live while verifying the filtering fix this
+      // function exists for: a transition logged exactly on its own day
+      // was still being flagged as moved purely because ITS NEIGHBOR chunk
+      // happened to be untouched — the fallback exists to decide whether a
+      // connector should ride along into a reschedule's remainder (a
+      // forward-looking "does this need fresh placement" question), never
+      // to override the backward-looking "was today's own task already
+      // satisfied" one. Without this, a day with real, on-time completed
+      // work could still collapse to "Tasks rescheduled" solely because a
+      // linked chunk elsewhere hadn't been touched yet.
+      if (doneDays.includes(day.dayNumber)) return false;
+      if (doneDays.length > 0) return true;
     }
     if (marker.remainingChunkOrder.includes(id)) return true;
     if (marker.remainingConnectorIds && marker.remainingConnectorIds.includes(id)) return true;
@@ -1112,7 +1197,14 @@ export function isDayFullySwept(day, piece, chunkById = {}) {
       ? marker.remainingChunkOrder.includes(c.linkedIds[0])
       : c.linkedIds.some((lid) => marker.remainingChunkOrder.includes(lid));
   };
-  return ids.every(isMovedId);
+  return new Set(ids.filter(isMovedId));
+}
+
+export function isDayFullySwept(day, piece, chunkById = {}) {
+  const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
+  if (!ids.length) return false;
+  const moved = movedIdsForDay(day, piece, chunkById);
+  return ids.every((id) => moved.has(id));
 }
 
 // One shared classification for "this day has nothing to show" across the
@@ -1169,9 +1261,26 @@ export function countBehindDays(piece, timeline, currentDay, chunkById = {}) {
 // a second copy of the formula. The 0.65 is the same day-fill factor the
 // rest of the scheduler uses (see computeDaysNeededForMinutesPerDay), and
 // the 5-minute floor on minutesPerDay guards a divide-by-something-tiny.
-export function estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay, remainingChunkIds) {
+//
+// `connectors`/`remainingConnectorIds` default to `[]` — optional, so a
+// call site that only cares about practice-chunk fit doesn't have to pass
+// them — but omitting them for a piece whose only remaining work is
+// transitions/combos silently reports `fits: true` no matter how much of
+// that work is actually outstanding, since remainingEffort would then be
+// computed from practice chunks alone. Reported live (indirectly): a
+// piece with every practice chunk already learned and 9 untouched
+// transitions still got told everything "fits" into whatever single day
+// was left in its plan, so no extension was ever offered — reschedule
+// then had nowhere to put those 9 transitions but that one day (~3 hours
+// of work). Both current call sites (handleReschedule, App.jsx;
+// planRescheduleForPieces, below) already have chunkSet and
+// remainingConnectorIds in scope and now pass them.
+export function estimateRescheduleFit(piece, practiceChunks, timeline, asOfDay, remainingChunkIds, connectors = [], remainingConnectorIds = []) {
   const remaining = new Set(remainingChunkIds);
-  const remainingEffort = practiceChunks.reduce((s, c) => (remaining.has(c.id) ? s + c.effort : s), 0);
+  const remainingConnectors = new Set(remainingConnectorIds);
+  const remainingEffort =
+    practiceChunks.reduce((s, c) => (remaining.has(c.id) ? s + c.effort : s), 0) +
+    connectors.reduce((s, c) => (remainingConnectors.has(c.id) ? s + c.effort : s), 0);
   const availableDays = Math.max(1, timeline.days.length - asOfDay + 1);
   const requiredDays = Math.max(
     1,
@@ -1330,7 +1439,15 @@ export function planRescheduleForPieces(pieces) {
       // outcome. Found in review, removed rather than left as dead weight.
       if (missedCount === 0 && qualifyingConnectorIds.length === 0) return;
 
-      const fit = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, asOfDay, remainingChunkIds);
+      const fit = estimateRescheduleFit(
+        piece,
+        chunkSet.practiceChunks,
+        timeline,
+        asOfDay,
+        remainingChunkIds,
+        [...chunkSet.transitions, ...chunkSet.combos],
+        remainingConnectorIds
+      );
 
       // A piece whose target date has already passed (not just "tight
       // within what's left") has no meaningful "pack into what's left"
@@ -1364,7 +1481,21 @@ export function planRescheduleForPieces(pieces) {
         // computeEffectiveTimeline for why a piece rescheduled more than
         // once needs that chain instead of always re-deriving from the raw,
         // never-rescheduled schedule.
-        marker: { asOfDay, remainingChunkOrder: remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
+        //
+        // asOfDay here is elapsedDay(piece) — the real, unclamped calendar
+        // day — NOT the `asOfDay` local above (getCurrentDay, clamped to
+        // the CURRENT/pre-extend plan length). Same bug computeRescheduleRemainder
+        // was fixed for (see its comment in this file): when `extend` also
+        // grows daysToLearn in this same action, a marker anchored to the
+        // old plan's last day leaves every day between that stale point and
+        // today freshly populated with "remaining" content that was never
+        // actually lived through, reading as newly behind — this is a
+        // second, independent copy of that exact computation that drifted
+        // out of sync with the fix, not covered by it. `asOfDay` (clamped)
+        // is still the right anchor for `fit` above — "does what's left fit
+        // in what THIS plan currently has left" is genuinely about the
+        // current, pre-extension length.
+        marker: { asOfDay: elapsedDay(piece), remainingChunkOrder: remainingChunkIds, remainingConnectorIds, previous: piece.rescheduleMarker || null },
         extend,
       });
     } catch (e) {

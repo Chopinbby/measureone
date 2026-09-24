@@ -150,7 +150,12 @@ MeasureOne.jsx/
     │   │                                  # "already shown" flag),
     │   │                                  # applyColdStartLog/Unlog. See
     │   │                                  # Algorithms.md#cold-start-check
-    │   └── storage.js                     # localStorage load/save/export/import
+    │   ├── technique.js                   # Pass 99 — Technique practice engine
+    │   │                                  # (scales/arpeggios): day list, walk,
+    │   │                                  # pace, methods. Pure, no clock — see
+    │   │                                  # Algorithms.md#technique-practice-engine-pass-99
+    │   └── storage.js                     # localStorage load/save/export/import;
+    │                                      # also the app-level technique key (Pass 100)
     └── components/
         ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
         │   ScheduleBanner.jsx, Sparkline.jsx,
@@ -289,6 +294,28 @@ library.
   piece" wizard) through one shared function,
   `confirmAndDiscardProvisional`/`guardLeavingInterleaved` — see
   [Decisions.md](Decisions.md#spaced-repetition--maintenance).
+- **Technique practice (Pass 100): `technique`, its own state, never part
+  of `pieces`.** Loaded in the same mount effect as pieces
+  (`loadTechniqueFromStorage`, `lib/storage.js`) and saved by its own
+  effect gated on `loaded` (`saveTechniqueToStorage`). Every change goes
+  through `updateTechnique(updaterFnOrValue)`, which bumps
+  `technique.updatedAt` — **never `setPieces`/`updatePiece`**. The
+  `handleTechnique*` handlers (check off, log tempo, star scale/method,
+  in-rotation and method switches, add/edit item, add custom method,
+  change check octaves with keep/start fresh) wrap `lib/technique.js`; no
+  screen calls them yet (Passes 101–102). Piece keys aren't stored yet, so
+  `techniqueRepertoireKeys` is an empty list until Pass 103.
+  - **Today's list:** one effect builds it whenever the saved list's date
+    isn't `techniqueToday`, rolling unfinished tasks forward
+    (`buildDayList`). `techniqueToday` has its own trigger, since nothing
+    app-wide re-reads the date while the app is open: window `focus`,
+    `visibilitychange` to visible, and a 60-second interval, each just
+    re-reading `todayISODate()`. This is technique-only; every other
+    screen's "today" is unchanged.
+  - **Its own failure flag:** `techniqueStorageError` is separate from
+    `storageError`, because the pieces save effect resets `storageError` on
+    every run and would otherwise clear a technique failure (and vice
+    versa). The existing storage banner shows while either is set.
 - `storageError` (a failed `localStorage` write) and `exportReminderDue` /
   `exportReminderDismissed` (**Pass 12** — a day-plus since the last export,
   or since first use if never exported; `isExportReminderDue`,

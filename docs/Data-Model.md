@@ -1082,14 +1082,51 @@ cross-piece "time practiced" total).
 
 ## Technique practice data (app-level)
 
-**Designed, not built.** Technique practice data (the scale/arpeggio
-library, practice methods, today's list, walk position, and settings) is
-**app-level, not part of any piece**: it has its own `localStorage` key and
-update path, is included in backups, and never goes through `setPieces` or
-`updatePiece`. The only piece-level addition is two optional fields — the
-key of the piece and other keys it passes through. See
-[Technique-Practice.md](Technique-Practice.md#data) for the designed shape;
-this section gets the real schema once the storage pass is built.
+**Stored since Pass 100; no screens yet.** Technique practice data is
+**app-level, not part of any piece**: one `localStorage` key of its own,
+`measureone-technique`, with its own update path (`updateTechnique`,
+`App.jsx`). It never goes through `setPieces` or `updatePiece`. **Not yet
+included in backups** — that is deferred to a later pass. The only
+piece-level addition planned is two optional fields (the key of the piece
+and other keys it passes through), not built yet. Design:
+[Technique-Practice.md](Technique-Practice.md#data).
+
+The schema is `validateAndMigrateTechnique` / `defaultTechnique`
+(`lib/storage.js`); the engine that reads it is `lib/technique.js`.
+
+```js
+{
+  schemaVersion: 1,             // a save with none is read as version 1
+  items: [{
+    id, form: "scale" | "arpeggio",
+    tonic: "F#",                // any spelling; enharmonics compare equal
+    quality: "major" | "minor",
+    minorForm: "natural" | "harmonic" | "melodic" | null,
+    octaves: 1-4, hands: "together" | "thirds" | "sixths",
+    evenTempo: number | null,   // last verified even tempo
+    checkOctaves: 1-4,          // octaves for the even-rhythm check
+    lastCheckedDate: ISO | null,   // last time a tempo was logged
+    lastPracticedDate: ISO | null, // last check-off of any kind
+    practicedDates: [ISO],      // last 14 days of practice; the weekly pace reads it
+    starred, inRotation,
+  }],
+  methodState: { [methodId]: { starred, enabled } }, // built-ins live in code
+  customMethods: [{ id, name, technique, description, appliesTo, custom: true }],
+  methodLastUsed: { [itemId]: { [methodId]: ISO } }, // written only on completion
+  walkPosition: 0-23,           // circle-of-fifths position; moves on completion
+  dayList: { date: ISO, tasks: [{ itemId, methodIds, done, tier, tempo }] } | null,
+  settings: { scalesPerDay: 3, minutesPerScale: 5 }, // defaults only, no UI in v1
+  updatedAt: epoch ms | null,
+}
+```
+
+- **`practicedDates` isn't in the design brief.** The engine's weekly pace
+  (starred about 3 days a week, repertoire about 4) needs to count the days
+  practiced this week, which `lastPracticedDate` alone can't give.
+- **Loading never throws.** A missing key gives defaults, and each
+  wrong-typed field falls back on its own rather than failing the whole
+  load. Unreadable JSON is copied to `measureone-technique-corrupt` before
+  defaults replace it, so the next save can't silently destroy it.
 
 ## Known simplifications worth knowing about
 

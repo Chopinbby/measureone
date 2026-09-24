@@ -1159,3 +1159,125 @@ describe("[Pass 91 follow-up] focus spots — position-based measure backfill an
     assert.deepEqual(migrated.progress.c1.troubleSpots.map((s) => s.id), ["fs1"]);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  Technique data (Pass 100) — app-level, its own key and schema.     */
+/* ------------------------------------------------------------------ */
+
+import {
+  TECHNIQUE_KEY,
+  TECHNIQUE_CORRUPT_BACKUP_KEY,
+  TECHNIQUE_SCHEMA_VERSION,
+  defaultTechnique,
+  validateAndMigrateTechnique,
+  loadTechniqueFromStorage,
+  saveTechniqueToStorage,
+} from "../src/lib/storage.js";
+
+// Minimal in-memory localStorage for the load/save functions. `failWrites`
+// makes setItem throw the way a full browser store does.
+function installLocalStorage(initial = {}) {
+  const store = { ...initial };
+  const ls = {
+    failWrites: false,
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => {
+      if (ls.failWrites) throw new Error("QuotaExceededError");
+      store[k] = String(v);
+    },
+    removeItem: (k) => { delete store[k]; },
+    store,
+  };
+  globalThis.localStorage = ls;
+  return ls;
+}
+
+describe("technique storage (Pass 100)", () => {
+  test("defaults: empty library, walk at C, no list yet, 3 scales / 5 minutes", () => {
+    const d = defaultTechnique();
+    assert.equal(d.schemaVersion, TECHNIQUE_SCHEMA_VERSION);
+    assert.deepEqual(d.items, []);
+    assert.equal(d.walkPosition, 0);
+    assert.equal(d.dayList, null);
+    assert.deepEqual(d.settings, { scalesPerDay: 3, minutesPerScale: 5 });
+  });
+
+  test("a key separate from every piece's key", () => {
+    assert.ok(!TECHNIQUE_KEY.startsWith("measureone-piece:"));
+  });
+
+  test("migration: a save with no schemaVersion and missing fields is backfilled", () => {
+    const old = {
+      items: [{ id: "a", tonic: "D", quality: "major", evenTempo: 100 }],
+      walkPosition: 5,
+    };
+    const m = validateAndMigrateTechnique(old);
+    assert.equal(m.schemaVersion, TECHNIQUE_SCHEMA_VERSION);
+    assert.equal(m.walkPosition, 5);
+    assert.deepEqual(m.items[0], {
+      id: "a", form: "scale", tonic: "D", quality: "major", minorForm: null, octaves: 2,
+      hands: "together", evenTempo: 100, checkOctaves: 2, lastCheckedDate: null,
+      lastPracticedDate: null, practicedDates: [], starred: false, inRotation: true,
+    });
+    assert.deepEqual(m.methodState, {});
+    assert.deepEqual(m.settings, { scalesPerDay: 3, minutesPerScale: 5 });
+  });
+
+  test("migration keeps a valid save byte-for-byte after one round trip", () => {
+    const once = validateAndMigrateTechnique({
+      items: [{ id: "a", tonic: "F#", quality: "minor", minorForm: "melodic", octaves: 3, checkOctaves: 1, practicedDates: ["2025-01-06"] }],
+      methodState: { eyes: { starred: true, enabled: true } },
+      customMethods: [{ id: "m1", name: "LH alone", technique: "Memory", appliesTo: "scale" }],
+      methodLastUsed: { a: { eyes: "2025-01-06" } },
+      dayList: { date: "2025-01-06", tasks: [{ itemId: "a", methodIds: ["eyes"], done: true, tier: "walk", tempo: 90 }] },
+      walkPosition: 7,
+      updatedAt: 123,
+    });
+    assert.deepEqual(validateAndMigrateTechnique(JSON.parse(JSON.stringify(once))), once);
+  });
+
+  test("corrupt fields fall back one at a time, not the whole save", () => {
+    const m = validateAndMigrateTechnique({
+      items: [{ id: "ok", tonic: "C", quality: "major" }, { id: "no-quality", tonic: "C" }, "junk", null],
+      walkPosition: 99,
+      dayList: { date: "not a date", tasks: [] },
+      settings: { scalesPerDay: -1, minutesPerScale: "five" },
+      methodLastUsed: { ok: { eyes: "yesterday", chain: "2025-01-01" } },
+    });
+    assert.deepEqual(m.items.map((i) => i.id), ["ok"]);
+    assert.equal(m.walkPosition, 0);
+    assert.equal(m.dayList, null);
+    assert.deepEqual(m.settings, { scalesPerDay: 3, minutesPerScale: 5 });
+    assert.deepEqual(m.methodLastUsed, { ok: { chain: "2025-01-01" } });
+    assert.deepEqual(validateAndMigrateTechnique("nonsense"), defaultTechnique());
+    assert.deepEqual(validateAndMigrateTechnique(null), defaultTechnique());
+  });
+
+  test("load: missing key gives defaults", () => {
+    installLocalStorage();
+    assert.deepEqual(loadTechniqueFromStorage(), defaultTechnique());
+  });
+
+  test("load: unreadable JSON gives defaults and sets the raw text aside", () => {
+    const ls = installLocalStorage({ [TECHNIQUE_KEY]: "{not json" });
+    assert.deepEqual(loadTechniqueFromStorage(), defaultTechnique());
+    assert.equal(ls.store[TECHNIQUE_CORRUPT_BACKUP_KEY], "{not json");
+  });
+
+  test("load: storage unavailable gives defaults instead of throwing", () => {
+    globalThis.localStorage = { getItem: () => { throw new Error("SecurityError"); } };
+    assert.deepEqual(loadTechniqueFromStorage(), defaultTechnique());
+  });
+
+  test("save then load round-trips; a failed write returns { ok: false }", () => {
+    const ls = installLocalStorage({ "measureone-piece:p1": "{\"id\":\"p1\"}" });
+    const t = validateAndMigrateTechnique({ items: [{ id: "a", tonic: "Eb", quality: "major" }], walkPosition: 3 });
+    assert.deepEqual(saveTechniqueToStorage(t), { ok: true });
+    assert.deepEqual(loadTechniqueFromStorage(), t);
+    assert.equal(ls.store["measureone-piece:p1"], "{\"id\":\"p1\"}", "piece key untouched");
+    ls.failWrites = true;
+    const res = saveTechniqueToStorage(t);
+    assert.equal(res.ok, false);
+    assert.ok(res.error);
+  });
+});

@@ -536,6 +536,162 @@ export function removePieceFromStorage(id) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Technique practice data (Pass 100) — app-level, not part of any    */
+/*  piece: one localStorage key of its own, its own schema version,    */
+/*  never read or written through setPieces/updatePiece. Shape:        */
+/*  docs/Data-Model.md#technique-practice-data-app-level. The engine   */
+/*  that reads it is lib/technique.js.                                 */
+/* ------------------------------------------------------------------ */
+
+export const TECHNIQUE_KEY = "measureone-technique";
+// Where an unreadable technique entry is copied before it's replaced with
+// defaults, so a corrupt save is set aside rather than silently lost.
+export const TECHNIQUE_CORRUPT_BACKUP_KEY = "measureone-technique-corrupt";
+export const TECHNIQUE_SCHEMA_VERSION = 1;
+
+export function defaultTechnique() {
+  return {
+    schemaVersion: TECHNIQUE_SCHEMA_VERSION,
+    items: [],
+    methodState: {}, // { [methodId]: { starred, enabled } }
+    customMethods: [],
+    methodLastUsed: {}, // { [itemId]: { [methodId]: ISO date } }
+    walkPosition: 0,
+    dayList: null, // { date, tasks: [{ itemId, methodIds, done, tier, tempo? }] }
+    settings: { scalesPerDay: 3, minutesPerScale: 5 },
+    updatedAt: null,
+  };
+}
+
+const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const isISODate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const positiveNumberOrNull = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+
+// One library item with every field the engine reads, defaulted. Also the
+// constructor for a newly added item (App.jsx's add handler). Returns null
+// for anything unusable (no id, or no tonic/quality to key it by).
+export function normalizeTechniqueItem(raw) {
+  if (!isPlainObject(raw) || raw.id == null || typeof raw.tonic !== "string") return null;
+  if (raw.quality !== "major" && raw.quality !== "minor") return null;
+  const octaves = Number.isInteger(raw.octaves) && raw.octaves >= 1 && raw.octaves <= 4 ? raw.octaves : 2;
+  return {
+    id: String(raw.id),
+    form: raw.form === "arpeggio" ? "arpeggio" : "scale",
+    tonic: raw.tonic,
+    quality: raw.quality,
+    minorForm: raw.quality === "minor" && ["natural", "harmonic", "melodic"].includes(raw.minorForm) ? raw.minorForm : null,
+    octaves,
+    hands: ["together", "thirds", "sixths"].includes(raw.hands) ? raw.hands : "together",
+    evenTempo: positiveNumberOrNull(raw.evenTempo),
+    checkOctaves: Number.isInteger(raw.checkOctaves) && raw.checkOctaves >= 1 && raw.checkOctaves <= 4 ? raw.checkOctaves : octaves,
+    lastCheckedDate: isISODate(raw.lastCheckedDate) ? raw.lastCheckedDate : null,
+    lastPracticedDate: isISODate(raw.lastPracticedDate) ? raw.lastPracticedDate : null,
+    practicedDates: Array.isArray(raw.practicedDates) ? raw.practicedDates.filter(isISODate) : [],
+    starred: !!raw.starred,
+    inRotation: raw.inRotation !== false,
+  };
+}
+
+function normalizeDayList(raw) {
+  if (!isPlainObject(raw) || !isISODate(raw.date) || !Array.isArray(raw.tasks)) return null;
+  const tasks = raw.tasks
+    .filter((t) => isPlainObject(t) && t.itemId != null)
+    .map((t) => ({
+      itemId: String(t.itemId),
+      methodIds: Array.isArray(t.methodIds) ? t.methodIds.map(String) : [],
+      done: !!t.done,
+      tier: typeof t.tier === "string" ? t.tier : null,
+      tempo: positiveNumberOrNull(t.tempo),
+    }));
+  return { date: raw.date, tasks };
+}
+
+// Pure: any parsed value in, a complete, current-schema technique object
+// out. Missing fields are backfilled; wrong-typed fields fall back to their
+// default rather than failing the whole load. A save with no schemaVersion
+// is treated as version 1 (the first shipped shape).
+export function validateAndMigrateTechnique(raw) {
+  const d = defaultTechnique();
+  if (!isPlainObject(raw)) return d;
+  const items = Array.isArray(raw.items) ? raw.items.map(normalizeTechniqueItem).filter(Boolean) : [];
+  const methodState = {};
+  if (isPlainObject(raw.methodState)) {
+    for (const [id, st] of Object.entries(raw.methodState)) {
+      if (isPlainObject(st)) methodState[id] = { starred: !!st.starred, enabled: st.enabled !== false };
+    }
+  }
+  const customMethods = Array.isArray(raw.customMethods)
+    ? raw.customMethods.filter((m) => isPlainObject(m) && m.id != null && typeof m.name === "string" && m.name.trim())
+        .map((m) => ({
+          id: String(m.id),
+          name: m.name,
+          technique: typeof m.technique === "string" ? m.technique : "Rhythm",
+          description: typeof m.description === "string" ? m.description : "",
+          appliesTo: ["both", "scale", "arpeggio", "together"].includes(m.appliesTo) ? m.appliesTo : "both",
+          custom: true,
+        }))
+    : [];
+  const methodLastUsed = {};
+  if (isPlainObject(raw.methodLastUsed)) {
+    for (const [itemId, used] of Object.entries(raw.methodLastUsed)) {
+      if (!isPlainObject(used)) continue;
+      methodLastUsed[itemId] = Object.fromEntries(Object.entries(used).filter(([, v]) => isISODate(v)));
+    }
+  }
+  const walkPosition = Number.isInteger(raw.walkPosition) && raw.walkPosition >= 0 && raw.walkPosition < 24 ? raw.walkPosition : 0;
+  const settings = { ...d.settings };
+  if (isPlainObject(raw.settings)) {
+    if (Number.isInteger(raw.settings.scalesPerDay) && raw.settings.scalesPerDay >= 1) settings.scalesPerDay = raw.settings.scalesPerDay;
+    if (typeof raw.settings.minutesPerScale === "number" && raw.settings.minutesPerScale > 0) settings.minutesPerScale = raw.settings.minutesPerScale;
+  }
+  return {
+    schemaVersion: TECHNIQUE_SCHEMA_VERSION,
+    items,
+    methodState,
+    customMethods,
+    methodLastUsed,
+    walkPosition,
+    dayList: normalizeDayList(raw.dayList),
+    settings,
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : null,
+  };
+}
+
+// Never throws. Missing key → defaults. Unreadable JSON → the raw text is
+// copied to TECHNIQUE_CORRUPT_BACKUP_KEY first (so the next save can't
+// silently destroy it), then defaults. Storage unavailable → defaults.
+export function loadTechniqueFromStorage() {
+  try {
+    const raw = localStorage.getItem(TECHNIQUE_KEY);
+    if (!raw) return defaultTechnique();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      try {
+        localStorage.setItem(TECHNIQUE_CORRUPT_BACKUP_KEY, raw);
+      } catch (e2) {
+        /* nowhere to set it aside */
+      }
+      return defaultTechnique();
+    }
+    return validateAndMigrateTechnique(parsed);
+  } catch (e) {
+    return defaultTechnique();
+  }
+}
+
+// { ok: true } or { ok: false, error }, same contract as savePieceToStorage.
+export function saveTechniqueToStorage(technique) {
+  try {
+    localStorage.setItem(TECHNIQUE_KEY, JSON.stringify(technique));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Export reminder — nudges toward a backup export since this app has  */
 /*  no server-side persistence at all (see CLAUDE.md's "no backend").   */
 /*  App-level, not per-piece: a single export already bundles every     */

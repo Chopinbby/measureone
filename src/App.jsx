@@ -43,7 +43,11 @@ import {
   saveLastExportedAt,
   loadOrInitFirstUseAt,
   isExportReminderDue,
+  loadTechniqueFromStorage,
+  saveTechniqueToStorage,
+  normalizeTechniqueItem,
 } from "./lib/storage";
+import { resolveMethods, buildDayList, completeTask, changeCheckOctaves } from "./lib/technique";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
@@ -204,6 +208,17 @@ export default function App() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
   const [storageError, setStorageError] = useState(false);
+  // Technique data (Pass 100) — app-level, one localStorage key of its own,
+  // never part of `pieces` and never touched by setPieces/updatePiece. Its
+  // write failures are tracked in their own flag so the pieces save effect
+  // (which resets storageError on every run) can't clear a technique
+  // failure, and vice versa; the banner shows while either is set.
+  const [technique, setTechnique] = useState(null);
+  const [techniqueStorageError, setTechniqueStorageError] = useState(false);
+  // "Today" for the technique list only. Nothing app-wide ticks the date
+  // while the app is open, so this has its own trigger (focus/visibility
+  // plus a slow interval, below). Other screens' "today" is untouched.
+  const [techniqueToday, setTechniqueToday] = useState(() => todayISODate());
   const [exportReminderDue, setExportReminderDue] = useState(false);
   const [exportReminderDismissed, setExportReminderDismissed] = useState(false);
   const importInputRef = useRef(null);
@@ -215,6 +230,7 @@ export default function App() {
     const found = loadPiecesFromStorage();
     setPieces(found);
     setActivePieceId(loadActivePieceId(found));
+    setTechnique(loadTechniqueFromStorage());
     setLoaded(true);
   }, []);
 
@@ -252,6 +268,40 @@ export default function App() {
     });
     setStorageError(anyFailed);
   }, [pieces, loaded]);
+
+  // Persist technique data, separately from pieces (see techniqueStorageError).
+  useEffect(() => {
+    if (!loaded || !technique) return;
+    setTechniqueStorageError(!saveTechniqueToStorage(technique).ok);
+  }, [technique, loaded]);
+
+  // Re-read the date when the window regains focus or becomes visible, and
+  // once a minute — setting the same date string is a no-op re-render-wise,
+  // so this only does anything when the day actually changed.
+  useEffect(() => {
+    const check = () => setTechniqueToday(todayISODate());
+    const onVisibility = () => { if (document.visibilityState === "visible") check(); };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", onVisibility);
+    const interval = setInterval(check, 60 * 1000);
+    return () => {
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Ensure today's technique list exists. buildDayList rolls the previous
+  // list's unfinished tasks forward (same methods) and returns an existing
+  // list for today unchanged, so this is stable across reloads and screens.
+  useEffect(() => {
+    if (!loaded || !technique) return;
+    if (technique.dayList?.date === techniqueToday) return;
+    updateTechnique((t) => ({
+      ...t,
+      dayList: buildDayList(techniqueEngineState(t), techniqueToday, t.settings.scalesPerDay),
+    }));
+  }, [loaded, technique, techniqueToday]);
 
   // Persist which piece is active.
   useEffect(() => {
@@ -398,6 +448,115 @@ export default function App() {
     setActiveTab("overview");
     setDayOverride(null);
     setDeleteModalOpen(false);
+  };
+
+  /* ------------------------------------------------------------------ */
+  /*  Technique practice handlers (Pass 100). Every technique change      */
+  /*  goes through updateTechnique — never setPieces/updatePiece. No      */
+  /*  screen calls these yet (Passes 101-102 build the screens).          */
+  /* ------------------------------------------------------------------ */
+
+  // Piece keys aren't stored yet (Pass 103), so no scale is a repertoire
+  // scale until then.
+  const techniqueRepertoireKeys = [];
+
+  // The engine's view of the saved technique object.
+  function techniqueEngineState(t) {
+    return {
+      items: t.items,
+      methods: resolveMethods(t.methodState, t.customMethods),
+      methodLastUsed: t.methodLastUsed,
+      walkPosition: t.walkPosition,
+      previousList: t.dayList,
+      repertoireKeys: techniqueRepertoireKeys,
+    };
+  }
+
+  function updateTechnique(updater) {
+    setTechnique((prev) => {
+      if (!prev) return prev;
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (!next || next === prev) return prev;
+      return { ...next, updatedAt: Date.now() };
+    });
+  }
+
+  const updateTechniqueItem = (itemId, fn) =>
+    updateTechnique((t) => ({ ...t, items: t.items.map((it) => (it.id === itemId ? fn(it) : it)) }));
+
+  // Check-off (tempo omitted: a bare check-off, saved tempo unchanged) or
+  // an even-rhythm check with a tempo, which sets the new baseline.
+  const handleTechniqueComplete = (itemId, tempo = null) =>
+    updateTechnique((t) => {
+      if (!t.dayList) return t;
+      const done = completeTask(
+        { items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition },
+        itemId,
+        t.dayList.date,
+        tempo
+      );
+      return { ...t, items: done.items, dayList: done.dayList, methodLastUsed: done.methodLastUsed, walkPosition: done.walkPosition };
+    });
+  const handleTechniqueCheckOff = (itemId) => handleTechniqueComplete(itemId, null);
+  const handleTechniqueLogTempo = (itemId, tempo) => handleTechniqueComplete(itemId, tempo);
+
+  const handleTechniqueToggleStarItem = (itemId) =>
+    updateTechniqueItem(itemId, (it) => ({ ...it, starred: !it.starred }));
+  const handleTechniqueToggleRotation = (itemId) =>
+    updateTechniqueItem(itemId, (it) => ({ ...it, inRotation: !it.inRotation }));
+
+  const updateMethodState = (methodId, fn) =>
+    updateTechnique((t) => {
+      const cur = t.methodState[methodId] || { starred: false, enabled: true };
+      return { ...t, methodState: { ...t.methodState, [methodId]: fn(cur) } };
+    });
+  const handleTechniqueToggleStarMethod = (methodId) => updateMethodState(methodId, (s) => ({ ...s, starred: !s.starred }));
+  const handleTechniqueToggleMethod = (methodId) => updateMethodState(methodId, (s) => ({ ...s, enabled: !s.enabled }));
+
+  // fields: { form, tonic, quality, minorForm, octaves, hands, checkOctaves }.
+  // Returns false if the fields don't make a valid item.
+  const handleTechniqueAddItem = (fields) => {
+    const item = normalizeTechniqueItem({ ...fields, id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` });
+    if (!item) return false;
+    updateTechnique((t) => ({ ...t, items: [...t.items, item] }));
+    return true;
+  };
+
+  // Edits octaves / hands / form details. checkOctaves is deliberately not
+  // editable here — it goes through handleTechniqueChangeCheckOctaves so a
+  // saved tempo is never silently re-based.
+  const handleTechniqueEditItem = (itemId, patch) =>
+    updateTechniqueItem(itemId, (it) => {
+      const { checkOctaves, id, ...rest } = patch || {};
+      return normalizeTechniqueItem({ ...it, ...rest }) || it;
+    });
+
+  // choice: undefined (ask first), "keep", or "fresh". Returns the engine's
+  // status — "needs-prompt" means nothing changed and the screen should ask
+  // "keep as a starting point, or start fresh?" then call again with a choice.
+  const handleTechniqueChangeCheckOctaves = (itemId, newOctaves, choice) => {
+    const item = technique?.items.find((it) => it.id === itemId);
+    if (!item) return "unchanged";
+    const result = changeCheckOctaves(item, newOctaves, choice);
+    if (result.status === "applied") updateTechniqueItem(itemId, () => result.item);
+    return result.status;
+  };
+
+  // fields: { name, technique, description, appliesTo }. Returns false if
+  // the name is blank.
+  const handleTechniqueAddMethod = (fields) => {
+    const name = (fields?.name || "").trim();
+    if (!name) return false;
+    const method = {
+      id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      technique: fields.technique || "Rhythm",
+      description: (fields.description || "").trim(),
+      appliesTo: fields.appliesTo || "both",
+      custom: true,
+    };
+    updateTechnique((t) => ({ ...t, customMethods: [...t.customMethods, method] }));
+    return true;
   };
 
   const handleExportClick = () => setExportModalOpen(true);
@@ -1945,7 +2104,7 @@ export default function App() {
         }}
       />
 
-      {storageError && (
+      {(storageError || techniqueStorageError) && (
         <div className="storage-error-banner">
           <AlertTriangle size={18} />
           <div>

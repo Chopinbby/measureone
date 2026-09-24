@@ -6875,6 +6875,39 @@ These entries record the design decisions and what each one ruled out.
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **Technique practice — known gaps found in the Passes 99–100 review
+  (logged, not fixed).** None blocks building the screens; each needs a
+  decision or a small fix in a later pass:
+  1. **A check-off just after midnight lands on yesterday's list.**
+     `App.jsx` re-reads the date on focus, on visibility, and once a
+     minute, so for up to a minute after midnight `handleTechniqueComplete`
+     still completes against the old `dayList` and records that practice
+     under yesterday's date. The rollover then drops it as done.
+  2. **A scale with missing fields is dropped for good on the next save.**
+     `validateAndMigrateTechnique` (`lib/storage.js`) silently skips an
+     item it can't read (for example, no major/minor), and the next save
+     writes the library without it. The app itself never writes such an
+     item; only a hand-edited save could. The corrupt-JSON copy
+     (`measureone-technique-corrupt`) only covers a whole unreadable
+     entry, not a single bad item. A task still pointing at a dropped
+     item's id stays on the list, so the screens must handle a missing
+     item.
+  3. **Technique data isn't in backups yet.** The design says it is
+     ([Technique-Practice.md](Technique-Practice.md#data)), but
+     `downloadBackup`/import only carry pieces, and none of Passes 101–104
+     as planned clearly owns adding it.
+  4. **A check-off can't be undone.** `lib/technique.js` has no undo, and
+     reversing a completion would mean restoring the walk position,
+     `lastPracticedDate`/`practicedDates`, the tempo, and each method's
+     last-used date, none of which is snapshotted today. The mockup's
+     check circle toggles both ways, so the screen pass needs a decision:
+     build an undo (with a snapshot, like a piece session's
+     `ladderSnapshot`) or make check-off one-way.
+  5. **Two engine constants weren't in Research.md** (the "not two days
+     running" spacing and the week-alternation start date). Added in the
+     same commit as this entry; listed here so the Pass 99 summary's flag
+     is closed.
+
 - ~~**A piece that's already been rescheduled once via "cram it into what's
   left" while its own plan was already fully elapsed can permanently stop
   being recognized as behind schedule — and "Reschedule all" then silently

@@ -139,6 +139,8 @@ numbers in particular are explicitly marked "tune after real use".
 | Methods per scale | 3–4 | How many practice methods each task suggests | Whether more or fewer methods changes how much of the task gets done |
 | Slow tier cut-off | slowest third of the user's own even tempos | Which items count as "slow" for tier 2 | Tune after real use (Decided 2) |
 | Slow tier cooldown | 7 days | A slow item isn't offered again by tier 2 within 7 days of being practiced | Tune after real use (Decided 2) |
+| Pace spacing | at least 2 days apart (`TECHNIQUE_PACE_MIN_GAP_DAYS`) | A starred or repertoire scale isn't offered two days running unless the rest of the week can't hold its remaining days otherwise, so 3–4 days spread across the week | Not from the brief; an engine choice in Pass 99. Real data on whether spacing or back-to-back days helps more |
+| Week-alternation start date | 2024-01-01, a Monday (`TECHNIQUE_WEEK_PARITY_EPOCH`) | Which calendar weeks count as "even" (4 days) vs. "odd" (3 days) for a scale that is both starred and repertoire | Arbitrary anchor, not a tuning value; changing it only swaps which weeks are 3 vs. 4 |
 
 ## Open research questions
 

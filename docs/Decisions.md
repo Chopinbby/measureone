@@ -6769,6 +6769,177 @@ linked to Today's Practice — display and navigation only, no editing.**
 - See [Algorithms.md](Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
   for the full mechanism.
 
+## Splitting a chunk (Pass 97)
+
+- **A mockup, and a real sign-off round, before any code.** This pass's own
+  build order required it, and it changed real decisions: the panel hides
+  entirely rather than showing an empty state when nothing today qualifies
+  (the original draft showed explanatory text instead — simpler to just not
+  render it, once asked directly); the confirm mechanism is `window.confirm`,
+  matching this app's existing precedent for every other no-undo action
+  ("Mark as learned elsewhere," "End revival," leaving unlogged practice
+  data) rather than a new inline-expand control; and the Settings clear-
+  splits behavior became boundary-aware (below) instead of an unconditional
+  wipe, directly from the user asking "does changing chunk size only
+  overwrite split chunks if the new size doesn't reproduce them?" — the
+  mockup review surfaced a real design gap, not just cosmetic feedback.
+- **The split points ARE a boundary list, not a separate parallel chunking
+  scheme.** The alternative considered (and rejected, implicitly, by even
+  attempting it) would have been some kind of override map from old chunk
+  id to new sub-chunks. Representing a split as "one more measure the
+  uniform grid must also treat as a boundary" instead means
+  `generatePracticeChunks` needed one small change (merge two boundary
+  sets instead of stepping one), not a second code path — every existing
+  consumer (transitions, combos, `computeTimeline`,
+  `getEffectiveTimeline`) needed zero changes, since none of them care
+  *why* a boundary exists, only that it does.
+  - **This also directly answers a real forward-looking question the user
+    asked before signing off**: a future "undo this split" / "merge two
+    chunks back together" feature (explicitly deferred from this pass, not
+    built) is a natural fit for this representation — removing the one
+    boundary measure that created the split. What that future feature
+    still has to design, which this pass deliberately does NOT solve: what
+    happens to two chunks' *history* if either has been practiced
+    separately since the split (whose sessions count, whose ladder stage
+    wins) — a real merge decision, not a mechanical undo, and explicitly
+    left for whenever that pass actually gets built.
+- **The floor, not the ceiling, for the midpoint — caught by the pass's own
+  worked example, not assumed correct on the first attempt.** An odd count
+  splits 2+3 (extra measure to the SECOND half), matching CLAUDE.md's own
+  "Split mm. 9-12 into 9-10 and 11-12" wording — that specific example is
+  actually an *even* case (4 measures) and doesn't disambiguate ceil vs.
+  floor on its own; the odd-count rule ("5 into 2+3") is what pins it down,
+  and a first-draft `Math.ceil` implementation passed every even-count case
+  while silently getting every odd one backwards (3+2). Caught while
+  writing the unit test for the odd case specifically, before any manual
+  testing — worth remembering as a reason to write the test for the
+  asymmetric case, not just the symmetric ones, whenever a "split in half"
+  rule has an odd-count tiebreak.
+- **The first half keeps the parent's id — a design consequence, not a
+  separate choice.** Once chunk ids are `c${start}` and a split's first
+  half doesn't move its own start measure, keeping the same id for it is
+  what `generatePracticeChunks` already does automatically; the
+  alternative (regenerating a fresh id for BOTH halves) would have meant
+  manually migrating the first half's entire progress entry, including its
+  session log, for no benefit — pure, unforced extra risk. This is also
+  exactly why "sessions[] stays on the first half only" was cheap to build
+  correctly: the first half's sessions were never touched or copied at
+  all, just left where they already were.
+- **A combo anchored to the parent's own reused id is explicitly cleared,
+  not left to whatever the recompute happens to produce.** Considered and
+  rejected: leaving it alone and trusting that a recomputed combo at that
+  id would just be "whatever it is now." Rejected because the combo's own
+  range depends on its neighbor context (Pass 89's tier/neighbor logic),
+  which the split changes for the first half specifically (its "next"
+  chunk in array order is now the second half) — so a stale combo entry
+  surviving under a coincidentally-reused id would attribute old history
+  to a structurally different block, silently. Deleting it unconditionally
+  (harmless when nothing was there) is cheaper and safer than trying to
+  detect whether the recomputed combo "is really the same one."
+- **The transition-to-next carry-over is checked by literal range
+  comparison, not asserted algebraically.** The pass's own text already
+  specified this ("carry that record over when the two ranges are
+  identical and start fresh when they are not"), and building it that way
+  paid off immediately: it's what correctly excludes the 1-measure-second-
+  half case without needing a second, hand-derived condition to cover it —
+  one comparison handles both the "carries over" and "starts fresh" cases
+  by construction, rather than two separately-reasoned branches that could
+  drift out of sync with each other.
+- **Reschedule-marker chaining: re-snapshot the top layer, but patch every
+  ancestor that lists the parent — confirmed necessary by actually
+  rescheduling a test piece twice, not assumed from reading the code.**
+  The initial reasoning (a marker chain, ancestor snapshots looked up
+  against the current chunk set) predicted the ancestor-patching need
+  correctly, but the live check mattered: on a piece rescheduled twice
+  with an untouched chunk listed in both markers, splitting it after
+  finally practicing it produced exactly the predicted result — the
+  second half spliced in right after the first in *both* ancestor
+  markers' `remainingChunkOrder`, with the freshly re-snapshotted top
+  marker correctly NOT listing either half (both already touched as of
+  right now). Extracted into a standalone, unit-testable function
+  (`insertSplitHalfIntoMarkerChain`, `lib/scheduling.js`) specifically
+  because CLAUDE.md is explicit that logic needing a regression test
+  belongs in `lib/`, not embedded in an App.jsx event handler.
+- **For a never-rescheduled piece, no marker is created — verified to
+  actually hold, not just asserted.** The pass allowed creating one if the
+  "never rescheduled" Verify test failed without it; it didn't fail. The
+  reason, confirmed by the test rather than assumed: `computeScheduleStatus`
+  only ever counts an *untouched* chunk as behind, and the second half's
+  copied `doneDays` makes it read as touched immediately, regardless of
+  where a from-scratch `computeTimeline` recompute happens to place its
+  own `introducedDay`. This is the same general property any other chunk-
+  set-changing edit already has on this app (a `customChunkSize` change
+  mid-plan re-derives introducedDay for everything, unconditionally) — a
+  split isn't a special case here, it's covered by an existing invariant.
+- **The Settings clear-splits check became boundary-aware, not "always
+  clear on any structural edit."** The blanket-clear approach the pass
+  first described was explicitly there to avoid *guessing* how an old
+  split point maps onto new boundaries — but checking whether the NEW
+  grid already reproduces the exact same boundary isn't a guess, it's a
+  deterministic membership test with zero risk of producing an odd
+  sliver (a surviving point sits exactly where the new grid would have
+  put a boundary anyway). This directly resolves the common case the user
+  named unprompted — resizing 4 → 2 always preserves every midpoint split
+  made under size 4, since half of an even number divides evenly into
+  the smaller grid too — with no confirmation dialog needed at all.
+- **Load-time self-heal for split points — and the first attempt was
+  wrong in a way a test caught.** A post-build review noticed split points
+  are only validated at Settings-save time, so a backup import or hand-edited
+  file could leave ones the current chunk size can't have produced. The
+  obvious fix — re-run `survivingSplitPoints` on every load — would have
+  wiped *every legitimate split on every reload* (a real split is never on
+  the uniform grid; that rule is the resize question, not the load
+  question). Caught only because a "legitimate splits are left alone" test
+  was written alongside the "bad ones are cleared" tests and failed against
+  the first version. Replaced by `validSplitPoints` (midpoint-tree check,
+  see Algorithms.md). Two honesty notes: the review's original
+  reproduction (size 3, point 11) did not actually demonstrate an invalid
+  state — 11 is a legitimate midpoint of measures 10–12, and the 1-measure
+  chunk at the end was the plain size-3 grid's own remainder — so the gap
+  was real but its severity was overstated (chunk shapes the app can't
+  otherwise create, not data loss or a crash); and
+  `handleSavePiece` used to apply the resize rule to *every* structure edit,
+  so adding measures at the end of a piece (chunk size unchanged) dropped
+  every split with a warning — resolved in the next entry.
+- **Adding measures no longer costs you your splits.** Raised directly: if
+  only the total changes, the existing chunks shouldn't move — the added
+  measures just become new chunks, with an odd remainder at the end getting
+  its own (16 → 23 adds a 4-measure chunk and a 3-measure one), and adding
+  measures is rare anyway. The original spec ("changing chunk size *or total
+  measures* clears the stored split points") predates the boundary-aware
+  refinement and treated both edits the same; they aren't the same question.
+  A size change removes the old grid (so only what the new grid reproduces
+  can survive); a total-only change leaves the grid alone (so everything
+  still legitimate stays). Implemented as `splitPointsAfterStructureEdit`
+  (`lib/chunking.js`) so the rule is unit-tested rather than living in an
+  App.jsx handler; verified live (16 → 23 on a piece with three splits: all
+  three kept, two new chunks, no dialog). One nuance worth knowing, not
+  caused by splits: if the piece's last chunk was short (say 14 measures,
+  last chunk 13–14), growing it extends *that* chunk rather than leaving it
+  and starting a new one — existing grid behavior, so a split inside such a
+  short last chunk is the one case a total-only edit can still lose (it's
+  no longer a midpoint of the lengthened chunk).
+- **Piece Map draws a split pair inside one dashed box — added after the
+  pass, on direct request, as display only.** Raised while reviewing the
+  pre-build mockup ("have the dashed line encircle both split chunks, so
+  there is some indication of the original chunk"); the mockup's box was
+  first offered as review-only illustration because the pass as written
+  said nothing at read time needs to know the halves were once one, and
+  `PieceMapTab.jsx` wasn't a file the pass touched. Then asked for as a
+  real feature, so it shipped — without contradicting that principle: the
+  grouping is *derived live* from `piece.chunkSplitPoints` (which
+  `generatePracticeChunks` already needs), adding no new stored
+  relationship, so the halves' own data still records nothing about their
+  origin. Neutral gray (`--ink-faint`) rather than teal, so the border can't
+  be misread as a confidence tier. Known simplification: a chunk re-split
+  more than once sits at two split boundaries but can only be drawn paired
+  with one neighbor (the earlier split point wins; the other neighbor is
+  left standalone) — a two-box visual has no honest way to show a three-way
+  grouping, and it's cosmetic. Also the natural future home for a "merge
+  these back" affordance, which is still deferred.
+- See [Algorithms.md](Algorithms.md#splitting-a-chunk-pass-97) for the full
+  mechanism.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -7647,3 +7818,52 @@ oversight to silently fix; surface it instead.
   Not fixed here — changing it is a product call (does landing on
   Overview first still have value, e.g. surfacing revival progress stats
   before diving back in?), not an obvious bug to silently correct.
+
+- **Backup import can still pair one device's split points with the other
+  device's chunk size (Pass 97, reduced but not closed).**
+  `mergeImportedPiece` (`lib/storage.js`) picks each field independently by
+  recency, and `chunkSplitPoints` isn't in `MERGE_FIELDS_HANDLED_SEPARATELY`
+  the way `totalMeasures`/`measureDifficulty` are (those must move together;
+  these should too). The load-time self-heal (`validSplitPoints`) now clears
+  any point the merged piece's grid could not have produced, so the worst
+  outcomes (chunk shapes the app can't otherwise create) are gone. Still
+  open: a mismatched point that happens to *look* like a valid midpoint of
+  some chunk on the other side's grid is indistinguishable from a real one
+  and is kept, silently reshaping that chunk into an ordinary midpoint pair.
+  Harmless-looking, but nobody asked for it. Fix, if it ever matters: treat
+  `chunkSplitPoints` as travelling with `chunkMode`/`customChunkSize`/
+  `totalMeasures` in the merge. Not done: no test currently drives an
+  import merge through split points at all.
+- **`splitPracticeChunk` writes the second half's progress entry
+  unconditionally (Pass 97).** If a stale, orphaned progress entry from some
+  unrelated earlier edit happens to sit at exactly the new second half's id
+  (`c${splitMeasure}`), splitting silently overwrites it. Requires an exact
+  id coincidence with already-orphaned data, so very unlikely, and not
+  covered by any test. `migrateOrphanedProgress`'s "never overwrite a chunk
+  that already has its own progress" rule is the precedent for guarding it.
+- **Splitting a chunk that's deep in the maintenance ladder was only checked
+  by reading code and unit tests, not exercised in the browser (Pass 97).**
+  Every per-chunk field except `sessions`/`troubleSpots` is copied wholesale
+  to the second half (a spread, so a future ladder field is carried
+  automatically — no hand-maintained list to forget, unlike the three session
+  handlers), which means both halves start with identical Holding-stage state
+  (`holdingReviewCount`, `holdingEntryBPM`, `nextDueDate`, ...) and diverge
+  from there. That's what the spec asked for and looks right, but only
+  Stabilizing-stage chunks were split live.
+- **Two split halves have no way back (Pass 97, by design for now).** There is
+  no undo and no merge; the confirm dialog is the only safety net. Wanted
+  eventually — see [Roadmap.md](Roadmap.md) backlog item 6 for what a merge
+  would still have to decide about the halves' history. Related loose end: a
+  split lost to a later Settings edit leaves the second half's own progress
+  entry orphaned (never merged into the first half) — consistent with
+  `migrateOrphanedProgress`'s rules, but it means that half's practice history
+  is stranded, not combined.
+- **After a split, the Split panel can disappear immediately (Pass 97).** The
+  panel offers chunks in "the viewed day's live schedule with that day in
+  `doneDays`" (shared with `ReassessPanel`). On a piece whose schedule
+  reshuffles on the recompute a split triggers, both new halves can turn into
+  read-only historical cards and stop qualifying, so you can't split a half
+  again straight away. Observed live on a twice-rescheduled piece; on a simple
+  piece the halves stayed offered. Not changed — sharing `ReassessPanel`'s
+  notion of "today's items" was deliberate — but worth revisiting if it
+  confuses anyone.

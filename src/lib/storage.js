@@ -2,7 +2,7 @@ import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
 import { todayISODate, addDaysISO, parseMeasurePosition } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
 import { isInRevival } from "./revival";
-import { generatePracticeChunks, reassociateTroubleSpots } from "./chunking";
+import { generatePracticeChunks, reassociateTroubleSpots, validSplitPoints } from "./chunking";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -397,10 +397,41 @@ export function validateAndMigratePiece(piece) {
     troubleSpotsEnabled: !!piece.troubleSpotsEnabled,
     troubleSpotDefaultMinutes:
       typeof piece.troubleSpotDefaultMinutes === "number" ? piece.troubleSpotDefaultMinutes : 5,
+    // Pass 97 — extra chunk-boundary measures layered on top of the uniform
+    // chunkMode/customChunkSize stepping (generatePracticeChunks,
+    // lib/chunking.js), one per chunk a learner has split in two from Daily
+    // Practice. A chunk-structure edit (totalMeasures/chunkMode/
+    // customChunkSize) is handled at Settings-save time by App.jsx's
+    // handleSavePiece via splitPointsAfterStructureEdit (lib/chunking.js). A
+    // DIFFERENT check, validSplitPoints, also runs on every load just below
+    // — this line is only the "missing field defaults to empty" half.
+    chunkSplitPoints: Array.isArray(piece.chunkSplitPoints) ? piece.chunkSplitPoints : [],
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.
     startDate,
+  };
+
+  // Split points (Pass 97 follow-up) — self-heals any stored split point the
+  // app could not have produced on this piece's own current chunk grid
+  // (validSplitPoints, lib/chunking.js), same "never trust stored state"
+  // spirit as the focus-spot reassociation just below. handleSavePiece
+  // (App.jsx) prunes split points when a Settings edit changes
+  // totalMeasures/chunkMode/customChunkSize, but that's not the only way a
+  // piece can end up with stale ones: a backup import can pair one device's
+  // split points with the other device's chunk size (mergeImportedPiece
+  // picks each field independently by recency), and a hand-edited file can
+  // say anything. Left as-is, that yields chunk shapes the app can't
+  // otherwise create (e.g. an 8-measure grid chunk cut into 5+2 rather than
+  // a midpoint). Uses validSplitPoints, NOT survivingSplitPoints — a
+  // legitimate split is never on the uniform grid, so the resize rule would
+  // wipe every real split on every load. Deliberately runs BEFORE the steps
+  // below, which derive things from the chunk shape (focus-spot homes via
+  // generatePracticeChunks, minutes-mode day counts via generateAllChunks).
+  // Silent, no confirmation: there's no one user action to ask about here.
+  const withHealedSplits = {
+    ...migrated,
+    chunkSplitPoints: validSplitPoints(migrated.chunkSplitPoints, migrated),
   };
 
   // Focus spots (Pass 91 follow-up) — self-heals any spot left mismatched
@@ -417,9 +448,12 @@ export function validateAndMigratePiece(piece) {
   // at all. Skipping reassociation for that narrow shape is the same
   // "never make this worse than before" fallback reassociateTroubleSpots
   // itself already follows for a spot it can't place.
-  const withReassociatedSpots = Array.isArray(migrated.measureDifficulty)
-    ? { ...migrated, progress: reassociateTroubleSpots(migrated.progress, generatePracticeChunks(migrated)) }
-    : migrated;
+  const withReassociatedSpots = Array.isArray(withHealedSplits.measureDifficulty)
+    ? {
+        ...withHealedSplits,
+        progress: reassociateTroubleSpots(withHealedSplits.progress, generatePracticeChunks(withHealedSplits)),
+      }
+    : withHealedSplits;
 
   // A "minutes per day" piece's daysToLearn must stay derived from its
   // minutesPerDay budget, not just whatever value happened to be sitting on

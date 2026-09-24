@@ -132,11 +132,14 @@ piece = {
                          // chunk already had (`c${start}` doesn't change when the
                          // start measure doesn't move), so splitting never
                          // orphans the first half's own history the way an
-                         // ordinary structure edit can. A chunkMode/
-                         // customChunkSize/totalMeasures edit clears whichever of
-                         // these the new grid can't reproduce on its own —
-                         // survivingSplitPoints (lib/chunking.js) — rather than
-                         // clearing all of them unconditionally; see
+                         // ordinary structure edit can. A totalMeasures/chunkMode/
+                         // customChunkSize edit keeps every split that's still
+                         // valid — all of them if only the total moved, or those
+                         // the new chunk size already lands on if the size
+                         // changed — and asks before dropping any
+                         // (splitPointsAfterStructureEdit, lib/chunking.js); and
+                         // every load/import drops any point the piece's own grid
+                         // couldn't have produced (validSplitPoints). See
                          // Algorithms.md#splitting-a-chunk-pass-97 and
                          // Decisions.md#splitting-a-chunk-pass-97.
   targetBPM,             // number | null — whole-piece default tempo target
@@ -217,10 +220,15 @@ piece = {
                          // like any other entry's — it used to skip this key specially, which
                          // was a bug (see the `lastLoggedAt` field below). A synthetic entry
                          // in the same map, not a documented exception until now.
-  rescheduleMarker,      // null | { asOfDay, remainingChunkOrder, previous } — `previous` is the
-                         // marker in effect right before this one (or null), chained so a piece
-                         // rescheduled more than once still carries its whole history — see
-                         // Algorithms.md#rescheduling
+  rescheduleMarker,      // null | { asOfDay, remainingChunkOrder, remainingConnectorIds,
+                         // previous } — `remainingChunkOrder` is untouched practice-chunk ids,
+                         // `remainingConnectorIds` untouched transition/combo ids (Pass 73);
+                         // `previous` is the marker in effect right before this one (or null),
+                         // chained so a piece rescheduled more than once still carries its whole
+                         // history — see Algorithms.md#rescheduling. Splitting a chunk (Pass 97)
+                         // keeps this rather than nulling it, and inserts the new second half after
+                         // its parent in every marker in the chain that lists the parent — see
+                         // Algorithms.md#the-reschedule-marker-chain
   lastPlayedDate,        // string ("YYYY-MM-DD") | null — collected at revival entry; purely
                          // informational (displayed on Piece Overview), not used by any automatic
                          // staleness detection — see Repertoire-Lifecycle.md and #revival below.
@@ -818,7 +826,8 @@ reasons:
   time any user ticks off a section run-through.
 - **Genuinely stale ids** — editing `totalMeasures`/`chunkMode`/
   `customChunkSize` regenerates chunk ids (sections/difficulty edits alone
-  don't — chunk ids only depend on those three fields), orphaning progress
+  don't — chunk ids depend on those three fields plus `chunkSplitPoints`, which
+  only splitting a chunk changes), orphaning progress
   entries logged before the edit. `migrateOrphanedProgress`
   (`lib/chunking.js`, resolved from an open question — see
   [Decisions.md](Decisions.md#open-questions)) now runs on every Settings

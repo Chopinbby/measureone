@@ -35,7 +35,14 @@ doesn't define them.
 
 - Chunk size comes from `autoChunkSize()` (flat 4 measures, regardless of
   piece length — previously tiered 2/4/8/12 by piece length, simplified per
-  [Decisions.md](Decisions.md#scheduling)) or `piece.customChunkSize`.
+  [Decisions.md](Decisions.md#scheduling)) or `piece.customChunkSize`, via
+  `chunkGridSize()` — the one place that formula lives.
+- **Chunk boundaries are that uniform grid plus `piece.chunkSplitPoints`**
+  (Pass 97): extra boundaries a learner adds by splitting a chunk in two.
+  `generatePracticeChunks` merges the two into one sorted, deduped boundary
+  list, so a split is just another boundary and everything downstream is
+  unchanged — see [Splitting a chunk](#splitting-a-chunk-pass-97). Unsplit
+  pieces (`chunkSplitPoints: []`) behave exactly as before.
 - Each chunk's difficulty is the average of its measures' difficulty
   ratings (`weightedDifficultyFromArray`), bucketed into easy/medium/hard.
 - Recurring material reduces a chunk's `effort` (the unit the scheduler
@@ -48,10 +55,10 @@ for what each generated `kind` means.
 ### Migrating orphaned progress after a chunk-id-shifting edit
 
 A practice chunk's id is `c${start}` — purely a function of where it
-starts, which is itself purely a function of `totalMeasures`/`chunkMode`/
-`customChunkSize` (chunking always restarts counting at measure 1). Edit
-any of those three fields and every chunk from the first boundary shift
-onward gets a **different id**, even though the underlying measures are
+starts, which is itself a function of `totalMeasures`/`chunkMode`/
+`customChunkSize` (chunking always restarts counting at measure 1) and, since
+Pass 97, `chunkSplitPoints`. Edit any of the first three fields and every
+chunk from the first boundary shift onward gets a **different id**, even though the underlying measures are
 the same piece — `piece.progress[oldId]` (sessions, ladder stage,
 `practiceBPM`, everything) no longer matches anything in the freshly
 generated chunk set. **The very first chunk (`start === 1`) always keeps
@@ -67,7 +74,14 @@ to whichever *current* chunk overlaps its old measure range the most,
 instead of leaving it permanently stranded under a dead id. Called once,
 from `App.jsx`'s `handleSavePiece`, comparing the live (pre-edit) `piece`
 against the about-to-be-saved draft — a no-op (same object reference back)
-when the edit didn't touch any of the three id-affecting fields.
+when the edit didn't touch any of the three id-affecting fields. A split
+point a structure edit *loses* (see
+[Interaction with a later Settings structure edit](#interaction-with-a-later-settings-structure-edit))
+leaves that split's second-half progress entry orphaned rather than merged
+back into the first half — rule 1 below (never overwrite a chunk that already
+has its own progress) is what keeps it from being attached anywhere; there is
+no merge of two halves' history yet (deferred, see
+[Decisions.md](Decisions.md#splitting-a-chunk-pass-97)).
 
 It's a heuristic, not a guaranteed-correct remapping — there's often no
 single right answer once boundaries genuinely move. Three rules keep it
@@ -2355,7 +2369,7 @@ of merged into it.
 
 `getEffectiveTimeline(piece, chunkSet)`: when the user confirms "Reschedule
 remaining days" (see [User-Flows.md](User-Flows.md#4-falling-behind-and-rescheduling)),
-`piece.rescheduleMarker = { asOfDay, remainingChunkOrder, previous }` is set
+`piece.rescheduleMarker = { asOfDay, remainingChunkOrder, remainingConnectorIds, previous }` is set
 (`remainingChunkOrder` is the ordered list of practice-chunk ids with zero
 sessions logged as of *that* reschedule; `previous` is whatever
 `rescheduleMarker` was in effect immediately before this one, or `null` for
@@ -2618,7 +2632,7 @@ single-piece and bulk paths can't drift apart the way `currentDay` vs.
 
 **`planRescheduleForPieces(pieces)`** (Pass 21, `lib/scheduling.js`) is the
 multi-piece form of the flow above — Master Agenda's "Reschedule all". For
-every piece it builds the same `{ asOfDay, remainingChunkOrder, previous }`
+every piece it builds the same `{ asOfDay, remainingChunkOrder, remainingConnectorIds, previous }`
 marker `handleReschedule` would, anchored to *that piece's own* current day (not a
 single shared day number, since pieces in a bulk reschedule usually started
 on different dates), and calls `estimateRescheduleFit` per piece so the
@@ -3662,12 +3676,13 @@ Unchanged and separate from splits: a `totalMeasures`/`chunkMode`/
 
 ### Load-time self-heal: `validSplitPoints` (not `survivingSplitPoints`)
 
-`survivingSplitPoints` only runs at Settings-save time, but a piece can also
+The save-time check (`splitPointsAfterStructureEdit`) only runs when a Settings
+edit changes `totalMeasures`/`chunkMode`/`customChunkSize`, but a piece can also
 arrive with stale split points another way: a backup import
 (`mergeImportedPiece` picks each field independently by recency, so one
 device's split points can land next to the other device's chunk size), or a
 hand-edited file. So `validateAndMigratePiece` (`lib/storage.js`) also
-re-checks `chunkSplitPoints` on **every load**, via `validSplitPoints`
+re-checks `chunkSplitPoints` on **every load** — and immediately after a backup import, since both import paths in `App.jsx` (merge into an existing piece, and add as a new piece) call it too — via `validSplitPoints`
 (`lib/chunking.js`), running *before* the focus-spot reassociation and the
 minutes-mode day count — both derive things from the chunk shape, so they
 must see the healed one.
@@ -3691,3 +3706,41 @@ midpoint-shaped pair. Silent, no dialog: there's no single user action to
 confirm, and leaving an impossible chunk shape in place is the alternative.
 A property test asserts every point `splitPracticeChunk` itself produces,
 split all the way down, is accepted — the two can't drift apart.
+
+### The panel: which chunks are offered
+
+`TodayTab.jsx` builds `splitEligibleChunks` from the same "today's practiced
+items" set `ReassessPanel` already uses (`todaysIds` filtered to those with
+today in `doneDays`), narrowed to `kind: "section"` with `measureCount >= 2`
+(`canSplitChunk`, `lib/chunking.js`). `SplitChunkPanel`
+(`components/tabs/today/`) renders **nothing at all** when that list is empty —
+no empty-state message (a shown-but-empty panel was judged more confusing than
+none, on review of the mockup). It sits below `ReassessPanel` in the regular
+view only: revival is an early return above it, and it's explicitly excluded
+from Interleaved mode (`viewMode !== "interleave"`), unlike `ReassessPanel`.
+Two consequences worth knowing, both inherited from sharing `todaysIds`
+rather than added by this pass: "today" here is the day being *viewed*
+(`todaysDayNumber` — the browsed day, or the real elapsed day once past the
+plan), so paging to a past day offers the chunks done on that day, same as
+`ReassessPanel`; and a chunk practiced that day but no longer in that day's
+*live* schedule (it shows only as a Pass 90 historical card) isn't offered at
+all — seen live right after splitting: the two new halves became historical
+cards and the panel disappeared.
+
+### Piece Map: showing which chunks came from one split
+
+`computeSplitDisplayGroups(gridChunks, chunkSplitPoints)` (`lib/chunking.js`)
+lays the grid out as render slots: a lone chunk, or a `{ first, second }` pair
+for two chunks whose shared boundary is one of the piece's split points.
+`PieceMapTab` draws a pair inside one dashed `.map-cell-group` box spanning two
+grid columns (hover title "Split from one original chunk"); every cell inside
+is the ordinary cell, so click-to-open-the-detail-modal and all per-cell marks
+are unchanged. **Derived live, not persisted** — it reads the same
+`chunkSplitPoints` list `generatePracticeChunks` already consumes, so the
+halves themselves still carry no "I was once one chunk" data. A chunk can be
+shown paired with only one neighbor: a chunk that was re-split sits at two
+split boundaries at once, and the *smaller* (earlier) split point's pairing
+wins while the other neighbor is left standalone — a cosmetic simplification
+of a two-box visual that can't show a three-way grouping, not a data issue.
+An unsplit piece renders byte-for-byte as before. This is display only:
+there's still no way to *un*-split from Piece Map (or anywhere).

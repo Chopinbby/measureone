@@ -6919,6 +6919,24 @@ linked to Today's Practice — display and navigation only, no editing.**
   and starting a new one — existing grid behavior, so a split inside such a
   short last chunk is the one case a total-only edit can still lose (it's
   no longer a midpoint of the lengthened chunk).
+- **Piece Map draws a split pair inside one dashed box — added after the
+  pass, on direct request, as display only.** Raised while reviewing the
+  pre-build mockup ("have the dashed line encircle both split chunks, so
+  there is some indication of the original chunk"); the mockup's box was
+  first offered as review-only illustration because the pass as written
+  said nothing at read time needs to know the halves were once one, and
+  `PieceMapTab.jsx` wasn't a file the pass touched. Then asked for as a
+  real feature, so it shipped — without contradicting that principle: the
+  grouping is *derived live* from `piece.chunkSplitPoints` (which
+  `generatePracticeChunks` already needs), adding no new stored
+  relationship, so the halves' own data still records nothing about their
+  origin. Neutral gray (`--ink-faint`) rather than teal, so the border can't
+  be misread as a confidence tier. Known simplification: a chunk re-split
+  more than once sits at two split boundaries but can only be drawn paired
+  with one neighbor (the earlier split point wins; the other neighbor is
+  left standalone) — a two-box visual has no honest way to show a three-way
+  grouping, and it's cosmetic. Also the natural future home for a "merge
+  these back" affordance, which is still deferred.
 - See [Algorithms.md](Algorithms.md#splitting-a-chunk-pass-97) for the full
   mechanism.
 
@@ -7800,3 +7818,52 @@ oversight to silently fix; surface it instead.
   Not fixed here — changing it is a product call (does landing on
   Overview first still have value, e.g. surfacing revival progress stats
   before diving back in?), not an obvious bug to silently correct.
+
+- **Backup import can still pair one device's split points with the other
+  device's chunk size (Pass 97, reduced but not closed).**
+  `mergeImportedPiece` (`lib/storage.js`) picks each field independently by
+  recency, and `chunkSplitPoints` isn't in `MERGE_FIELDS_HANDLED_SEPARATELY`
+  the way `totalMeasures`/`measureDifficulty` are (those must move together;
+  these should too). The load-time self-heal (`validSplitPoints`) now clears
+  any point the merged piece's grid could not have produced, so the worst
+  outcomes (chunk shapes the app can't otherwise create) are gone. Still
+  open: a mismatched point that happens to *look* like a valid midpoint of
+  some chunk on the other side's grid is indistinguishable from a real one
+  and is kept, silently reshaping that chunk into an ordinary midpoint pair.
+  Harmless-looking, but nobody asked for it. Fix, if it ever matters: treat
+  `chunkSplitPoints` as travelling with `chunkMode`/`customChunkSize`/
+  `totalMeasures` in the merge. Not done: no test currently drives an
+  import merge through split points at all.
+- **`splitPracticeChunk` writes the second half's progress entry
+  unconditionally (Pass 97).** If a stale, orphaned progress entry from some
+  unrelated earlier edit happens to sit at exactly the new second half's id
+  (`c${splitMeasure}`), splitting silently overwrites it. Requires an exact
+  id coincidence with already-orphaned data, so very unlikely, and not
+  covered by any test. `migrateOrphanedProgress`'s "never overwrite a chunk
+  that already has its own progress" rule is the precedent for guarding it.
+- **Splitting a chunk that's deep in the maintenance ladder was only checked
+  by reading code and unit tests, not exercised in the browser (Pass 97).**
+  Every per-chunk field except `sessions`/`troubleSpots` is copied wholesale
+  to the second half (a spread, so a future ladder field is carried
+  automatically — no hand-maintained list to forget, unlike the three session
+  handlers), which means both halves start with identical Holding-stage state
+  (`holdingReviewCount`, `holdingEntryBPM`, `nextDueDate`, ...) and diverge
+  from there. That's what the spec asked for and looks right, but only
+  Stabilizing-stage chunks were split live.
+- **Two split halves have no way back (Pass 97, by design for now).** There is
+  no undo and no merge; the confirm dialog is the only safety net. Wanted
+  eventually — see [Roadmap.md](Roadmap.md) backlog item 6 for what a merge
+  would still have to decide about the halves' history. Related loose end: a
+  split lost to a later Settings edit leaves the second half's own progress
+  entry orphaned (never merged into the first half) — consistent with
+  `migrateOrphanedProgress`'s rules, but it means that half's practice history
+  is stranded, not combined.
+- **After a split, the Split panel can disappear immediately (Pass 97).** The
+  panel offers chunks in "the viewed day's live schedule with that day in
+  `doneDays`" (shared with `ReassessPanel`). On a piece whose schedule
+  reshuffles on the recompute a split triggers, both new halves can turn into
+  read-only historical cards and stop qualifying, so you can't split a half
+  again straight away. Observed live on a twice-rescheduled piece; on a simple
+  piece the halves stayed offered. Not changed — sharing `ReassessPanel`'s
+  notion of "today's items" was deliberate — but worth revisiting if it
+  confuses anyone.

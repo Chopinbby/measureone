@@ -401,11 +401,10 @@ export function validateAndMigratePiece(piece) {
     // chunkMode/customChunkSize stepping (generatePracticeChunks,
     // lib/chunking.js), one per chunk a learner has split in two from Daily
     // Practice. A chunk-structure edit (totalMeasures/chunkMode/
-    // customChunkSize) clears whichever of these the new grid can't
-    // reproduce on its own — see App.jsx's handleSavePiece and
-    // survivingSplitPoints (lib/chunking.js). That check only runs at
-    // Settings-save time, so it's ALSO re-run on every load, just below —
-    // this line is only the "missing field defaults to empty" half.
+    // customChunkSize) is handled at Settings-save time by App.jsx's
+    // handleSavePiece via splitPointsAfterStructureEdit (lib/chunking.js). A
+    // DIFFERENT check, validSplitPoints, also runs on every load just below
+    // — this line is only the "missing field defaults to empty" half.
     chunkSplitPoints: Array.isArray(piece.chunkSplitPoints) ? piece.chunkSplitPoints : [],
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in

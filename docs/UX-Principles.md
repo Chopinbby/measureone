@@ -86,6 +86,17 @@ The rest of that same panel (Focus spots, the revival tempo field) stays
 frictionless, since toggling either genuinely doesn't cost anything to
 reconsider.
 
+**Since Pass 97**, splitting a chunk gets a confirmation too, and it clears
+the same bar more plainly than either above: it has **no undo** (and no merge
+yet), so a mis-click on the wrong chunk is permanent. The `window.confirm`
+names the exact result — "Split mm. 9-12 into 9-10 and 11-12? This can't be
+undone." — so the one thing a second step *can* change (the learner sees the
+wrong chunk range and backs out) is precisely what it shows. Deliberately a
+plain `window.confirm`, not a bespoke inline step, matching the two
+precedents above. The panel itself follows the app's existing
+"nothing to offer → render nothing" habit (`ReassessPanel`, the Random Start
+pool below two entries) rather than showing an explanatory empty state.
+
 ## A mode lives inside its tab, not a standing nav entry
 
 When a piece enters a special way of practicing — Interleaved rotation,
@@ -192,6 +203,15 @@ computation:
 - Pass 68: `SectionRunThroughPanel` only renders when `isRealToday` —
   `sectionRunThroughGate`/`computeSectionRunThroughs` stay day-agnostic on
   purpose.
+
+**A considered non-instance (Pass 97):** the "Split a chunk" panel is rendered
+on browsed days too, and deliberately is *not* gated on `isRealToday`. It isn't
+the shape this section warns about: its list isn't an un-dated live answer
+relabeled onto the wrong day — it's scoped to the *viewed* day (chunks in that
+day's schedule with that day in `doneDays`, the same set `ReassessPanel`
+reads), and its action changes the piece's chunk structure without stamping
+any day onto anything. Gating it on real "today" would only hide a legitimate
+action from someone who paged back to the day they practiced.
 
 Treat a fourth instance of this exact shape (a live, un-dated "is this due
 right now" function whose result gets rendered somewhere a browsed day is

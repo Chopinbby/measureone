@@ -3,6 +3,7 @@ import { X, Pencil, Flag, RotateCcw, TrendingUp, Metronome, AlertTriangle, Signa
 import { NumberInput } from "../NumberInput";
 import { MemoryAnchorField } from "../MemoryAnchorField";
 import { clamp, formatRange, todayISODate, findRelatedChunks } from "../../lib/utils";
+import { computeSplitDisplayGroups } from "../../lib/chunking";
 import { findNextScheduledDay } from "../../lib/history";
 import { DIFFICULTY_META, ROLE_LABEL } from "../../lib/constants";
 import {
@@ -102,6 +103,53 @@ export function PieceMapTab({
   // through the piece's last measure), so transitions/combos need their
   // own way to be reached: the "Related chunks" field below.
   const gridChunks = chunks.filter((c) => c.kind === "section");
+  // Pass 97 follow-up — which grid cells are shown grouped as a split pair,
+  // derived live off piece.chunkSplitPoints (computeSplitDisplayGroups,
+  // lib/chunking.js) — display only, no new persisted relationship.
+  const splitDisplayGroups = computeSplitDisplayGroups(gridChunks, piece.chunkSplitPoints);
+  // One cell's worth of markup, shared by a standalone chunk and a chunk
+  // rendered inside a split-pair group — extracted so the grid's own map()
+  // below doesn't have to duplicate this per-cell body for both cases.
+  const renderMapCell = (c) => {
+    const conf = computeConfidence(c, piece, currentDay);
+    const manual = isManualConfidence(c, piece.progress);
+    const flag = (piece.progress[c.id] || {}).flag;
+    const needsRelearning = (piece.progress[c.id] || {}).needsRelearning;
+    const climbingTempo = hasClimbingTempo(piece.progress[c.id]);
+    const tier = conf >= 67 ? "teal" : conf >= 34 ? "brass" : "brick";
+    const DiffSignalIcon = DIFFICULTY_SIGNAL_ICON[c.difficultyLabel];
+    return (
+      <button
+        key={c.id}
+        className={`map-cell tier-${tier} ${selected === c.id ? "selected" : ""}`}
+        onClick={() => setSelected(selected === c.id ? null : c.id)}
+      >
+        {c.kind !== "section" && <span className="map-cell-kind">{c.kind === "combo" ? "Focus" : "Review"}</span>}
+        <DiffSignalIcon size={12} className="map-cell-diff-icon" title={DIFFICULTY_META[c.difficultyLabel].label} />
+        <span className="map-cell-range mono">{formatRange(c.start, c.end)}</span>
+        <span className="map-cell-conf mono">
+          {conf}%{manual && <Pencil size={9} className="manual-mark" title="Set manually" />}
+          {climbingTempo && (
+            <>
+              <Metronome size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
+              <TrendingUp size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
+            </>
+          )}
+        </span>
+        {c.recurring && <span className="map-cell-recurring" title="Recurring material">&#8635;</span>}
+        {flag && (
+          <span className={`map-cell-flag flag-${flag}`} title={flag === "lost" ? "Lost" : "Rough"}>
+            <Flag size={11} />
+          </span>
+        )}
+        {needsRelearning && (
+          <span className="map-cell-relearning" title="Needs reinforcement">
+            <RotateCcw size={11} />
+          </span>
+        )}
+      </button>
+    );
+  };
   // Computed for whatever chunk is currently selected, not just a base
   // one — so following a related-chunk link to a transition's or combo's
   // own detail view shows its related chunks in turn (including the base
@@ -192,46 +240,16 @@ export function PieceMapTab({
       </div>
 
       <div className="map-grid">
-        {gridChunks.map((c) => {
-          const conf = computeConfidence(c, piece, currentDay);
-          const manual = isManualConfidence(c, piece.progress);
-          const flag = (piece.progress[c.id] || {}).flag;
-          const needsRelearning = (piece.progress[c.id] || {}).needsRelearning;
-          const climbingTempo = hasClimbingTempo(piece.progress[c.id]);
-          const tier = conf >= 67 ? "teal" : conf >= 34 ? "brass" : "brick";
-          const DiffSignalIcon = DIFFICULTY_SIGNAL_ICON[c.difficultyLabel];
-          return (
-            <button
-              key={c.id}
-              className={`map-cell tier-${tier} ${selected === c.id ? "selected" : ""}`}
-              onClick={() => setSelected(selected === c.id ? null : c.id)}
-            >
-              {c.kind !== "section" && <span className="map-cell-kind">{c.kind === "combo" ? "Focus" : "Review"}</span>}
-              <DiffSignalIcon size={12} className="map-cell-diff-icon" title={DIFFICULTY_META[c.difficultyLabel].label} />
-              <span className="map-cell-range mono">{formatRange(c.start, c.end)}</span>
-              <span className="map-cell-conf mono">
-                {conf}%{manual && <Pencil size={9} className="manual-mark" title="Set manually" />}
-                {climbingTempo && (
-                  <>
-                    <Metronome size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
-                    <TrendingUp size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
-                  </>
-                )}
-              </span>
-              {c.recurring && <span className="map-cell-recurring" title="Recurring material">&#8635;</span>}
-              {flag && (
-                <span className={`map-cell-flag flag-${flag}`} title={flag === "lost" ? "Lost" : "Rough"}>
-                  <Flag size={11} />
-                </span>
-              )}
-              {needsRelearning && (
-                <span className="map-cell-relearning" title="Needs reinforcement">
-                  <RotateCcw size={11} />
-                </span>
-              )}
-            </button>
-          );
-        })}
+        {splitDisplayGroups.map(({ first, second }) =>
+          second ? (
+            <div key={first.id} className="map-cell-group" title="Split from one original chunk">
+              {renderMapCell(first)}
+              {renderMapCell(second)}
+            </div>
+          ) : (
+            renderMapCell(first)
+          )
+        )}
       </div>
 
       {selectedChunk && (

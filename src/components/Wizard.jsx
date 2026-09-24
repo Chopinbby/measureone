@@ -48,6 +48,7 @@ export function defaultPiece() {
     practiceDaysPerWeek: 7,
     chunkMode: "auto",
     customChunkSize: 4,
+    chunkSplitPoints: [],
     targetBPM: null,
     bpmZones: [],
     recordings: [],

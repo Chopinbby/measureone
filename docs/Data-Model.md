@@ -122,6 +122,23 @@ piece = {
                          // (no rest days) — see Algorithms.md#timeline--scheduler
   chunkMode,             // 'auto' | 'custom'
   customChunkSize,       // number, measures per chunk when chunkMode === 'custom'
+  chunkSplitPoints,      // number[], default [] — Pass 97. Extra chunk-boundary
+                         // measures layered on top of the uniform chunkMode/
+                         // customChunkSize stepping (generatePracticeChunks,
+                         // lib/chunking.js), one per chunk a learner has split in
+                         // two from Daily Practice's "Split a chunk" panel. Each
+                         // entry is the measure the SECOND half starts at — the
+                         // first half always keeps the id the whole, unsplit
+                         // chunk already had (`c${start}` doesn't change when the
+                         // start measure doesn't move), so splitting never
+                         // orphans the first half's own history the way an
+                         // ordinary structure edit can. A chunkMode/
+                         // customChunkSize/totalMeasures edit clears whichever of
+                         // these the new grid can't reproduce on its own —
+                         // survivingSplitPoints (lib/chunking.js) — rather than
+                         // clearing all of them unconditionally; see
+                         // Algorithms.md#splitting-a-chunk-pass-97 and
+                         // Decisions.md#splitting-a-chunk-pass-97.
   targetBPM,             // number | null — whole-piece default tempo target
   bpmZones,              // [{ id, start, end, bpm }] — per-range tempo overrides
   recordings,            // [{ id, label, url }] — reference recordings (YouTube, Spotify, etc.),

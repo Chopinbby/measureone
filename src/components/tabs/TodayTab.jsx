@@ -10,6 +10,7 @@ import { ReassessSequencePanel } from "./revival/ReassessSequencePanel";
 import { DayChecklist } from "./today/DayChecklist";
 import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
+import { SplitChunkPanel } from "./today/SplitChunkPanel";
 import { WeekView } from "./today/WeekView";
 import { InterleavePanel } from "./today/InterleavePanel";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
@@ -165,6 +166,7 @@ export function TodayTab({
   onLogFocusSpotTime,
   onUnlogFocusSpotTime,
   onResolveFocusSpot,
+  onSplitChunk,
 }) {
   const [viewMode, setViewMode] = useState("day");
   const day = timeline.days[currentDay - 1];
@@ -387,6 +389,17 @@ export function TodayTab({
     .map((id) => chunkById[id])
     .filter(Boolean)
     .map((c) => ({ start: c.start, end: c.end }));
+
+  // Split a chunk (Pass 97) — same "today's practiced items" set
+  // todaysRanges reads above, narrowed to base practice chunks of 2+
+  // measures (canSplitChunk, lib/chunking.js) — a transition, combo,
+  // section run-through, or 1-measure chunk is never offered. Unlike
+  // ReassessPanel, this has no "nothing qualifies" state: the panel itself
+  // renders nothing when this list is empty (per direct request).
+  const splitEligibleChunks = [...new Set(todaysIds)]
+    .filter((id) => ((piece.progress[id] || {}).doneDays || []).includes(todaysDayNumber))
+    .map((id) => chunkById[id])
+    .filter((c) => c && c.kind === "section" && c.measureCount >= 2);
 
   // Random Start (Pass 57) — the same "don't let yourself always start
   // from the top" pool RevivalTab/MasterAgendaTab already use (chunkEntry,
@@ -838,6 +851,12 @@ export function TodayTab({
       />
 
       <ReassessPanel piece={piece} todaysRanges={todaysRanges} onReassessRange={onReassessRange} />
+
+      {/* Pass 97 — regular Today's Practice view only, same as this whole
+          return block (revival is an early return above); explicitly
+          excluded from Interleaved mode per direct request, unlike
+          ReassessPanel just above, which stays available there too. */}
+      {viewMode !== "interleave" && <SplitChunkPanel chunks={splitEligibleChunks} onSplitChunk={onSplitChunk} />}
     </div>
   );
 }

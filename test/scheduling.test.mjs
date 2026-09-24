@@ -4,7 +4,7 @@
 // for the design this implements.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { generateAllChunks } from "../src/lib/chunking.js";
+import { generateAllChunks, splitPracticeChunk } from "../src/lib/chunking.js";
 import {
   computeTimeline,
   getEffectiveTimeline,
@@ -30,6 +30,7 @@ import {
   scheduleBand,
   bandOvershoot,
   focusSpotGate,
+  insertSplitHalfIntoMarkerChain,
 } from "../src/lib/scheduling.js";
 import { addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "../src/lib/utils.js";
 
@@ -2718,5 +2719,85 @@ describe("Pass 92 — classifyDayEmptyState consolidates the four surfaces' own 
     assert.deepEqual(day.reviewChunkIds, []);
     assert.deepEqual(day.staleReviewIds, ["c1"]);
     assert.equal(classifyDayEmptyState(day, piece), "empty");
+  });
+});
+
+describe("insertSplitHalfIntoMarkerChain (Pass 97) — threading a split's second half into reschedule-marker history", () => {
+  test("inserts the second half immediately after the parent in a single marker", () => {
+    const marker = { asOfDay: 10, remainingChunkOrder: ["c1", "c9", "c13"], remainingConnectorIds: [], previous: null };
+    const patched = insertSplitHalfIntoMarkerChain(marker, "c9", "c11");
+    assert.deepEqual(patched.remainingChunkOrder, ["c1", "c9", "c11", "c13"]);
+  });
+
+  test("patches every marker in the previous chain that lists the parent, not just the top one — and leaves a layer that doesn't list it alone", () => {
+    // Oldest reschedule: c9 (the eventual split parent) and c17 were both
+    // still untouched as of that snapshot. By the middle reschedule, c17
+    // had been practiced (so it's no longer listed) but c9 still hadn't.
+    // By the most recent (top) reschedule, c9 itself had finally been
+    // practiced too — so the top marker doesn't list it at all.
+    const oldest = { asOfDay: 5, remainingChunkOrder: ["c9", "c17"], remainingConnectorIds: [], previous: null };
+    const middle = { asOfDay: 10, remainingChunkOrder: ["c9"], remainingConnectorIds: [], previous: oldest };
+    const top = { asOfDay: 15, remainingChunkOrder: ["c21"], remainingConnectorIds: [], previous: middle };
+
+    const patched = insertSplitHalfIntoMarkerChain(top, "c9", "c11");
+    assert.deepEqual(patched.remainingChunkOrder, ["c21"], "top marker never listed the parent -> untouched");
+    assert.deepEqual(patched.previous.remainingChunkOrder, ["c9", "c11"], "middle marker listed the parent -> patched");
+    assert.deepEqual(
+      patched.previous.previous.remainingChunkOrder,
+      ["c9", "c11", "c17"],
+      "oldest marker listed the parent -> patched, second half inserted right after it, ahead of whatever already followed"
+    );
+  });
+
+  test("remainingConnectorIds is left completely untouched — connectors start fresh on a split, per CLAUDE.md", () => {
+    const marker = { asOfDay: 10, remainingChunkOrder: ["c21"], remainingConnectorIds: ["t_c1_c5"], previous: null };
+    const patched = insertSplitHalfIntoMarkerChain(marker, "c9", "c11");
+    assert.deepEqual(patched.remainingConnectorIds, ["t_c1_c5"]);
+  });
+
+  test("a null marker (never rescheduled) is returned as-is, not turned into a fresh one", () => {
+    assert.equal(insertSplitHalfIntoMarkerChain(null, "c9", "c11"), null);
+  });
+});
+
+describe('[Pass 97, "never rescheduled" test] splitting an already-practiced chunk on a piece with no rescheduleMarker', () => {
+  test("no chunk newly reads as missed/behind, and both halves show done wherever the parent was done", () => {
+    const piece = basePiece({ totalMeasures: 12, customChunkSize: 4, daysToLearn: 21, progress: {} });
+    const chunkSet = generateAllChunks(piece);
+    const timeline = computeTimeline(piece, chunkSet);
+    const day = timeline.introducedDay.c1;
+    piece.progress.c1 = { doneDays: [day], sessions: [{ day, cleanReps: 3, bpm: 80 }] };
+
+    // Other chunks in this piece (c5, c9) are still genuinely untouched and
+    // legitimately count as missed by day+10 — irrelevant to this test,
+    // which only cares whether the SPLIT chunk specifically stays clear.
+    const statusBefore = computeScheduleStatus(piece, chunkSet.practiceChunks, timeline, day + 10);
+    assert.ok(!statusBefore.remainingChunkIds.includes("c1"), "sanity check: the touched parent isn't remaining before the split");
+
+    const result = splitPracticeChunk(piece, "c1");
+    assert.ok(result, "c1 (4 measures) must be splittable");
+    const splitPiece = { ...piece, chunkSplitPoints: result.chunkSplitPoints, progress: result.progress };
+    const splitChunkSet = generateAllChunks(splitPiece);
+    // No rescheduleMarker on this piece at all — per CLAUDE.md, a split on a
+    // never-rescheduled piece must NOT create one unless this test fails
+    // without it. computeTimeline (not getEffectiveTimeline) is exactly
+    // what a null rescheduleMarker resolves to either way.
+    const splitTimeline = computeTimeline(splitPiece, splitChunkSet);
+
+    const statusAfter = computeScheduleStatus(splitPiece, splitChunkSet.practiceChunks, splitTimeline, day + 10);
+    assert.equal(
+      statusAfter.missedCount,
+      statusBefore.missedCount,
+      "the split must not newly count either half as missed/behind — c5/c9 staying missed is unrelated and expected"
+    );
+    assert.ok(!statusAfter.remainingChunkIds.includes(result.firstHalfId));
+    assert.ok(!statusAfter.remainingChunkIds.includes(result.secondHalfId));
+
+    assert.deepEqual(splitPiece.progress[result.firstHalfId].doneDays, [day]);
+    assert.deepEqual(
+      splitPiece.progress[result.secondHalfId].doneDays,
+      [day],
+      "the second half shows done on the same day the parent was, even though it has no session log of its own"
+    );
   });
 });

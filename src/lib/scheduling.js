@@ -991,6 +991,34 @@ export function computeRescheduleRemainder(piece, chunkSet, timeline) {
   return { remainingChunkIds: status.remainingChunkIds, remainingConnectorIds, qualifyingConnectorIds, marker };
 }
 
+// Pass 97 — splitting a chunk keeps the parent's own id on the first half
+// (generatePracticeChunks derives ids from start measure, which the first
+// half doesn't move), so a marker's remainingChunkOrder still resolves the
+// parent's id to a real chunk after the split — just a smaller one. A
+// marker's remainingChunkOrder is a frozen historical snapshot, looked up
+// against the CURRENT chunk set every time computeEffectiveTimeline
+// processes it — so once the parent's id resolves to the first half, the
+// second half needs to ride along with it in every layer of the `previous`
+// chain that still lists the parent, or that layer's own computeTimeline
+// call schedules the first half alone and never learns the second half
+// exists at all. A layer where the parent was already touched as of that
+// snapshot (not in remainingChunkOrder to begin with) is left untouched —
+// nothing to insert after. `marker` may be null (nothing to patch).
+export function insertSplitHalfIntoMarkerChain(marker, firstHalfId, secondHalfId) {
+  if (!marker) return marker;
+  const insertAfter = (order) => {
+    if (!order || !order.includes(firstHalfId)) return order;
+    const next = [...order];
+    next.splice(next.indexOf(firstHalfId) + 1, 0, secondHalfId);
+    return next;
+  };
+  return {
+    ...marker,
+    remainingChunkOrder: insertAfter(marker.remainingChunkOrder),
+    previous: insertSplitHalfIntoMarkerChain(marker.previous, firstHalfId, secondHalfId),
+  };
+}
+
 // Per-day completion status for a single timeline day, relative to
 // currentDay: "future" | "done" | "behind" | "empty". Pure and side-effect
 // free, written once (Pass 45) specifically so Pass 46 (Timeline tab) can

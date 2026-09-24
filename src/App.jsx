@@ -18,9 +18,17 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
-import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
-import { generateAllChunks, migrateOrphanedProgress, reassociateTroubleSpots } from "./lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension } from "./lib/scheduling";
+import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange } from "./lib/utils";
+import {
+  generateAllChunks,
+  migrateOrphanedProgress,
+  reassociateTroubleSpots,
+  canSplitChunk,
+  computeSplitMeasure,
+  splitPracticeChunk,
+  splitPointsAfterStructureEdit,
+} from "./lib/chunking";
+import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -77,8 +85,12 @@ const NAV_BASE = [
 
 // Fields that regenerate practice-chunk IDENTITY (ids/boundaries) —
 // generatePracticeChunks (lib/chunking.js) builds `id: c${start}` from a
-// loop over totalMeasures stepped by chunkMode/customChunkSize alone,
-// nothing else. Originally this list also included measureDifficulty,
+// loop over totalMeasures stepped by chunkMode/customChunkSize, plus
+// piece.chunkSplitPoints (Pass 97). chunkSplitPoints is deliberately NOT in
+// this list: the Settings form never edits it (only handleSplitChunk adds
+// to it), so "did this save change it" isn't a question handleSavePiece
+// needs to ask — a structure edit's effect on it is handled separately, by
+// splitPointsAfterStructureEdit. Nothing else feeds chunk identity. Originally this list also included measureDifficulty,
 // recurringMode, recurringMeasures, and recurringPairs — mirroring
 // ScheduleFields.jsx's own chunkSet-recompute dependency list — but that
 // list answers a different question (which fields change total EFFORT,
@@ -634,7 +646,37 @@ export default function App() {
     const rescheduleMarker = scheduleOnlyEdit
       ? computeRescheduleRemainder(piece, chunkSet, timeline).marker
       : null;
-    updatePiece(ensureWorkId({ ...updated, progress, rescheduleMarker }));
+
+    // Pass 97 — a structural edit can invalidate existing split points.
+    // splitPointsAfterStructureEdit (lib/chunking.js) decides which survive:
+    // if the chunk step is unchanged (e.g. only totalMeasures moved) every
+    // split that's still a legitimate midpoint stays, no dialog; if the step
+    // changed, only splits the new grid already lands on survive (a resize
+    // like 4 -> 2 keeps every midpoint split, no dialog). Only splits
+    // actually being lost get named in a confirmation.
+    let chunkSplitPoints = piece.chunkSplitPoints || [];
+    if (!scheduleOnlyEdit && chunkSplitPoints.length > 0) {
+      const { kept, lost } = splitPointsAfterStructureEdit(piece, updated);
+      if (lost.length > 0) {
+        const oldChunks = chunkSet.practiceChunks;
+        const describeLostSplit = (m) => {
+          const right = oldChunks.find((c) => c.start === m);
+          const left = oldChunks.find((c) => c.end === m - 1);
+          if (!right || !left) return `measure ${m}`;
+          return `${formatRange(left.start, right.end)} (→ ${formatRange(left.start, right.start - 1)} / ${formatRange(right.start, right.end)})`;
+        };
+        const descriptions = lost.map(describeLostSplit).join("; ");
+        const ok = window.confirm(
+          lost.length === 1
+            ? `This change can't preserve your split at ${descriptions} — it'll merge back into an ordinary chunk under the new chunking.\n\nProgress still carries over the way it always does when chunking changes.\n\nContinue?`
+            : `This change can't preserve ${lost.length} of your splits — ${descriptions}.\n\nThey'll merge back into ordinary chunks under the new chunking. Progress still carries over the way it always does when chunking changes.\n\nContinue?`
+        );
+        if (!ok) return;
+      }
+      chunkSplitPoints = kept;
+    }
+
+    updatePiece(ensureWorkId({ ...updated, progress, rescheduleMarker, chunkSplitPoints }));
     setEditDraftState(null);
     setSettingsEditing(false);
   };
@@ -1153,6 +1195,42 @@ export default function App() {
           : prevEntry.practiceBPM;
       progress[chunkId] = { ...prevEntry, troubleSpots: nextSpots, practiceBPM: seededPracticeBPM };
       return { ...p, progress, lastLoggedAt: loggedDate };
+    });
+  };
+
+  // Pass 97 — splits a base practice chunk (2+ measures) into two, from
+  // Daily Practice's "Split a chunk" panel. No undo, so the confirm step is
+  // the only safety net (matching the app's existing no-undo precedent,
+  // difficulty reassessment) — built as a plain window.confirm, the same
+  // pattern already used for "Mark as learned elsewhere," "End revival," and
+  // leaving unlogged practice data.
+  const handleSplitChunk = (chunkId) => {
+    const chunk = chunkSet.practiceChunks.find((c) => c.id === chunkId);
+    if (!canSplitChunk(chunk)) return;
+    const splitMeasure = computeSplitMeasure(chunk);
+    const rangeText = (s, e) => (s === e ? `${s}` : `${s}-${e}`);
+    const ok = window.confirm(
+      `Split mm. ${chunk.start}-${chunk.end} into ${rangeText(chunk.start, splitMeasure - 1)} and ${rangeText(splitMeasure, chunk.end)}?\n\nThis can't be undone.`
+    );
+    if (!ok) return;
+
+    // Snapshotted from the pre-split piece/chunkSet/timeline — the same
+    // "what's actually still untouched" computation every other
+    // reschedule-marker constructor uses (see
+    // docs/Algorithms.md#rescheduling). A structural edit would normally
+    // null rescheduleMarker outright (handleSavePiece above); that would
+    // discard real reschedule history, so a split instead re-snapshots it
+    // fresh, same as a pacing-only Settings edit already does.
+    const remainder = piece.rescheduleMarker ? computeRescheduleRemainder(piece, chunkSet, timeline) : null;
+
+    updatePiece((p) => {
+      const result = splitPracticeChunk(p, chunkId);
+      if (!result) return p;
+      const { chunkSplitPoints, progress, firstHalfId, secondHalfId } = result;
+      const rescheduleMarker = remainder
+        ? insertSplitHalfIntoMarkerChain(remainder.marker, firstHalfId, secondHalfId)
+        : p.rescheduleMarker;
+      return { ...p, chunkSplitPoints, progress, rescheduleMarker };
     });
   };
 
@@ -2211,6 +2289,7 @@ export default function App() {
                 onLogFocusSpotTime={handleLogFocusSpotTime}
                 onUnlogFocusSpotTime={handleUnlogFocusSpotTime}
                 onResolveFocusSpot={handleResolveFocusSpot}
+                onSplitChunk={handleSplitChunk}
               />
             )}
             {activeTab === "progress" && (
@@ -2633,6 +2712,8 @@ const CSS = `
 .map-cell-flag.flag-rough { color: var(--brass); }
 .map-cell-flag.flag-lost { color: var(--brick); }
 .map-cell-relearning { position: absolute; top: 10px; left: 10px; display: inline-flex; color: var(--brick); }
+.map-cell-group { grid-column: span 2; display: flex; gap: 8px; border: 2px dashed var(--ink-faint); border-radius: 12px; padding: 6px; }
+.map-cell-group .map-cell { flex: 1; min-width: 0; }
 
 .flag-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; transition: border-color .15s, background .15s, color .15s; }
 .flag-toggle:hover { border-color: var(--brass); }
@@ -2761,6 +2842,7 @@ const CSS = `
 .focus-conf { margin-left: auto; font-weight: 600; color: var(--brick); }
 
 .reassess-panel { border-color: rgba(185,138,62,0.35); }
+.split-chunk-panel { border-color: rgba(46,110,99,0.35); }
 .reassess-quickpicks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
 
 .stat-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }

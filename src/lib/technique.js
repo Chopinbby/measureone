@@ -190,9 +190,44 @@ export function walkKeyOfDay(items, walkPosition) {
   };
 }
 
+// What the Technique page's walk hint should say ("Circle of fifths: D
+// major today, B minor next."), or null to hide it. Returns
+// { today: { position, pc, quality }, next: { … } }.
+//
+// - If a walk-advancing task was already checked off today, "today" is the
+//   key that task finished (read from its undo snapshot) and "next" is where
+//   the walk sits now — so the hint doesn't vanish or jump ahead the moment
+//   the key of the day is done (Pass 101 review fix). If several advanced
+//   the walk today, the first one's key is today's.
+// - Otherwise the hint shows only if a task on today's list is in the key of
+//   the day. On a day when starred, repertoire or slow scales fill every
+//   slot, the walk doesn't run, and naming a key nobody is practicing would
+//   be wrong.
+export function walkHint(items, walkPosition, dayList) {
+  const current = effectiveWalkPosition(walkPosition, items);
+  if (current == null || !dayList) return null;
+  const byId = new Map((items || []).map((it) => [it.id, it]));
+  const keyAt = (pos) => ({ position: pos, ...WALK_KEYS[pos] });
+
+  const advancing = dayList.tasks.filter((t) => t.done && t.undo && t.undo.advancedTo != null && byId.has(t.itemId));
+  if (advancing.length) {
+    const advancedTo = new Set(advancing.map((t) => t.undo.advancedTo));
+    const first = advancing.find((t) => !advancedTo.has(t.undo.walkPosition)) || advancing[0];
+    const item = byId.get(first.itemId);
+    const todayPos = WALK_KEYS.findIndex((k) => itemInKey(item, k));
+    if (todayPos >= 0) return { today: keyAt(todayPos), next: keyAt(current) };
+  }
+
+  const onList = dayList.tasks.some((t) => byId.has(t.itemId) && itemInKey(byId.get(t.itemId), WALK_KEYS[current]));
+  if (!onList) return null;
+  const next = effectiveWalkPosition(current + 1, items);
+  return { today: keyAt(current), next: keyAt(next) };
+}
+
 /* --------------------------------- Pace --------------------------------- */
 
-function isRepertoireItem(item, repertoireKeys) {
+// Is this item in one of the given keys (the active pieces' keys)?
+export function isRepertoireItem(item, repertoireKeys) {
   const k = itemKey(item);
   if (!k) return false;
   return (repertoireKeys || []).some((rk) => {
@@ -331,13 +366,31 @@ export function pickMethods(item, methods, lastUsedForItem = {}, today) {
 //   { [methodId]: date } }, walkPosition, previousList, repertoireKeys }
 // Returns { date, tasks: [{ itemId, methodIds, done, tier }] }.
 export function buildDayList(state, today, tasksPerDay = TECHNIQUE_TASKS_PER_DAY) {
-  const { items = [], methods = [], methodLastUsed = {}, walkPosition = 0, previousList = null, repertoireKeys = [] } = state;
+  const { previousList = null } = state;
   if (previousList && previousList.date === today) return previousList;
+  return { date: today, tasks: fillTasks(state, today, tasksPerDay, [], previousList?.tasks || []) };
+}
 
+// Fills the free slots of today's list without touching what's already on
+// it (done or not, in the same order). Used when a scale is added or put
+// back in rotation mid-day, so a short or empty list doesn't have to wait
+// until tomorrow (Pass 101, on direct request). Items already on the list
+// are never added twice. Returns the list unchanged if it's full, missing,
+// or not today's.
+export function topUpDayList(state, dayList, today, tasksPerDay = TECHNIQUE_TASKS_PER_DAY) {
+  if (!dayList || dayList.date !== today || dayList.tasks.length >= tasksPerDay) return dayList;
+  const tasks = fillTasks(state, today, tasksPerDay, dayList.tasks, []);
+  return tasks.length === dayList.tasks.length ? dayList : { ...dayList, tasks };
+}
+
+// Shared by buildDayList and topUpDayList: starts from `startTasks` (kept
+// as-is), then carry-over, pace, slow, walk, up to the cap.
+function fillTasks(state, today, tasksPerDay, startTasks, carryTasks) {
+  const { items = [], methods = [], methodLastUsed = {}, walkPosition = 0, repertoireKeys = [] } = state;
   const pool = rotationItems(items);
   const byId = new Map(pool.map((it) => [it.id, it]));
-  const tasks = [];
-  const onList = new Set();
+  const tasks = [...startTasks];
+  const onList = new Set(startTasks.map((t) => t.itemId));
   const add = (item, tier, methodIds) => {
     if (tasks.length >= tasksPerDay || onList.has(item.id)) return;
     onList.add(item.id);
@@ -350,7 +403,7 @@ export function buildDayList(state, today, tasksPerDay = TECHNIQUE_TASKS_PER_DAY
   };
 
   // 0. Carry-over.
-  for (const t of previousList?.tasks || []) {
+  for (const t of carryTasks) {
     if (t.done || !byId.has(t.itemId)) continue;
     add(byId.get(t.itemId), "carried", t.methodIds);
   }
@@ -380,7 +433,16 @@ export function buildDayList(state, today, tasksPerDay = TECHNIQUE_TASKS_PER_DAY
       .forEach((it) => add(it, "walk"));
   }
 
-  return { date: today, tasks };
+  return tasks;
+}
+
+// Takes an item's unfinished task off today's list — used when the item is
+// switched out of rotation mid-day, so it doesn't sit there checkable until
+// tomorrow. A done task stays: it's a record of practice that happened.
+// Returns the list unchanged if there's nothing to remove.
+export function removeUnfinishedTask(dayList, itemId) {
+  if (!dayList || !dayList.tasks.some((t) => t.itemId === itemId && !t.done)) return dayList;
+  return { ...dayList, tasks: dayList.tasks.filter((t) => t.itemId !== itemId || t.done) };
 }
 
 /* ---------------------------- Completing a task ------------------------- */
@@ -419,22 +481,95 @@ export function completeTask(state, itemId, today, tempo = null) {
     return completedItem;
   });
 
-  const usedForItem = { ...(methodLastUsed[itemId] || {}) };
+  const previousUsed = methodLastUsed[itemId] || {};
+  const usedForItem = { ...previousUsed };
   for (const mid of task.methodIds) usedForItem[mid] = today;
 
   let nextWalk = walkPosition;
+  let advancedTo = null;
   if (completedItem && keyOfDayPos != null && itemInKey(completedItem, WALK_KEYS[keyOfDayPos])) {
     nextWalk = (keyOfDayPos + 1) % TECHNIQUE_WALK_LAP_DAYS;
+    advancedTo = nextWalk;
   }
+
+  // Everything this completion changes, so uncompleteTask can put it back.
+  const before = items.find((it) => it.id === itemId) || {};
+  const undo = {
+    walkPosition,
+    advancedTo,
+    // The check octaves the tempo belongs to — see uncompleteTask.
+    checkOctaves: before.checkOctaves ?? null,
+    item: {
+      lastPracticedDate: before.lastPracticedDate ?? null,
+      practicedDates: before.practicedDates || [],
+      evenTempo: before.evenTempo ?? null,
+      lastCheckedDate: before.lastCheckedDate ?? null,
+    },
+    methodLastUsed: Object.fromEntries(task.methodIds.map((mid) => [mid, previousUsed[mid] ?? null])),
+  };
 
   return {
     ...state,
     items: nextItems,
     dayList: {
       ...dayList,
-      tasks: dayList.tasks.map((t) => (t.itemId === itemId ? { ...t, done: true, tempo: hasTempo ? tempo : null } : t)),
+      tasks: dayList.tasks.map((t) => (t.itemId === itemId ? { ...t, done: true, tempo: hasTempo ? tempo : null, undo } : t)),
     },
     methodLastUsed: { ...methodLastUsed, [itemId]: usedForItem },
+    walkPosition: nextWalk,
+  };
+}
+
+// Reverses completeTask for one task on today's list (Pass 101, on direct
+// request): the item's practice dates and tempo, the task's method
+// last-used dates, and the walk step go back to what they were. The walk
+// is only stepped back if nothing has moved it since (a later completion
+// in the next key stays put). Fields the user changed separately (star,
+// rotation, octaves) are left alone, and so is the tempo if the check
+// octaves changed in between. A done task with no snapshot (none
+// exists today, but a hand-edited save could have one) can't be undone
+// and returns the state unchanged.
+export function uncompleteTask(state, itemId) {
+  const { items = [], dayList, methodLastUsed = {}, walkPosition = 0 } = state;
+  const task = dayList?.tasks.find((t) => t.itemId === itemId);
+  if (!task || !task.done || !task.undo) return state;
+  const { undo } = task;
+
+  // If the check octaves changed since the check-off (Library → keep or
+  // start fresh), the tempo in the snapshot was measured over a different
+  // number of octaves than the item now uses — putting it back would undo
+  // the user's keep/start-fresh choice. The dates still go back; the tempo
+  // fields stay as they are now (Pass 101 review fix).
+  const octavesChanged = (it) => undo.checkOctaves != null && it.checkOctaves !== undo.checkOctaves;
+  const nextItems = items.map((it) => {
+    if (it.id !== itemId) return it;
+    const { evenTempo, lastCheckedDate, ...dates } = undo.item;
+    return octavesChanged(it) ? { ...it, ...dates } : { ...it, ...undo.item };
+  });
+
+  const used = { ...(methodLastUsed[itemId] || {}) };
+  for (const [mid, prev] of Object.entries(undo.methodLastUsed || {})) {
+    if (prev == null) delete used[mid];
+    else used[mid] = prev;
+  }
+  const nextUsed = { ...methodLastUsed };
+  if (Object.keys(used).length) nextUsed[itemId] = used;
+  else delete nextUsed[itemId];
+
+  const nextWalk = undo.advancedTo != null && walkPosition === undo.advancedTo ? undo.walkPosition : walkPosition;
+
+  return {
+    ...state,
+    items: nextItems,
+    dayList: {
+      ...dayList,
+      tasks: dayList.tasks.map((t) => {
+        if (t.itemId !== itemId) return t;
+        const { undo: _drop, ...rest } = t;
+        return { ...rest, done: false, tempo: null };
+      }),
+    },
+    methodLastUsed: nextUsed,
     walkPosition: nextWalk,
   };
 }

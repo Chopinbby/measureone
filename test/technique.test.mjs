@@ -23,6 +23,10 @@ import {
   pickMethods,
   buildDayList,
   completeTask,
+  uncompleteTask,
+  topUpDayList,
+  walkHint,
+  removeUnfinishedTask,
   startingTempo,
   changeCheckOctaves,
 } from "../src/lib/technique.js";
@@ -447,5 +451,178 @@ describe("completeTask, startingTempo, changeCheckOctaves", () => {
   test("effectiveWalkPosition sanity: position with no items moves forward", () => {
     assert.equal(effectiveWalkPosition(1, [item("g", "G", "major")]), 2);
     assert.equal(startOfWeekISO(MONDAY), MONDAY);
+  });
+});
+
+/* ----------------------- Undo and top-up (Pass 101) --------------------- */
+
+describe("uncompleteTask (Pass 101)", () => {
+  const setup = () => {
+    const items = [
+      item("c", "C", "major", { evenTempo: 100, lastCheckedDate: "2024-12-01", lastPracticedDate: "2024-12-20", practicedDates: ["2024-12-20"] }),
+      item("am", "A", "minor"),
+    ];
+    const state = { items, methods, methodLastUsed: { c: { eyes: "2024-12-20" } }, walkPosition: 0, previousList: null, repertoireKeys: [] };
+    return { ...state, dayList: buildDayList(state, MONDAY) };
+  };
+
+  test("puts back dates, tempo, method history and the walk step", () => {
+    const start = setup();
+    const done = completeTask(start, "c", MONDAY, 120);
+    assert.equal(done.walkPosition, 1);
+    const undone = uncompleteTask(done, "c");
+    assert.deepEqual(undone.items, start.items);
+    assert.deepEqual(undone.methodLastUsed, start.methodLastUsed);
+    assert.equal(undone.walkPosition, 0);
+    const task = undone.dayList.tasks.find((t) => t.itemId === "c");
+    assert.equal(task.done, false);
+    assert.equal(task.tempo, null);
+    assert.equal(task.undo, undefined);
+  });
+
+  test("a bare check-off undoes too; the task can then be completed again", () => {
+    const start = setup();
+    const again = completeTask(uncompleteTask(completeTask(start, "c", MONDAY), "c"), "c", MONDAY, 110);
+    assert.equal(again.items[0].evenTempo, 110);
+    assert.equal(again.walkPosition, 1);
+  });
+
+  test("the walk isn't stepped back if a later completion already moved it on", () => {
+    const start = setup();
+    let st = completeTask(start, "c", MONDAY); // C major → walk to A minor (1)
+    st = { ...st, dayList: topUpDayList({ ...st, methods }, st.dayList, MONDAY) };
+    assert.ok(st.dayList.tasks.some((t) => t.itemId === "am"), "A minor topped up");
+    st = completeTask(st, "am", MONDAY); // A minor → walk to 2
+    assert.equal(st.walkPosition, 2);
+    st = uncompleteTask(st, "c");
+    assert.equal(st.walkPosition, 2);
+  });
+
+  test("a done task without a snapshot, or an unfinished one, is left alone", () => {
+    const start = setup();
+    assert.equal(uncompleteTask(start, "c"), start);
+    const noSnap = { ...start, dayList: { ...start.dayList, tasks: start.dayList.tasks.map((t) => ({ ...t, done: true })) } };
+    assert.equal(uncompleteTask(noSnap, "c"), noSnap);
+  });
+});
+
+describe("topUpDayList (Pass 101)", () => {
+  test("fills empty slots, keeps existing tasks (done or not) in place, never duplicates", () => {
+    const empty = { items: [], methods, methodLastUsed: {}, walkPosition: 0, previousList: null, repertoireKeys: [] };
+    const list = buildDayList(empty, MONDAY);
+    assert.deepEqual(list.tasks, []);
+    const items = [item("c", "C", "major"), item("c2", "C", "major", { form: "arpeggio" }), item("g", "G", "major", { evenTempo: 60 })];
+    const topped = topUpDayList({ ...empty, items }, list, MONDAY);
+    assert.equal(topped.tasks.length, 3);
+    assert.equal(new Set(topped.tasks.map((t) => t.itemId)).size, 3);
+    const doneFirst = { ...topped, tasks: [{ ...topped.tasks[0], done: true }, topped.tasks[1]] };
+    const again = topUpDayList({ ...empty, items }, doneFirst, MONDAY);
+    assert.deepEqual(again.tasks.slice(0, 2), doneFirst.tasks);
+    assert.equal(again.tasks.length, 3);
+  });
+
+  test("a full list, a missing list, or yesterday's list is returned unchanged", () => {
+    const state = { items: bigLibrary(), methods, methodLastUsed: {}, walkPosition: 0, previousList: null, repertoireKeys: [] };
+    const full = buildDayList(state, MONDAY);
+    assert.equal(topUpDayList(state, full, MONDAY), full);
+    assert.equal(topUpDayList(state, null, MONDAY), null);
+    const old = { date: addDaysISO(MONDAY, -1), tasks: [] };
+    assert.equal(topUpDayList(state, old, MONDAY), old);
+  });
+});
+
+/* -------------------- Pass 101 review fixes -------------------- */
+
+describe("walkHint (Pass 101 review fixes)", () => {
+  const withKeys = (h) => h && `${h.today.position}->${h.next.position}`;
+  test("hidden when pace fills every slot and the walk key isn't on the list", () => {
+    const items = [
+      item("c", "C", "major"),
+      item("st1", "D", "major", { starred: true }),
+      item("st2", "A", "major", { starred: true }),
+      item("st3", "E", "major", { starred: true }),
+    ];
+    const list = buildDayList({ items, methods, walkPosition: 0, repertoireKeys: [] }, MONDAY);
+    assert.ok(!list.tasks.some((t) => t.itemId === "c"));
+    assert.equal(walkHint(items, 0, list), null);
+    assert.equal(walkHint(items, 0, null), null);
+    assert.equal(walkHint([], 0, list), null);
+  });
+
+  test("shown while the key of the day is on the list", () => {
+    const items = [item("c", "C", "major"), item("g", "G", "major")];
+    const list = { date: MONDAY, tasks: [{ itemId: "c", methodIds: [], done: false, tier: "walk" }] };
+    assert.equal(withKeys(walkHint(items, 0, list)), "0->2");
+  });
+
+  test("still names today's key after it's checked off (walk already moved on)", () => {
+    const items = [item("c", "C", "major"), item("g", "G", "major")];
+    const state = { items, methods, methodLastUsed: {}, walkPosition: 0, previousList: null, repertoireKeys: [] };
+    const list = { date: MONDAY, tasks: [{ itemId: "c", methodIds: ["eyes"], done: false, tier: "walk" }] };
+    const done = completeTask({ ...state, dayList: list }, "c", MONDAY);
+    assert.equal(done.walkPosition, 1);
+    // G major (position 2) is not on today's list, but the hint keeps C as today.
+    assert.equal(withKeys(walkHint(done.items, done.walkPosition, done.dayList)), "0->2");
+    // Un-checking puts the walk back; hint reads the same.
+    const undone = uncompleteTask(done, "c");
+    assert.equal(withKeys(walkHint(undone.items, undone.walkPosition, undone.dayList)), "0->2");
+  });
+
+  test("two keys finished today: today is the first one", () => {
+    const items = [item("c", "C", "major"), item("am", "A", "minor"), item("g", "G", "major")];
+    const state = { items, methods, methodLastUsed: {}, walkPosition: 0, previousList: null, repertoireKeys: [] };
+    let st = { ...state, dayList: { date: MONDAY, tasks: [
+      { itemId: "c", methodIds: [], done: false, tier: "walk" },
+      { itemId: "am", methodIds: [], done: false, tier: "slow" },
+    ] } };
+    st = completeTask(st, "c", MONDAY);
+    st = completeTask(st, "am", MONDAY);
+    assert.equal(st.walkPosition, 2);
+    assert.equal(withKeys(walkHint(st.items, st.walkPosition, st.dayList)), "0->2");
+  });
+});
+
+describe("uncompleteTask keeps a keep/start-fresh choice (Pass 101 review fix)", () => {
+  const setup = () => {
+    const items = [item("c", "C", "major", { evenTempo: 100, checkOctaves: 2, lastCheckedDate: "2024-12-01" })];
+    const state = { items, methods, methodLastUsed: {}, walkPosition: 0, previousList: null, repertoireKeys: [] };
+    return completeTask({ ...state, dayList: buildDayList(state, MONDAY) }, "c", MONDAY);
+  };
+  test("check octaves changed + started fresh since the check-off: tempo stays cleared, dates still go back", () => {
+    const done = setup();
+    const fresh = { ...done, items: done.items.map((it) => ({ ...it, checkOctaves: 3, evenTempo: null })) };
+    const undone = uncompleteTask(fresh, "c");
+    assert.equal(undone.items[0].evenTempo, null);
+    assert.equal(undone.items[0].checkOctaves, 3);
+    assert.equal(undone.items[0].lastPracticedDate, null);
+  });
+  test("octaves unchanged: tempo is restored as before", () => {
+    const done = completeTask(setup(), "c", MONDAY); // no-op, already done
+    const undone = uncompleteTask(done, "c");
+    assert.equal(undone.items[0].evenTempo, 100);
+  });
+});
+
+describe("removeUnfinishedTask (switching a scale out of rotation mid-day)", () => {
+  const list = { date: MONDAY, tasks: [
+    { itemId: "a", methodIds: [], done: false, tier: "walk" },
+    { itemId: "b", methodIds: [], done: true, tier: "walk" },
+  ] };
+  test("removes an unfinished task, keeps a done one, leaves others alone", () => {
+    assert.deepEqual(removeUnfinishedTask(list, "a").tasks.map((t) => t.itemId), ["b"]);
+    assert.equal(removeUnfinishedTask(list, "b"), list);
+    assert.equal(removeUnfinishedTask(list, "zzz"), list);
+    assert.equal(removeUnfinishedTask(null, "a"), null);
+  });
+});
+
+describe("itemTitle spelling (Pass 101 P1 fix: no lookbehind)", async () => {
+  const { itemTitle } = await import("../src/components/tabs/technique/format.js");
+  test("sharps and flats become ♯/♭; a minor 'b' elsewhere is untouched", () => {
+    assert.equal(itemTitle({ tonic: "Eb", quality: "major", form: "scale" }), "E♭ major");
+    assert.equal(itemTitle({ tonic: "Bb", quality: "minor", form: "scale", minorForm: "harmonic" }), "B♭ minor, harmonic");
+    assert.equal(itemTitle({ tonic: "F#", quality: "major", form: "arpeggio" }), "F♯ major arpeggio");
+    assert.equal(itemTitle({ tonic: "B", quality: "major", form: "scale" }), "B major");
+    assert.equal(itemTitle({ tonic: "G♭", quality: "major", form: "scale" }), "G♭ major");
   });
 });

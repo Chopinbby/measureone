@@ -16,6 +16,7 @@ import {
   Download,
   X,
   AlertTriangle,
+  Piano,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay } from "./lib/utils";
@@ -47,7 +48,7 @@ import {
   saveTechniqueToStorage,
   normalizeTechniqueItem,
 } from "./lib/storage";
-import { resolveMethods, buildDayList, completeTask, changeCheckOctaves } from "./lib/technique";
+import { resolveMethods, buildDayList, completeTask, uncompleteTask, topUpDayList, removeUnfinishedTask, changeCheckOctaves } from "./lib/technique";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
@@ -64,6 +65,7 @@ import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
 import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
+import { TechniqueTab } from "./components/tabs/TechniqueTab";
 
 /* ------------------------------------------------------------------ */
 /*  App shell                                                          */
@@ -71,6 +73,9 @@ import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
 
 const NAV_BASE = [
   { key: "master-agenda", label: "Master Agenda", icon: Layers },
+  // App-level, like Master Agenda — the hairline divider after it (see the
+  // nav render) separates the app-wide items from the piece-scoped ones.
+  { key: "technique", label: "Technique", icon: Piano },
   { key: "overview", label: "Piece Overview", icon: LayoutGrid },
   { key: "timeline", label: "Timeline", icon: CalendarDays },
   { key: "map", label: "Piece Map", icon: Music2 },
@@ -451,9 +456,9 @@ export default function App() {
   };
 
   /* ------------------------------------------------------------------ */
-  /*  Technique practice handlers (Pass 100). Every technique change      */
-  /*  goes through updateTechnique — never setPieces/updatePiece. No      */
-  /*  screen calls these yet (Passes 101-102 build the screens).          */
+  /*  Technique practice handlers (Pass 100; undo and top-up Pass 101).  */
+  /*  Every technique change goes through updateTechnique — never        */
+  /*  setPieces/updatePiece. Called from TechniqueTab and its panel.     */
   /* ------------------------------------------------------------------ */
 
   // Piece keys aren't stored yet (Pass 103), so no scale is a repertoire
@@ -498,12 +503,34 @@ export default function App() {
       return { ...t, items: done.items, dayList: done.dayList, methodLastUsed: done.methodLastUsed, walkPosition: done.walkPosition };
     });
   const handleTechniqueCheckOff = (itemId) => handleTechniqueComplete(itemId, null);
+  // Un-check: reverses everything the check-off changed (uncompleteTask).
+  const handleTechniqueUncheck = (itemId) =>
+    updateTechnique((t) => {
+      if (!t.dayList) return t;
+      const undone = uncompleteTask(
+        { items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition },
+        itemId
+      );
+      return { ...t, items: undone.items, dayList: undone.dayList, methodLastUsed: undone.methodLastUsed, walkPosition: undone.walkPosition };
+    });
+
+  // After a scale is added or put back in rotation, fill any free slots on
+  // today's list right away instead of waiting for tomorrow's list (Pass
+  // 101). Nothing already on the list is replaced.
+  const withTopUp = (t) =>
+    t.dayList ? { ...t, dayList: topUpDayList(techniqueEngineState(t), t.dayList, t.dayList.date, t.settings.scalesPerDay) } : t;
   const handleTechniqueLogTempo = (itemId, tempo) => handleTechniqueComplete(itemId, tempo);
 
   const handleTechniqueToggleStarItem = (itemId) =>
     updateTechniqueItem(itemId, (it) => ({ ...it, starred: !it.starred }));
+  // Switching a scale off also takes its unfinished task off today's list
+  // (a done one stays as a record); either way, free slots are topped up.
   const handleTechniqueToggleRotation = (itemId) =>
-    updateTechniqueItem(itemId, (it) => ({ ...it, inRotation: !it.inRotation }));
+    updateTechnique((t) => {
+      const next = { ...t, items: t.items.map((it) => (it.id === itemId ? { ...it, inRotation: !it.inRotation } : it)) };
+      const nowOn = next.items.find((it) => it.id === itemId)?.inRotation;
+      return withTopUp(nowOn ? next : { ...next, dayList: removeUnfinishedTask(next.dayList, itemId) });
+    });
 
   const updateMethodState = (methodId, fn) =>
     updateTechnique((t) => {
@@ -518,7 +545,7 @@ export default function App() {
   const handleTechniqueAddItem = (fields) => {
     const item = normalizeTechniqueItem({ ...fields, id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` });
     if (!item) return false;
-    updateTechnique((t) => ({ ...t, items: [...t.items, item] }));
+    updateTechnique((t) => withTopUp({ ...t, items: [...t.items, item] }));
     return true;
   };
 
@@ -2257,14 +2284,16 @@ export default function App() {
               {NAV_BASE.map((n) => {
                 const Icon = n.icon;
                 return (
-                  <button
-                    key={n.key}
-                    className={`nav-item ${activeTab === n.key ? "active" : ""}`}
-                    onClick={() => { if (guardLeavingActiveWork()) setActiveTab(n.key); }}
-                  >
-                    <Icon size={17} />
-                    <span>{n.label}</span>
-                  </button>
+                  <React.Fragment key={n.key}>
+                    <button
+                      className={`nav-item ${activeTab === n.key ? "active" : ""}`}
+                      onClick={() => { if (guardLeavingActiveWork()) setActiveTab(n.key); }}
+                    >
+                      <Icon size={17} />
+                      <span>{n.label}</span>
+                    </button>
+                    {n.key === "technique" && <div className="nav-divider" role="separator" />}
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -2279,6 +2308,23 @@ export default function App() {
           </nav>
 
           <main className="main-content">
+            {activeTab === "technique" && technique && (
+              <TechniqueTab
+                technique={technique}
+                repertoireKeys={techniqueRepertoireKeys}
+                onCheckOff={handleTechniqueCheckOff}
+                onUncheck={handleTechniqueUncheck}
+                onLogTempo={handleTechniqueLogTempo}
+                onToggleStarItem={handleTechniqueToggleStarItem}
+                onToggleRotation={handleTechniqueToggleRotation}
+                onToggleStarMethod={handleTechniqueToggleStarMethod}
+                onToggleMethod={handleTechniqueToggleMethod}
+                onAddItem={handleTechniqueAddItem}
+                onEditItem={handleTechniqueEditItem}
+                onChangeCheckOctaves={handleTechniqueChangeCheckOctaves}
+                onAddMethod={handleTechniqueAddMethod}
+              />
+            )}
             {activeTab === "overview" && (
               <OverviewTab
                 piece={piece}
@@ -3073,4 +3119,131 @@ const CSS = `
 .piece-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
 .link-btn { background: transparent; border: none; color: var(--brass-deep); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; transition: color 0.15s; padding: 0; font-family: inherit; }
 .link-btn:hover { color: var(--brass); text-decoration: underline; }
+
+/* ---------------------------------------------------------------- */
+/*  Technique practice (Pass 101) — the Technique page, the shared   */
+/*  panel (components/tabs/technique/TechniquePanel.jsx), Library    */
+/*  and Methods. Built to docs/mockups/technique-practice.html.      */
+/* ---------------------------------------------------------------- */
+.nav-divider { height: 1px; background: var(--line); margin: 6px 4px; }
+.tq-page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.tq-h1 { font-size: 26px; line-height: 1.15; }
+.tq-page-sub { margin-top: 6px; font-size: 13px; }
+.tq-subtabs { align-self: flex-start; margin-bottom: -8px; }
+.tq-seg-sm button { padding: 5px 12px; font-size: 12.5px; }
+.tq-panel { padding: 16px 18px; }
+.tq-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tq-panel .tq-panel-title { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; }
+.tq-panel-sub { color: var(--ink-soft); font-size: 12.5px; margin: 4px 0 12px; line-height: 1.5; }
+.tq-meta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft); }
+.tq-ink { color: var(--ink); }
+.tq-empty { border: 1px dashed var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.tq-empty p { margin: 0; font-size: 13px; color: var(--ink-soft); }
+
+/* Task card: done = filled teal check + tinted card, never a strikethrough. */
+.tq-card { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); margin-bottom: 8px; }
+.tq-card.done { border-color: rgba(46,110,99,0.45); background: rgba(46,110,99,0.06); }
+.tq-check { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--ink-faint); background: var(--white); display: flex; align-items: center; justify-content: center; color: var(--white); padding: 0; margin-top: 1px; }
+.tq-check.done { background: var(--teal); border-color: var(--teal); }
+/* A check-off saved before undo existed can't be reversed: stays teal, just not clickable. */
+.tq-check:disabled { cursor: default; }
+.tq-card-main { flex: 1; min-width: 0; }
+.tq-card-head { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
+.tq-title { font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tq-title-star { display: inline-flex; color: var(--brass); }
+.tq-title-star svg { fill: currentColor; }
+.tq-chevron { color: var(--ink-faint); display: inline-flex; }
+.tq-methods { margin-top: 6px; }
+.tq-method-row { display: flex; gap: 5px; align-items: flex-start; padding: 3px 0; }
+.tq-method-body { flex: 1; min-width: 0; cursor: pointer; }
+.tq-method-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.tq-method-name { font-weight: 600; font-size: 12.5px; }
+.tq-method-desc { color: var(--ink-soft); font-size: 12px; line-height: 1.5; margin-top: 1px; }
+.tq-tech-tag { flex: none; font-size: 10.5px; padding: 1px 8px; border-radius: 20px; border: 1px solid rgba(46,110,99,0.5); color: var(--teal); font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+.tq-pill-row { margin-top: 7px; }
+.tq-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; background: rgba(185,138,62,0.14); color: var(--brass-deep); }
+.tq-expanded { margin-top: 6px; }
+.tq-start { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin: 8px 0 10px; padding: 10px 12px; background: var(--paper); border-radius: 8px; }
+.tq-start-label { font-weight: 600; font-size: 12.5px; }
+.tq-start-sub { color: var(--ink-soft); font-size: 12px; margin-top: 1px; }
+.tq-start-value { font-size: 16px; font-weight: 600; color: var(--ink); white-space: nowrap; border-bottom: 1px dotted var(--ink-faint); }
+.tq-tip { position: relative; display: inline-block; cursor: help; outline: none; }
+.tq-tip-text { display: none; position: absolute; right: 0; bottom: calc(100% + 6px); background: var(--ink); color: var(--white); font-size: 11.5px; line-height: 1.4; padding: 6px 9px; border-radius: 7px; white-space: nowrap; z-index: 5; font-weight: 500; }
+.tq-tip:hover .tq-tip-text, .tq-tip:focus .tq-tip-text { display: block; }
+.tq-check-section { border-top: 1px solid var(--line); padding-top: 10px; }
+.tq-check-heading { font-weight: 600; font-size: 12.5px; }
+.tq-check-sub { color: var(--ink-soft); font-size: 12px; margin: 1px 0 8px; line-height: 1.6; }
+.tq-check-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tq-tempo-input input { width: 76px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; background: var(--white); color: var(--ink); }
+.tq-tempo-input.error input { border-color: var(--brick); }
+.tq-ok { color: var(--teal); font-size: 12.5px; font-weight: 500; margin: 0; }
+.tq-hint { color: var(--ink-soft); font-size: 12px; margin: 0; }
+.tq-error { color: var(--brick); font-size: 12.5px; }
+.tq-more-often { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+.ghost-btn.tq-xs { padding: 3px 9px; font-size: 11.5px; border-radius: 7px; gap: 5px; }
+.ghost-btn.tq-on { border-color: var(--brass); color: var(--brass-deep); background: rgba(185,138,62,0.1); }
+.ghost-btn.tq-on svg { fill: currentColor; }
+
+/* Stars: the lucide Star, centered in a fixed square; filled when on. */
+.tq-star { flex: none; border: none; background: transparent; color: var(--ink-faint); padding: 0; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; }
+.tq-star svg { display: block; }
+.tq-star:hover { color: var(--brass-deep); }
+.tq-star.on { color: var(--brass); }
+.tq-star.on svg { fill: currentColor; }
+.tq-method-row .tq-star { margin-top: -1px; }
+
+/* Library */
+.tq-lib-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Accidentals: Inter has no ♭, and the browser's fallback draws it in a
+   full-em box with a wide blank left side (read as "E ♭"). These fonts draw
+   ♯/♭ snugly; KeyText.jsx wraps them. The select gets the same stack since
+   a native option can't hold a span. */
+.tq-acc { font-family: 'Helvetica Neue', 'Segoe UI Symbol', 'Arial Unicode MS', sans-serif; }
+.tq-select { font-family: 'Inter', 'Helvetica Neue', 'Segoe UI Symbol', sans-serif; }
+.tq-select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: 12.5px; background: var(--white); color: var(--ink); max-width: 100%; }
+.tq-lib-grid { display: grid; grid-template-columns: 22px minmax(0,1fr) 72px 64px 52px; gap: 8px; align-items: center; }
+.tq-lib-head { padding: 8px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; border-top: 1px solid var(--line); margin-top: 10px; }
+.tq-lib-row-wrap { border-top: 1px solid var(--line); }
+.tq-lib-row { padding: 7px 0; }
+.tq-lib-row.off .tq-title, .tq-lib-row.off .tq-meta { opacity: .5; }
+.tq-lib-item { min-width: 0; cursor: pointer; }
+.tq-lib-item .tq-title { font-size: 13px; }
+.tq-note { display: inline-flex; color: var(--brass-deep); margin-left: 2px; }
+.tq-bar { height: 4px; border-radius: 2px; background: var(--paper); overflow: hidden; margin-top: 4px; }
+.tq-bar i { display: block; height: 100%; background: var(--brass); opacity: .85; }
+.tq-switch { position: relative; width: 32px; height: 18px; border-radius: 9px; border: 1px solid var(--line); background: var(--white); padding: 0; justify-self: center; flex: none; }
+.tq-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-faint); transition: left .15s; }
+.tq-switch.on { background: var(--teal); border-color: var(--teal); }
+.tq-switch.on::after { left: 16px; background: var(--white); }
+.tq-row-editor { padding: 2px 0 12px 30px; }
+.tq-editor-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+.tq-editor-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink-soft); }
+.tq-editor-field input[type="number"] { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; background: var(--white); color: var(--ink); }
+.tq-editor-field .segmented { align-self: flex-start; }
+.tq-prompt { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; margin-top: 10px; }
+.tq-prompt-buttons { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Methods */
+.tq-group-label { font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .06em; font-size: 10.5px; color: var(--brass-deep); font-weight: 600; margin: 14px 0 2px; }
+.tq-method-item { display: grid; grid-template-columns: 22px minmax(0,1fr) 40px; gap: 8px; align-items: start; padding: 7px 0; border-top: 1px solid var(--line); }
+.tq-method-item.off .tq-method-item-body { opacity: .5; }
+.tq-method-item .tq-switch { margin-top: 2px; }
+.tq-mine { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; padding: 1px 6px; border-radius: 20px; background: rgba(46,110,99,0.12); color: var(--teal); margin-left: 4px; }
+.tq-add-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tq-panel .field .tq-select { align-self: stretch; }
+
+/* Add form */
+.tq-add-grid { margin: 10px 0 12px; }
+.tq-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 12px; }
+
+@media (max-width: 820px) {
+  .nav-divider { display: none; }
+}
+@media (max-width: 640px) {
+  .tq-lib-grid { grid-template-columns: 22px minmax(0,1fr) 64px 46px; }
+  .tq-lib-grid > *:nth-child(4) { display: none; }
+  .tq-editor-grid { grid-template-columns: 1fr; }
+  .tq-row-editor { padding-left: 0; }
+}
+
 `;

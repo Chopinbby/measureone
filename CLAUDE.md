@@ -1712,3 +1712,47 @@ navigation only — adding, resolving, or deleting a spot is still only
 ever done from Daily Practice or the Wizard. See
 [`docs/Algorithms.md`](docs/Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
 and [`docs/Decisions.md`](docs/Decisions.md#focus-spots-v1).
+
+**Since Pass 101**, there's a **Technique page** — daily scales and
+arpeggios, the first visible piece of the Technique practice design
+(Passes 98–100 recorded the design, built the engine, and wired up
+storage; see [`docs/Technique-Practice.md`](docs/Technique-Practice.md)).
+"Technique" sits in `NAV_BASE` right after Master Agenda, with a hairline
+divider (`.nav-divider`) before the piece-scoped items; it goes through the
+same `guardLeavingActiveWork` click path as every other nav item.
+**Technique data is app-level, not part of any piece**: one localStorage
+key of its own (`measureone-technique`, `loadTechniqueFromStorage`/
+`saveTechniqueToStorage`, `lib/storage.js`), held in `App.jsx`'s
+`technique` state, and **never goes through `setPieces` or
+`updatePiece`** — every change goes through `updateTechnique` and the
+`handleTechnique*` handlers. The engine is `lib/technique.js` (pure, no
+clock). The page is `components/tabs/TechniqueTab.jsx`; the pieces it's
+built from are in `components/tabs/technique/`, and **the shared panel is
+`TechniquePanel.jsx`** — standalone on purpose, so Pass 102 can put the
+same component on Master Agenda and Daily Practice (`variant="shared"`).
+Three calls made on direct request while building it, beyond the pass
+card: a check-off can be **undone** (`uncompleteTask`, with an `undo`
+snapshot saved on the task); adding a scale or putting one back in
+rotation **tops up today's list** right away (`topUpDayList`); and the
+Library's summary uses the days-a-week pace sentence. Review fixes in the
+same pass: switching a scale off removes its unfinished task from today's
+list; the walk hint (`walkHint`) hides when the key of the day isn't on
+the list but keeps naming today's key after it's checked off; un-checking
+doesn't bring back a tempo if the check octaves changed since; tempos are
+limited to 30–300; a check-off saved before undo existed shows as
+un-uncheckable instead of silently ignoring clicks; the Library's
+never-checked label reads "Not yet"; and key names render
+through `KeyText.jsx`. Inter has no ♭, and the fallback font drew it with
+a wide blank left side, so "E♭" read as "E ♭". `KeyText` puts ♯/♭ in a
+tighter font (`.tq-acc`) and wraps the name in one span so a flex `gap`
+can't split it. Use it anywhere a key name is shown, and wrap it with its
+surrounding words when the parent is a flex row with a gap (buttons are).
+**Don't use regex lookbehind (`(?<=…)`/`(?<!…)`) anywhere:** the build
+targets Safari 14, which can't read it, and one instance stops the whole
+app loading there. `test/browser-compat.test.mjs` fails if it reappears. Still not built:
+the panel on Master Agenda/Daily Practice (Pass 102), piece keys and the
+"Repertoire in this key" pill (Pass 103 — the pill already renders if
+`repertoireKeys` matches, but that list is empty until then), technique
+data in backups, and a settings UI for scales per day / minutes per scale.
+See [`docs/Architecture.md`](docs/Architecture.md#main-ui-components) and
+[`docs/Decisions.md`](docs/Decisions.md#technique-practice).

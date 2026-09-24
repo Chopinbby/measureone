@@ -1236,6 +1236,20 @@ describe("technique storage (Pass 100)", () => {
     assert.deepEqual(validateAndMigrateTechnique(JSON.parse(JSON.stringify(once))), once);
   });
 
+  test("a done task's undo snapshot survives a save and reload (Pass 101)", () => {
+    const withUndo = validateAndMigrateTechnique({
+      items: [{ id: "a", tonic: "C", quality: "major" }],
+      dayList: { date: "2025-01-06", tasks: [{ itemId: "a", methodIds: ["eyes"], done: true, tier: "walk",
+        undo: { walkPosition: 0, advancedTo: 1, item: { lastPracticedDate: null, practicedDates: [], evenTempo: 90, lastCheckedDate: "2025-01-01" }, methodLastUsed: { eyes: null } } }] },
+    });
+    const u = withUndo.dayList.tasks[0].undo;
+    // checkOctaves: null — a snapshot saved before that field existed (Pass
+    // 101 review fix) reads as "unknown", and uncompleteTask then restores the
+    // tempo as it always did.
+    assert.deepEqual(u, { walkPosition: 0, advancedTo: 1, checkOctaves: null, item: { lastPracticedDate: null, practicedDates: [], evenTempo: 90, lastCheckedDate: "2025-01-01" }, methodLastUsed: { eyes: null } });
+    assert.deepEqual(validateAndMigrateTechnique(JSON.parse(JSON.stringify(withUndo))), withUndo);
+  });
+
   test("corrupt fields fall back one at a time, not the whole save", () => {
     const m = validateAndMigrateTechnique({
       items: [{ id: "ok", tonic: "C", quality: "major" }, { id: "no-quality", tonic: "C" }, "junk", null],

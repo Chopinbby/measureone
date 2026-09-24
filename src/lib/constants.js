@@ -136,3 +136,8 @@ export const TECHNIQUE_STARRED_METHOD_WEIGHT = 2; // "starred methods count doub
 export const TECHNIQUE_SLOW_FRACTION = 1 / 3; // slowest third of the user's own tempo range
 export const TECHNIQUE_SLOW_COOLDOWN_DAYS = 7;
 export const TECHNIQUE_WALK_ITEMS_PER_KEY_MAX = 2;
+// Accepted range for a logged even-rhythm tempo or a starting tempo typed in
+// the Add form. 30 is the mockup's floor; 300 is a sanity ceiling (Pass 101
+// review) so a typo like an extra digit can't become the baseline.
+export const TECHNIQUE_MIN_TEMPO = 30;
+export const TECHNIQUE_MAX_TEMPO = 300;

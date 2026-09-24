@@ -1114,7 +1114,10 @@ The schema is `validateAndMigrateTechnique` / `defaultTechnique`
   customMethods: [{ id, name, technique, description, appliesTo, custom: true }],
   methodLastUsed: { [itemId]: { [methodId]: ISO } }, // written only on completion
   walkPosition: 0-23,           // circle-of-fifths position; moves on completion
-  dayList: { date: ISO, tasks: [{ itemId, methodIds, done, tier, tempo }] } | null,
+  dayList: { date: ISO, tasks: [{ itemId, methodIds, done, tier, tempo,
+    undo? }] } | null,          // undo: only on a done task (Pass 101) — what
+                                // the check-off changed, for uncompleteTask,
+                                // plus the check octaves at the time
   settings: { scalesPerDay: 3, minutesPerScale: 5 }, // defaults only, no UI in v1
   updatedAt: epoch ms | null,
 }

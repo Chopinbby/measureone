@@ -3578,6 +3578,45 @@ library of methods. Methods are recorded as used only by `completeTask`.
   `evenTempo`), or `"needs-prompt"` (a saved tempo and no choice yet; the
   item is returned unchanged).
 
-There is no undo for `completeTask` yet. Undoing a check-off would have to
-reverse the walk advance, the dates, and the method last-used dates, and
-nothing currently snapshots them.
+- **Undo (Pass 101):** `completeTask` stores an `undo` snapshot on the
+  task: the walk position before and the position it advanced to, the
+  item's `lastPracticedDate`/`practicedDates`/`evenTempo`/`lastCheckedDate`,
+  and each of the task's methods' previous last-used date. `uncompleteTask`
+  puts them back and marks the task not done. The walk is only stepped
+  back if it still sits where this completion left it, so undoing an
+  earlier task never rewinds a later one's step. Star, rotation and octave
+  changes made in between are left alone. **The tempo isn't restored if
+  the check octaves changed since the check-off** (the snapshot records
+  them as `undo.checkOctaves`). Otherwise un-checking after a Library
+  "start fresh" would bring back a tempo measured over a different number
+  of octaves and silently undo that choice. A snapshot saved before this
+  field existed reads it as `null` (unknown) and restores the tempo as it
+  always did. A done task with no snapshot at all (saved before undo
+  existed) can't be un-checked; the card disables its check and says why. The snapshot is saved with the
+  list (`lib/storage.js` keeps it), so undo works after a reload too.
+
+### Topping up today's list (Pass 101)
+
+`topUpDayList(state, dayList, today)` fills a short list's free slots
+(pace, slow, walk, no carry-over) without touching what's already on it,
+done or not. `App.jsx` calls it only when a scale is added or put back in
+rotation, so someone's first scales show up the same day instead of
+tomorrow. It isn't run after a check-off, so finishing the key of the day
+never pulls the next key's scales in early. `buildDayList` and
+`topUpDayList` share one private fill routine.
+
+**Switching a scale out of rotation mid-day** (Pass 101 review fix) also
+takes its unfinished task off today's list (`removeUnfinishedTask`; a done
+task stays as a record), then tops up the freed slot.
+
+**The walk hint** ("Circle of fifths: D major today, B minor next.") comes
+from `walkHint(items, walkPosition, dayList)`:
+- Once a walk-advancing task is checked off, "today" stays the key that
+  task finished (read from its `undo` snapshot) and "next" is where the
+  walk now sits. So the hint doesn't vanish or jump ahead the moment the
+  key of the day is done. If two keys were finished today, the first one
+  is "today".
+- Otherwise it shows only if a task on today's list is in the key of the
+  day. On a day when starred, repertoire or slow scales fill every slot,
+  the walk doesn't run, and the hint would otherwise name a key nobody is
+  practicing.

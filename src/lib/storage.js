@@ -592,6 +592,26 @@ export function normalizeTechniqueItem(raw) {
   };
 }
 
+// A done task's snapshot of what completing it changed, so the check-off
+// can be undone after a reload too (lib/technique.js uncompleteTask).
+function normalizeUndo(u) {
+  const item = isPlainObject(u.item) ? u.item : {};
+  return {
+    walkPosition: Number.isInteger(u.walkPosition) ? u.walkPosition : 0,
+    advancedTo: Number.isInteger(u.advancedTo) ? u.advancedTo : null,
+    checkOctaves: Number.isInteger(u.checkOctaves) ? u.checkOctaves : null,
+    item: {
+      lastPracticedDate: isISODate(item.lastPracticedDate) ? item.lastPracticedDate : null,
+      practicedDates: Array.isArray(item.practicedDates) ? item.practicedDates.filter(isISODate) : [],
+      evenTempo: positiveNumberOrNull(item.evenTempo),
+      lastCheckedDate: isISODate(item.lastCheckedDate) ? item.lastCheckedDate : null,
+    },
+    methodLastUsed: isPlainObject(u.methodLastUsed)
+      ? Object.fromEntries(Object.entries(u.methodLastUsed).map(([k, v]) => [k, isISODate(v) ? v : null]))
+      : {},
+  };
+}
+
 function normalizeDayList(raw) {
   if (!isPlainObject(raw) || !isISODate(raw.date) || !Array.isArray(raw.tasks)) return null;
   const tasks = raw.tasks
@@ -602,6 +622,7 @@ function normalizeDayList(raw) {
       done: !!t.done,
       tier: typeof t.tier === "string" ? t.tier : null,
       tempo: positiveNumberOrNull(t.tempo),
+      ...(t.done && isPlainObject(t.undo) ? { undo: normalizeUndo(t.undo) } : {}),
     }));
   return { date: raw.date, tasks };
 }

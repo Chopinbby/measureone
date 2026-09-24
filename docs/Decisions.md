@@ -6840,6 +6840,18 @@ These entries record the design decisions and what each one ruled out.
   pace a single repertoire key with several library items (say four
   minor-form scales and arpeggios) can take most of the 21 weekly task
   slots on its own.
+- **Pass 101 calls, made by the user when the Technique page was built:**
+  - **Library summary copy uses the days-a-week sentence**
+    ([Technique-Practice.md](Technique-Practice.md#mockup-vs-brief) item b),
+    even though the Pass 101 card said the mockup's "3 days / 4 days a
+    week" sentence must appear nowhere. That card predated the switch to
+    days-a-week pace. Alternatives: a sentence with no numbers, or none.
+  - **Check-off can be undone** (the mockup's circle toggles both ways).
+    Alternative: one-way check-off, with undo left to a later pass.
+  - **Adding a scale tops up today's list right away.** Alternative: keep
+    the list fixed for the day, which leaves a new user's first day empty.
+  - **A new library starts empty**, with a prompt to add a scale.
+    Alternative: pre-filling the 24 major and minor scales.
 - **Decided 1 — piece links are by key ("Other keys in this piece"), not
   by specific scale.** A piece stores its key and other keys it passes
   through; every library item in those keys gets the repertoire pill and
@@ -6896,7 +6908,10 @@ oversight to silently fix; surface it instead.
      ([Technique-Practice.md](Technique-Practice.md#data)), but
      `downloadBackup`/import only carry pieces, and none of Passes 101–104
      as planned clearly owns adding it.
-  4. **A check-off can't be undone.** `lib/technique.js` has no undo, and
+  4. ~~**A check-off can't be undone.**~~ **Resolved in Pass 101, on
+     direct request: built** (`uncompleteTask`, see
+     [Algorithms.md](Algorithms.md#completing-tempo-and-octaves)). Original
+     note: `lib/technique.js` had no undo, and
      reversing a completion would mean restoring the walk position,
      `lastPracticedDate`/`practicedDates`, the tempo, and each method's
      last-used date, none of which is snapshotted today. The mockup's

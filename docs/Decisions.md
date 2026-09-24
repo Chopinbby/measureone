@@ -6769,6 +6769,107 @@ linked to Today's Practice — display and navigation only, no editing.**
 - See [Algorithms.md](Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
   for the full mechanism.
 
+## Technique practice
+
+**Designed, not built (Pass 98, docs only).** The full brief is
+[Technique-Practice.md](Technique-Practice.md); the hand-picked numbers are
+inventoried in
+[Research.md](Research.md#technique-practice-constants-designed-not-built).
+These entries record the design decisions and what each one ruled out.
+
+- **The per-scale practice methods are a new build, not a revival of the
+  removed `suggestMethods()`.** [Product-Principles.md](Product-Principles.md#recommend-the-highest-impact-next-action)
+  already anticipated this: if a "recommend a specific technique" feature
+  came back, it would be new, since `suggestMethods()` no longer exists.
+  Technique practice suggests methods for *scales and arpeggios* from a
+  library the user controls (star, switch off, add their own), rotated by
+  how long since each was used — not a rotating tip attached to a *piece
+  chunk* the way Pass 31's removed function worked. Alternative
+  considered: reviving `suggestMethods()` and extending it — rejected,
+  because the Pass 31 judgment (a fixed per-role requirement line is
+  clearer on a chunk card) still holds for chunks and isn't being
+  revisited.
+- **Unfinished technique tasks carry over to the next day, with the same
+  methods; they don't disappear.** Carry-over is what keeps this feature
+  consistent with [No punishment mechanics](Product-Principles.md#no-punishment-mechanics)
+  and the "never behind" rule: nothing is ever counted as missed, and
+  carried tasks count toward the day's 3, so nothing piles up either.
+  Alternative considered: let an unfinished day's list vanish at midnight
+  and build a fresh one — rejected, because a scale chosen for a reason
+  (due, slow, key of the day) would silently lose its turn, and the
+  rotation would drift toward whatever the user happened to finish.
+- **The circle-of-fifths walk is the last tier, not one input to a single
+  score.** Priority order is carried over → repertoire-key and starred →
+  slow → walk. Alternative considered: rank every item by one blended
+  score (due-ness, slowness, key of the day) — rejected, because tiers are
+  easy to explain ("why is this here?") and guarantee that a due
+  repertoire scale is never outranked by a walk scale. The cost — the walk
+  can be crowded out — is accepted explicitly (Decided 3 and 5 below).
+- **Method stars are global per method, not per scale.** Starring "Eyes
+  closed" makes it come up more on every scale. Alternative considered:
+  per-scale method stars — rejected as far more to manage (13+ methods ×
+  every library item) for a preference that is usually about the method,
+  not the scale.
+- **One pill label, "Repertoire in this key", for every active piece.**
+  Alternative considered: different labels for a piece being learned vs.
+  one in maintenance or finished (or naming the piece) — rejected as extra
+  distinctions that don't change what the user should do with the scale.
+- **Check octaves are set in the Add form and Library, not on the task
+  card.** Changing them on an item with a saved tempo asks "keep as a
+  starting point or start fresh". Alternative considered: an octave
+  selector on the card — rejected, because a tempo measured over 2 octaves
+  isn't comparable to one over 4, and a per-session selector would quietly
+  mix the two in one baseline.
+- **Exposure is read as a return interval, not as extra lottery weight.**
+  "Due" means enough days have passed since an item was last practiced for
+  its target pace; most overdue first. Alternative considered: treat the
+  boost as a weighted random chance of being picked — rejected as
+  unpredictable (a favorite could go weeks without coming up, or come up
+  three days running) and impossible to explain on the Library page.
+- **Pace for repertoire-key and starred scales is a days-a-week target,
+  not an exposure multiplier on the 24-day lap (Pass 98, confirmed by the
+  user).** Starred ≈ 3 days a week, repertoire key ≈ 4 days a week, both
+  ≈ 3–4 days a week (alternating weeks). **This supersedes the brief's
+  original "5x cap" model**: multipliers of x3 (repertoire) and x2
+  (starred), multiplied together and capped at x5, read as a return
+  interval of 24 ÷ multiplier — about every 8, 12, and 5 days. That model
+  was the alternative considered and rejected: it was much slower than
+  the pace the user actually wants (well under once a week for a starred
+  or repertoire scale), and it disagreed with the mockup's own Library
+  sentence. Known consequence, accepted under Decided 5 below: at this
+  pace a single repertoire key with several library items (say four
+  minor-form scales and arpeggios) can take most of the 21 weekly task
+  slots on its own.
+- **Decided 1 — piece links are by key ("Other keys in this piece"), not
+  by specific scale.** A piece stores its key and other keys it passes
+  through; every library item in those keys gets the repertoire pill and
+  pace. Alternative ruled out: linking by specific scale (the mockup's
+  "Other scales and arpeggios in this piece" chips) — more precise, but
+  asks the user to know which scale forms a passage uses, and misses a
+  scale added to the library later.
+- **Decided 2 — the slow-tier numbers (slowest third, 7-day cooldown) stay
+  as starting values, to tune after real use.** Alternative ruled out:
+  settling on different values now, with no usage data to pick them from.
+  Listed in [Research.md](Research.md#technique-practice-constants-designed-not-built).
+- **Decided 3 — if a user stars very many scales, the walk can starve;
+  accepted.** Alternative ruled out: a guard against the walk starving
+  (for example, always reserving one daily slot for the walk). Starring
+  many scales is a choice the user can undo, and a reserved slot would
+  push out a due scale the user asked to see more.
+- **Decided 4 — a scale that is both repertoire and starred comes up 3–4
+  days a week, alternating weeks between 3 and 4.** Confirmed by the user
+  when Pass 98 was run. The pass had proposed recording the brief's x5 cap
+  (about every 5 days), while the original decision message had said "5
+  days a week". Alternatives ruled out: the x5 cap (a lower pace than
+  wanted) and 5 days a week (a higher one).
+- **Decided 5 — crowding at 3 tasks a day is accepted; the priority order
+  stands.** Alternative ruled out: a smaller daily list for the higher
+  tiers (capping how many of the 3 slots repertoire/starred scales may
+  take), which would break the priority order. Levers kept for later, if
+  crowding bothers real use: a settings UI for scales per day, or
+  repertoire pace per key rather than per item (see
+  [Roadmap.md](Roadmap.md#designed-queued-for-build)).
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

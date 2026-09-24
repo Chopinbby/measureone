@@ -1080,6 +1080,17 @@ either piece-level setting. See
 out (Settings-side spot management, wiring focus-spot minutes into any
 cross-piece "time practiced" total).
 
+## Technique practice data (app-level)
+
+**Designed, not built.** Technique practice data (the scale/arpeggio
+library, practice methods, today's list, walk position, and settings) is
+**app-level, not part of any piece**: it has its own `localStorage` key and
+update path, is included in backups, and never goes through `setPieces` or
+`updatePiece`. The only piece-level addition is two optional fields — the
+key of the piece and other keys it passes through. See
+[Technique-Practice.md](Technique-Practice.md#data) for the designed shape;
+this section gets the real schema once the storage pass is built.
+
 ## Known simplifications worth knowing about
 
 - The effort→minutes conversion (`EFFORT_TO_MIN = 2.5`), the schedule-estimate

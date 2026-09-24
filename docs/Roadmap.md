@@ -333,6 +333,17 @@ Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale.
 
+## Designed, queued for build
+
+- **Technique practice** — Passes 98–104. **Status: designed, not built**
+  (Pass 98 recorded the design in docs only). A daily list of up to 3 scale
+  and arpeggio tasks, each with 3–4 rotating practice methods, shown on
+  Master Agenda and every piece's Daily Practice, plus a Technique page
+  (Today / Library / Methods). App-level data, never "behind". Full brief:
+  [Technique-Practice.md](Technique-Practice.md); decisions:
+  [Decisions.md](Decisions.md#technique-practice). Levers kept for later,
+  not in v1: a settings UI for scales per day, and repertoire pace per key.
+
 ## Priority-ordered backlog
 
 1. **Practice journal** — free-text notes per *session* (distinct from

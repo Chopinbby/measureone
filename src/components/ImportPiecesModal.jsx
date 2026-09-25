@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { X, Upload } from "lucide-react";
 import { PieceCheckRow } from "./PieceCheckRow";
-import { findMatchingPiece, diffImportedPiece } from "../lib/storage";
+import { findMatchingPiece, diffImportedPiece, mergeImportedTechnique } from "../lib/storage";
 
 // candidates: the raw piece objects parsed out of the chosen backup file,
 // before any of them have actually been added or merged. existingPieces:
@@ -12,8 +12,23 @@ import { findMatchingPiece, diffImportedPiece } from "../lib/storage";
 // preview-only reasoning applies to `hasDivergence` (diffImportedPiece) below
 // — App.jsx's handleConfirmImport re-derives it at confirm time rather than
 // trusting this snapshot.
-export function ImportPiecesModal({ candidates, existingPieces, onCancel, onImport }) {
+// techniqueCandidate (Pass 104): the backup's technique block
+// (parseBackupTechnique), or null for a backup without one — then no
+// "Technique library" row appears and the import behaves exactly as before.
+// existingTechnique is only used to preview what the merge will add.
+// techniqueUnreadable / techniqueSkippedItems (Pass 104 review fix): the
+// file had a technique block that couldn't be read at all, or some of its
+// scales couldn't be — said here instead of being skipped silently.
+export function ImportPiecesModal({
+  candidates, existingPieces, techniqueCandidate = null, existingTechnique = null,
+  techniqueUnreadable = false, techniqueSkippedItems = 0, onCancel, onImport,
+}) {
   const [selected, setSelected] = useState(() => new Set(candidates.map((_, i) => i)));
+  const [includeTechnique, setIncludeTechnique] = useState(!!techniqueCandidate);
+  const techniquePreview = useMemo(
+    () => (techniqueCandidate && existingTechnique ? mergeImportedTechnique(existingTechnique, techniqueCandidate).stats : null),
+    [techniqueCandidate, existingTechnique]
+  );
   // Per-piece "keep what's here" vs "use the imported version" pick, keyed
   // by candidate index — only ever read for a row diffImportedPiece flagged
   // as real divergence (see `rows` below); every other row's ladder state is
@@ -66,14 +81,40 @@ export function ImportPiecesModal({ candidates, existingPieces, onCancel, onImpo
         </div>
         <div className="modal-body">
           <p className="wizard-hint">
-            Found {rows.length} piece{rows.length === 1 ? "" : "s"} in this file — {newCount} new,{" "}
-            {updateCount} matching a piece you already have. Choose which to import; a match updates the
-            existing piece instead of duplicating it.
+            {rows.length === 0
+              ? "This file has no pieces, only your technique library."
+              : `Found ${rows.length} piece${rows.length === 1 ? "" : "s"} in this file — ${newCount} new, ${updateCount} matching a piece you already have. Choose which to import; a match updates the existing piece instead of duplicating it.`}
           </p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {techniqueUnreadable && (
+            <p className="wizard-hint import-warning">
+              This file has a technique library, but it couldn't be read, so it won't be imported. Your
+              technique library here stays as it is.
+            </p>
+          )}
+          {techniqueCandidate && techniqueSkippedItems > 0 && (
+            <p className="wizard-hint import-warning">
+              {techniqueSkippedItems} scale{techniqueSkippedItems === 1 ? "" : "s"} in this file's technique library
+              couldn't be read and will be skipped. Everything else in it can still be imported.
+            </p>
+          )}
+          {techniqueCandidate && (
+            <div className="checklist" style={{ marginBottom: 14 }}>
+              <PieceCheckRow
+                piece={{
+                  name: "Technique library",
+                  composer: techniquePreview
+                    ? `${techniqueCandidate.items.length} in the file — ${techniquePreview.itemsAdded} new, ${techniquePreview.temposUpdated} newer tempo${techniquePreview.temposUpdated === 1 ? "" : "s"}. Nothing here is removed.`
+                    : `${techniqueCandidate.items.length} scales and arpeggios`,
+                }}
+                checked={includeTechnique}
+                onToggle={() => setIncludeTechnique((v) => !v)}
+              />
+            </div>
+          )}
+          {rows.length > 0 && <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
             <button className="ghost-btn" onClick={() => setSelected(new Set(candidates.map((_, i) => i)))}>Select all</button>
             <button className="ghost-btn" onClick={() => setSelected(new Set())}>Select none</button>
-          </div>
+          </div>}
           {updateCount > 0 && (
             <div style={{ margin: "0 0 14px", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
               <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
@@ -137,8 +178,15 @@ export function ImportPiecesModal({ candidates, existingPieces, onCancel, onImpo
         </div>
         <div className="modal-foot">
           <button className="ghost-btn" onClick={onCancel}>Cancel</button>
-          <button className="primary-btn" disabled={selected.size === 0} onClick={() => onImport([...selected], ladderChoices, orderChoice)}>
-            <Upload size={15} /> Import {selected.size} piece{selected.size === 1 ? "" : "s"}
+          <button
+            className="primary-btn"
+            disabled={selected.size === 0 && !includeTechnique}
+            onClick={() => onImport([...selected], ladderChoices, orderChoice, includeTechnique)}
+          >
+            <Upload size={15} />
+            {selected.size === 0
+              ? "Import technique library"
+              : `Import ${selected.size} piece${selected.size === 1 ? "" : "s"}${includeTechnique ? " and technique" : ""}`}
           </button>
         </div>
       </div>

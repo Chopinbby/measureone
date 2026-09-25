@@ -4,9 +4,13 @@ import { PieceCheckRow } from "./PieceCheckRow";
 
 // pieceGroups: same shape groupPiecesByWork produces — standalone pieces as
 // one-item groups, multi-movement works grouped under their workName.
-export function ExportPiecesModal({ pieceGroups, onCancel, onExport }) {
+// techniqueItemCount (Pass 104): how many scales/arpeggios the Technique
+// library holds, for the "Technique library" row — on by default; switching
+// it off leaves the technique block out of the file entirely.
+export function ExportPiecesModal({ pieceGroups, techniqueItemCount = 0, onCancel, onExport }) {
   const allIds = pieceGroups.flatMap((g) => g.pieces.map((p) => p.id));
   const [selected, setSelected] = useState(() => new Set(allIds));
+  const [includeTechnique, setIncludeTechnique] = useState(true);
 
   const toggle = (id) => {
     setSelected((prev) => {
@@ -27,7 +31,17 @@ export function ExportPiecesModal({ pieceGroups, onCancel, onExport }) {
           </button>
         </div>
         <div className="modal-body">
-          <p className="wizard-hint">Choose which pieces to include in the backup file.</p>
+          <p className="wizard-hint">Choose what to include in the backup file.</p>
+          <div className="checklist" style={{ marginBottom: 14 }}>
+            <PieceCheckRow
+              piece={{
+                name: "Technique library",
+                composer: `${techniqueItemCount} ${techniqueItemCount === 1 ? "scale or arpeggio" : "scales and arpeggios"}, with tempos, stars and your own methods`,
+              }}
+              checked={includeTechnique}
+              onToggle={() => setIncludeTechnique((v) => !v)}
+            />
+          </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
             <button className="ghost-btn" onClick={() => setSelected(new Set(allIds))}>Select all</button>
             <button className="ghost-btn" onClick={() => setSelected(new Set())}>Select none</button>
@@ -45,8 +59,15 @@ export function ExportPiecesModal({ pieceGroups, onCancel, onExport }) {
         </div>
         <div className="modal-foot">
           <button className="ghost-btn" onClick={onCancel}>Cancel</button>
-          <button className="primary-btn" disabled={selected.size === 0} onClick={() => onExport([...selected])}>
-            <Download size={15} /> Export {selected.size} piece{selected.size === 1 ? "" : "s"}
+          <button
+            className="primary-btn"
+            disabled={selected.size === 0 && !includeTechnique}
+            onClick={() => onExport([...selected], includeTechnique)}
+          >
+            <Download size={15} />
+            {selected.size === 0
+              ? "Export technique library"
+              : `Export ${selected.size} piece${selected.size === 1 ? "" : "s"}${includeTechnique ? " and technique" : ""}`}
           </button>
         </div>
       </div>

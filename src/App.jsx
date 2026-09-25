@@ -47,6 +47,8 @@ import {
   loadTechniqueFromStorage,
   saveTechniqueToStorage,
   normalizeTechniqueItem,
+  readBackupTechnique,
+  mergeImportedTechnique,
 } from "./lib/storage";
 import { resolveMethods, buildDayList, completeTask, uncompleteTask, topUpDayList, removeUnfinishedTask, changeCheckOctaves, repertoireKeysFromPieces } from "./lib/technique";
 
@@ -212,6 +214,12 @@ export default function App() {
   }, [scrollToOnArrival, activeTab]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
+  // The chosen backup's technique block (Pass 104), or null when it has none
+  // (an older backup, a bare-array one, or exported with the row off).
+  const [importTechnique, setImportTechnique] = useState(null);
+  // What reading that block reported: { unreadable, skippedItems } — shown in
+  // the import modal and the final message rather than skipped silently.
+  const [importTechniqueInfo, setImportTechniqueInfo] = useState({ unreadable: false, skippedItems: 0 });
   const [storageError, setStorageError] = useState(false);
   // Technique data (Pass 100) — app-level, one localStorage key of its own,
   // never part of `pieces` and never touched by setPieces/updatePiece. Its
@@ -602,9 +610,11 @@ export default function App() {
 
   const handleExportClick = () => setExportModalOpen(true);
 
-  const handleConfirmExport = (selectedIds) => {
+  // includeTechnique (Pass 104): the export modal's "Technique library" row,
+  // on by default. Off leaves the technique block out of the file entirely.
+  const handleConfirmExport = (selectedIds, includeTechnique = false) => {
     const subset = Object.fromEntries(selectedIds.map((id) => [id, pieces[id]]).filter(([, p]) => p));
-    downloadBackup(subset);
+    downloadBackup(subset, includeTechnique ? technique : null);
     const result = saveLastExportedAt(Date.now());
     if (!result.ok) setStorageError(true);
     setExportReminderDue(false);
@@ -621,23 +631,33 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = () => {
       let importedPieces;
+      let techniqueRead;
       try {
         importedPieces = parseBackupPieces(reader.result);
+        techniqueRead = readBackupTechnique(reader.result);
       } catch (e) {
         window.alert("That file doesn't look like a valid MeasureOne backup.");
         return;
       }
       const valid = (importedPieces || []).filter((p) => p && p.id);
-      if (valid.length === 0) {
-        window.alert("No pieces found in that backup file.");
+      // A backup can hold only a technique library (exported with every
+      // piece unticked) — that's still worth importing.
+      if (valid.length === 0 && !techniqueRead.technique) {
+        window.alert(
+          techniqueRead.unreadable
+            ? "The technique library in that backup couldn't be read, and it has no pieces, so there's nothing to import."
+            : "No pieces found in that backup file."
+        );
         return;
       }
+      setImportTechnique(techniqueRead.technique);
+      setImportTechniqueInfo({ unreadable: techniqueRead.unreadable, skippedItems: techniqueRead.skippedItems });
       setImportCandidates(valid);
     };
     reader.readAsText(file);
   };
 
-  const handleConfirmImport = (selectedIndices, ladderChoices = {}, orderChoice = "existing") => {
+  const handleConfirmImport = (selectedIndices, ladderChoices = {}, orderChoice = "existing", includeTechnique = false) => {
     const next = { ...pieces };
     let firstNewId = null;
     let updatedCount = 0;
@@ -706,10 +726,32 @@ export default function App() {
     });
     setPieces(next);
     if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
+    // Technique library (Pass 104): merged, never replaced — see
+    // mergeImportedTechnique (lib/storage.js). Goes through updateTechnique
+    // like every other technique change, and tops up today's list so newly
+    // added scales can join it straight away.
+    let techniqueStats = null;
+    if (includeTechnique && importTechnique && technique) {
+      techniqueStats = mergeImportedTechnique(technique, importTechnique).stats;
+      updateTechnique((t) => withTopUp(mergeImportedTechnique(t, importTechnique).technique));
+    }
+    const { unreadable: techniqueUnreadable, skippedItems } = importTechniqueInfo;
     setImportCandidates(null);
+    setImportTechnique(null);
+    setImportTechniqueInfo({ unreadable: false, skippedItems: 0 });
     const parts = [];
     if (createdCount) parts.push(`${createdCount} new piece${createdCount === 1 ? "" : "s"} added`);
     if (updatedCount) parts.push(`${updatedCount} existing piece${updatedCount === 1 ? "" : "s"} updated`);
+    if (techniqueStats) {
+      const t = techniqueStats;
+      parts.push(
+        `technique library merged (${t.itemsAdded} scale${t.itemsAdded === 1 ? "" : "s"} added, ` +
+          `${t.temposUpdated} newer tempo${t.temposUpdated === 1 ? "" : "s"}, ${t.methodsAdded} method${t.methodsAdded === 1 ? "" : "s"} added` +
+          (skippedItems > 0 ? `, ${skippedItems} unreadable scale${skippedItems === 1 ? "" : "s"} skipped` : "") +
+          ")"
+      );
+    }
+    if (techniqueUnreadable) parts.push("the technique library in the file couldn't be read, so it wasn't imported");
     window.alert(parts.length ? `Import complete: ${parts.join(", ")}.` : "Nothing selected — import cancelled.");
   };
 
@@ -2495,6 +2537,7 @@ export default function App() {
       {exportModalOpen && (
         <ExportPiecesModal
           pieceGroups={pieceGroups}
+          techniqueItemCount={technique?.items.length || 0}
           onCancel={() => setExportModalOpen(false)}
           onExport={handleConfirmExport}
         />
@@ -2503,7 +2546,11 @@ export default function App() {
         <ImportPiecesModal
           candidates={importCandidates}
           existingPieces={pieces}
-          onCancel={() => setImportCandidates(null)}
+          techniqueCandidate={importTechnique}
+          techniqueUnreadable={importTechniqueInfo.unreadable}
+          techniqueSkippedItems={importTechniqueInfo.skippedItems}
+          existingTechnique={technique}
+          onCancel={() => { setImportCandidates(null); setImportTechnique(null); setImportTechniqueInfo({ unreadable: false, skippedItems: 0 }); }}
           onImport={handleConfirmImport}
         />
       )}
@@ -3130,6 +3177,9 @@ const CSS = `
 .time-summary-num { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; color: var(--brass-deep); }
 /* Pass 102: "includes Nm technique" under Master Agenda's Total planned. */
 .time-summary-sub { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft); }
+/* Pass 104 review fix: import modal note when a backup's technique library
+   (or some of its scales) couldn't be read — said, not skipped silently. */
+.wizard-hint.import-warning { color: var(--brick); background: rgba(181,71,58,0.06); border: 1px solid rgba(181,71,58,0.25); border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; }
 .time-status { font-size: 12px; color: var(--ink-soft); }
 .time-status.busy { color: var(--brick); }
 

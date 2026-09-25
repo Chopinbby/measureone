@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NumberInput } from "../../NumberInput";
 import { KeyText } from "./KeyText";
 import { KEY_OPTIONS, MINOR_FORMS, HANDS_OPTIONS, itemTitle, handsText } from "./format";
-import { sameKey } from "../../../lib/technique";
+import { sameSpelledKey } from "../../../lib/technique";
 import { TECHNIQUE_MIN_TEMPO, TECHNIQUE_MAX_TEMPO } from "../../../lib/constants";
 
 // "Add scale or arpeggio" (Pass 101). Not drawn in the mockup, so built from
@@ -35,7 +35,9 @@ export function AddTechniqueItemForm({ items, onAdd, onClose }) {
     starred,
   };
   const duplicate = items.find(
-    (it) => it.form === draft.form && sameKey(it, draft) && (it.minorForm || null) === draft.minorForm && it.hands === draft.hands
+    // Matched as spelled: a G♭ major scale and an F♯ major scale are two
+    // different library items (pieces link to scales by the key as written).
+    (it) => it.form === draft.form && sameSpelledKey(it, draft) && (it.minorForm || null) === draft.minorForm && it.hands === draft.hands
   );
 
   const submit = () => {

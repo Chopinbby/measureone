@@ -49,6 +49,11 @@ export function defaultPiece() {
     chunkMode: "auto",
     customChunkSize: 4,
     targetBPM: null,
+    // Pass 103 — key of the piece / other keys it passes through, both
+    // optional ({ tonic, quality } like technique items). Drives the
+    // "Repertoire in this key" tag and pace on the Technique page.
+    homeKey: null,
+    otherKeys: null,
     bpmZones: [],
     recordings: [],
     documents: [],

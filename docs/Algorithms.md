@@ -3491,7 +3491,13 @@ Tests: `test/technique.test.mjs`.
 
 - `pitchClass(tonic)` maps a spelling ("F#", "G♭", "B#") to 0–11, so
   enharmonic keys compare equal. `normalizeKey`/`sameKey` accept either
-  `{ tonic, quality }` or a string like "G minor".
+  `{ tonic, quality }` or a string like "G minor". This sound-based match
+  is for the walk only (it has one F♯/G♭ day).
+- **Linking pieces to scales uses `sameSpelledKey` instead (Pass 103
+  follow-up):** the key as written, so "Gb" = "G♭", but G♭ major ≠ F♯
+  major. `isRepertoireItem` and the dedupe in `normalizeOtherKeys` use it,
+  and so does the Add form's duplicate check. A piece in G♭ major
+  tags and paces G♭ major scales only.
 - `WALK_KEYS` is the 24-position lap: each major around the circle of
   fifths (C G D A E B F♯ D♭ A♭ E♭ B♭ F), each followed by its relative
   minor (major + 9 semitones).

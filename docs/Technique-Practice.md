@@ -226,7 +226,10 @@ Each item has its own entry, with the alternative it rules out, in
 [Decisions.md](Decisions.md#technique-practice).
 
 1. **Piece links are by key** ("Other keys in this piece"), not by specific
-   scale.
+   scale. Keys are matched **as written** (Pass 103 follow-up, on direct
+   request): a piece in G♭ major tags G♭ major scales, not F♯ major. The
+   key lists never show two separate enharmonic choices: each pair is one
+   entry, "F♯/G♭ major" and "D♯/E♭ minor" (24 keys).
 2. **Slow-tier numbers** (slowest third, 7-day cooldown) stay as starting
    values, to tune after real use.
 3. **If a user stars very many scales the walk can starve**; accepted.

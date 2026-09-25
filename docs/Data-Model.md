@@ -123,6 +123,18 @@ piece = {
   chunkMode,             // 'auto' | 'custom'
   customChunkSize,       // number, measures per chunk when chunkMode === 'custom'
   targetBPM,             // number | null — whole-piece default tempo target
+  homeKey,               // { tonic, quality } | null — Pass 103, "Key of the piece".
+                         // Same shape as a technique item's key (tonic spelled
+                         // "F♯"/"G♭"/…, quality "major"|"minor"). Matched AS
+                         // SPELLED: a G♭ major piece tags G♭ major scales, not
+                         // F♯ major ("Gb" = "G♭" is the same spelling).
+                         // Backfilled to null, never a materialized default.
+  otherKeys,             // [{ tonic, quality }] | null — Pass 103, "Other keys in
+                         // this piece". Deduped by spelling, never repeats
+                         // homeKey; empty is stored as null. Both fields: set in
+                         // BasicsFields (Wizard + Settings), on EDIT_FORM_FIELDS,
+                         // read only by repertoireKeysFromPieces (lib/technique.js)
+                         // — active pieces only — to tag and pace Technique scales.
   bpmZones,              // [{ id, start, end, bpm }] — per-range tempo overrides
   recordings,            // [{ id, label, url }] — reference recordings (YouTube, Spotify, etc.),
                          // shown as links on the dashboard; purely referential, not embedded playback
@@ -1082,14 +1094,17 @@ cross-piece "time practiced" total).
 
 ## Technique practice data (app-level)
 
-**Stored since Pass 100; no screens yet.** Technique practice data is
+**Stored since Pass 100; on screen since Pass 101.** Technique practice data is
 **app-level, not part of any piece**: one `localStorage` key of its own,
 `measureone-technique`, with its own update path (`updateTechnique`,
 `App.jsx`). It never goes through `setPieces` or `updatePiece`. **Not yet
 included in backups** — that is deferred to a later pass. The only
-piece-level addition planned is two optional fields (the key of the piece
-and other keys it passes through), not built yet. Design:
-[Technique-Practice.md](Technique-Practice.md#data).
+piece-level addition is two optional fields, built in Pass 103:
+`homeKey` and `otherKeys` (see [The piece object](#the-piece-object)). Pieces
+link to scales **by key, never by specific scale**. The keys of every active
+piece (paused and archived don't count; mid-revival does) feed the engine's
+repertoire pace and the "Repertoire in this key" tag, via
+`repertoireKeysFromPieces` (`lib/technique.js`).
 
 The schema is `validateAndMigrateTechnique` / `defaultTechnique`
 (`lib/storage.js`); the engine that reads it is `lib/technique.js`.

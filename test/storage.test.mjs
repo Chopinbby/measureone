@@ -1295,3 +1295,51 @@ describe("technique storage (Pass 100)", () => {
     assert.ok(res.error);
   });
 });
+
+/* ------------------------ Piece keys (Pass 103) ------------------------ */
+
+describe("piece keys: homeKey / otherKeys (Pass 103)", () => {
+  const base = { id: "pk", name: "Ballade", composer: "Chopin", totalMeasures: 40, startDate: "2026-07-01", progress: {}, updatedAt: 1000 };
+
+  test("a piece saved before the fields existed backfills both to null, not a materialized value", () => {
+    const m = validateAndMigratePiece(base);
+    assert.equal(m.homeKey, null);
+    assert.equal(m.otherKeys, null);
+  });
+
+  test("valid keys survive a load; bad ones become null; migrating twice changes nothing", () => {
+    const withKeys = validateAndMigratePiece({ ...base, homeKey: { tonic: "G", quality: "minor" }, otherKeys: [{ tonic: "B♭", quality: "major" }, { tonic: "G", quality: "minor" }] });
+    assert.deepEqual(withKeys.homeKey, { tonic: "G", quality: "minor" });
+    assert.deepEqual(withKeys.otherKeys, [{ tonic: "B♭", quality: "major" }], "the piece's own key is dropped from other keys");
+    assert.deepEqual(validateAndMigratePiece(JSON.parse(JSON.stringify(withKeys))), withKeys);
+    const bad = validateAndMigratePiece({ ...base, homeKey: "G minor", otherKeys: "nope" });
+    assert.equal(bad.homeKey, null);
+    assert.equal(bad.otherKeys, null);
+  });
+
+  test("re-importing a backup with the new fields is not flagged as a conflict, and keeps them", () => {
+    const existing = validateAndMigratePiece({ ...base, homeKey: { tonic: "G", quality: "minor" } });
+    const backup = JSON.parse(JSON.stringify(existing));
+    assert.deepEqual(diffImportedPiece(existing, backup), { hasDivergence: false, resolution: "existing" });
+    const merged = mergeImportedPiece(existing, backup, "existing");
+    assert.deepEqual(merged.homeKey, { tonic: "G", quality: "minor" });
+  });
+
+  test("re-importing an older-format backup WITHOUT the fields is not a conflict and doesn't wipe the keys", () => {
+    const existing = validateAndMigratePiece({ ...base, homeKey: { tonic: "G", quality: "minor" }, otherKeys: [{ tonic: "D", quality: "major" }] });
+    const { homeKey, otherKeys, ...oldFormat } = JSON.parse(JSON.stringify(existing));
+    assert.deepEqual(diffImportedPiece(existing, oldFormat), { hasDivergence: false, resolution: "existing" });
+    const merged = validateAndMigratePiece(mergeImportedPiece(existing, oldFormat, "existing"));
+    assert.deepEqual(merged.homeKey, { tonic: "G", quality: "minor" });
+    assert.deepEqual(merged.otherKeys, [{ tonic: "D", quality: "major" }]);
+  });
+
+  test("a piece that never set a key re-imports byte-identically", () => {
+    const existing = validateAndMigratePiece(base);
+    const backup = JSON.parse(JSON.stringify(existing));
+    assert.equal(diffImportedPiece(existing, backup).hasDivergence, false);
+    // Compared as saved text: mergeImportedPiece copies createdAt through even
+    // when it's undefined (this fixture has none), which JSON drops anyway.
+    assert.equal(JSON.stringify(validateAndMigratePiece(mergeImportedPiece(existing, backup, "existing"))), JSON.stringify(existing));
+  });
+});

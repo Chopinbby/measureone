@@ -6852,6 +6852,27 @@ These entries record the design decisions and what each one ruled out.
     the list fixed for the day, which leaves a new user's first day empty.
   - **A new library starts empty**, with a prompt to add a scale.
     Alternative: pre-filling the 24 major and minor scales.
+- **Pass 103 follow-up, on direct request — pieces link to scales by the
+  key as written, not as sounded.** A piece in G♭ major tags and paces G♭
+  major scales, not F♯ major ("technically it's a different key").
+  **The key lists never show two separate enharmonic entries** (a
+  follow-up to the follow-up, on direct request): a piece's key fields and
+  "Add scale or arpeggio" offer the 24 keys, with each enharmonic pair as
+  ONE entry labelled with both spellings ("F♯/G♭ major", "D♯/E♭ minor"),
+  saved as the first spelling. So a piece and a scale picked from the same
+  entry always match. A key stored with the other spelling (an import, or
+  the brief 26-key list) still shows as its combined entry (`keyOptionFor`,
+  `technique/format.js`). Alternatives considered: splitting the pairs into
+  26 separate entries (built briefly, then rejected: "don't show two
+  separate enharmonic scales"); showing only the more common spelling
+  (rejected because F♯ and G♭ major are about equally common); all 30 key
+  signatures; and matching enharmonics as the same key (the Pass 103
+  card's rule, superseded). The walk still groups by sound
+  (one F♯/G♭ day). The pace itself is unchanged (a repertoire scale is
+  still about 4 days a week). In the same follow-up, the "Scales in this
+  piece" heading was removed from the key fields (Wizard and Settings), and
+  the hint under "Key of the piece" gained "These scales will show up more
+  often in your practice routine."
 - **Decided 1 — piece links are by key ("Other keys in this piece"), not
   by specific scale.** A piece stores its key and other keys it passes
   through; every library item in those keys gets the repertoire pill and

@@ -48,7 +48,7 @@ import {
   saveTechniqueToStorage,
   normalizeTechniqueItem,
 } from "./lib/storage";
-import { resolveMethods, buildDayList, completeTask, uncompleteTask, topUpDayList, removeUnfinishedTask, changeCheckOctaves } from "./lib/technique";
+import { resolveMethods, buildDayList, completeTask, uncompleteTask, topUpDayList, removeUnfinishedTask, changeCheckOctaves, repertoireKeysFromPieces } from "./lib/technique";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
@@ -461,9 +461,12 @@ export default function App() {
   /*  setPieces/updatePiece. Called from TechniqueTab and its panel.     */
   /* ------------------------------------------------------------------ */
 
-  // Piece keys aren't stored yet (Pass 103), so no scale is a repertoire
-  // scale until then.
-  const techniqueRepertoireKeys = [];
+  // Every key of every ACTIVE piece (Pass 103): its own key plus the other
+  // keys it passes through. Paused/archived pieces don't count; a piece
+  // mid-revival is still active, so it does. Feeds the engine's pace tier
+  // (via techniqueEngineState) and the "Repertoire in this key" pill /
+  // Library note icon on every screen that shows technique.
+  const techniqueRepertoireKeys = useMemo(() => repertoireKeysFromPieces(pieces), [pieces]);
 
   // The engine's view of the saved technique object.
   function techniqueEngineState(t) {
@@ -2590,6 +2593,14 @@ export default function App() {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
+/* Inter and Fraunces have no ♯ or ♭, so the browser borrowed a system
+   font whose ♭ sits in a full-width box with a wide blank left side — "E♭"
+   read as "E ♭" in piece names, placeholders and headings. Naming
+   Helvetica Neue (Mac) / Segoe UI Symbol (Windows) right after them makes
+   the browser draw just those symbols snugly; every other character is
+   still Inter/Fraunces. IBM Plex Mono has its own ♯/♭ at its fixed width,
+   so .mono is deliberately left as is (a fallback there would break
+   column alignment). */
 .measureone-app {
   --paper: #EEF0EC;
   --paper-card: #F8F9F6;
@@ -2602,7 +2613,7 @@ const CSS = `
   --teal: #2E6E63;
   --brick: #B5473A;
   --white: #FFFFFF;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', 'Helvetica Neue', 'Segoe UI Symbol', sans-serif;
   color: var(--ink);
   background: var(--paper);
   min-height: 100%;
@@ -2611,7 +2622,7 @@ const CSS = `
 }
 .measureone-app *, .measureone-app *::before, .measureone-app *::after { box-sizing: border-box; }
 .measureone-app h1, .measureone-app h2, .measureone-app h3 {
-  font-family: 'Fraunces', serif; font-weight: 600; margin: 0; color: var(--ink);
+  font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; margin: 0; color: var(--ink);
 }
 .measureone-app .mono { font-family: 'IBM Plex Mono', monospace; }
 .measureone-app button { font-family: inherit; cursor: pointer; }
@@ -2627,7 +2638,7 @@ const CSS = `
   width: 232px; flex-shrink: 0; background: var(--paper-card); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; padding: 20px 14px; position: sticky; top: 0; height: 100vh;
 }
-.brand { display: flex; align-items: center; gap: 8px; padding: 6px 10px 20px; font-family: 'Fraunces', serif; font-weight: 600; font-size: 18px; color: var(--brass-deep); }
+.brand { display: flex; align-items: center; gap: 8px; padding: 6px 10px 20px; font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 18px; color: var(--brass-deep); }
 .nav-list { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .nav-item {
   display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; border: none;
@@ -2813,7 +2824,7 @@ const CSS = `
 .derived-stat strong { color: var(--brass-deep); }
 
 .schedule-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(181,71,58,0.08); border: 1px solid rgba(181,71,58,0.3); border-radius: 14px; padding: 16px 20px; }
-.schedule-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
+.schedule-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
 .schedule-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; max-width: 480px; }
 .schedule-banner-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
@@ -2821,23 +2832,23 @@ const CSS = `
    brick red, since this never requires action (proceeding as-is is always
    fine, see ScheduleFields.jsx). */
 .plan-fit-banner { background: rgba(185,138,62,0.1); border: 1px solid rgba(185,138,62,0.35); border-radius: 14px; padding: 14px 18px; margin: 4px 0 18px; }
-.plan-fit-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14.5px; margin: 0 0 4px; color: var(--brass-deep); }
+.plan-fit-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 14.5px; margin: 0 0 4px; color: var(--brass-deep); }
 .plan-fit-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; line-height: 1.5; }
 
 .storage-error-banner { display: flex; align-items: center; gap: 14px; background: rgba(181,71,58,0.1); border-bottom: 1px solid rgba(181,71,58,0.35); color: var(--brick); padding: 12px 24px; }
 .storage-error-banner svg { flex-shrink: 0; }
-.storage-error-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brick); }
+.storage-error-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brick); }
 .storage-error-sub { font-size: 12px; color: var(--ink-soft); margin: 0; max-width: 620px; }
 .storage-error-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
 .export-reminder-banner { display: flex; align-items: center; gap: 14px; background: rgba(185,138,62,0.1); border-bottom: 1px solid rgba(185,138,62,0.35); color: var(--brass-deep); padding: 12px 24px; }
 .export-reminder-banner svg { flex-shrink: 0; }
-.export-reminder-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brass-deep); }
+.export-reminder-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brass-deep); }
 .export-reminder-sub { font-size: 12px; color: var(--ink-soft); margin: 0; max-width: 620px; }
 .export-reminder-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
 .export-reminder-dismiss { background: transparent; border: none; color: var(--ink-soft); cursor: pointer; padding: 4px; flex-shrink: 0; display: inline-flex; border-radius: 6px; }
 .export-reminder-dismiss:hover { color: var(--ink); background: rgba(32,42,51,0.06); }
 .revival-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(185,138,62,0.1); border: 1px solid rgba(185,138,62,0.35); border-radius: 14px; padding: 16px 20px; }
-.revival-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brass); }
+.revival-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brass); }
 .revival-banner-reasons { font-size: 12.5px; color: var(--ink-soft); margin: 0; padding-left: 18px; max-width: 480px; }
 
 .confidence-legend { display: flex; gap: 18px; font-size: 13px; color: var(--ink-soft); flex-wrap: wrap; }
@@ -3098,7 +3109,7 @@ const CSS = `
 .pairs-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .pair-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); flex-wrap: wrap; }
 .pair-row input { width: 52px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; font-size: 13px; text-align: center; font-family: 'IBM Plex Mono', monospace; background: var(--white); color: var(--ink); }
-.pair-row input.name-input { width: 120px; text-align: left; font-family: 'Inter', sans-serif; }
+.pair-row input.name-input { width: 120px; text-align: left; font-family: 'Inter', 'Helvetica Neue', 'Segoe UI Symbol', sans-serif; }
 .pair-label { flex-shrink: 0; }
 
 .recording-row { display: flex; align-items: center; gap: 6px; }
@@ -3125,7 +3136,7 @@ const CSS = `
 .master-agenda-cards { display: flex; flex-direction: column; gap: 14px; }
 .piece-card { background: var(--paper-card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
 .piece-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.piece-title { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 600; color: var(--ink); margin: 0; }
+.piece-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-size: 16px; font-weight: 600; color: var(--ink); margin: 0; }
 .piece-meta { display: flex; gap: 12px; align-items: center; }
 .piece-time { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 600; color: var(--brass-deep); }
 .tasks-list { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--ink-soft); }
@@ -3219,6 +3230,15 @@ const CSS = `
    a native option can't hold a span. */
 .tq-acc { font-family: 'Helvetica Neue', 'Segoe UI Symbol', 'Arial Unicode MS', sans-serif; }
 .tq-select { font-family: 'Inter', 'Helvetica Neue', 'Segoe UI Symbol', sans-serif; }
+/* Pass 103: the piece's key fields (BasicsFields) — set apart by a divider
+   inside the Wizard/Settings basics form, with key chips for "Other keys". */
+.key-fields { border-top: 1px solid var(--line); padding-top: 14px; }
+.key-fields .field { margin-bottom: 10px; }
+.field .field-hint { font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+.key-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.key-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--line); border-radius: 20px; background: var(--white); font-size: 12.5px; }
+.key-chip button { border: none; background: transparent; color: var(--ink-faint); padding: 0 2px; font-size: 15px; line-height: 1; }
+.key-chip button:hover { color: var(--brick); }
 .tq-select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: 12.5px; background: var(--white); color: var(--ink); max-width: 100%; }
 .tq-lib-grid { display: grid; grid-template-columns: 22px minmax(0,1fr) 72px 64px 52px; gap: 8px; align-items: center; }
 .tq-lib-head { padding: 8px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; border-top: 1px solid var(--line); margin-top: 10px; }

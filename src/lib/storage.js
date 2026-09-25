@@ -3,6 +3,7 @@ import { todayISODate, addDaysISO, parseMeasurePosition } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
 import { isInRevival } from "./revival";
 import { generatePracticeChunks, reassociateTroubleSpots } from "./chunking";
+import { normalizePieceKey, normalizeOtherKeys } from "./technique";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -397,6 +398,14 @@ export function validateAndMigratePiece(piece) {
     troubleSpotsEnabled: !!piece.troubleSpotsEnabled,
     troubleSpotDefaultMinutes:
       typeof piece.troubleSpotDefaultMinutes === "number" ? piece.troubleSpotDefaultMinutes : 5,
+    // Pass 103 — the key of the piece and other keys it passes through, in
+    // the same { tonic, quality } shape technique items use (Technique
+    // practice links pieces to scales by key, never by specific scale —
+    // docs/Technique-Practice.md, Decided 1). Backfilled to null, not to a
+    // materialized value, so a piece that never set them stays unchanged
+    // and a byte-identical re-import doesn't differ from what's stored.
+    homeKey: normalizePieceKey(piece.homeKey),
+    otherKeys: normalizeOtherKeys(piece.otherKeys, normalizePieceKey(piece.homeKey)),
     // Plans saved before startDate existed (or backups that predate it)
     // start "today" rather than inheriting createdAt — see getCurrentDay in
     // lib/utils for why createdAt was never a safe stand-in for day 1.

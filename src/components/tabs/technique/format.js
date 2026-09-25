@@ -3,7 +3,7 @@
 /*  copy only. Scheduling logic lives in lib/technique.js.             */
 /* ------------------------------------------------------------------ */
 
-import { WALK_KEYS, normalizeKey } from "../../../lib/technique";
+import { WALK_KEYS, normalizeKey, sameKey, sameSpelledKey } from "../../../lib/technique";
 
 // One display name per walk position, in walk order — each major, then
 // its relative minor. Enharmonic pairs are shown as the brief writes them.
@@ -14,12 +14,25 @@ export const WALK_KEY_LABELS = [
   "E♭ major", "C minor", "B♭ major", "G minor", "F major", "D minor",
 ];
 
-// The Add form's key list: all 24 keys, in walk order. `tonic` is the
-// spelling saved on the item (the first of an enharmonic pair).
+// The key list for the Add form and a piece's key fields: the 24 keys in
+// walk order. An enharmonic pair is ONE choice, labelled with both
+// spellings ("F♯/G♭ major", "D♯/E♭ minor"), never two separate entries (on
+// direct request, Pass 103 follow-up). `tonic` is the spelling saved on the
+// item or piece: always the first of the pair, so a piece and a scale picked
+// from the same entry are stored identically and always match.
 export const KEY_OPTIONS = WALK_KEY_LABELS.map((label, i) => {
   const [name, quality] = label.split(" ");
   return { value: String(i), label, tonic: name.split("/")[0], quality };
 });
+
+// The KEY_OPTIONS entry for a stored { tonic, quality }: matched as spelled
+// first, then by sound, so a key saved with the other spelling of a pair
+// (e.g. "G♭ major" from an import, or from the brief 26-key list) still
+// shows as its combined entry instead of "Not set".
+export function keyOptionFor(key) {
+  if (!key) return null;
+  return KEY_OPTIONS.find((o) => sameSpelledKey(o, key)) || KEY_OPTIONS.find((o) => sameKey(o, key)) || null;
+}
 
 export const MINOR_FORMS = [
   { value: "natural", label: "Natural" },

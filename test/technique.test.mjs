@@ -29,6 +29,10 @@ import {
   removeUnfinishedTask,
   techniqueTodaySummary,
   agendaStatusLabel,
+  normalizePieceKey,
+  normalizeOtherKeys,
+  repertoireKeysFromPieces,
+  isRepertoireItem,
   startingTempo,
   changeCheckOctaves,
 } from "../src/lib/technique.js";
@@ -671,5 +675,101 @@ describe("agendaStatusLabel (Master Agenda's Status)", () => {
   });
   test("nothing at all", () => {
     assert.equal(agendaStatusLabel(0, 0, 0), "Nothing scheduled");
+  });
+});
+
+/* ------------------------ Piece keys (Pass 103) ------------------------ */
+
+describe("piece keys → repertoire keys (Pass 103)", () => {
+  const piece = (id, extra) => ({ id, status: "active", homeKey: null, otherKeys: null, ...extra });
+
+  test("matched as spelled: a G♭ major piece tags G♭ major scales, not the enharmonic F♯ major (and the reverse)", () => {
+    // Pass 103 follow-up, on direct request: technically a different key.
+    const keys = repertoireKeysFromPieces([piece("p", { homeKey: { tonic: "G♭", quality: "major" } })]);
+    assert.ok(isRepertoireItem(item("gb", "G♭", "major"), keys));
+    assert.ok(isRepertoireItem(item("gb2", "Gb", "major"), keys), "'Gb' and 'G♭' are the same spelling");
+    assert.ok(!isRepertoireItem(item("fs", "F#", "major"), keys));
+    assert.ok(!isRepertoireItem(item("fs2", "F♯", "major"), keys));
+    const keys2 = repertoireKeysFromPieces([piece("p", { homeKey: { tonic: "F♯", quality: "major" } })]);
+    assert.ok(isRepertoireItem(item("fs3", "F#", "major"), keys2));
+    assert.ok(!isRepertoireItem(item("gb3", "Gb", "major"), keys2));
+    // D♯ minor vs E♭ minor, the other split pair in the key list.
+    const keys3 = repertoireKeysFromPieces([piece("p", { homeKey: { tonic: "E♭", quality: "minor" } })]);
+    assert.ok(isRepertoireItem(item("ebm", "Eb", "minor"), keys3));
+    assert.ok(!isRepertoireItem(item("dsm", "D#", "minor"), keys3));
+  });
+
+  test("the walk still groups enharmonic keys together (one F♯/G♭ day)", () => {
+    // Walk position 12 is F♯/G♭ major; a G♭ major scale belongs to it.
+    const h = walkKeyOfDay([item("gb", "G♭", "major")], 12);
+    assert.equal(h.today.position, 12);
+  });
+
+  test("major and minor are kept apart", () => {
+    const keys = repertoireKeysFromPieces([piece("p", { homeKey: { tonic: "G", quality: "minor" } })]);
+    assert.ok(isRepertoireItem(item("gm", "G", "minor"), keys));
+    assert.ok(!isRepertoireItem(item("gM", "G", "major"), keys));
+    assert.ok(!isRepertoireItem(item("bb", "Bb", "major"), keys), "relative major isn't the same key");
+  });
+
+  test("other keys count too; a key in neither list doesn't, even for the same piece", () => {
+    const keys = repertoireKeysFromPieces([piece("p", {
+      homeKey: { tonic: "G", quality: "minor" },
+      otherKeys: [{ tonic: "B♭", quality: "major" }],
+    })]);
+    assert.ok(isRepertoireItem(item("bb", "Bb", "major"), keys));
+    assert.ok(!isRepertoireItem(item("d", "D", "major"), keys));
+  });
+
+  test("paused and archived pieces are excluded; a piece mid-revival (still active) is included", () => {
+    const key = { tonic: "D", quality: "major" };
+    assert.equal(repertoireKeysFromPieces([piece("p", { status: "paused", homeKey: key })]).length, 0);
+    assert.equal(repertoireKeysFromPieces([piece("p", { status: "archived", homeKey: key })]).length, 0);
+    const revival = piece("p", { homeKey: key, revival: { active: true, reassessmentComplete: false } });
+    assert.ok(isRepertoireItem(item("d", "D", "major"), repertoireKeysFromPieces([revival])));
+    // A piece saved before status existed counts as active.
+    const legacy = { id: "old", homeKey: key };
+    assert.equal(repertoireKeysFromPieces([legacy]).length, 1);
+    // Accepts the app's { id: piece } object as well as an array.
+    assert.equal(repertoireKeysFromPieces({ p: piece("p", { homeKey: key }) }).length, 1);
+  });
+
+  test("normalizing: bad keys become null; other keys are deduped by spelling and never repeat the piece's own key", () => {
+    assert.equal(normalizePieceKey(undefined), null);
+    assert.equal(normalizePieceKey({ tonic: "H", quality: "major" }), null);
+    assert.equal(normalizePieceKey({ tonic: "C", quality: "dorian" }), null);
+    assert.deepEqual(normalizePieceKey({ tonic: "C", quality: "major", extra: 1 }), { tonic: "C", quality: "major" });
+    const home = { tonic: "D", quality: "major" };
+    assert.deepEqual(
+      normalizeOtherKeys([{ tonic: "F♯", quality: "minor" }, { tonic: "F#", quality: "minor" }, { tonic: "G♭", quality: "minor" }, home, { tonic: "Z", quality: "major" }], home),
+      [{ tonic: "F♯", quality: "minor" }, { tonic: "G♭", quality: "minor" }],
+      "F# = F♯ (same spelling, deduped); G♭ minor is a different key, kept"
+    );
+    assert.equal(normalizeOtherKeys([], home), null);
+    assert.equal(normalizeOtherKeys(undefined), null);
+  });
+
+  test("engine: a repertoire-key scale is paced as repertoire once its piece has that key", () => {
+    const keys = repertoireKeysFromPieces([piece("p", { homeKey: { tonic: "E", quality: "minor" } })]);
+    const em = item("em", "E", "minor");
+    assert.equal(paceDaysPerWeek(em, keys, MONDAY), 4);
+    assert.equal(paceDaysPerWeek(em, [], MONDAY), 0);
+  });
+});
+
+describe("key list: enharmonic pairs are one entry (Pass 103 follow-up)", async () => {
+  const { KEY_OPTIONS, keyOptionFor } = await import("../src/components/tabs/technique/format.js");
+  test("24 entries, never two for the same sounding key", () => {
+    assert.equal(KEY_OPTIONS.length, 24);
+    const seen = new Set(KEY_OPTIONS.map((o) => `${pitchClass(o.tonic)} ${o.quality}`));
+    assert.equal(seen.size, 24);
+    assert.ok(KEY_OPTIONS.some((o) => o.label === "F♯/G♭ major" && o.tonic === "F♯"));
+    assert.ok(KEY_OPTIONS.some((o) => o.label === "D♯/E♭ minor" && o.tonic === "D♯"));
+  });
+  test("a key saved with the other spelling still finds its combined entry", () => {
+    assert.equal(keyOptionFor({ tonic: "G♭", quality: "major" }).label, "F♯/G♭ major");
+    assert.equal(keyOptionFor({ tonic: "E♭", quality: "minor" }).label, "D♯/E♭ minor");
+    assert.equal(keyOptionFor({ tonic: "D", quality: "major" }).label, "D major");
+    assert.equal(keyOptionFor(null), null);
   });
 });

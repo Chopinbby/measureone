@@ -138,6 +138,78 @@ export function sameKey(a, b) {
   return !!x && !!y && x.pc === y.pc && x.quality === y.quality;
 }
 
+/* ------------------------ Piece keys (Pass 103) ------------------------ */
+
+// A key as WRITTEN: the tonic's letter and accidentals, with "#"/"b" read as
+// ♯/♭, plus major/minor. "Gb major" and "G♭ major" are the same spelled key;
+// "F♯ major" is a different one. Returns e.g. "G♭ major", or null.
+// Accepts { tonic, quality } or a string like "G♭ major", same as normalizeKey.
+function spelledKey(key) {
+  if (typeof key === "string") {
+    const parts = key.trim().split(/\s+/);
+    key = { tonic: parts[0], quality: (parts[1] || "major").toLowerCase() };
+  }
+  if (!key || typeof key.tonic !== "string") return null;
+  const m = key.tonic.trim().match(/^([A-Ga-g])([#♯b♭]*)$/);
+  if (!m || (key.quality !== "major" && key.quality !== "minor")) return null;
+  const acc = [...m[2]].map((c) => (c === "#" || c === "♯" ? "♯" : "♭")).join("");
+  return `${m[1].toUpperCase()}${acc} ${key.quality}`;
+}
+
+// Same key as written — enharmonic spellings are DIFFERENT keys here (a
+// piece in G♭ major is not "in F♯ major"). Used for linking pieces to
+// scales, so only the piece's actual scale is tagged and paced (Pass 103
+// follow-up, on direct request). The circle-of-fifths walk still groups by
+// sound (sameKey), since the walk has one F♯/G♭ day, not two.
+export function sameSpelledKey(a, b) {
+  const x = spelledKey(a);
+  return !!x && x === spelledKey(b);
+}
+
+// A piece's key, stored on the piece in the same { tonic, quality } shape
+// technique items use, so "is this scale in a repertoire key" is one
+// comparison (sameSpelledKey — spelled as written, so F♯ ≠ G♭). Returns a
+// clean { tonic, quality } or null for anything unusable — the null is what
+// validateAndMigratePiece backfills, never a materialized default.
+export function normalizePieceKey(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.tonic !== "string") return null;
+  if (!normalizeKey(raw)) return null;
+  return { tonic: raw.tonic, quality: raw.quality };
+}
+
+// "Other keys in this piece": a list of keys, deduplicated by spelling
+// ("Gb" = "G♭", but G♭ and F♯ are two keys), with the piece's own key left out.
+// Empty or missing → null, so an untouched piece stays byte-identical.
+export function normalizeOtherKeys(raw, homeKey = null) {
+  if (!Array.isArray(raw)) return null;
+  const out = [];
+  for (const k of raw) {
+    const clean = normalizePieceKey(k);
+    if (!clean) continue;
+    if (homeKey && sameSpelledKey(clean, homeKey)) continue;
+    if (out.some((o) => sameSpelledKey(o, clean))) continue;
+    out.push(clean);
+  }
+  return out.length ? out : null;
+}
+
+// The repertoire keys the engine's pace tier reads: every key of every
+// ACTIVE piece — its own key plus its other keys. Paused and archived pieces
+// don't count; a piece mid-revival is still status "active", so it does.
+// A piece with no status (saved before pause/archive existed) is active, the
+// same default validateAndMigratePiece applies.
+export function repertoireKeysFromPieces(pieces) {
+  const list = Array.isArray(pieces) ? pieces : Object.values(pieces || {});
+  const keys = [];
+  for (const p of list) {
+    if (!p || (p.status || "active") !== "active") continue;
+    const home = normalizePieceKey(p.homeKey);
+    if (home) keys.push(home);
+    for (const k of normalizeOtherKeys(p.otherKeys) || []) keys.push(k);
+  }
+  return keys;
+}
+
 export function relativeMinorPc(majorPc) {
   return (majorPc + 9) % 12;
 }
@@ -227,14 +299,12 @@ export function walkHint(items, walkPosition, dayList) {
 
 /* --------------------------------- Pace --------------------------------- */
 
-// Is this item in one of the given keys (the active pieces' keys)?
+// Is this item in one of the given keys (the active pieces' keys)? Matched
+// as spelled: a G♭ major piece tags G♭ major scales, not F♯ major ones —
+// technically a different key (Pass 103 follow-up, on direct request).
 export function isRepertoireItem(item, repertoireKeys) {
-  const k = itemKey(item);
-  if (!k) return false;
-  return (repertoireKeys || []).some((rk) => {
-    const r = normalizeKey(rk);
-    return !!r && r.pc === k.pc && r.quality === k.quality;
-  });
+  const k = { tonic: item?.tonic, quality: item?.quality };
+  return (repertoireKeys || []).some((rk) => sameSpelledKey(k, rk));
 }
 
 function weekParity(today) {

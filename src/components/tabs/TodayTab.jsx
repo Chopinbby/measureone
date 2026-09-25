@@ -12,6 +12,8 @@ import { ChecklistItem } from "./today/ChecklistItem";
 import { ReassessPanel } from "./today/ReassessPanel";
 import { WeekView } from "./today/WeekView";
 import { InterleavePanel } from "./today/InterleavePanel";
+import { TechniquePanel } from "./technique/TechniquePanel";
+import { techniqueTodaySummary } from "../../lib/technique";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival, getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
@@ -165,9 +167,30 @@ export function TodayTab({
   onLogFocusSpotTime,
   onUnlogFocusSpotTime,
   onResolveFocusSpot,
+  technique,
+  techniqueRepertoireKeys,
+  techniqueHandlers,
 }) {
   const [viewMode, setViewMode] = useState("day");
   const day = timeline.days[currentDay - 1];
+
+  // Today's technique list (Pass 102) — app-level data, not this piece's:
+  // the same list and the same panel as the Technique page and Master
+  // Agenda, so a check-off here shows there too. Real today only; the rest
+  // of the rule (today's saved list, with at least one task — no empty
+  // panel on every piece's page) is techniqueTodaySummary in
+  // lib/technique.js, shared with Master Agenda. Never read by anything
+  // schedule-related on this tab.
+  const renderTechniquePanel = (showingToday) =>
+    showingToday &&
+    techniqueTodaySummary(technique, todayISODate()).visible && (
+      <TechniquePanel
+        technique={technique}
+        repertoireKeys={techniqueRepertoireKeys}
+        variant="shared"
+        handlers={techniqueHandlers}
+      />
+    );
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   const practiceChunks = chunks.filter((c) => c.kind === "section");
 
@@ -481,6 +504,9 @@ export function TodayTab({
           </div>
         </div>
 
+        {/* Revival has no day navigation — it's always today. */}
+        {renderTechniquePanel(true)}
+
         {!revival.reassessmentComplete ? (
           revivalBaseChunks.length > 0 && (
             <ReassessSequencePanel
@@ -683,6 +709,7 @@ export function TodayTab({
           )}
         </div>
       </div>
+      {renderTechniquePanel(isRealToday)}
       {/* Pulled out of the segmented view-mode control (Day View/Week
           View/All Tasks) into its own button — entering Interleaved mode
           is a distinct action, not another way to view the same day, so it

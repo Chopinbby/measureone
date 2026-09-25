@@ -7,6 +7,8 @@ import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../l
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
 import { isPieceLearned } from "../../lib/ladder";
+import { TechniquePanel } from "./technique/TechniquePanel";
+import { techniqueTodaySummary, agendaStatusLabel } from "../../lib/technique";
 
 // Which sub-view was last open. This component unmounts whenever you
 // navigate to another main tab, so plain useState would reset the choice
@@ -16,7 +18,7 @@ import { isPieceLearned } from "../../lib/ladder";
 // fresh page load starting back at Learning phase is the right default.
 let lastSubTab = "learning";
 
-export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onSelectDay, onRescheduleAll }) {
+export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onSelectDay, onRescheduleAll, technique, techniqueRepertoireKeys, techniqueHandlers }) {
   const [selectedDate, setSelectedDate] = useState(todayISODate());
   const [subTab, setSubTabState] = useState(lastSubTab);
 
@@ -313,14 +315,19 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
     day: "numeric",
   });
 
-  const status =
-    agendaData.totalMinutes > 60
-      ? `Busy day — ${agendaData.items.length} pieces scheduled`
-      : agendaData.totalMinutes > 30
-        ? `Moderate — ${agendaData.items.length} pieces scheduled`
-        : agendaData.items.length > 0
-          ? `Light — ${agendaData.items.length} pieces scheduled`
-          : "Nothing scheduled";
+  // Today's technique list (Pass 102): app-level, not any piece's. Shown
+  // and counted only when the picker is on the real today —
+  // techniqueTodaySummary (lib/technique.js) decides visibility and minutes,
+  // agendaStatusLabel the wording; both are tested there. Technique minutes
+  // count toward the Busy/Moderate tier, never toward "N pieces scheduled".
+  const todayStr = todayISODate();
+  const techniqueToday = selectedDate === todayStr
+    ? techniqueTodaySummary(technique, todayStr)
+    : { visible: false, minutes: 0 };
+  const showTechnique = techniqueToday.visible;
+  const techniqueMinutes = techniqueToday.minutes;
+  const totalMinutes = agendaData.totalMinutes + techniqueMinutes;
+  const status = agendaStatusLabel(totalMinutes, agendaData.items.length, techniqueMinutes);
 
   // Same agendaData.items array, split by the one flag that already
   // distinguishes the two shapes it produces — no new computation.
@@ -479,13 +486,25 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
       <div className="time-summary-banner">
         <div className="time-summary-item">
           <div className="time-summary-label">Total planned</div>
-          <div className="time-summary-num">{formatMinutes(agendaData.totalMinutes)}</div>
+          <div className="time-summary-num">{formatMinutes(totalMinutes)}</div>
+          {techniqueMinutes > 0 && (
+            <div className="time-summary-sub">includes {formatMinutes(techniqueMinutes)} technique</div>
+          )}
         </div>
         <div className="time-summary-item">
           <div className="time-summary-label">Status</div>
-          <div className={`time-status ${agendaData.totalMinutes > 60 ? "busy" : ""}`}>{status}</div>
+          <div className={`time-status ${totalMinutes > 60 ? "busy" : ""}`}>{status}</div>
         </div>
       </div>
+
+      {showTechnique && (
+        <TechniquePanel
+          technique={technique}
+          repertoireKeys={techniqueRepertoireKeys}
+          variant="shared"
+          handlers={techniqueHandlers}
+        />
+      )}
 
       {isToday && practiceablePieceIds.length > 1 && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>

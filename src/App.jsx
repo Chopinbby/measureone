@@ -586,6 +586,17 @@ export default function App() {
     return true;
   };
 
+  // The panel's card handlers, shared by every surface that shows today's
+  // technique list (Technique page, Master Agenda, Daily Practice) — one
+  // list in App state, so a check-off anywhere shows everywhere.
+  const techniquePanelHandlers = {
+    onCheckOff: handleTechniqueCheckOff,
+    onUncheck: handleTechniqueUncheck,
+    onLogTempo: handleTechniqueLogTempo,
+    onToggleStarItem: handleTechniqueToggleStarItem,
+    onToggleStarMethod: handleTechniqueToggleStarMethod,
+  };
+
   const handleExportClick = () => setExportModalOpen(true);
 
   const handleConfirmExport = (selectedIds) => {
@@ -2351,6 +2362,9 @@ export default function App() {
                 onSelectPieceToday={(id) => switchToPiece(id, "today")}
                 onSelectDay={handleSelectDay}
                 onRescheduleAll={handleRescheduleAll}
+                technique={technique}
+                techniqueRepertoireKeys={techniqueRepertoireKeys}
+                techniqueHandlers={techniquePanelHandlers}
               />
             )}
             {activeTab === "timeline" && (
@@ -2389,6 +2403,9 @@ export default function App() {
                 currentDay={currentDay}
                 realCurrentDay={realCurrentDay}
                 isRealToday={currentDay === realCurrentDay}
+                technique={technique}
+                techniqueRepertoireKeys={techniqueRepertoireKeys}
+                techniqueHandlers={techniquePanelHandlers}
                 onDayChange={(d) => setDayOverride(clamp(d, 1, timeline.days.length))}
                 onJumpToday={() => setDayOverride(null)}
                 onLogSession={handleLogSession}
@@ -3100,6 +3117,8 @@ const CSS = `
 .time-summary-item { display: flex; flex-direction: column; gap: 2px; }
 .time-summary-label { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
 .time-summary-num { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; color: var(--brass-deep); }
+/* Pass 102: "includes Nm technique" under Master Agenda's Total planned. */
+.time-summary-sub { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft); }
 .time-status { font-size: 12px; color: var(--ink-soft); }
 .time-status.busy { color: var(--brick); }
 

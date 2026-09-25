@@ -27,6 +27,8 @@ import {
   topUpDayList,
   walkHint,
   removeUnfinishedTask,
+  techniqueTodaySummary,
+  agendaStatusLabel,
   startingTempo,
   changeCheckOctaves,
 } from "../src/lib/technique.js";
@@ -624,5 +626,50 @@ describe("itemTitle spelling (Pass 101 P1 fix: no lookbehind)", async () => {
     assert.equal(itemTitle({ tonic: "F#", quality: "major", form: "arpeggio" }), "F♯ major arpeggio");
     assert.equal(itemTitle({ tonic: "B", quality: "major", form: "scale" }), "B major");
     assert.equal(itemTitle({ tonic: "G♭", quality: "major", form: "scale" }), "G♭ major");
+  });
+});
+
+/* ----------------- Master Agenda / Daily Practice (Pass 102) ------------ */
+
+describe("techniqueTodaySummary (panel visibility and minutes on other screens)", () => {
+  const items = [item("a", "C", "major"), item("b", "G", "major"), item("off", "D", "major", { inRotation: false })];
+  const list = (date, ids, doneIds = []) => ({ date, tasks: ids.map((id) => ({ itemId: id, methodIds: [], done: doneIds.includes(id), tier: "walk" })) });
+  const tech = (overrides) => ({ items, dayList: list(MONDAY, ["a", "b"]), settings: { scalesPerDay: 3, minutesPerScale: 5 }, ...overrides });
+
+  test("every task counts, done or not: 5 minutes each", () => {
+    assert.deepEqual(techniqueTodaySummary(tech({ dayList: list(MONDAY, ["a", "b"], ["a"]) }), MONDAY), { visible: true, taskCount: 2, minutes: 10 });
+  });
+  test("a task whose scale was deleted doesn't count", () => {
+    assert.deepEqual(techniqueTodaySummary(tech({ dayList: list(MONDAY, ["a", "gone"]) }), MONDAY), { visible: true, taskCount: 1, minutes: 5 });
+  });
+  test("hidden: no technique data, empty library, yesterday's list, or an empty list (e.g. every scale switched off)", () => {
+    const hidden = { visible: false, taskCount: 0, minutes: 0 };
+    assert.deepEqual(techniqueTodaySummary(null, MONDAY), hidden);
+    assert.deepEqual(techniqueTodaySummary(tech({ items: [] }), MONDAY), hidden);
+    assert.deepEqual(techniqueTodaySummary(tech({ dayList: list(addDaysISO(MONDAY, -1), ["a"]) }), MONDAY), hidden);
+    assert.deepEqual(techniqueTodaySummary(tech({ dayList: list(MONDAY, []) }), MONDAY), hidden);
+    assert.deepEqual(techniqueTodaySummary(tech({ dayList: null }), MONDAY), hidden);
+  });
+  test("minutes per scale falls back to the default when settings are missing", () => {
+    assert.equal(techniqueTodaySummary(tech({ settings: undefined }), MONDAY).minutes, 10);
+  });
+});
+
+describe("agendaStatusLabel (Master Agenda's Status)", () => {
+  test("with pieces: exactly the pre-Pass-102 wording, tier from the total including technique", () => {
+    assert.equal(agendaStatusLabel(0, 2, 0), "Light — 2 pieces scheduled");
+    assert.equal(agendaStatusLabel(20, 1, 0), "Light — 1 pieces scheduled");
+    assert.equal(agendaStatusLabel(35, 1, 15), "Moderate — 1 pieces scheduled"); // 20 piece + 15 technique
+    assert.equal(agendaStatusLabel(61, 3, 15), "Busy day — 3 pieces scheduled");
+    assert.equal(agendaStatusLabel(30, 1, 15), "Light — 1 pieces scheduled"); // 30 is not > 30
+    assert.equal(agendaStatusLabel(60, 1, 0), "Moderate — 1 pieces scheduled"); // 60 is not > 60
+  });
+  test("technique only: the tier word plus 'technique only', never 'Nothing scheduled'", () => {
+    assert.equal(agendaStatusLabel(15, 0, 15), "Light — technique only");
+    assert.equal(agendaStatusLabel(45, 0, 45), "Moderate — technique only");
+    assert.equal(agendaStatusLabel(75, 0, 75), "Busy day — technique only");
+  });
+  test("nothing at all", () => {
+    assert.equal(agendaStatusLabel(0, 0, 0), "Nothing scheduled");
   });
 });

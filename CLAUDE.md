@@ -1756,3 +1756,30 @@ the panel on Master Agenda/Daily Practice (Pass 102), piece keys and the
 data in backups, and a settings UI for scales per day / minutes per scale.
 See [`docs/Architecture.md`](docs/Architecture.md#main-ui-components) and
 [`docs/Decisions.md`](docs/Decisions.md#technique-practice).
+
+**Since Pass 102**, the same `TechniquePanel` (`variant="shared"`, sub-line
+"…Checking one off here counts everywhere it appears.", no walk hint)
+also appears on **Master Agenda** — directly under the Total planned
+banner, above the random-piece button and the Learning/Maintenance/Revival
+switcher — and on **Daily Practice**, right under the page header (normal
+view and the revival view alike). It's one list in `App.jsx` state, so a
+check-off on any screen shows on all of them; the handlers reach both tabs
+as a single `techniquePanelHandlers` prop bundle. Both surfaces show it
+only on the real today (Master Agenda's `selectedDate === today`, Daily
+Practice's `isRealToday`; revival counts as today), only once the saved
+list is today's, and — a call made in this pass, not on the card — only if
+that list has at least one task, so no empty panel shows on every piece's
+page when the library is empty or every scale is switched off (the
+Technique page still shows its own empty states). **Total planned adds
+`minutesPerScale` (5) per task on today's list**, done or not, carried
+over or new, with an "includes Nm technique" line under the number. That
+counts toward the Busy (>60)/Moderate (>30) tier, but never toward "N
+pieces scheduled". A day with scales but no pieces reads **"<tier> —
+technique only"** ("Light — technique only" at the default 15 minutes;
+em dash, matching the other labels, confirmed with the user) instead of
+"Nothing scheduled". The visibility/minutes rule
+(`techniqueTodaySummary`) and the Status wording (`agendaStatusLabel`)
+live in `lib/technique.js` with tests, not in the two components. **Technique stays out of every schedule path** — no behind-
+schedule count, `ScheduleBanner`, reschedule dialog or piece-progress
+code reads it (verified unchanged in the browser, reschedule dialog text
+included). Don't wire technique into those: it isn't part of any piece.

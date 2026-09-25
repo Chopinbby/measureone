@@ -27,6 +27,7 @@ import {
   TECHNIQUE_SLOW_FRACTION,
   TECHNIQUE_SLOW_COOLDOWN_DAYS,
   TECHNIQUE_WALK_ITEMS_PER_KEY_MAX,
+  TECHNIQUE_MINUTES_PER_SCALE,
 } from "./constants";
 import { addDaysISO, daysBetweenInclusive, startOfWeekISO } from "./utils";
 
@@ -594,4 +595,39 @@ export function changeCheckOctaves(item, newOctaves, choice) {
   if (choice === "keep") return { status: "applied", item: { ...item, checkOctaves: newOctaves } };
   if (choice === "fresh") return { status: "applied", item: { ...item, checkOctaves: newOctaves, evenTempo: null } };
   return { status: "needs-prompt", item };
+}
+
+/* ------------------- Today's list on other screens (Pass 102) ------------ */
+
+// Whether Master Agenda and Daily Practice show the shared Technique panel
+// on the real today, and how many minutes it adds to Master Agenda's Total
+// planned. Visible only when the saved list is today's (it rolls over within
+// a minute of midnight) and has at least one task whose scale still
+// exists — so neither screen shows an empty panel, whether the library is
+// empty or every scale is switched off. The Technique page itself doesn't
+// use this; it always shows its panel, empty states included. Every task
+// counts toward the minutes, done or not, carried over or new.
+// Returns { visible, taskCount, minutes }.
+export function techniqueTodaySummary(technique, today) {
+  const none = { visible: false, taskCount: 0, minutes: 0 };
+  if (!technique || !technique.items?.length || technique.dayList?.date !== today) return none;
+  const itemIds = new Set(technique.items.map((it) => it.id));
+  const taskCount = technique.dayList.tasks.filter((t) => itemIds.has(t.itemId)).length;
+  if (taskCount === 0) return none;
+  const perScale = technique.settings?.minutesPerScale ?? TECHNIQUE_MINUTES_PER_SCALE;
+  return { visible: true, taskCount, minutes: taskCount * perScale };
+}
+
+// Master Agenda's Status label. The tier (Busy day > 60 min, Moderate > 30,
+// else Light) comes from the total including technique minutes; the "N
+// pieces scheduled" count never includes technique. With pieces, the
+// wording is exactly what it was before Pass 102. With no pieces but some
+// technique, "<tier> — technique only" (em dash, confirmed with the user)
+// instead of "Nothing scheduled". Kept here, not in the component, so it
+// has regression tests.
+export function agendaStatusLabel(totalMinutes, pieceCount, techniqueMinutes) {
+  const tier = totalMinutes > 60 ? "Busy day" : totalMinutes > 30 ? "Moderate" : "Light";
+  if (pieceCount > 0) return `${tier} — ${pieceCount} pieces scheduled`;
+  if (techniqueMinutes > 0) return `${tier} — technique only`;
+  return totalMinutes > 30 ? `${tier} — 0 pieces scheduled` : "Nothing scheduled";
 }

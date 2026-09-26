@@ -19,7 +19,7 @@ import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../l
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival, getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
 import { isManualConfidence } from "../../lib/confidence";
-import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, isDayFullySwept, focusSpotGate } from "../../lib/scheduling";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, focusSpotGate } from "../../lib/scheduling";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, formatRange, hasPendingProvisionalSession } from "../../lib/utils";
 
 // Pass 91 (experimental v1) — every practice chunk's unresolved focus spots,
@@ -256,24 +256,18 @@ export function TodayTab({
   // Completion treats realCurrentDay and later as "future," never
   // "behind," so scanning further is guaranteed empty.
   //
-  // A day classifyDayCompletion calls "behind" can still be one Pass 48
-  // collapses to "Tasks rescheduled" — classifyDayCompletion only reads
-  // doneDays, it has no idea the day's original tasks were swept into a
-  // reschedule and now live somewhere else. Found live, post-review: after
-  // any reschedule, the earliest "behind" day is reliably day 1 again (its
-  // stale newChunkIds are still all undone, by definition), so without this
-  // guard the button would send you to that empty collapsed day instead of
-  // wherever the work actually moved. isDayFullySwept (lib/scheduling.js,
-  // shared with TimelineTab.jsx and DayChecklist.jsx — Pass 74 follow-up
-  // consolidated what used to be three separate copies of this exact
-  // check) — a day this scan would otherwise land on gets skipped, not
-  // returned, so "earliest incomplete day" keeps meaning a day with
-  // something real left to do.
+  // classifyDayCompletion (lib/scheduling.js) only judges what's still owed
+  // on a day — anything a reschedule already moved elsewhere (Pass 48's
+  // "Tasks rescheduled") doesn't count. That's what keeps this scan from
+  // landing on a day whose work has since moved (after any reschedule the
+  // stale, still-undone day 1 would otherwise read "behind" again) and from
+  // landing on a half-done, half-moved day where nothing visible is left to
+  // do. It needs chunkById so a connector that rode along via a linked
+  // practice chunk is recognized as moved too.
   const findEarliestBehindDay = () => {
     for (const d of timeline.days) {
       if (d.dayNumber >= realCurrentDay) break;
-      if (isDayFullySwept(d, piece, chunkById)) continue;
-      if (classifyDayCompletion(d, piece, realCurrentDay) === "behind") return d.dayNumber;
+      if (classifyDayCompletion(d, piece, realCurrentDay, chunkById) === "behind") return d.dayNumber;
     }
     return null;
   };

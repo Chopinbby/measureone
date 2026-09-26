@@ -1687,6 +1687,38 @@ same as any other day with nothing to do.**
 - See [Algorithms.md](Algorithms.md#timeline--scheduler) (Pass 92
   same-session follow-up, end of section).
 
+**Decision: a past day counts as "behind" only for tasks still owed on it —
+tasks a reschedule already moved to a new day never count against the old
+one.**
+
+- **Reported:** after "Reschedule remaining days" → "Change target date,"
+  the banner still said "2 days behind"; clicking Reschedule again seemed to
+  do nothing and the banner never went away.
+- **Why it happened:** a day where some tasks were done on time and the rest
+  were moved by the reschedule was neither "fully swept" nor "done" under the
+  old checks, so it stayed "behind" no matter what — there was nothing left
+  to do on it, and no reschedule could clear it (each just re-moved the same
+  tasks). Reproduced against the real scheduler: 14 → 5 → 5 → 5 across a
+  reschedule and two more.
+- **The rule now:** a day is judged only on what's still owed on it. Moved
+  tasks don't count; if none are left it's simply empty, and if what's left
+  is all done, the day is done. One shared check (`classifyDayCompletion`)
+  answers this for the banner, the "N days behind" figure, Master Agenda's
+  badge, the "Go to Day N" button, and the Timeline/Overview ✓ — so they
+  can't disagree.
+- **Visible side effects, accepted:** a half-done, half-moved day now shows
+  the same ✓/strikethrough as any finished day on Timeline and Overview, and
+  Overview's week list describes only what was owed that day (and says
+  "Tasks rescheduled" for a fully-moved day, like the other four day lists).
+- **Alternatives considered:** fixing only the banner's count and leaving the
+  per-day classification alone — rejected: it would leave two definitions of
+  "behind" that could contradict each other on screen (a ✓ on Timeline next
+  to a banner still naming that day), the duplication Passes 45 and 74 were
+  written to remove.
+- Regression tests: `test/scheduling.test.mjs`, "[regression] a day is
+  judged only on what's still owed on it" (fail on the old logic — checked).
+  See [Algorithms.md](Algorithms.md#half-done-half-moved-days-a-day-is-judged-only-on-whats-still-owed).
+
 ## Spaced repetition & maintenance
 
 **Status: the stage-math engine, Tier 1/Tier 2 review scheduling,

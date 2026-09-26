@@ -2251,6 +2251,15 @@ Pass 47**, Daily Practice's catch-up-button day search scans
 of `"done"` / `"behind"` / `"empty"`, strikes it through only when
 `"done"`) was the original, and only, consumer through Pass 45.
 
+**Later fix — a day is judged only on what's still *owed* on it.**
+`classifyDayCompletion` now takes an optional fourth `chunkById` argument
+and first drops every id `movedIdsForDay` says a reschedule already moved
+(or that was done on a different day); a day whose ids were all moved
+reads `"empty"`. Every "every one of those ids" above describes a piece
+that was never rescheduled, where nothing is ever dropped. See
+[Rescheduling](#half-done-half-moved-days-a-day-is-judged-only-on-whats-still-owed)
+below.
+
 **Since Pass 70**, `countBehindDays(piece, timeline, currentDay)` is a thin
 pure sibling in the same file: it filters `timeline.days` down to entries
 where `classifyDayCompletion(d, piece, currentDay) === "behind"` and
@@ -2894,6 +2903,53 @@ day implied a harder stop than actually exists. `d.type`'s own value is
 untouched and still drives the day-card's CSS class (`` `day-card
 clickable ${d.type}` ``) for whatever visual styling exists — only the
 text branch was removed.
+
+### Half-done, half-moved days: a day is judged only on what's still owed
+
+**Reported:** after "Reschedule remaining days" → "Change target date,"
+the banner still said "2 days behind," and clicking Reschedule again
+changed nothing — the banner never went away.
+
+**Cause:** a past day where some tasks were done on time and the rest were
+moved off by the reschedule fell between the two checks that decide
+"behind." It wasn't *fully swept* (`isDayFullySwept` needs every id moved,
+and the on-time one isn't), and it wasn't *done* (`classifyDayCompletion`
+needed every id — moved ones included — logged on that exact day). So
+`countBehindDays` counted it, and because each further reschedule just
+re-moved the same already-moved tasks, nothing could ever clear it.
+Reproduced against the real scheduler functions with a learner who does
+the first task of every other day: 14 days behind → 5 after rescheduling →
+5 after rescheduling again → 5 after a third. The "Change target date"
+path applies the same marker (plus the longer plan), so it hits this too,
+as does a plain reschedule.
+
+**Fix:** `classifyDayCompletion(day, piece, currentDay, chunkById = {})`
+drops the ids `movedIdsForDay` reports *before* judging the day — nothing
+left is `"empty"` (nothing owed, same as a rest day), what's left all
+done that day is `"done"`, otherwise `"behind"`. Consolidation days are
+unaffected (they're judged by `"__consolidation__"`, and are never before a
+marker's `asOfDay`). `countBehindDays` lost its separate
+`!isDayFullySwept` clause — a fully-swept day is now `"empty"`, never
+`"behind"` — and Daily Practice's catch-up scan (`findEarliestBehindDay`)
+lost its own swept-day skip for the same reason, so the banner, the "N days
+behind" figure, Master Agenda's badge, and the "Go to Day N" button all
+answer one question one way. A piece that was never rescheduled is
+unaffected: `movedIdsForDay` returns an empty set with no marker.
+
+**Visible consequences (deliberate):** on Timeline and Overview, a half-
+done, half-moved day now gets the same ✓/strikethrough as any completed
+day. Overview's week list also stopped counting moved work in each day's
+description ("Learn 4 new measures" instead of "Learn 4 new measures,
+review 16 measures" for a day whose review work moved) and reads "Tasks
+rescheduled" for a fully-moved day, matching the other four day lists
+(Day view, Timeline, Week view, Master Agenda). A day's `minutes` figure is
+still the original, stale one — same "don't re-cost a moved day"
+precedent `isDayFullySwept` already set.
+
+**Alternative considered and rejected:** fix only the banner's count and
+the catch-up scan, leaving `classifyDayCompletion` alone. That would have
+left two definitions of "behind" that can disagree (Timeline's ✓ vs. the
+banner), the exact duplication Pass 45/74 worked to remove.
 
 ## Revival
 

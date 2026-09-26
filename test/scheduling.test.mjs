@@ -823,11 +823,12 @@ describe("Pass 74 follow-up — countBehindDays excludes days fully swept into a
         { dayNumber: 2, newChunkIds: ["c2"], specialChunkIds: [], reviewChunkIds: [] },
       ],
     };
-    // Sanity: classifyDayCompletion alone (with no sweep awareness) still
-    // calls both "behind" — isDayFullySwept is a separate filter layered
-    // on top, not a change to classifyDayCompletion itself.
-    assert.equal(classifyDayCompletion(timeline.days[0], piece, 5), "behind");
-    assert.equal(classifyDayCompletion(timeline.days[1], piece, 5), "behind");
+    // classifyDayCompletion is itself moved-task aware now (it used to
+    // report these "behind" and leave the sweep to a separate filter in
+    // countBehindDays): every id on both days was moved, so nothing is owed
+    // there — "empty", the same as a rest day.
+    assert.equal(classifyDayCompletion(timeline.days[0], piece, 5), "empty");
+    assert.equal(classifyDayCompletion(timeline.days[1], piece, 5), "empty");
     assert.equal(countBehindDays(piece, timeline, 5), 0);
   });
 
@@ -879,6 +880,131 @@ describe("Pass 74 follow-up — countBehindDays excludes days fully swept into a
     // With chunkById supplied, the linkedIds fallback recognizes t1 as
     // having ridden along with c1 into the rescheduled remainder.
     assert.equal(countBehindDays(piece, timeline, 5, chunkById), 0);
+  });
+});
+
+describe("[regression] a day is judged only on what's still owed on it — a half-done, half-moved day is not 'behind'", () => {
+  // Reported live: after clicking "Reschedule remaining days" (including via
+  // the "Change target date" choice) the banner still said "2 days behind",
+  // and clicking Reschedule again changed nothing. Cause: a past day where
+  // some tasks were done on time and the rest were moved off by the
+  // reschedule was neither "fully swept" (the done task isn't moved) nor
+  // "done" (the moved task isn't done on that day), so it read "behind"
+  // forever — nothing was left to do there and no reschedule could clear it.
+  const day1 = { dayNumber: 1, newChunkIds: ["c1", "c2"], specialChunkIds: [], reviewChunkIds: [] };
+
+  test("done on time + moved away = done, not behind", () => {
+    const piece = basePiece({
+      progress: { c1: { doneDays: [1] } }, // c1 done on its own day; c2 untouched...
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c2"], remainingConnectorIds: [], previous: null }, // ...and moved by the reschedule
+    });
+    assert.equal(classifyDayCompletion(day1, piece, 5), "done");
+    assert.equal(countBehindDays(piece, { days: [day1] }, 5), 0);
+  });
+
+  test("still 'behind' when something genuinely owed on that day is neither done nor moved", () => {
+    const piece = basePiece({
+      progress: { c1: { doneDays: [1] } },
+      // c2 is NOT on the marker — it wasn't moved, so it's still owed on day 1.
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c9"], remainingConnectorIds: [], previous: null },
+    });
+    assert.equal(classifyDayCompletion(day1, piece, 5), "behind");
+    assert.equal(countBehindDays(piece, { days: [day1] }, 5), 1);
+  });
+
+  test("nothing changes for a piece that was never rescheduled: a missed task still leaves the day behind", () => {
+    const piece = basePiece({ progress: { c1: { doneDays: [1] } } }); // no rescheduleMarker at all
+    assert.equal(classifyDayCompletion(day1, piece, 5), "behind");
+    assert.equal(countBehindDays(piece, { days: [day1] }, 5), 1);
+  });
+
+  test("a connector that only rode along via a linked chunk counts as moved only when chunkById is supplied", () => {
+    const piece = basePiece({
+      progress: { c1: { doneDays: [1] } },
+      rescheduleMarker: { asOfDay: 3, remainingChunkOrder: ["c5"], remainingConnectorIds: [], previous: null },
+    });
+    const day = { dayNumber: 1, newChunkIds: ["c1"], specialChunkIds: ["t1"], reviewChunkIds: [] };
+    const chunkById = { t1: { kind: "transition", linkedIds: ["c1", "c5"] } };
+    // t1 was never logged; it moved with c5. Without chunkById it can't be
+    // resolved, so the day conservatively stays behind.
+    assert.equal(classifyDayCompletion(day, piece, 5), "behind");
+    assert.equal(classifyDayCompletion(day, piece, 5, chunkById), "done");
+  });
+
+  // The real thing, end to end, against the actual scheduler rather than a
+  // hand-built timeline: a learner who does the first task of every other
+  // day, then reschedules — once directly, and once through the "Change
+  // target date" choice (extend + marker in one action) — and then clicks
+  // Reschedule again. The old code left days stuck "behind" through all of it.
+  function lived({ elapsed, planDays, practiceEvery, withLadder = false, minutesPerDay = 30 }) {
+    const startDate = addDaysISO(todayISODate(), -(elapsed - 1));
+    const base = basePiece({
+      totalMeasures: 48,
+      measureDifficulty: Array(48).fill(1),
+      scheduleMode: "days",
+      minutesPerDay,
+      daysToLearn: planDays,
+      startDate,
+      targetDate: addDaysISO(startDate, planDays - 1),
+      status: "active",
+    });
+    const raw = getEffectiveTimeline(base, generateAllChunks(base));
+    const progress = {};
+    raw.days.slice(0, elapsed - 1).forEach((d) => {
+      const first = d.newChunkIds[0];
+      if (first && d.dayNumber % practiceEvery === 0) {
+        progress[first] = {
+          doneDays: [d.dayNumber],
+          sessions: [{ day: d.dayNumber, reps: 3, bpm: 60, loggedAt: 1, loggedDate: addDaysISO(startDate, d.dayNumber - 1) }],
+          stage: withLadder ? "stabilizing" : null,
+          ...(withLadder ? { nextDueDate: addDaysISO(startDate, d.dayNumber + 1), practiceBPM: 60 } : {}),
+        };
+      }
+    });
+    return { ...base, progress };
+  }
+
+  // What App.jsx shows for a piece right now: the effective timeline, with
+  // stale reviews pulled, judged against the real current day.
+  function bannerCount(piece) {
+    const chunkSet = generateAllChunks(piece);
+    const chunkById = Object.fromEntries(chunkSet.all.map((c) => [c.id, c]));
+    const raw = getEffectiveTimeline(piece, chunkSet);
+    const real = getCurrentDay(piece, raw.days.length);
+    return countBehindDays(piece, withLiveReviewStatus(raw, piece, real), real, chunkById);
+  }
+
+  // handleReschedule's marker (and, when it doesn't fit, the extension the
+  // "Change target date" button applies alongside it).
+  function reschedule(piece) {
+    const chunkSet = generateAllChunks(piece);
+    const raw = getEffectiveTimeline(piece, chunkSet);
+    const timeline = withLiveReviewStatus(raw, piece, getCurrentDay(piece, raw.days.length));
+    const { remainingChunkIds, remainingConnectorIds, marker } = computeRescheduleRemainder(piece, chunkSet, timeline);
+    assert.ok(marker, "fixture must have something left to reschedule");
+    const fit = estimateRescheduleFit(piece, chunkSet.practiceChunks, timeline, elapsedDay(piece), remainingChunkIds, [...chunkSet.transitions, ...chunkSet.combos], remainingConnectorIds);
+    if (fit.fits) return { piece: { ...piece, rescheduleMarker: marker }, extended: false };
+    const ext = computeReschedulePastPlanExtension(piece, elapsedDay(piece), fit.requiredDays);
+    return { piece: { ...piece, daysToLearn: ext.daysToLearn, targetDate: ext.targetDate, rescheduleMarker: marker }, extended: true };
+  }
+
+  test("rescheduling clears the banner, and rescheduling again keeps it clear", () => {
+    const before = lived({ elapsed: 16, planDays: 24, practiceEvery: 2 });
+    assert.ok(bannerCount(before) > 0, "fixture sanity: the piece really starts out behind");
+    const once = reschedule(before).piece;
+    assert.equal(bannerCount(once), 0, "banner must clear after the first reschedule (old code: 5 days stuck behind)");
+    const twice = reschedule(once).piece;
+    assert.equal(bannerCount(twice), 0, "and stay clear after a second reschedule");
+  });
+
+  test("the 'Change target date' path (extend + reschedule in one action) clears it too", () => {
+    const before = lived({ elapsed: 12, planDays: 20, practiceEvery: 2, withLadder: true });
+    assert.ok(bannerCount(before) > 0, "fixture sanity: the piece really starts out behind");
+    const { piece: extendedPiece, extended } = reschedule(before);
+    assert.equal(extended, true, "fixture sanity: this piece's remaining work doesn't fit, so the extension path is exercised");
+    assert.equal(bannerCount(extendedPiece), 0, "banner must clear after extending the target date (old code: 5 days stuck behind)");
+    const again = reschedule(extendedPiece).piece;
+    assert.equal(bannerCount(again), 0, "and stay clear after clicking Reschedule again");
   });
 });
 

@@ -12,6 +12,8 @@ import {
   isPlanActuallyComplete,
   computeScheduleStatus,
   classifyDayCompletion,
+  classifyDayEmptyState,
+  movedIdsForDay,
   countBehindDays,
   computeAbandonedPlanReminder,
 } from "../../lib/scheduling";
@@ -57,10 +59,10 @@ export function OverviewTab({
   const abandonedPlanReminder =
     !revivalActive && chunkSet && timeline ? computeAbandonedPlanReminder(piece, chunkSet, timeline) : null;
   // Built here (not just below, where it was originally introduced) so it
-  // can also feed countBehindDays' isDayFullySwept check just below —
-  // lets a connector that rode along into a reschedule via a linked
-  // practice chunk be recognized as moved, not just one directly listed
-  // on the marker.
+  // can also feed countBehindDays' and classifyDayCompletion's moved-task
+  // check just below — lets a connector that rode along into a reschedule
+  // via a linked practice chunk be recognized as moved, not just one
+  // directly listed on the marker.
   const chunkById = Object.fromEntries(chunks.map((c) => [c.id, c]));
   // For "The first week"'s today-row note below — reused rather than a
   // separate count, per Pass 45's build note.
@@ -248,11 +250,23 @@ export function OverviewTab({
         <div className="day-preview-list">
           {weekDays.map((d) => {
             let desc = "Nothing scheduled";
+            // Same wording every other day list already uses for a day whose
+            // tasks a reschedule moved elsewhere (Timeline, Week view, Day
+            // view, Master Agenda).
+            let rescheduled = false;
             if (d.type === "consolidation") {
               desc = "Full run-through & consolidation";
+            } else if (classifyDayEmptyState(d, piece, chunkById) === "rescheduled") {
+              desc = "Tasks rescheduled";
+              rescheduled = true;
             } else {
-              const newMeasures = d.newChunkIds.reduce((s, id) => s + chunkById[id].measureCount, 0);
-              const reviewMeasures = [...d.specialChunkIds, ...d.reviewChunkIds].reduce(
+              // Only what's still owed on the day: a task a reschedule moved
+              // away lives on its new day, and counting it here made a day
+              // that's done read as if it had also covered the moved work.
+              const moved = movedIdsForDay(d, piece, chunkById);
+              const owed = (ids) => ids.filter((id) => !moved.has(id));
+              const newMeasures = owed(d.newChunkIds).reduce((s, id) => s + chunkById[id].measureCount, 0);
+              const reviewMeasures = [...owed(d.specialChunkIds), ...owed(d.reviewChunkIds)].reduce(
                 (s, id) => s + chunkById[id].measureCount,
                 0
               );
@@ -264,7 +278,7 @@ export function OverviewTab({
                 desc = desc[0].toUpperCase() + desc.slice(1);
               }
             }
-            const completion = classifyDayCompletion(d, piece, currentDay);
+            const completion = classifyDayCompletion(d, piece, currentDay, chunkById);
             // Suppressed during an active revival, on direct request
             // (docs/Decisions.md#open-questions): missedCount/behindDays
             // are judged against the piece's *original*, pre-revival plan
@@ -283,7 +297,16 @@ export function OverviewTab({
                 onClick={() => onSelectDay(d.dayNumber)}
               >
                 <span className="day-num mono">Day {d.dayNumber}</span>
-                <span className="day-desc" style={completion === "done" ? { textDecoration: "line-through" } : undefined}>
+                <span
+                  className="day-desc"
+                  style={
+                    completion === "done"
+                      ? { textDecoration: "line-through" }
+                      : rescheduled
+                        ? { fontStyle: "italic" }
+                        : undefined
+                  }
+                >
                   {desc}
                 </span>
                 <span className="day-min mono">{formatMinutes(d.minutes)}</span>

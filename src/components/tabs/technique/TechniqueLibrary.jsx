@@ -121,7 +121,7 @@ export function TechniqueLibrary({ technique, repertoireKeys, today, onToggleSta
                   </div>
                   <div>
                     {!it.inRotation ? (
-                      <div className="tq-meta">—</div>
+                      <div className="tq-meta">n/a</div>
                     ) : it.evenTempo == null ? (
                       <div className="tq-meta">Not set</div>
                     ) : (

@@ -4992,6 +4992,29 @@ button spacing, and the obsolete "Tempo ratchet" editor removed.**
   pieces — not done here. The Stabilizing/Settling "Tempo floor (fraction of
   target)" fields are a different, still-live setting and stay.
 
+**Decision: no em dashes in user-facing copy (Pass 80, redone after Pass
+104).**
+
+- **What:** every string the app displays was reworked to drop its em dash,
+  about 125 across 30 files, each rewritten as a period, comma, colon, or
+  parenthetical, whichever read most naturally. A bare "—" empty
+  placeholder became "n/a". A focus spot row in Piece Map's chunk detail
+  uses the middle dot it already used for its other separator ("name ·
+  m. 24 · Open"). Master Agenda's Status labels use a colon ("Busy day: 3
+  pieces scheduled", "Light: technique only"), overriding Pass 102's
+  em dash, which was only chosen to match the others.
+- **Why redone:** the original Pass 80 (Sep 4) was built on a branch that
+  was never pushed or merged. By the time that came up, `main` had moved
+  on through Passes 81–104, including new copy with em dashes of its own,
+  so the change was rebuilt from scratch on current `main` rather than
+  rebased.
+- **Guard:** `test/copy-style.test.mjs` compiles every file in `src/` with
+  esbuild (comments stripped, strings kept) and fails if an em dash
+  survives. It exists because the rule alone wasn't enough: `CLAUDE.md` and
+  `docs/` are full of em dashes, and new copy keeps picking up the habit
+  from them. Comments and docs stay exempt by design. The house-style rule
+  is in [AI-GUIDELINES.md](AI-GUIDELINES.md#no-em-dashes-in-user-facing-copy).
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as
@@ -7044,6 +7067,9 @@ These entries record the design decisions and what each one ruled out.
     of "Nothing scheduled". Technique minutes count toward the Busy/Moderate
     tier but never toward "N pieces scheduled". Alternatives: "Light,
     technique only" (the card's comma), or leave "Nothing scheduled".
+    *Wording since superseded by the Pass 80 redo: all three Status
+    labels now use a colon ("Light: technique only"), since no
+    user-facing copy uses an em dash — see [UX](#ux).*
   - **The visibility/minutes rule and the Status wording live in
     `lib/technique.js`** (`techniqueTodaySummary`, `agendaStatusLabel`)
     with tests, not in the two screens — found in review: component logic

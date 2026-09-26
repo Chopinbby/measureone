@@ -15,7 +15,7 @@ export function RecordingsEditor({ draft, set }) {
   return (
     <div>
       <p className="wizard-hint">
-        Link reference recordings — YouTube, Spotify, wherever — so they're one click away while
+        Link reference recordings (YouTube, Spotify, wherever) so they're one click away while
         you practice.
       </p>
       <div className="pairs-list">
@@ -24,7 +24,7 @@ export function RecordingsEditor({ draft, set }) {
             <input
               type="text"
               className="name-input"
-              placeholder="e.g. YouTube — Horowitz performance"
+              placeholder="e.g. YouTube, Horowitz performance"
               value={r.label}
               onChange={(e) => updateRecording(i, { label: e.target.value })}
             />

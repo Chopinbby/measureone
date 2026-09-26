@@ -764,7 +764,7 @@ export default function App() {
       );
     }
     if (techniqueUnreadable) parts.push("the technique library in the file couldn't be read, so it wasn't imported");
-    window.alert(parts.length ? `Import complete: ${parts.join(", ")}.` : "Nothing selected — import cancelled.");
+    window.alert(parts.length ? `Import complete: ${parts.join(", ")}.` : "Nothing selected. Import cancelled.");
   };
 
   // Editing state lives here, not inside SettingsTab, so switching tabs
@@ -910,8 +910,8 @@ export default function App() {
         const descriptions = lost.map(describeLostSplit).join("; ");
         const ok = window.confirm(
           lost.length === 1
-            ? `This change can't preserve your split at ${descriptions} — it'll merge back into an ordinary chunk under the new chunking.\n\nProgress still carries over the way it always does when chunking changes.\n\nContinue?`
-            : `This change can't preserve ${lost.length} of your splits — ${descriptions}.\n\nThey'll merge back into ordinary chunks under the new chunking. Progress still carries over the way it always does when chunking changes.\n\nContinue?`
+            ? `This change can't preserve your split at ${descriptions}. It'll merge back into an ordinary chunk under the new chunking.\n\nProgress still carries over the way it always does when chunking changes.\n\nContinue?`
+            : `This change can't preserve ${lost.length} of your splits: ${descriptions}.\n\nThey'll merge back into ordinary chunks under the new chunking. Progress still carries over the way it always does when chunking changes.\n\nContinue?`
         );
         if (!ok) return;
       }
@@ -1898,7 +1898,7 @@ export default function App() {
 
     if (failedNames.length) {
       window.alert(
-        `Couldn't save the new schedule for ${failedNames.join(", ")}. Your browser's storage is full or unavailable, so ${failedNames.length === 1 ? "that piece was left" : "those pieces were left"} exactly as before — nothing was lost.\n\nExport a backup, then free up space (deleting an old piece works) and try again.`
+        `Couldn't save the new schedule for ${failedNames.join(", ")}. Your browser's storage is full or unavailable, so ${failedNames.length === 1 ? "that piece was left" : "those pieces were left"} exactly as before. Nothing was lost.\n\nExport a backup, then free up space (deleting an old piece works) and try again.`
       );
     }
   };
@@ -2022,7 +2022,7 @@ export default function App() {
       // this can still correctly stay silent once the plan is truly done.
       if (!isPlanActuallyComplete(piece, chunkSet, timeline)) {
         window.alert(
-          "Every practice chunk has already been introduced — there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"All Tasks\" on Daily Practice to find it."
+          "Every practice chunk has already been introduced, so there's nothing left to reschedule. What's still open is a transition or focus block waiting to be logged; check \"All Tasks\" on Daily Practice to find it."
         );
       }
       return;
@@ -2095,7 +2095,7 @@ export default function App() {
         // only the extend choice is offered — singleChoice tells the modal
         // to render one button instead of two.
         suggestion = { targetDate: suggestedTargetDate, daysToLearn: newDaysToLearn, singleChoice: true };
-        message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)} — and this piece's target date has already passed.\n\nRescheduling will move the target date to ${formatDateReadable(suggestedTargetDate)} to fit, at the same pace. Continue?`;
+        message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, and this piece's target date has already passed.\n\nRescheduling will move the target date to ${formatDateReadable(suggestedTargetDate)} to fit, at the same pace. Continue?`;
       } else {
         suggestion = { targetDate: suggestedTargetDate, daysToLearn: newDaysToLearn };
         message = `Heads up: at your current pace (${formatMinutes(piece.minutesPerDay)}/day), what's left realistically needs about ${requiredDays} more ${dayWord(requiredDays)}, but only ${availableDays} ${dayWord(availableDays)} ${remainWord(availableDays)} in this plan.\n\nWould you like to change the target date to ${formatDateReadable(suggestedTargetDate)}, or reschedule into the current remaining plan days?`;
@@ -2157,7 +2157,7 @@ export default function App() {
       // situation.
       if (stuck.length) {
         window.alert(
-          `${stuck.length} piece${stuck.length === 1 ? " is" : "s are"} behind schedule (${stuck.map(stuckNameOf).join(", ")}), but ${stuck.length === 1 ? "it has" : "they have"} no unstarted material left to reschedule — what's stuck is a transition, focus block, or review waiting to be logged instead. Check "All Tasks" on ${stuck.length === 1 ? "its" : "each"} Daily Practice to find it.`
+          `${stuck.length} piece${stuck.length === 1 ? " is" : "s are"} behind schedule (${stuck.map(stuckNameOf).join(", ")}), but ${stuck.length === 1 ? "it has" : "they have"} no unstarted material left to reschedule. What's stuck is a transition, focus block, or review waiting to be logged instead. Check "All Tasks" on ${stuck.length === 1 ? "its" : "each"} Daily Practice to find it.`
         );
       }
       return;
@@ -2182,11 +2182,11 @@ export default function App() {
     const tight = plans.filter((p) => !p.fit.fits && !p.extend);
 
     const extendingNote = extending.length
-      ? `\n\n${extending.length === 1 ? "" : `${extending.length} of these — `}${extending.map(nameOf).join(", ")}${extending.length === 1 ? " is" : " are"} past ${extending.length === 1 ? "its" : "their"} target date entirely. Rescheduling will also push ${extending.length === 1 ? "its" : "their"} target date${extending.length === 1 ? "" : "s"} out to fit, at the same pace.`
+      ? `\n\n${extending.length === 1 ? "" : `${extending.length} of these (`}${extending.map(nameOf).join(", ")}${extending.length === 1 ? " is" : ") are"} past ${extending.length === 1 ? "its" : "their"} target date entirely. Rescheduling will also push ${extending.length === 1 ? "its" : "their"} target date${extending.length === 1 ? "" : "s"} out to fit, at the same pace.`
       : "";
 
     const warning = tight.length
-      ? `\n\nHeads up: at your current pace, ${tight.length === 1 ? "" : `${tight.length} of these — `}${tight.map(nameOf).join(", ")}${tight.length === 1 ? " probably won't" : " — probably won't"} fit in the days ${tight.length === 1 ? "its plan has" : "their plans have"} left. Rescheduling packs things in as tightly as possible either way; open ${tight.length === 1 ? "it" : "them"} individually for the details, or extend the timeline in Settings.`
+      ? `\n\nHeads up: at your current pace, ${tight.length === 1 ? "" : `${tight.length} of these (`}${tight.map(nameOf).join(", ")}${tight.length === 1 ? " probably won't" : ") probably won't"} fit in the days ${tight.length === 1 ? "its plan has" : "their plans have"} left. Rescheduling packs things in as tightly as possible either way; open ${tight.length === 1 ? "it" : "them"} individually for the details, or extend the timeline in Settings.`
       : "";
 
     // A piece counted in Master Agenda's summary above but excluded here
@@ -2194,7 +2194,7 @@ export default function App() {
     // count this dialog is about to act on never silently diverges from
     // the count that panel just showed.
     const stuckNote = stuck.length
-      ? `\n\n${stuck.length === 1 ? "" : `${stuck.length} more — `}${stuck.map(stuckNameOf).join(", ")}${stuck.length === 1 ? " is" : " are"} also behind schedule but ${stuck.length === 1 ? "isn't" : "aren't"} included here — ${stuck.length === 1 ? "it has" : "they have"} nothing unstarted left to reschedule. What's stuck ${stuck.length === 1 ? "there is" : "there are"} a transition, focus block, or review waiting to be logged instead — check "All Tasks" on ${stuck.length === 1 ? "its" : "each of their"} Daily Practice.`
+      ? `\n\n${stuck.length === 1 ? "" : `${stuck.length} more (`}${stuck.map(stuckNameOf).join(", ")}${stuck.length === 1 ? " is" : ") are"} also behind schedule but ${stuck.length === 1 ? "isn't" : "aren't"} included here, since ${stuck.length === 1 ? "it has" : "they have"} nothing unstarted left to reschedule. What's stuck ${stuck.length === 1 ? "there is" : "there are"} a transition, focus block, or review waiting to be logged instead. Check "All Tasks" on ${stuck.length === 1 ? "its" : "each of their"} Daily Practice.`
       : "";
 
     // Named per what's actually moving, same as the single-piece dialog —
@@ -2272,8 +2272,8 @@ export default function App() {
             <p className="storage-error-title">Your last change couldn't be saved</p>
             <p className="storage-error-sub">
               Browser storage is full or unavailable, so recent practice data may not be
-              persisted. Export a backup now, then free up space (e.g. delete an old piece) —
-              this banner clears once a save succeeds again.
+              persisted. Export a backup now, then free up space (e.g. delete an old piece).
+              This banner clears once a save succeeds again.
             </p>
           </div>
           <button className="ghost-btn" onClick={() => setExportModalOpen(true)}>
@@ -2288,7 +2288,7 @@ export default function App() {
           <div>
             <p className="export-reminder-title">Back up your practice data</p>
             <p className="export-reminder-sub">
-              MeasureOne only saves to this browser — it's been a while since your last export.
+              MeasureOne only saves to this browser, and it's been a while since your last export.
               Download a backup so your plans and practice history aren't only in one place.
             </p>
           </div>

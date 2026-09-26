@@ -72,7 +72,7 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
       <div className="panel">
         <h3>This week</h3>
         <p className="wizard-hint">
-          This piece has finished its bounded plan — maintenance reviews now come due one day at a
+          This piece has finished its bounded plan. Maintenance reviews now come due one day at a
           time, on each chunk's own spaced-repetition schedule.
         </p>
         <div className="week-grid">
@@ -82,7 +82,7 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
             const dayItems = isPast ? [] : isToday ? dueItems : computeDueOnDate(piece, chunkSetShim, date);
             const dayRanges = mergedRangesFor(dayItems.map((it) => it.chunk.id));
             const body = isPast ? (
-              <p className="day-card-note" style={{ color: "var(--ink-faint)" }}>—</p>
+              <p className="day-card-note" style={{ color: "var(--ink-faint)" }}>n/a</p>
             ) : dayItems.length ? (
               <div className="day-card-group">
                 <span className="day-card-tag review">Due</span>
@@ -126,7 +126,7 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
           })}
         </div>
         <p className="wizard-hint" style={{ marginTop: 12, marginBottom: 0 }}>
-          Days ahead show what's newly due that day — anything already overdue stays counted in
+          Days ahead show what's newly due that day. Anything already overdue stays counted in
           today's total, not repeated into every day after it.
         </p>
       </div>

@@ -208,8 +208,8 @@ export function OverviewTab({
         <div className="panel status-note">
           <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-soft)" }}>
             {piece.status === "archived"
-              ? "Archived — off your Master Agenda, and confidence will keep quietly fading the longer it goes untouched. Reactivate it any time from Settings."
-              : "Paused — off your Master Agenda and won't flag chunks as behind schedule. Confidence still fades the same as an active piece. Resume it any time from Settings."}
+              ? "Archived: off your Master Agenda, and confidence will keep quietly fading the longer it goes untouched. Reactivate it any time from Settings."
+              : "Paused: off your Master Agenda and won't flag chunks as behind schedule. Confidence still fades the same as an active piece. Resume it any time from Settings."}
           </p>
         </div>
       )}

@@ -268,6 +268,12 @@ chunking, scheduling, and confidence are actually computed, see
   build targets Safari 14, which can't parse it and esbuild can't rewrite
   it — one instance blanks the whole app there, not just one screen.
   `test/browser-compat.test.mjs` fails if it appears (Pass 101).
+- **No em dashes (—) in anything the app displays.** Rework the sentence
+  with a period, comma, colon, or parentheses instead — see
+  [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md#no-em-dashes-in-user-facing-copy).
+  Comments and docs are exempt (and full of them, which is why new copy
+  keeps picking them up). `test/copy-style.test.mjs` fails if one appears
+  in copy (Pass 80, redone after Pass 104).
 - **Technique data is app-level — never `setPieces`/`updatePiece`.** It
   lives in `App.jsx`'s `technique` state and its own localStorage key, and
   every change goes through `updateTechnique` (Pass 100).
@@ -1844,10 +1850,11 @@ Technique page still shows its own empty states). **Total planned adds
 `minutesPerScale` (5) per task on today's list**, done or not, carried
 over or new, with an "includes Nm technique" line under the number. That
 counts toward the Busy (>60)/Moderate (>30) tier, but never toward "N
-pieces scheduled". A day with scales but no pieces reads **"<tier> —
-technique only"** ("Light — technique only" at the default 15 minutes;
-em dash, matching the other labels, confirmed with the user) instead of
-"Nothing scheduled". The visibility/minutes rule
+pieces scheduled". A day with scales but no pieces reads **"<tier>:
+technique only"** ("Light: technique only" at the default 15 minutes)
+instead of "Nothing scheduled". Pass 102 shipped this with an em dash to
+match the other Status labels; the Pass 80 redo moved all of them to a
+colon. The visibility/minutes rule
 (`techniqueTodaySummary`) and the Status wording (`agendaStatusLabel`)
 live in `lib/technique.js` with tests, not in the two components. **Technique stays out of every schedule path** — no behind-
 schedule count, `ScheduleBanner`, reschedule dialog or piece-progress
@@ -1878,3 +1885,15 @@ in it, are reported instead of skipped (`readBackupTechnique`). Old and
 bare-array backups import as before. See
 [`docs/Algorithms.md`](docs/Algorithms.md#import-merge).
 
+**Pass 80 (em dash removal), redone after Pass 104**: no user-facing copy
+uses an em dash anymore. About 125 strings across 30 files were reworked
+one by one (period, comma, colon, or parentheses, whichever read best),
+including Master Agenda's Status labels ("Light: 2 pieces scheduled",
+"Light: technique only"). A lone "—" placeholder became "n/a", and a focus
+spot row in Piece Map's chunk detail now reads "name · m. 24 · Open". The
+original Pass 80 branch (Sep 4) was never merged and had gone stale, so
+this was rebuilt against current `main` rather than rebased. New:
+`test/copy-style.test.mjs` (fails on any em dash the app can show) and the
+house-style rule in
+[`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md#no-em-dashes-in-user-facing-copy).
+Code comments and docs are untouched by design.

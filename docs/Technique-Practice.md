@@ -37,7 +37,7 @@ kept as written; where the build differs, the list below says so and
 - The walk hint shows only when the key of the day is on today's list, and
   keeps naming today's key after it's checked off.
 - On Master Agenda and Daily Practice the panel is hidden when today's list
-  is empty; a scales-only day reads "<tier> — technique only".
+  is empty; a scales-only day reads "<tier>: technique only".
 - Piece keys are matched **as written** (G♭ ≠ F♯), and the key lists show
   each enharmonic pair as one entry ("F♯/G♭ major") — see [Decided](#decided) item 1.
 - Backups merge technique data and never remove anything here.

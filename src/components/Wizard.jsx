@@ -236,7 +236,7 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
                     {startAsRevival && (
                       <p className="wizard-hint" style={{ marginTop: 8 }}>
                         We'll skip the "introduce new material" phase and go straight into a
-                        revival — a quick reassessment of where things actually stand. You will be
+                        revival: a quick reassessment of where things actually stand. You will be
                         prompted to assess your confidence one chunk at a time after setting up the
                         piece.
                       </p>
@@ -256,11 +256,11 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
                   there) — sections are the more natural thing to set first,
                   and tempo zones can now copy their ranges from them. */}
               <div className="panel" style={{ marginTop: 20 }}>
-                <h3>Recordings — optional</h3>
+                <h3>Recordings (optional)</h3>
                 <RecordingsEditor draft={draft} set={set} />
               </div>
               <div className="panel" style={{ marginTop: 14 }}>
-                <h3>Documents — optional</h3>
+                <h3>Documents (optional)</h3>
                 <DocumentsEditor draft={draft} set={set} />
               </div>
             </div>
@@ -275,7 +275,7 @@ export function Wizard({ onCancel, onComplete, hasPiece, joinWork = null }) {
                   ranges from sections" button needs draft.sections to
                   already have something worth copying. */}
               <div className="panel" style={{ marginTop: 20 }}>
-                <h3>Tempo zones — optional</h3>
+                <h3>Tempo zones (optional)</h3>
                 <BpmZonesEditor draft={draft} set={set} />
               </div>
             </div>

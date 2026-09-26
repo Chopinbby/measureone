@@ -416,7 +416,7 @@ export function computeProgressTier(chunk, piece) {
   // stage this wasn't updated for) silently landing in the same bucket.
   // Warn instead of misclassifying without a trace.
   if (entry.stage != null && !STAGES.includes(entry.stage)) {
-    console.warn(`computeProgressTier: chunk ${chunk.id} has unrecognized stage "${entry.stage}" — defaulting to "learned"`);
+    console.warn(`computeProgressTier: chunk ${chunk.id} has unrecognized stage "${entry.stage}"; defaulting to "learned"`);
   }
   return "learned";
 }
@@ -478,7 +478,7 @@ export function formatLadderStatus(entry, ladderConfig, asOfDate) {
 
   let dueLabel = null;
   if (entry.needsRelearning) {
-    dueLabel = "paused — needs reinforcement";
+    dueLabel = "paused (needs reinforcement)";
   } else if (entry.nextDueDate) {
     // Same daysOverdue direction/off-by-one as computeDueReviews
     // (lib/maintenance.js), reused rather than reinvented so "N days" means

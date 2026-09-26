@@ -84,7 +84,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
         />
       </label>
       <p className="wizard-hint">
-        Day 1 of this plan. Defaults to today — set it earlier if you're already partway through,
+        Day 1 of this plan. Defaults to today. Set it earlier if you're already partway through,
         or later to start it in the future.
       </p>
 
@@ -118,7 +118,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
               <p className="plan-fit-banner-title">This plan will take over 3 months to complete</p>
               <p className="plan-fit-banner-sub">
                 At <strong className="mono">{formatMinutes(draft.minutesPerDay)}</strong>/day, this piece will
-                take about <strong className="mono">{draft.daysToLearn}</strong> days to learn — projected to
+                take about <strong className="mono">{draft.daysToLearn}</strong> days to learn, projected to
                 cover the whole piece around <strong className="mono">{estFinishLabel}</strong>. If you want to
                 have it down sooner, increase your daily practice estimate.
               </p>
@@ -157,7 +157,7 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
             <NumberInput value={draft.minutesPerDay} min={5} max={600} onCommit={(n) => set({ minutesPerDay: n })} />
           </label>
           <p className="derived-stat">
-            At least <strong className="mono">{draft.daysToLearn}</strong> days needed at this pace —
+            At least <strong className="mono">{draft.daysToLearn}</strong> days needed at this pace,
             around <strong className="mono">{estFinishLabel}</strong>
           </p>
         </>

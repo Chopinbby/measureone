@@ -660,18 +660,18 @@ describe("techniqueTodaySummary (panel visibility and minutes on other screens)"
 });
 
 describe("agendaStatusLabel (Master Agenda's Status)", () => {
-  test("with pieces: exactly the pre-Pass-102 wording, tier from the total including technique", () => {
-    assert.equal(agendaStatusLabel(0, 2, 0), "Light — 2 pieces scheduled");
-    assert.equal(agendaStatusLabel(20, 1, 0), "Light — 1 pieces scheduled");
-    assert.equal(agendaStatusLabel(35, 1, 15), "Moderate — 1 pieces scheduled"); // 20 piece + 15 technique
-    assert.equal(agendaStatusLabel(61, 3, 15), "Busy day — 3 pieces scheduled");
-    assert.equal(agendaStatusLabel(30, 1, 15), "Light — 1 pieces scheduled"); // 30 is not > 30
-    assert.equal(agendaStatusLabel(60, 1, 0), "Moderate — 1 pieces scheduled"); // 60 is not > 60
+  test("with pieces: the pre-Pass-102 wording, tier from the total including technique", () => {
+    assert.equal(agendaStatusLabel(0, 2, 0), "Light: 2 pieces scheduled");
+    assert.equal(agendaStatusLabel(20, 1, 0), "Light: 1 pieces scheduled");
+    assert.equal(agendaStatusLabel(35, 1, 15), "Moderate: 1 pieces scheduled"); // 20 piece + 15 technique
+    assert.equal(agendaStatusLabel(61, 3, 15), "Busy day: 3 pieces scheduled");
+    assert.equal(agendaStatusLabel(30, 1, 15), "Light: 1 pieces scheduled"); // 30 is not > 30
+    assert.equal(agendaStatusLabel(60, 1, 0), "Moderate: 1 pieces scheduled"); // 60 is not > 60
   });
   test("technique only: the tier word plus 'technique only', never 'Nothing scheduled'", () => {
-    assert.equal(agendaStatusLabel(15, 0, 15), "Light — technique only");
-    assert.equal(agendaStatusLabel(45, 0, 45), "Moderate — technique only");
-    assert.equal(agendaStatusLabel(75, 0, 75), "Busy day — technique only");
+    assert.equal(agendaStatusLabel(15, 0, 15), "Light: technique only");
+    assert.equal(agendaStatusLabel(45, 0, 45), "Moderate: technique only");
+    assert.equal(agendaStatusLabel(75, 0, 75), "Busy day: technique only");
   });
   test("nothing at all", () => {
     assert.equal(agendaStatusLabel(0, 0, 0), "Nothing scheduled");

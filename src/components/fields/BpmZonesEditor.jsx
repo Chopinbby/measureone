@@ -28,7 +28,7 @@ export function BpmZonesEditor({ draft, set }) {
   const copyRangesFromSections = () => {
     if (
       !zonesAreUntouchedDefault &&
-      !window.confirm("This will replace your current tempo zones with the section ranges — continue?")
+      !window.confirm("This will replace your current tempo zones with the section ranges. Continue?")
     ) {
       return;
     }
@@ -79,7 +79,7 @@ export function BpmZonesEditor({ draft, set }) {
   return (
     <div>
       <p className="wizard-hint">
-        Optionally set a different tempo target for specific measure ranges — this overrides the
+        Optionally set a different tempo target for specific measure ranges. This overrides the
         whole-piece default (set under Piece) for those measures.
       </p>
       <div className="pairs-list">

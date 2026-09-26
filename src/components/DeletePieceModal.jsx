@@ -24,7 +24,7 @@ export function DeletePieceModal({ piece, onCancel, onConfirm }) {
         <div className="modal-body">
           <p className="wizard-hint">
             Are you sure you want to delete this piece and all its progress? This removes "
-            {targetName || "this piece"}" — every chunk, session log, and revival history — from this
+            {targetName || "this piece"}" (every chunk, session log, and revival history) from this
             browser, permanently. It can't be undone.
           </p>
           <label className="field">

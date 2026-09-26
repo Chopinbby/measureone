@@ -74,7 +74,7 @@ export function ColdStartPanel({ piece, day, onLogColdStart, onUnlogColdStart, o
         {lastSession && (
           <p className="tip-line">
             Logged: {lastSession.avgBpm} BPM average
-            {lastSession.notes ? ` — "${lastSession.notes}"` : ""}
+            {lastSession.notes ? `. Notes: "${lastSession.notes}"` : ""}
           </p>
         )}
         <div className="field">
@@ -106,12 +106,12 @@ export function ColdStartPanel({ piece, day, onLogColdStart, onUnlogColdStart, o
       <h3>Cold-start check</h3>
       <p className="wizard-hint">
         It's been {dueThreshold}+ days since you last touched this piece. Play all the way through,
-        cold — no warm-up, no stopping to fix anything — then jot down roughly how it went.
+        cold (no warm-up, no stopping to fix anything), then jot down roughly how it went.
       </p>
       {lastSession && (
         <p className="tip-line">
           Last logged: {lastSession.avgBpm} BPM average
-          {lastSession.notes ? ` — "${lastSession.notes}"` : ""}
+          {lastSession.notes ? `. Notes: "${lastSession.notes}"` : ""}
         </p>
       )}
       <div className="log-row">

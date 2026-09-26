@@ -96,7 +96,7 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
         <h3>Nothing due today</h3>
         <p className="wizard-hint" style={{ margin: 0 }}>
           {suppressed ||
-            "Every chunk's next maintenance review is still ahead. Play the piece for the joy of it — the next review will show up here on the day it's due."}
+            "Every chunk's next maintenance review is still ahead. Play the piece for the joy of it. The next review will show up here on the day it's due."}
         </p>
       </div>
     );
@@ -104,7 +104,7 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
 
   return (
     <div className="panel">
-      <h3>Due today — {formatMinutes(totalDueMinutes(dueItems))} planned</h3>
+      <h3>Due today: {formatMinutes(totalDueMinutes(dueItems))} planned</h3>
       <div className="checklist">
         {dueItems.map(({ chunkId, chunk }) => (
           <ChecklistItem
@@ -126,7 +126,7 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
           that). See docs/Repertoire-Lifecycle.md. */}
       <p className="wizard-hint" style={{ marginTop: 12, marginBottom: 0 }}>
         {dueItems.filter((i) => i.daysOverdue > 0).length > 0
-          ? "Some of these have been waiting a few days. That's fine — take them in order."
+          ? "Some of these have been waiting a few days. That's fine, take them in order."
           : "All of these came due today."}
       </p>
     </div>
@@ -592,14 +592,14 @@ export function TodayTab({
                 <div className="tab-header">
                   <h1 style={{ fontSize: 19 }}>Revival plan</h1>
                   <p className="hero-sub">
-                    Suggested order and pacing, weakest first — everything here is loggable any day, in any
+                    Suggested order and pacing, weakest first. Everything here is loggable any day, in any
                     order.
                   </p>
                 </div>
                 <div className="view-all-list">
                   {revival.plan.days.map((d) => (
                     <div key={d.dayNumber} className="panel">
-                      <h3>Suggested day {d.dayNumber} — {formatMinutes(d.minutes)}</h3>
+                      <h3>Suggested day {d.dayNumber}: {formatMinutes(d.minutes)}</h3>
                       <div className="checklist">
                         {d.itemIds.map((id) => {
                           const chunk = revivalChunkById[id];
@@ -682,7 +682,7 @@ export function TodayTab({
               <div>
                 <p className="schedule-banner-title">Past your target date</p>
                 <p className="schedule-banner-sub">
-                  Every chunk has been introduced — what's left is a transition or focus block
+                  Every chunk has been introduced. What's left is a transition or focus block
                   still waiting to be logged. Nothing to reschedule; check "All Tasks" below to find
                   it.
                 </p>
@@ -700,7 +700,7 @@ export function TodayTab({
           {isRealToday && <h1>Daily Practice</h1>}
           <p className="hero-sub">
             {pastPlan
-              ? `Plan complete — maintenance, day ${elapsedDay}`
+              ? `Plan complete, maintenance day ${elapsedDay}`
               : `Day ${currentDay} of ${timeline.days.length}`}
           </p>
         </div>
@@ -753,8 +753,8 @@ export function TodayTab({
       {interleaveItems.length < 2 && (
         <p className="wizard-hint" style={{ marginTop: -8 }}>
           {interleaveItems.length === 0
-            ? "Interleaved mode unlocks once at least two chunks graduate past Stabilizing — no chunks have graduated past Stabilizing yet."
-            : "Interleaved mode unlocks once at least two chunks graduate past Stabilizing — only one chunk has graduated past Stabilizing so far."}
+            ? "Interleaved mode unlocks once at least two chunks graduate past Stabilizing. No chunks have graduated past Stabilizing yet."
+            : "Interleaved mode unlocks once at least two chunks graduate past Stabilizing. Only one chunk has graduated past Stabilizing so far."}
         </p>
       )}
 

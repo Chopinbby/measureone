@@ -74,7 +74,7 @@ export function SettingsTab({
           <h3>Backup & restore</h3>
           <p className="wizard-hint" style={{ marginBottom: 12 }}>
             Everything is saved only in this browser. Export a backup file now and then, or before
-            switching browsers or devices — you can import it back in later. Both let you choose
+            switching browsers or devices. You can import it back in later. Both let you choose
             which pieces to include.
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -250,7 +250,7 @@ export function SettingsTab({
           {!editDraft.markedLearnedElsewhere ? (
             <>
               <p className="wizard-hint" style={{ marginBottom: 8 }}>
-                Already know this piece from before you started tracking it here — or learned it
+                Already know this piece from before you started tracking it here, or learned it
                 away from the app entirely? You can mark it finished manually instead of logging
                 every chunk retroactively. This unlocks Archive and Start revival and stops the
                 schedule from flagging it as behind, the same as genuinely finishing the plan
@@ -263,11 +263,11 @@ export function SettingsTab({
           ) : (
             <>
               <p className="wizard-hint" style={{ marginBottom: 8 }}>
-                Marked as learned elsewhere — this piece is treated as finished regardless of
+                Marked as learned elsewhere. This piece is treated as finished regardless of
                 what's actually logged in-app.
               </p>
               <button className="ghost-btn" onClick={() => setEditDraft({ markedLearnedElsewhere: false })}>
-                <Undo2 size={14} /> Undo — treat as still in progress
+                <Undo2 size={14} /> Undo: treat as still in progress
               </button>
             </>
           )}
@@ -289,7 +289,7 @@ export function SettingsTab({
         <div>
           <h3 style={{ fontSize: 17, marginBottom: 4 }}>Applies immediately</h3>
           <p className="wizard-hint" style={{ margin: 0 }}>
-            Changes in this section take effect as soon as you make them — they aren't part of Save
+            Changes in this section take effect as soon as you make them. They aren't part of Save
             changes or Discard changes.
           </p>
         </div>
@@ -297,10 +297,10 @@ export function SettingsTab({
           <h3>Practice status</h3>
           <p className="wizard-hint" style={{ marginBottom: 12 }}>
             {status === "archived"
-              ? "This piece is archived: it won't appear on your Master Agenda, and its confidence will keep quietly fading the longer it goes untouched — the same recency decay that applies to any chunk you stop practicing."
+              ? "This piece is archived: it won't appear on your Master Agenda, and its confidence will keep quietly fading the longer it goes untouched, the same recency decay that applies to any chunk you stop practicing."
               : status === "paused"
                 ? "This piece is paused: it won't appear on your Master Agenda and won't flag chunks as behind schedule. Confidence still fades exactly as it would if the piece were active."
-                : "Active pieces appear on your Master Agenda and can flag chunks as behind schedule. Pause a piece you're setting aside mid-plan, or archive one you're done learning — either way it drops off your daily agenda until you bring it back."}
+                : "Active pieces appear on your Master Agenda and can flag chunks as behind schedule. Pause a piece you're setting aside mid-plan, or archive one you're done learning. Either way it drops off your daily agenda until you bring it back."}
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {status === "active" && (
@@ -341,7 +341,7 @@ export function SettingsTab({
           </div>
           {status !== "archived" && !planComplete && (
             <p className="wizard-hint" style={{ marginTop: 8, marginBottom: 0 }}>
-              Archive unlocks once this piece's plan is actually finished — this one still has
+              Archive unlocks once this piece's plan is actually finished. This one still has
               practicing left to do. Pause it instead if you want it off your daily agenda for now.
             </p>
           )}

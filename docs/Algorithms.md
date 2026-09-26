@@ -2143,6 +2143,32 @@ are expected states, not a sign anything went wrong.
 > case: any piece with a logged section run-through hit it. See
 > [Decisions.md](Decisions.md#ux).
 
+### Actual vs. planned progress
+
+`computeIntroductionProgress(piece, practiceChunks, timeline, currentDay)`
+(`lib/history.js`) feeds Progress's "Actual vs. planned progress" chart.
+For each plan day it returns `{ dayNumber, planned, actual }`, both
+cumulative counts of practice chunks:
+
+- **planned** — how many distinct chunks the timeline has put in
+  `newChunkIds` by that day. **Each chunk counts once, on the first day it
+  appears.** After a reschedule, `getEffectiveTimeline` keeps the days
+  before the marker from the old plan and places every still-untouched
+  chunk again on a later day, so the same chunk can sit in `newChunkIds`
+  twice. A plain running sum of `newChunkIds.length` (the original inline
+  version) counted it twice, which let "planned" exceed the piece's chunk
+  count. Counting first appearance means a reschedule never erases how far
+  behind the original plan the learner fell.
+- **actual** — how many chunks have their first `doneDays` entry on or
+  before that day. `null` after `currentDay`, so the chart doesn't draw
+  "actual" bars on days that haven't happened.
+
+`scaleMax` is the larger of the plan's final planned count and the number
+of chunks ever started, so a full-height bar means "every chunk". The chart
+shows days 1 through `max(currentDay + 3, 14)`, one column per day; its
+columns shrink to fit the card (`.progress-chart.by-day`), and every column
+reserves the same label height so all bars share one baseline.
+
 ### Historical cards on Daily Practice
 
 Added on direct request: a day's own `newChunkIds`/`specialChunkIds`/

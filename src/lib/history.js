@@ -215,3 +215,68 @@ export function findHistoricalItemsForDay(piece, chunks, timeline, day) {
     }))
     .sort((a, b) => a.chunk.start - b.chunk.start);
 }
+
+/**
+ * Progress's "Actual vs. planned progress" chart: for each plan day, how
+ * many practice chunks the plan had introduced by then vs. how many had
+ * actually been started (first logged session).
+ *
+ * Moved here out of ProgressTab so the double-count below could carry a
+ * regression test. The old inline version added up `newChunkIds.length`
+ * day by day, which is only correct for a plan that has never been
+ * rescheduled. After a reschedule, getEffectiveTimeline keeps the days
+ * before the marker from the old plan and places every chunk that was
+ * still untouched again on a later day, so a chunk the learner fell
+ * behind on was counted twice: once where it was first planned and again
+ * where the reschedule moved it. Real data had "planned" climbing to 35
+ * on a 27-chunk piece, and 80 on a 24-chunk one. Each chunk now counts
+ * once, on the first day the plan put it, so "planned" can never exceed
+ * the number of chunks. A reschedule therefore never erases how far
+ * behind the original plan the learner fell; it only fills in the chunks
+ * the old plan hadn't reached yet.
+ *
+ * `actual` is null after `currentDay` — nothing can have happened there
+ * yet, and carrying today's total forward drew "actual" bars on days
+ * still in the future.
+ *
+ * @param {object} piece
+ * @param {Array}  practiceChunks `chunkSet.practiceChunks`
+ * @param {object} timeline       the effective timeline
+ * @param {number} currentDay
+ * @returns {{
+ *   days: Array<{dayNumber: number, planned: number, actual: number|null}>,
+ *   firstDoneDay: Object<string, number>,
+ *   scaleMax: number,
+ * }}
+ */
+export function computeIntroductionProgress(piece, practiceChunks, timeline, currentDay) {
+  const firstDoneDay = {};
+  practiceChunks.forEach((c) => {
+    const dd = ((piece.progress || {})[c.id] || {}).doneDays || [];
+    if (dd.length) firstDoneDay[c.id] = Math.min(...dd);
+  });
+  const doneCountByDay = {};
+  Object.values(firstDoneDay).forEach((d) => {
+    doneCountByDay[d] = (doneCountByDay[d] || 0) + 1;
+  });
+
+  const plannedIds = new Set();
+  let planned = 0;
+  let actual = 0;
+  const days = timeline.days.map((d) => {
+    d.newChunkIds.forEach((id) => {
+      if (plannedIds.has(id)) return;
+      plannedIds.add(id);
+      planned++;
+    });
+    actual += doneCountByDay[d.dayNumber] || 0;
+    return { dayNumber: d.dayNumber, planned, actual: d.dayNumber <= currentDay ? actual : null };
+  });
+
+  // Scaled to the whole plan, not just the days the chart shows, so a full
+  // bar always means "every chunk". Actual is included in case a chunk was
+  // started that the plan never schedules (one held back by a setup focus
+  // spot, say), which would otherwise draw past the top of the chart.
+  const scaleMax = Math.max(planned, Object.keys(firstDoneDay).length, 1);
+  return { days, firstDoneDay, scaleMax };
+}

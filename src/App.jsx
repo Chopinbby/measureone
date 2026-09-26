@@ -3137,6 +3137,11 @@ const CSS = `
 .progress-chart-bar.planned { background: var(--ink-faint); opacity: 0.5; }
 .progress-chart-bar.actual { background: var(--brass); }
 .progress-chart-label { font-size: 9px; color: var(--ink-faint); }
+.progress-chart.by-day { height: auto; gap: 2px; }
+.progress-chart.by-day .progress-chart-col { min-width: 0; }
+.progress-chart.by-day .progress-chart-bars { gap: 1px; }
+.progress-chart.by-day .progress-chart-bar { width: auto; flex: 0 1 6px; min-width: 1px; }
+.progress-chart.by-day .progress-chart-label { height: 11px; line-height: 11px; white-space: nowrap; }
 .chart-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--ink-soft); }
 .chart-legend span { display: flex; align-items: center; }
 

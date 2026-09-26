@@ -24,7 +24,7 @@ export function DocumentsEditor({ draft, set }) {
   return (
     <div>
       <p className="wizard-hint">
-        Link reference documents — sheet music, fingerings, program notes — hosted on Drive, Dropbox,
+        Link reference documents (sheet music, fingerings, program notes) hosted on Drive, Dropbox,
         IMSLP, wherever, so they're one click away while you practice.
       </p>
       <div className="pairs-list">
@@ -33,7 +33,7 @@ export function DocumentsEditor({ draft, set }) {
             <input
               type="text"
               className="name-input"
-              placeholder="e.g. IMSLP — full score PDF"
+              placeholder="e.g. IMSLP, full score PDF"
               value={d.label}
               onChange={(e) => updateDocument(i, { label: e.target.value })}
             />

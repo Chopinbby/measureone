@@ -83,7 +83,7 @@ export function ImportPiecesModal({
           <p className="wizard-hint">
             {rows.length === 0
               ? "This file has no pieces, only your technique library."
-              : `Found ${rows.length} piece${rows.length === 1 ? "" : "s"} in this file — ${newCount} new, ${updateCount} matching a piece you already have. Choose which to import; a match updates the existing piece instead of duplicating it.`}
+              : `Found ${rows.length} piece${rows.length === 1 ? "" : "s"} in this file: ${newCount} new, ${updateCount} matching a piece you already have. Choose which to import; a match updates the existing piece instead of duplicating it.`}
           </p>
           {techniqueUnreadable && (
             <p className="wizard-hint import-warning">
@@ -103,7 +103,7 @@ export function ImportPiecesModal({
                 piece={{
                   name: "Technique library",
                   composer: techniquePreview
-                    ? `${techniqueCandidate.items.length} in the file — ${techniquePreview.itemsAdded} new, ${techniquePreview.temposUpdated} newer tempo${techniquePreview.temposUpdated === 1 ? "" : "s"}. Nothing here is removed.`
+                    ? `${techniqueCandidate.items.length} in the file: ${techniquePreview.itemsAdded} new, ${techniquePreview.temposUpdated} newer tempo${techniquePreview.temposUpdated === 1 ? "" : "s"}. Nothing here is removed.`
                     : `${techniqueCandidate.items.length} scales and arpeggios`,
                 }}
                 checked={includeTechnique}
@@ -118,7 +118,7 @@ export function ImportPiecesModal({
           {updateCount > 0 && (
             <div style={{ margin: "0 0 14px", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
               <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
-                Piece order — this file may list your pieces in a different order than they're
+                Piece order: this file may list your pieces in a different order than they're
                 arranged here. Which order should the switcher use for matched pieces?
               </p>
               <div style={{ display: "flex", gap: 8 }}>
@@ -151,7 +151,7 @@ export function ImportPiecesModal({
                 {hasDivergence && selected.has(index) && (
                   <div style={{ margin: "6px 0 0 34px", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
                     <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
-                      This piece's practice progress differs here from what's in the file — which one should
+                      This piece's practice progress differs here from what's in the file. Which one should
                       count?
                     </p>
                     <div style={{ display: "flex", gap: 8 }}>

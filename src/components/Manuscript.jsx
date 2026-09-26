@@ -53,8 +53,8 @@ export function ManuscriptStrip({ chunks, compact }) {
         >
           {c.recurring && <span className="recurring-dot" aria-hidden="true">&#8635;</span>}
           <span className="block-tooltip">
-            {formatRange(c.start, c.end)} — {DIFFICULTY_META[c.difficultyLabel].label}
-            {c.recurring ? " — recurring" : ""}
+            {formatRange(c.start, c.end)}, {DIFFICULTY_META[c.difficultyLabel].label}
+            {c.recurring ? ", recurring" : ""}
           </span>
         </div>
       ))}

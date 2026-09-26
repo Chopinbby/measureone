@@ -113,7 +113,7 @@ export function BasicsFields({ draft, set, lockWork = false, afterWorkMode = nul
             Settling/Holding stage's tempo-floor safety check becomes a
             no-op (targetBPM * floorFraction reduces to 0, so the floor is
             trivially satisfied) rather than blocking premature graduation. */}
-        <span>Target tempo (BPM) — optional</span>
+        <span>Target tempo (BPM, optional)</span>
         <NumberInput value={draft.targetBPM || ""} min={20} max={400} onCommit={(n) => set({ targetBPM: n })} />
       </label>
       {/* Pass 103 — the piece's keys. Links the piece to Technique practice
@@ -181,7 +181,7 @@ export function BasicsFields({ draft, set, lockWork = false, afterWorkMode = nul
       <label className="field">
         <span>Notes</span>
         <textarea
-          placeholder="Context, history, teacher notes — anything worth remembering about this piece…"
+          placeholder="Context, history, teacher notes: anything worth remembering about this piece…"
           value={draft.notes || ""}
           onChange={(e) => set({ notes: e.target.value })}
           rows={4}

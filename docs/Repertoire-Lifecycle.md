@@ -1069,7 +1069,7 @@ rather than a new tab or Master Agenda alone:
   `agendaData` computation, partitioned on the flag that already
   distinguished them, and the combined count is unchanged.
 - **The per-piece Today tab** — full detail. Once a piece runs past its
-  plan, "Day N of N" becomes "Plan complete — maintenance, day N" and the
+  plan, "Day N of N" becomes "Plan complete, maintenance day N" and the
   day checklist is replaced by the due list. Day nav is disabled there (no
   bounded grid left to page through); "View all" still shows the original
   plan.

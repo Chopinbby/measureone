@@ -18,7 +18,7 @@ function LockedRunThroughRow({ item }) {
         className="checklist-check-empty"
         disabled
         aria-label="Locked"
-        title="Locked — one more chunk needs its next logged session to unlock this run-through"
+        title="Locked. One more chunk needs its next logged session to unlock this run-through"
       />
       <div className="checklist-body">
         <div className="checklist-row">
@@ -28,7 +28,7 @@ function LockedRunThroughRow({ item }) {
           <span className="tag subtle">{DIFFICULTY_META[item.difficultyLabel].label}</span>
         </div>
         <p className="tip-line">
-          Almost there — one more chunk needs its next logged session to unlock this run-through.
+          Almost there. One more chunk needs its next logged session to unlock this run-through.
         </p>
         <button type="button" className="primary-btn sm" disabled style={{ marginTop: 8, alignSelf: "flex-start" }}>
           Log practice
@@ -59,10 +59,10 @@ export function SectionRunThroughPanel({ piece, practiceChunks, currentDay, isRe
       <h3>Section run-throughs</h3>
       <p className="wizard-hint">
         A single-section run-through is today's task once every chunk in that section has a logged
-        session — then it comes due again every two sessions per chunk after that (a repeating
+        session. Then it comes due again every two sessions per chunk after that (a repeating
         check-in, not a one-time unlock), showing locked here the day before it's due. Combined
         section run-throughs first unlock once the whole piece has been practiced in chunks and both
-        sections in the pair are learned — after that first unlock, they get the same repeating
+        sections in the pair are learned. After that first unlock, they get the same repeating
         check-in rhythm.
       </p>
       <div className="checklist">

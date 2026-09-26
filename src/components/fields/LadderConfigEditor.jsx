@@ -36,14 +36,14 @@ export function LadderConfigEditor({ draft, set }) {
   return (
     <div>
       <p className="wizard-hint">
-        Advanced tuning for the spaced-repetition maintenance ladder — how often a chunk comes back
+        Advanced tuning for the spaced-repetition maintenance ladder: how often a chunk comes back
         for review, how many clean passes it takes to move up a stage, and the tempo floors that
         apply along the way. These are hand-picked starting points, not settings tuned from real
-        data — change them if your own experience says otherwise.
+        data, so change them if your own experience says otherwise.
       </p>
 
       <SubHeading>Stabilizing</SubHeading>
-      <p className="wizard-hint">The first stage after a chunk is introduced — frequent, short-interval review.</p>
+      <p className="wizard-hint">The first stage after a chunk is introduced: frequent, short-interval review.</p>
       <div className="field-row">
         <label className="field">
           <span>Review every (days)</span>
@@ -82,7 +82,7 @@ export function LadderConfigEditor({ draft, set }) {
       </div>
 
       <SubHeading>Settling</SubHeading>
-      <p className="wizard-hint">The middle stage — longer intervals, and a real tempo floor kicks in.</p>
+      <p className="wizard-hint">The middle stage: longer intervals, and a real tempo floor kicks in.</p>
       <div className="field-row">
         <label className="field">
           <span>Review every (days)</span>
@@ -108,7 +108,7 @@ export function LadderConfigEditor({ draft, set }) {
 
       <SubHeading>Holding</SubHeading>
       <p className="wizard-hint">
-        The resting stage — no further stage to graduate to, so review intervals keep expanding
+        The resting stage: no further stage to graduate to, so review intervals keep expanding
         instead (capped at the maximum below). Every 4th logged review since a chunk's most recent
         entry into Holding asks for one extra clean rep, reverting to the usual requirement
         otherwise.

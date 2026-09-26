@@ -27,8 +27,8 @@ function nextFlag(current) {
 
 const FLAG_LABEL = {
   untouched: "Mark rough or lost",
-  rough: "Rough — tap for lost",
-  lost: "Lost — tap to clear",
+  rough: "Rough (tap for lost)",
+  lost: "Lost (tap to clear)",
 };
 
 const DIFFICULTY_SIGNAL_ICON = {
@@ -131,8 +131,8 @@ export function PieceMapTab({
           {conf}%{manual && <Pencil size={9} className="manual-mark" title="Set manually" />}
           {climbingTempo && (
             <>
-              <Metronome size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
-              <TrendingUp size={9} className="climbing-mark" title="Tempo climbing — try going faster" />
+              <Metronome size={9} className="climbing-mark" title="Tempo climbing: try going faster" />
+              <TrendingUp size={9} className="climbing-mark" title="Tempo climbing: try going faster" />
             </>
           )}
         </span>
@@ -205,7 +205,7 @@ export function PieceMapTab({
       <div>
         <span className="lbl">Stage</span>
         <span className="val">
-          {ladderStatus ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}` : "Not started"}
+          {ladderStatus ? `${ladderStatus.stageLabel}, ${ladderStatus.progressLabel}` : "Not started"}
         </span>
       </div>
       {ladderStatus && ladderStatus.dueLabel && (
@@ -217,8 +217,8 @@ export function PieceMapTab({
           <span className="val warn">
             <AlertTriangle size={12} />{" "}
             {tempoSimulation.converged
-              ? `${tempoSimulation.days}+ days away — over ${TEMPO_CONVERGENCE_WARNING_DAYS / 30} months at this pace`
-              : "may never reach at this pace — check tempo ratchet settings"}
+              ? `${tempoSimulation.days}+ days away, over ${TEMPO_CONVERGENCE_WARNING_DAYS / 30} months at this pace`
+              : "may never reach at this pace (check tempo ratchet settings)"}
           </span>
         </div>
       )}
@@ -272,7 +272,7 @@ export function PieceMapTab({
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
                         {relatedChunks.map((rc) => (
                           <button type="button" key={rc.id} className="link-btn" onClick={() => setSelected(rc.id)}>
-                            {relatedChunkLabel(rc)} — {formatRange(rc.start, rc.end)}
+                            {relatedChunkLabel(rc)}: {formatRange(rc.start, rc.end)}
                           </button>
                         ))}
                       </div>
@@ -294,7 +294,7 @@ export function PieceMapTab({
                           if (inRevival) {
                             return (
                               <span key={spot.id} className="focus-spot-map-row">
-                                <Target size={11} /> {spot.name} — <span className="mono">{positionTag}</span> · {statusLabel}
+                                <Target size={11} /> {spot.name} · <span className="mono">{positionTag}</span> · {statusLabel}
                               </span>
                             );
                           }
@@ -303,7 +303,7 @@ export function PieceMapTab({
                             return (
                               <div key={spot.id}>
                                 <span className="focus-spot-map-row">
-                                  <Target size={11} /> {spot.name} — <span className="mono">{positionTag}</span> · {statusLabel}
+                                  <Target size={11} /> {spot.name} · <span className="mono">{positionTag}</span> · {statusLabel}
                                 </span>
                                 <p className="tip-line" style={{ fontStyle: "italic", margin: "2px 0 0" }}>
                                   Not currently scheduled again within this plan.
@@ -318,7 +318,7 @@ export function PieceMapTab({
                               className="link-btn focus-spot-map-row"
                               onClick={() => onSelectDay(target.day, target.scrollId)}
                             >
-                              <Target size={11} /> {spot.name} — <span className="mono">{positionTag}</span> ·{" "}
+                              <Target size={11} /> {spot.name} · <span className="mono">{positionTag}</span> ·{" "}
                               {spot.resolved ? (
                                 <>
                                   <Check size={11} /> {statusLabel}
@@ -340,7 +340,7 @@ export function PieceMapTab({
                   <span>Ladder status</span>
                   <div className="manual-conf-row">
                     <p className="wizard-hint relearning-hint" style={{ margin: 0, flex: 1 }}>
-                      <RotateCcw size={13} /> Needs reinforcement — review is paused while this chunk rebuilds
+                      <RotateCcw size={13} /> Needs reinforcement. Review is paused while this chunk rebuilds
                       consistency in the Introductory phase. Clears automatically after 4 consecutive full passes.
                     </p>
                     <button className="ghost-btn" onClick={() => onClearRelearning(selectedChunk.id)}>
@@ -428,7 +428,7 @@ export function PieceMapTab({
                     <Metronome size={13} />
                     <TrendingUp size={13} />
                     <span>
-                      Tempo's been climbing — try {(selectedEntry.currentBPM || 0) + 15}–
+                      Tempo's been climbing. Try {(selectedEntry.currentBPM || 0) + 15}–
                       {(selectedEntry.currentBPM || 0) + 30} BPM faster, once or twice.
                     </span>
                   </div>

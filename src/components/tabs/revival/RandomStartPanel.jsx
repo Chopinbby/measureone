@@ -17,7 +17,7 @@ export function chunkEntry(chunk, anchor, context) {
 }
 
 const DEFAULT_HINT =
-  "Jump in somewhere you wouldn't have picked yourself — a good way to catch memory gaps you don't know are there.";
+  "Jump in somewhere you wouldn't have picked yourself. It's a good way to catch memory gaps you don't know are there.";
 
 // Started life revival-only; generalized in Pass 21 so the same "don't let
 // yourself choose the starting point" idea also covers a maintenance

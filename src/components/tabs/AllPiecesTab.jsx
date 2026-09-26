@@ -121,14 +121,14 @@ export function AllPiecesTab({ pieces, onSelectPiece, currentPieceId, currentPie
       <div className="panel">
         <h3>Consistency</h3>
         <p className="wizard-hint" style={{ marginTop: -4, marginBottom: 10 }}>
-          Any piece touched counts — the last {CONSISTENCY_WINDOW_DAYS} days, across your whole rotation.
+          Any piece touched counts: the last {CONSISTENCY_WINDOW_DAYS} days, across your whole rotation.
         </p>
         <div className="heatmap-row">
           {consistencyDays.map(({ date, touched }) => (
             <div
               key={date}
               className="heatmap-cell"
-              title={`${formatHeatmapDate(date)}${touched ? " — practiced" : ""}`}
+              title={`${formatHeatmapDate(date)}${touched ? ", practiced" : ""}`}
               style={{ background: touched ? "var(--teal)" : "var(--paper)" }}
             />
           ))}

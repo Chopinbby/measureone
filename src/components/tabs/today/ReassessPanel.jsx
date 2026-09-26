@@ -31,7 +31,7 @@ export function ReassessPanel({ piece, todaysRanges, onReassessRange, compact = 
   ) : (
     <>
       <h3>Reassess difficulty by measure</h3>
-      <p className="wizard-hint">Pick a range and a new rating — difficulty is tracked measure by measure, same as setup.</p>
+      <p className="wizard-hint">Pick a range and a new rating. Difficulty is tracked measure by measure, same as setup.</p>
       <div className="reassess-quickpicks">
         {todaysRanges.map((r) => (
           <button key={`${r.start}-${r.end}`} className="chip subtle" onClick={() => { setFrom(r.start); setTo(r.end); }}>

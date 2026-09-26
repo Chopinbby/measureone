@@ -3929,6 +3929,6 @@ minutes it adds to Total planned (`minutesPerScale` per task, done or
 not). `agendaStatusLabel(totalMinutes, pieceCount, techniqueMinutes)`
 words Master Agenda's Status: the tier (Busy day > 60, Moderate > 30,
 else Light) uses the total including technique; "N pieces scheduled"
-never counts technique; a scales-only day reads "<tier> — technique
+never counts technique; a scales-only day reads "<tier>: technique
 only". Nothing schedule-related (behind-schedule, reschedule, the
 schedule banner) reads technique data.

@@ -451,9 +451,9 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             never styled as "behind". */}
         <span style={{ fontSize: "12px", color: needsReschedule || (!isDueList && behindDaysCount > 0) ? "var(--brick)" : "var(--ink-soft)" }}>
           {needsReschedule
-            ? `Past target date${behindDaysCount > 0 ? ` — ${behindDaysCount} day${behindDaysCount === 1 ? "" : "s"} behind` : ""}`
+            ? `Past target date${behindDaysCount > 0 ? `, ${behindDaysCount} day${behindDaysCount === 1 ? "" : "s"} behind` : ""}`
             : isDueList
-              ? `Maintenance — ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
+              ? `Maintenance: ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
               : behindDaysCount > 0
                 ? `${behindDaysCount} day${behindDaysCount === 1 ? "" : "s"} behind schedule`
                 : "On schedule"}
@@ -555,7 +555,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               {behindItems.length} piece{behindItems.length === 1 ? " is" : "s are"} behind schedule
             </p>
             <p className="schedule-banner-sub">
-              Rebalance what you haven't started yet across the days each plan has left — in one go, rather
+              Rebalance what you haven't started yet across the days each plan has left, all in one go rather
               than piece by piece. Chunks you've already practiced stay where they are, and every piece keeps
               its own target date.
             </p>
@@ -599,7 +599,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
             {dueEntries.length > 1 && (
               <RandomStartPanel
                 entries={dueEntries}
-                hint="Start somewhere you wouldn't have picked yourself — otherwise the top of the list always gets your freshest attention. Picks from every spot due right now, across all your pieces."
+                hint="Start somewhere you wouldn't have picked yourself. Otherwise the top of the list always gets your freshest attention. Picks from every spot due right now, across all your pieces."
               />
             )}
             <div className="master-agenda-cards">{maintenanceItems.map(renderPieceCard)}</div>
@@ -622,8 +622,8 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               const statusText = !revival.reassessmentComplete
                 ? "Reassessment in progress"
                 : revival.plan
-                  ? "Plan ready — resume practicing"
-                  : "Reassessment complete — plan not generated yet";
+                  ? "Plan ready: resume practicing"
+                  : "Reassessment complete, plan not generated yet";
               return (
                 <div key={pieceId} className="piece-card">
                   <div className="piece-card-head">

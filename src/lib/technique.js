@@ -691,13 +691,14 @@ export function techniqueTodaySummary(technique, today) {
 // Master Agenda's Status label. The tier (Busy day > 60 min, Moderate > 30,
 // else Light) comes from the total including technique minutes; the "N
 // pieces scheduled" count never includes technique. With pieces, the
-// wording is exactly what it was before Pass 102. With no pieces but some
-// technique, "<tier> — technique only" (em dash, confirmed with the user)
-// instead of "Nothing scheduled". Kept here, not in the component, so it
-// has regression tests.
+// wording is the same as before Pass 102. With no pieces but some
+// technique, "<tier>: technique only" instead of "Nothing scheduled".
+// All three used an em dash until the em-dash pass switched them to a
+// colon (no user-facing copy uses an em dash). Kept here, not in the
+// component, so it has regression tests.
 export function agendaStatusLabel(totalMinutes, pieceCount, techniqueMinutes) {
   const tier = totalMinutes > 60 ? "Busy day" : totalMinutes > 30 ? "Moderate" : "Light";
-  if (pieceCount > 0) return `${tier} — ${pieceCount} pieces scheduled`;
-  if (techniqueMinutes > 0) return `${tier} — technique only`;
-  return totalMinutes > 30 ? `${tier} — 0 pieces scheduled` : "Nothing scheduled";
+  if (pieceCount > 0) return `${tier}: ${pieceCount} pieces scheduled`;
+  if (techniqueMinutes > 0) return `${tier}: technique only`;
+  return totalMinutes > 30 ? `${tier}: 0 pieces scheduled` : "Nothing scheduled";
 }

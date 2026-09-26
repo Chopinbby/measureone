@@ -24,7 +24,7 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
 
   return (
     <div className="panel">
-      <h3>Day {day} — Full run-through</h3>
+      <h3>Day {day}: Full run-through</h3>
       <p className="wizard-hint">No new material today. Play through the whole piece and note where it still catches.</p>
       {lastSession && (
         <p className="tip-line">
@@ -49,7 +49,7 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
         )}
       </div>
       <p className="wizard-hint" style={{ marginTop: 10, marginBottom: 0 }}>
-        Flag any chunk that caught on the <strong>Piece Map</strong> — rough or lost.
+        Flag any chunk that caught on the <strong>Piece Map</strong> as rough or lost.
       </p>
     </div>
   );
@@ -182,7 +182,7 @@ export function DayChecklist({
 
   return (
     <div className="panel">
-      <h3>Day {day.dayNumber} — {formatMinutes(day.minutes)} planned</h3>
+      <h3>Day {day.dayNumber}: {formatMinutes(day.minutes)} planned</h3>
       <div className="checklist">
         {visibleItems.map(({ id, role }) => (
           <ChecklistItem

@@ -264,7 +264,7 @@ export function ChecklistItem({
         ? practiceBPM != null
           ? `You logged ${cleanReps} of the ${requiredReps} reps needed at ${practiceBPM}+ BPM to progress this chunk. Save anyway?`
           : `You logged ${cleanReps} of the ${requiredReps} reps needed to progress this chunk. Save anyway?`
-        : `You logged ${cleanReps} clean reps at ${bpmAttempted} BPM — under the ${practiceBPM}+ BPM needed to progress this chunk. Save anyway?`;
+        : `You logged ${cleanReps} clean reps at ${bpmAttempted} BPM, under the ${practiceBPM}+ BPM needed to progress this chunk. Save anyway?`;
       if (!window.confirm(confirmMessage)) return;
     }
     const priorSessions = entry.sessions || [];
@@ -321,7 +321,7 @@ export function ChecklistItem({
           title={
             undoWillFullyReverse
               ? "Undo: removes this log and reverses the tempo and schedule changes it caused."
-              : "Removes this log entry, but can't reverse tempo or schedule changes it already caused — a later session has been logged since, or this entry predates undo support."
+              : "Removes this log entry, but can't reverse tempo or schedule changes it already caused, because a later session has been logged since or this entry predates undo support."
           }
         >
           <Check size={18} />
@@ -332,7 +332,7 @@ export function ChecklistItem({
           className="checklist-check-empty"
           disabled={!canLog}
           aria-label="Mark done"
-          title={canLog ? "Mark done" : isPaused ? "Regular practice is paused — resolve the focus spot first" : "Fill in reps and BPM first"}
+          title={canLog ? "Mark done" : isPaused ? "Regular practice is paused. Resolve the focus spot first" : "Fill in reps and BPM first"}
           onClick={submitLog}
         />
       )}
@@ -461,8 +461,8 @@ export function ChecklistItem({
           // which would otherwise render literal "undefined"s.
           <p className="tip-line">
             Skipped in Interleaved practice
-            {session.durationSeconds ? ` — ${formatDuration(session.durationSeconds)} logged` : ""}. Not marked done —
-            log a real attempt whenever you're ready.
+            {session.durationSeconds ? ` (${formatDuration(session.durationSeconds)} logged)` : ""}. Not marked done.
+            Log a real attempt whenever you're ready.
           </p>
         ) : session && session.provisional ? (
           // Pass 29 follow-up — an auto-classified soft-miss/fail logged
@@ -476,8 +476,8 @@ export function ChecklistItem({
           // never happened — this is also how a rough attempt gets "redone."
           <div className="tip-line">
             <div>
-              Provisional: {session.cleanReps} clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM —
-              would be a {outcomeMeta ? outcomeMeta.label.toLowerCase() : "non-pass"}. Not yet applied — confirm or
+              Provisional: {session.cleanReps} clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM,
+              which would be a {outcomeMeta ? outcomeMeta.label.toLowerCase() : "non-pass"}. Not yet applied. Confirm or
               discard, or log a fresh attempt below.
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -497,7 +497,7 @@ export function ChecklistItem({
           <p className="tip-line">
             Logged: {session.cleanReps} consecutive clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM
             {session.durationSeconds ? ` in ${formatDuration(session.durationSeconds)}` : ""}
-            {outcomeMeta ? ` — ${outcomeMeta.label}` : ""}
+            {outcomeMeta ? ` · ${outcomeMeta.label}` : ""}
             {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
           </p>
         ) : null}
@@ -515,7 +515,7 @@ export function ChecklistItem({
           <p className="tip-line">
             Spaced Repetition:{" "}
             {ladderStatus
-              ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
+              ? `${ladderStatus.stageLabel}, ${ladderStatus.progressLabel}${
                   ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
                 }`
               : "not started yet"}

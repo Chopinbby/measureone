@@ -175,7 +175,7 @@ export function ReassessSequencePanel({
       <div>
         <span className="lbl">Stage</span>
         <span className="val">
-          {ladderStatus ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}` : "Not started"}
+          {ladderStatus ? `${ladderStatus.stageLabel}, ${ladderStatus.progressLabel}` : "Not started"}
         </span>
       </div>
       {ladderStatus && ladderStatus.dueLabel && (
@@ -187,8 +187,8 @@ export function ReassessSequencePanel({
           <span className="val warn">
             <AlertTriangle size={12} />{" "}
             {tempoSimulation.converged
-              ? `${tempoSimulation.days}+ days away — over ${TEMPO_CONVERGENCE_WARNING_DAYS / 30} months at this pace`
-              : "may never reach at this pace — check tempo ratchet settings"}
+              ? `${tempoSimulation.days}+ days away, over ${TEMPO_CONVERGENCE_WARNING_DAYS / 30} months at this pace`
+              : "may never reach at this pace (check tempo ratchet settings)"}
           </span>
         </div>
       )}
@@ -207,7 +207,7 @@ export function ReassessSequencePanel({
           <h3 style={{ marginBottom: 2 }}>Reassess</h3>
           <p className="hero-sub mono" style={{ margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
             <DiffSignalIcon size={14} style={{ color: "var(--ink-faint)" }} title={DIFFICULTY_META[selectedChunk.difficultyLabel].label} />
-            {relatedChunkLabel(selectedChunk)} — {formatRange(selectedChunk.start, selectedChunk.end)}
+            {relatedChunkLabel(selectedChunk)}: {formatRange(selectedChunk.start, selectedChunk.end)}
           </p>
         </div>
       </div>
@@ -235,7 +235,7 @@ export function ReassessSequencePanel({
           <span>Ladder status</span>
           <div className="manual-conf-row">
             <p className="wizard-hint relearning-hint" style={{ margin: 0, flex: 1 }}>
-              <RotateCcw size={13} /> Needs reinforcement — review is paused while this chunk rebuilds
+              <RotateCcw size={13} /> Needs reinforcement. Review is paused while this chunk rebuilds
               consistency in the Introductory phase. Clears automatically after 4 consecutive full passes.
             </p>
             <button className="ghost-btn" onClick={() => onClearRelearning(selectedChunk.id)}>
@@ -318,8 +318,8 @@ export function ReassessSequencePanel({
               <p className="wizard-hint" style={{ margin: 0, flex: 1 }}>
                 {resolvedTargetBPM
                   ? selectedEntry.targetBPM
-                    ? `${resolvedTargetBPM} BPM — set for this chunk`
-                    : `${resolvedTargetBPM} BPM — set at piece setup`
+                    ? `${resolvedTargetBPM} BPM, set for this chunk`
+                    : `${resolvedTargetBPM} BPM, set at piece setup`
                   : "No target BPM set yet"}
               </p>
               <button type="button" className="ghost-btn" onClick={() => setBpmOverrideOpen(true)}>
@@ -343,7 +343,7 @@ export function ReassessSequencePanel({
             <Metronome size={13} />
             <TrendingUp size={13} />
             <span>
-              Tempo's been climbing — try {(selectedEntry.currentBPM || 0) + 15}–
+              Tempo's been climbing. Try {(selectedEntry.currentBPM || 0) + 15}–
               {(selectedEntry.currentBPM || 0) + 30} BPM faster, once or twice.
             </span>
           </div>

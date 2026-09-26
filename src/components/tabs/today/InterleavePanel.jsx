@@ -194,8 +194,8 @@ export function InterleavePanel({
       </div>
       <p className="wizard-hint">
         Rotates through chunks past Stabilizing, one at a time. Log what you play, or skip to move on without
-        recording an outcome. A rough result here is saved but held for your review, not applied immediately —
-        interleaved retrieval often looks harder than it is.
+        recording an outcome. A rough result here is saved but held for your review, not applied immediately.
+        Interleaved retrieval often looks harder than it is.
       </p>
 
       <div className="timer-row">
@@ -241,7 +241,7 @@ export function InterleavePanel({
           <p className="tip-line">
             Ladder:{" "}
             {ladderStatus
-              ? `${ladderStatus.stageLabel} — ${ladderStatus.progressLabel}${
+              ? `${ladderStatus.stageLabel}, ${ladderStatus.progressLabel}${
                   ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
                 }`
               : "not started yet"}
@@ -251,7 +251,7 @@ export function InterleavePanel({
             <div className="tip-line">
               <div>
                 Unresolved from earlier: {pendingProvisional.cleanReps} clean rep
-                {pendingProvisional.cleanReps === 1 ? "" : "s"} at {pendingProvisional.bpm} BPM — would be a{" "}
+                {pendingProvisional.cleanReps === 1 ? "" : "s"} at {pendingProvisional.bpm} BPM, which would be a{" "}
                 {(SESSION_OUTCOME_META[pendingProvisional.outcome] || {}).label?.toLowerCase() || "non-pass"}.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>

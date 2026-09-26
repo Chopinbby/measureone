@@ -173,7 +173,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
   if (remainingChunks <= 0) {
     projectionText = "Every chunk has been introduced at least once.";
   } else if (recentVelocity <= 0) {
-    projectionText = "No recent pace to project from yet — log a few sessions to see a projection.";
+    projectionText = "No recent pace to project from yet. Log a few sessions to see a projection.";
   } else {
     const projectedDay = currentDay + Math.ceil(remainingChunks / recentVelocity);
     // Calendar date, not a bare day-number (Decisions.md#open-questions,
@@ -240,7 +240,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
           ) : (
             <div className="manual-conf-row">
               <p className="wizard-hint" style={{ margin: 0, flex: 1 }}>
-                Effort-weighted average across every practice chunk — auto-calculated at {overallConfidence}% right
+                Effort-weighted average across every practice chunk, auto-calculated at {overallConfidence}% right
                 now.
               </p>
               <button className="ghost-btn" onClick={() => onSetOverallConfidence(overallConfidence)}>
@@ -257,7 +257,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
           <span className="stat-lbl">of last {consistencyWindow} day{consistencyWindow === 1 ? "" : "s"} practiced</span>
         </div>
         <div className="stat-card">
-          <span className="stat-num mono">{mostImproved ? `+${mostImproved.delta}%` : "—"}</span>
+          <span className="stat-num mono">{mostImproved ? `+${mostImproved.delta}%` : "n/a"}</span>
           <span className="stat-lbl">
             {mostImproved ? `Most improved: ${formatRange(mostImproved.chunk.start, mostImproved.chunk.end)}` : "No standout improvement this week"}
           </span>
@@ -271,7 +271,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
             <div
               key={d.dayNumber}
               className="heatmap-cell"
-              title={`Day ${d.dayNumber}${practicedDays.has(d.dayNumber) ? " — practiced" : ""}`}
+              title={`Day ${d.dayNumber}${practicedDays.has(d.dayNumber) ? ", practiced" : ""}`}
               style={{ background: practicedDays.has(d.dayNumber) ? "var(--teal)" : "var(--paper)" }}
             />
           ))}
@@ -365,7 +365,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
       <div className="panel">
         <h3>Outcome breakdown</h3>
         {allSessions.length === 0 ? (
-          <p className="wizard-hint">Nothing logged yet — check items off in Daily Practice.</p>
+          <p className="wizard-hint">Nothing logged yet. Check items off in Daily Practice.</p>
         ) : (
           <div className="analytics-bars">
             {outcomeBreakdown.map((o) => (
@@ -401,7 +401,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
       <div className="panel">
         <h3>Recent practice history</h3>
         {history.length === 0 ? (
-          <p className="wizard-hint">Nothing logged yet — check items off in Daily Practice.</p>
+          <p className="wizard-hint">Nothing logged yet. Check items off in Daily Practice.</p>
         ) : (
           <div className="history-list">
             {history.map(({ day, label }) => (

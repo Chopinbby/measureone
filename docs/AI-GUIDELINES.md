@@ -48,6 +48,32 @@ an existing term for a new concept that isn't actually the same thing. If a
 term is genuinely wrong (like the `kind: "section"` naming collision), that's
 a tracked refactor item, not license to improvise a new name inline.
 
+## No em dashes in user-facing copy
+
+Nothing the app displays should contain an em dash (—): JSX text, tip
+lines, tooltips (`title`), `window.alert`/`window.confirm` messages,
+placeholders, button labels, and strings built in `lib/` that end up on
+screen (`agendaStatusLabel`, `dueLabel`). Rework the sentence instead, choosing
+whatever reads most naturally for that specific sentence:
+
+- a period and a new sentence ("Nothing logged yet. Check items off in
+  Daily Practice."),
+- a comma ("…has already been introduced, so there's nothing left to
+  reschedule"),
+- a colon for a label followed by its detail ("Due today: 20 min planned",
+  "Light: technique only"),
+- parentheses for a true aside ("Link reference recordings (YouTube,
+  Spotify, wherever) so they're one click away").
+
+There's no single substitution that works everywhere. The redo of Pass 80
+reworked about 125 strings and used all four. A dash on its own as an empty
+placeholder became "n/a", and a separator inside a list-like row became the
+middle dot (·) the row already used. `test/copy-style.test.mjs` fails if an
+em dash appears anywhere the app can show it. The rule covers copy only:
+code comments, this file, and the rest of `docs/` use em dashes constantly,
+and that's fine. It's also exactly why new copy keeps picking them up, so
+check what you write.
+
 ## Update documentation alongside implementation
 
 If you change scheduling, confidence, chunking, or the data model, update

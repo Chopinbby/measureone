@@ -47,7 +47,10 @@ MeasureOne.jsx/
 │                               # rendering components, so nothing under
 │                               # components/ is covered. Logic that needs
 │                               # protecting belongs in lib/ — that's why
-│                               # lib/history.js exists (Pass 20).
+│                               # lib/history.js exists (Pass 20). One
+│                               # exception: browser-compat.test.mjs (Pass
+│                               # 101) scans all of src/ for syntax the
+│                               # Safari 14 build target can't parse.
 └── src/
     ├── main.jsx                 # ReactDOM entry point, just mounts <App />
     ├── App.jsx                  # state + layout only — ~2,600 lines; renders
@@ -190,8 +193,9 @@ MeasureOne.jsx/
                 └── technique/  TechniquePanel.jsx, TechniqueTaskCard.jsx,
                              TechniqueLibrary.jsx, TechniqueMethods.jsx,
                              AddTechniqueItemForm.jsx, StarButton.jsx,
-                             format.js (Pass 101; TechniqueTab.jsx sits
-                             beside the other tabs)
+                             KeyText.jsx (♯/♭ in key names), format.js
+                             (key list, labels) — Pass 101; TechniqueTab.jsx
+                             sits beside the other tabs
 ```
 
 This split (see "Module layout" below for the reasoning) replaced the
@@ -204,7 +208,7 @@ single-file Claude.ai artifact.
 |---|---|
 | `NumberInput` | Every numeric field uses this instead of a raw `<input type="number">` — decouples displayed text from committed value (commits on blur/Enter) to avoid a controlled-input bug where clearing a field to retype gets fought by React re-rendering the old value mid-keystroke. Always use this for numeric fields. |
 | `ManuscriptDoodle` / `ManuscriptStrip` | Decorative SVG staff/clef band and the colored horizontal strip of practice chunks shown on the dashboard and wizard review step. `ManuscriptStrip` uses a custom tooltip, not native `title`. |
-| `BasicsFields`, `SectionsEditor`, `DifficultyEditor`, `RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`, `DocumentsEditor` | Shared field-editor components, used in both `Wizard` and Settings — see [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows). Add new piece-level fields to one of these rather than duplicating markup. Target tempo lives in `BasicsFields`, not `ScheduleFields`, despite being schedule-adjacent — see the Product-Principles entry for why (it and the other Wizard-first-step extras don't gate plan generation, so they're grouped for convenience rather than by strict topical fit). Tempo zones, recordings, and documents are rendered directly in `Wizard.jsx`'s first step (not folded into `BasicsFields` itself), specifically so they don't also appear a second time in Settings' "Piece" panel — Settings keeps its own separate "Tempo zones"/"Recordings"/"Documents" panels for post-setup editing, unchanged. `BasicsFields` owns the "single piece / multiple movements" toggle as local state; an optional `onMultiPartChange` callback prop mirrors it up to whichever parent needs to see it — both `Wizard` and `SettingsTab` use this to block advancing/saving whenever the toggle is on and the work title is blank, see [Decisions.md](Decisions.md#multi-movement-works). |
+| `BasicsFields`, `SectionsEditor`, `DifficultyEditor`, `RecurringEditor`, `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`, `DocumentsEditor` | Shared field-editor components, used in both `Wizard` and Settings — see [Product-Principles.md](Product-Principles.md#shared-editors-not-divergent-flows). Add new piece-level fields to one of these rather than duplicating markup. Target tempo lives in `BasicsFields`, not `ScheduleFields`, despite being schedule-adjacent — see the Product-Principles entry for why (it and the other Wizard-first-step extras don't gate plan generation, so they're grouped for convenience rather than by strict topical fit). Tempo zones, recordings, and documents are rendered directly in `Wizard.jsx`'s first step (not folded into `BasicsFields` itself), specifically so they don't also appear a second time in Settings' "Piece" panel — Settings keeps its own separate "Tempo zones"/"Recordings"/"Documents" panels for post-setup editing, unchanged. `BasicsFields` owns the "single piece / multiple movements" toggle as local state; an optional `onMultiPartChange` callback prop mirrors it up to whichever parent needs to see it — both `Wizard` and `SettingsTab` use this to block advancing/saving whenever the toggle is on and the work title is blank, see [Decisions.md](Decisions.md#multi-movement-works). **Since Pass 103**, `BasicsFields` also holds the piece's key fields ("Key of the piece", "Other keys in this piece" as chips), picked from `KEY_OPTIONS`/`keyOptionFor` (`components/tabs/technique/format.js`: 24 keys, each enharmonic pair one entry); `homeKey`/`otherKeys` are on `EDIT_FORM_FIELDS`. |
 | `RecordingsList`, `DocumentsList` | Render `piece.recordings` / `piece.documents` as clickable links; used on the Piece Overview dashboard and in Settings' read-only Piece Details. Identical component shape ({id, label, url}, filter-then-map, no empty-state placeholder) — `DocumentsList` differs only in icon (`FileText` vs `ExternalLink`), kept as a separate small component rather than a shared one with a prop-driven icon since the two are simple enough that the duplication costs less than the indirection would. |
 | `PartSwitcher` | Strip of sibling movements on the Overview of any piece belonging to a multi-movement work, plus "Add a movement". Shows each movement's own measures-touched percentage — deliberately not a combined work total, see [Decisions.md](Decisions.md#multi-movement-works). Does **not** render a work-title heading of its own — the hero card's eyebrow directly above already names the work; a `workName` prop and an `<h3>` heading here were removed to stop showing that title twice on the same screen. |
 | `Wizard` | Multi-step modal for creating a new piece (create-only — see [User-Flows.md](User-Flows.md#1-setting-up-a-new-piece)). |
@@ -224,7 +228,7 @@ single-file Claude.ai artifact.
 | `InterleavePanel` | Pass 29. `TodayTab`'s fourth view mode ("Interleaved") — rotates through chunks past Stabilizing (**since Pass 69**, pooled from the whole piece, not just today's schedule) on a mode-level timer (mirrors `ChecklistItem`'s own per-chunk timer pattern; **since Pass 69** the duration is graded by the current chunk's difficulty, `ROTATION_SECONDS_BY_DIFFICULTY`, not one flat value), reusing the same rep/BPM inputs and `onLogSession` call the regular checklist uses. Adds "Skip, just save time" and, when an auto-classified soft-miss/fail lands mid-rotation, saves it **provisionally** rather than committing it — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29). Leaving this mode with an unresolved provisional is gated by `App.jsx`'s `guardLeavingInterleaved`, reported up via `onInterleaveRiskChange` since `TodayTab` is the only thing that knows whether this panel is actually on screen. |
 | `RevivalEntryModal` | Collects `lastPlayedDate` and `tempoLadderStartFraction` before a revival cycle starts; nothing else gates "Begin revival." Styled like `Wizard`'s modal shell. **Since Pass 55, no longer collects `purpose`** — the "What's this revival for?" field, `REVIVAL_PURPOSE_OPTIONS`, and the `disabled={!purpose}` gate are all gone; `piece.revival.purpose` stays defined-but-always-`null` on the schema rather than being stripped (see [Data-Model.md](Data-Model.md#revival)). The `performanceTempo` field this row used to also mention was removed outright in Pass 35, well before this — a pre-existing doc error, not a Pass 55 change, corrected here while touching this row. **Since the same session as Pass 55, `tempoLadderStartFraction` is collected as a straight BPM value** ("Tempo ladder starting point (BPM)"), not a percentage of target — derived from `BPM / targetBPM` on commit, with the field's `min`/`max` mirroring the old 10%–95%-of-target bounds so the result can't land outside that range; falls back to a flat 60% default when the piece has no `targetBPM`. |
 | `DeletePieceModal` | Confirms permanent deletion by requiring the piece's exact name to be typed back, rather than a single `window.confirm()` — deletion has no undo and takes all practice history with it. |
-| `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. `PieceCheckRow` is the shared checkbox-row list item both modals render. **Since Pass 13**, `ImportPiecesModal` also shows a small "keep what's here" / "use the imported version" chooser under any matched piece whose practice-ladder progress genuinely conflicts with what's already saved (`diffImportedPiece`, [Algorithms.md](Algorithms.md#import-merge)) — most matches never show it, since an updatedAt-based recency check already resolves the common cases automatically. |
+| `ExportPiecesModal` / `ImportPiecesModal` / `PieceCheckRow` | Per-piece export/import picker — lets the user choose which pieces to include rather than an all-or-nothing backup file. **Since Pass 104**, each also has a "Technique library" row (a `PieceCheckRow`); the import row previews the merge ("N new, N newer tempos. Nothing here is removed.") and a red note says when the file's technique library, or some scales in it, couldn't be read. `PieceCheckRow` is the shared checkbox-row list item both modals render. **Since Pass 13**, `ImportPiecesModal` also shows a small "keep what's here" / "use the imported version" chooser under any matched piece whose practice-ladder progress genuinely conflicts with what's already saved (`diffImportedPiece`, [Algorithms.md](Algorithms.md#import-merge)) — most matches never show it, since an updatedAt-based recency check already resolves the common cases automatically. |
 | `RandomStartPanel` | Picks a uniformly random item from a pool and displays it (plus its memory anchor/note, if any) so a review session doesn't always start from the same place. Originally revival-only; **since Pass 21** also used by `MasterAgendaTab`'s Maintenance-due subtab; **since Pass 57** also used directly by `TodayTab`, all three on the same "don't let yourself choose the starting point" reasoning. Two ways to supply the pool: a ready-made list built via the exported `chunkEntry` helper, so labels can't drift between callers (`MasterAgendaTab`'s cross-piece maintenance-due pool, which needs to name each pick's piece; `TodayTab`'s single-piece pool of every chunk/transition/combo with 2+ logged sessions, hidden below 2 qualifying entries — **known gap**: filters on raw session count, not `loggedSessions()`, so a chunk padded by a skip/unconfirmed attempt can qualify too), or the original single-piece chunk/transition/section props, which `TodayTab`'s revival branch still passes unchanged (`RevivalTab` before Pass 88; sections stay in the pool only in this single-piece form). No changes to the component itself were needed to add the third caller. |
 | `ReassessSequencePanel` (Pass 87, `components/tabs/revival/`) | The whole "rate your confidence on each chunk" UI for revival's reassessment phase — one chunk shown inline at a time (no grid, no modal-over-grid): Quick rate (`CONFIDENCE_PRESETS`), a "Log time" timer (stopping it logs directly — no separate log step, a same-session follow-up), Current/Target BPM, a collapsible Notes field, a collapsible "Chunk Info" stats dropdown, an "N of M rated" count next to a grid-icon button that opens a separate "Progress" modal (difficulty-tinted, checkmark-when-rated squares, one per chunk), and Previous/Next/Finish footer controls. **Walks base practice chunks only** (`kind: "section"`, `TodayTab`'s `revivalBaseChunks`) — a transition is still scheduled for practice in the generated plan below, just not individually rated here (a same-session follow-up to Pass 87/88, once it came up that a transition was showing up as something to rate). Retired `PieceMapTab`'s old `sequentialMode` embed entirely (see that row above) — this is a dedicated component, not a shared one. Rendered only by `TodayTab.jsx`'s revival branch (see that row above); never a standalone tab. The flagged-chunks summary (rough/lost, same field Piece Map's run-through flag sets — see [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#post-run-through-logging)) and the tempo-ladder-starting-point control (now in `SettingsTab`, see that row below) are no longer part of this component or its reassessment phase at all — flagging only ever happens through ordinary Piece Map now, and the tempo ladder is collected once at revival entry (`RevivalEntryModal`) and edited afterward from Settings. See [Algorithms.md](Algorithms.md#revival) and [Decisions.md](Decisions.md#revival). |
 | `ProgressTab` | **Since Pass 58, the first panel on the tab is "Overall confidence"** — the resolved value (auto or manual) of `computeOverallConfidence` (`lib/confidence.js`), with an inline set/clear control mirroring `PieceMapTab`'s existing confidence-override `.field` block exactly (`NumberInput` + "Reset to automatic," or a hint showing the auto value + "Set manually"). Below that, trend/diagnosis charts, in render order: rolling-window consistency + most-improved stat cards, consistency heatmap, actual-vs-planned, **estimated vs. actual practice time** (Pass 51), projected finish, tempo trend, outcome breakdown, **confidence by difficulty**, recent practice history. **Also since Pass 58**: the outcome-breakdown denominator (`allJudgedSessions`, `lib/confidence.js`) now excludes any session `sessionOutcome()` can't classify at all (a `"__consolidation__"` or `"__cold_start__"` session, which is neither skipped/provisional nor chunk-shaped) — found on review, a pre-existing dilution bug since Pass 6, not new to this pass. "Confidence by difficulty" was folded in from the former `AnalyticsTab` in **Pass 20**, which removed that tab entirely (file deleted, `analytics` entry gone from `NAV_BASE`) — relocated verbatim, not redesigned; its placement is pinned down rather than incidental, see [Decisions.md](Decisions.md#ux). The other Pass 20 fold-in, **recurring material payoff, was removed outright in Pass 32b** — display-only removal, the underlying scheduling-effort discount in `lib/chunking.js` is untouched. The `.analytics-*` CSS classes survive the rename and are **not** Analytics-specific — Progress's outcome bars always shared them. Recent practice history's labels come from `computePracticeHistory` (`lib/history.js`), not from logic inline here. **Since Pass 42**, a "View all pieces" button in the header links to `AllPiecesTab`. **Since Pass 51**, "Estimated vs. actual practice time" shows every practice chunk/transition/combo/single-section-run-through with a logged session in the same trailing window Consistency uses, as `EFFORT_TO_MIN`-based estimate vs. summed actual `durationSeconds` — reusing the actual-vs-planned chart's paired-bar visual language, but each item's pair scaled to its own taller bar rather than one shared scale, so a short chunk and a long run-through are both legible. Whole-piece and section-pair run-throughs are deliberately excluded — see [Decisions.md](Decisions.md#scheduling). |
@@ -309,11 +313,13 @@ library.
   `handleTechnique*` handlers (check off, log tempo, star scale/method,
   in-rotation and method switches, add/edit item, add custom method,
   change check octaves with keep/start fresh, and — since Pass 101 —
-  un-check) wrap `lib/technique.js`, and `TechniqueTab` calls them. Adding
-  a scale or putting one back in rotation also tops up today's list
-  (`topUpDayList`) so a short or empty list fills right away. Piece keys
-  aren't stored yet, so `techniqueRepertoireKeys` is an empty list until
-  Pass 103.
+  un-check) wrap `lib/technique.js`; `TechniqueTab` calls them, and Master
+  Agenda / Daily Practice get the card handlers as one
+  `techniquePanelHandlers` bundle (Pass 102). Adding a scale, putting one
+  back in rotation or switching it off, and importing a backup, also top up
+  today's list (`topUpDayList`). `techniqueRepertoireKeys` is
+  `useMemo(repertoireKeysFromPieces(pieces))` — every key of every active
+  piece (Pass 103).
   - **Today's list:** one effect builds it whenever the saved list's date
     isn't `techniqueToday`, rolling unfinished tasks forward
     (`buildDayList`). `techniqueToday` has its own trigger, since nothing
@@ -332,15 +338,14 @@ library.
   content. `exportReminderDismissed` is plain in-memory state, not
   persisted — a reload always re-shows a still-due reminder, so dismissing
   it is per-session, not a permanent "don't ask again."
-- `navItems` — `NAV_BASE` with `REVIVAL_NAV_ITEM` spliced in (before
-  Progress) only while `isInRevival(piece)` (`lib/revival.js`); the sidebar
-  renders this instead of `NAV_BASE` directly. The splice finds its
-  insertion point by `key` lookup, not by index, so reordering `NAV_BASE`
-  needs no change here — which is why **Pass 18**'s reorder (Master Agenda
-  moved to first) touched only the array itself. That pass also renamed the
-  `overview` entry's visible label to **"Piece Overview"**; its key and
-  route stay `"overview"`, so every `setActiveTab("overview")` call site is
-  unaffected.
+- `NAV_BASE` — the sidebar, rendered directly (the old `navItems` /
+  `REVIVAL_NAV_ITEM` splice is gone since Pass 88; revival lives inside
+  Daily Practice). Order: Master Agenda (**Pass 18** moved it first),
+  Technique (**Pass 101**, app-level, followed by a hairline `.nav-divider`),
+  then the piece-scoped items. Pass 18 also renamed the `overview` entry's
+  visible label to **"Piece Overview"**; its key and route stay
+  `"overview"`, so every `setActiveTab("overview")` call site is
+  unaffected. Every item's click goes through `guardLeavingActiveWork`.
 - Backup: `handleExportClick` opens `ExportPiecesModal` (pick which pieces
   to include, then `downloadBackup` on that subset — not an all-or-nothing
   export); `handleConfirmExport` also records `saveLastExportedAt(Date.now())`
@@ -352,7 +357,14 @@ library.
   it also re-derives each matched piece's ladder-state diff at confirm time
   and threads the resolved side (automatic, or the user's pick from the
   modal's divergence chooser) into `mergeImportedPiece`'s `ladderChoice`
-  parameter — see [Algorithms.md](Algorithms.md#import-merge).
+  parameter — see [Algorithms.md](Algorithms.md#import-merge). **Since
+  Pass 104**, both modals also have a "Technique library" row (export: on
+  by default; `downloadBackup(subset, technique)` adds a separate
+  `technique` block). On import, `readBackupTechnique` reads the block
+  (`importTechnique`/`importTechniqueInfo` state), and `handleConfirmImport`
+  merges it with `mergeImportedTechnique` through `updateTechnique`, then
+  tops up today's list. A file with only a technique library can be
+  exported and imported.
 
 `chunkSet` and `timeline` are `useMemo`'d off `piece` — pure derivations,
 never stored in `piece` itself. Schedule-related state that must persist

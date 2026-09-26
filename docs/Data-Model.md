@@ -127,7 +127,9 @@ piece = {
                          // Same shape as a technique item's key (tonic spelled
                          // "F♯"/"G♭"/…, quality "major"|"minor"). Matched AS
                          // SPELLED: a G♭ major piece tags G♭ major scales, not
-                         // F♯ major ("Gb" = "G♭" is the same spelling).
+                         // F♯ major ("Gb" = "G♭" is the same spelling). The
+                         // pickers show each enharmonic pair as ONE entry
+                         // ("F♯/G♭ major"), saved as the first spelling.
                          // Backfilled to null, never a materialized default.
   otherKeys,             // [{ tonic, quality }] | null — Pass 103, "Other keys in
                          // this piece". Deduped by spelling, never repeats
@@ -1097,8 +1099,13 @@ cross-piece "time practiced" total).
 **Stored since Pass 100; on screen since Pass 101.** Technique practice data is
 **app-level, not part of any piece**: one `localStorage` key of its own,
 `measureone-technique`, with its own update path (`updateTechnique`,
-`App.jsx`). It never goes through `setPieces` or `updatePiece`. **Not yet
-included in backups** — that is deferred to a later pass. The only
+`App.jsx`). It never goes through `setPieces` or `updatePiece`. **In backups
+since Pass 104:** the backup file gets a top-level `technique` block (this
+whole object, with its own `schemaVersion`) beside `pieces`; everything
+else in the file is unchanged, and a backup without the block imports as
+before. Importing merges it into what's here (`mergeImportedTechnique`,
+`lib/storage.js`), never replacing it — see
+[Algorithms.md](Algorithms.md#import-merge). The only
 piece-level addition is two optional fields, built in Pass 103:
 `homeKey` and `otherKeys` (see [The piece object](#the-piece-object)). Pieces
 link to scales **by key, never by specific scale**. The keys of every active

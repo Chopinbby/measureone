@@ -956,6 +956,21 @@ code proves the substitutions that ran, ran; it says nothing about
 substitutions that never got the chance to, or ones that ran in the wrong
 spot.
 
+## Empty storage after a session restart isn't proof of a wipe — check before concluding
+
+The built-in browser pane can come back with a fresh, empty storage area
+after the session restarts: same `localhost:5173` address, but none of the
+pieces a previous check saw. That looks exactly like data loss. Before
+reporting a wipe, or doing anything to "restore" it, check the app's own
+`measureone-first_use_at`: a timestamp from seconds after the dev server
+started means this storage has never held that data, so nothing was
+deleted. Say so plainly to the user either way.
+
+Worked example (Pass 103): a pre-test snapshot found no pieces where two
+had been the day before. `first_use_at` was 4 seconds after the new dev
+server started, so the pane had new storage and no delete had ever run. The
+checks then used a test piece made through the Wizard instead.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

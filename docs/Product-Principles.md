@@ -90,7 +90,7 @@ requirement line was clearer than a rotating technique suggestion. If a
 "recommend a specific technique" feature is proposed again, it's a new
 build, not a revival of `suggestMethods()`, which no longer exists.
 [Technique-Practice.md](Technique-Practice.md) is that new build: rotating
-practice methods for scales and arpeggios (designed, not built).
+practice methods for scales and arpeggios (built in Passes 99–104).
 
 ## Maximize long-term repertoire, not just today's session
 

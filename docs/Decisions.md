@@ -1873,7 +1873,7 @@ one unified formula.**
 implements this, called from `OverviewTab` to drive the "This piece might
 be due for a revival" banner (suppressed while a revival is already
 active). Returns every condition that independently fired, not just the
-first — see [Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7)
+first — see [Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83)
 for the full mechanics.
 
 - **Why:** Conditions 1 and 2 can only fire if a run-through was actually
@@ -5753,7 +5753,7 @@ component (`ReassessSequencePanel`) instead of continuing to share
   Next/Finish) is the same code, relocated — not rebuilt. What's actually
   new is the segmented per-chunk progress bar and the "Progress" modal
   (grid of difficulty-tinted, checkmark-when-rated squares) — see
-  [Algorithms.md](Algorithms.md#the-reassessment-panel-pass-87) for both.
+  [Algorithms.md](Algorithms.md#revival) for both.
 - **In-cell numbers in the Progress modal — resolved with the user before
   building:** the originating request said "no in-cell numbers once the
   piece has enough chunks to make them illegible," which read as
@@ -6771,10 +6771,10 @@ linked to Today's Practice — display and navigation only, no editing.**
 
 ## Technique practice
 
-**Designed, not built (Pass 98, docs only).** The full brief is
+**Designed in Pass 98, built in Passes 99–104.** The full brief is
 [Technique-Practice.md](Technique-Practice.md); the hand-picked numbers are
 inventoried in
-[Research.md](Research.md#technique-practice-constants-designed-not-built).
+[Research.md](Research.md#technique-practice-constants).
 These entries record the design decisions and what each one ruled out.
 
 - **The per-scale practice methods are a new build, not a revival of the
@@ -6852,6 +6852,50 @@ These entries record the design decisions and what each one ruled out.
     the list fixed for the day, which leaves a new user's first day empty.
   - **A new library starts empty**, with a prompt to add a scale.
     Alternative: pre-filling the 24 major and minor scales.
+  - **Review fixes before commit:** un-checking doesn't restore a tempo if
+    the check octaves changed since (it would undo a keep/start-fresh
+    choice); a check-off saved before undo existed is shown as
+    un-uncheckable rather than silently ignoring clicks; tempos are
+    limited to 30–300 (a typo can't become the baseline); the walk hint
+    hides when the key of the day isn't on today's list but keeps naming
+    today's key once it's checked off. Also: **no regex lookbehind
+    anywhere** — the build targets Safari 14, which can't parse it, so one
+    instance blanks the whole app there (`test/browser-compat.test.mjs`).
+- **Pass 102 — the same panel on Master Agenda and Daily Practice.** One
+  shared list in App state, so a check-off anywhere shows everywhere; real
+  today only. Calls made while building it:
+  - **Hidden on those two screens when today's list is empty** (library
+    empty, or every scale switched off), so a piece's page isn't cluttered
+    for someone who doesn't use Technique. The Technique page always shows
+    its panel. Alternative: always show it, empty state included.
+  - **Status on a scales-only day reads "<tier> — technique only"**
+    (confirmed with the user; em dash to match the other labels), instead
+    of "Nothing scheduled". Technique minutes count toward the Busy/Moderate
+    tier but never toward "N pieces scheduled". Alternatives: "Light,
+    technique only" (the card's comma), or leave "Nothing scheduled".
+  - **The visibility/minutes rule and the Status wording live in
+    `lib/technique.js`** (`techniqueTodaySummary`, `agendaStatusLabel`)
+    with tests, not in the two screens — found in review: component logic
+    can't be tested.
+- **Pass 104 — technique data in backups: merged, never replaced.** The
+  backup gets a separate `technique` block (own schema version) beside
+  `pieces`; old backups and bare-array backups import as before. Merge
+  rules (`mergeImportedTechnique`): same item = same form, key (as
+  spelled, with minor form), octaves and hands; the more recently
+  checked tempo wins and brings its check date and check octaves with it
+  (a tempo only means something with its octaves); a tie keeps what's
+  here; practice dates are combined; missing scales, custom methods and
+  method star/on-off states are added; the walk position is taken from
+  the backup only when the library here was empty (a restore). Review
+  fixes: an **empty** tempo from a backup (a "Start fresh" elsewhere)
+  never replaces a real one here, even with a newer check date — that
+  would remove something already here; and a technique block that can't
+  be read, or scales in it that can't, are **reported** in the import
+  modal and final message instead of skipped silently. Alternative
+  deferred on purpose: a per-item conflict picker. Known, accepted: since
+  identity uses the key as spelled, a scale saved as "G♭ major" (only
+  possible during the brief 26-key list, so only in test data) won't merge
+  with an "F♯ major" twin — both stay.
 - **Pass 103 follow-up, on direct request — pieces link to scales by the
   key as written, not as sounded.** A piece in G♭ major tags and paces G♭
   major scales, not F♯ major ("technically it's a different key").
@@ -6883,7 +6927,7 @@ These entries record the design decisions and what each one ruled out.
 - **Decided 2 — the slow-tier numbers (slowest third, 7-day cooldown) stay
   as starting values, to tune after real use.** Alternative ruled out:
   settling on different values now, with no usage data to pick them from.
-  Listed in [Research.md](Research.md#technique-practice-constants-designed-not-built).
+  Listed in [Research.md](Research.md#technique-practice-constants).
 - **Decided 3 — if a user stars very many scales, the walk can starve;
   accepted.** Alternative ruled out: a guard against the walk starving
   (for example, always reserving one daily slot for the walk). Starring
@@ -6901,16 +6945,15 @@ These entries record the design decisions and what each one ruled out.
   take), which would break the priority order. Levers kept for later, if
   crowding bothers real use: a settings UI for scales per day, or
   repertoire pace per key rather than per item (see
-  [Roadmap.md](Roadmap.md#designed-queued-for-build)).
+  [Roadmap.md](Roadmap.md#priority-ordered-backlog)).
 
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
-- **Technique practice — known gaps found in the Passes 99–100 review
-  (logged, not fixed).** None blocks building the screens; each needs a
-  decision or a small fix in a later pass:
+- **Technique practice — known gaps found in the Passes 99–100 review.**
+  Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**
      `App.jsx` re-reads the date on focus, on visibility, and once a
      minute, so for up to a minute after midnight `handleTechniqueComplete`
@@ -6924,11 +6967,13 @@ oversight to silently fix; surface it instead.
      (`measureone-technique-corrupt`) only covers a whole unreadable
      entry, not a single bad item. A task still pointing at a dropped
      item's id stays on the list, so the screens must handle a missing
-     item.
-  3. **Technique data isn't in backups yet.** The design says it is
-     ([Technique-Practice.md](Technique-Practice.md#data)), but
-     `downloadBackup`/import only carry pieces, and none of Passes 101–104
-     as planned clearly owns adding it.
+     item (they do: the panel skips it). **Since Pass 104, importing a
+     backup reports how many of its scales couldn't be read** instead of
+     dropping them silently — but loading this app's own saved data still
+     drops them without a word.
+  3. ~~**Technique data isn't in backups yet.**~~ **Resolved in Pass 104**
+     (see the Pass 104 entry in [Technique practice](#technique-practice)).
+     Original note: `downloadBackup`/import only carried pieces.
   4. ~~**A check-off can't be undone.**~~ **Resolved in Pass 101, on
      direct request: built** (`uncompleteTask`, see
      [Algorithms.md](Algorithms.md#completing-tempo-and-octaves)). Original
@@ -6943,6 +6988,13 @@ oversight to silently fix; surface it instead.
      running" spacing and the week-alternation start date). Added in the
      same commit as this entry; listed here so the Pass 99 summary's flag
      is closed.
+
+- **Master Agenda's Status wording has two pre-existing quirks** (seen
+  while building Pass 102, not caused by it, not fixed): the count isn't
+  pluralized ("Light — 1 pieces scheduled"), and a day whose pieces add up
+  to 0 minutes still reads "Light — 2 pieces scheduled" next to "Total
+  planned 0m". Both live in `agendaStatusLabel` / the agenda's minute
+  totals; worth a decision on wording if touched.
 
 - ~~**A piece that's already been rescheduled once via "cram it into what's
   left" while its own plan was already fully elapsed can permanently stop

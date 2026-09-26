@@ -3,26 +3,44 @@
 > **Purpose:** The canonical design brief for Technique practice — a daily
 > list of scale and arpeggio work shown alongside piece practice, plus a
 > Technique page for managing the scale library and practice methods.
-> **Audience:** Whoever builds Passes 99–104, and anyone later changing how
-> technique tasks are chosen, shown, or stored.
+> **Audience:** Anyone changing how technique tasks are chosen, shown, or
+> stored (the brief Passes 99–104 were built from).
 > **Scope:** What the feature does, where it appears, what it stores, and how
 > each day's list is built. Not the reasoning behind each choice — see
 > [Decisions.md](Decisions.md#technique-practice). Not the tuning status of
 > its numbers — see
-> [Research.md](Research.md#technique-practice-constants-designed-not-built).
+> [Research.md](Research.md#technique-practice-constants).
 > **Related:** [Decisions.md](Decisions.md#technique-practice) ·
-> [Research.md](Research.md#technique-practice-constants-designed-not-built) ·
+> [Research.md](Research.md#technique-practice-constants) ·
 > [Data-Model.md](Data-Model.md#technique-practice-data-app-level) ·
-> [Roadmap.md](Roadmap.md#designed-queued-for-build) ·
+> [Roadmap.md](Roadmap.md#priority-ordered-backlog) ·
 > [Product-Principles.md](Product-Principles.md#recommend-the-highest-impact-next-action)
 > **Update when:** Any pass from 99 onward builds part of this (mark what
 > shipped, and move anything that turned out differently into
 > [Decisions.md](Decisions.md#technique-practice)), or a decision below is
 > revisited.
 
-**Status: designed, not built.** Recorded in Pass 98 (docs only). Nothing in
-`src/` implements any of this yet. The first pass with visible behavior
-(Pass 101) writes the `CLAUDE.md` "Since Pass" entry.
+**Status: built (Passes 99–104).** Engine `src/lib/technique.js` (99), storage and
+App wiring (100), the Technique page (101), the panel on Master Agenda and
+Daily Practice (102), piece keys (103), backups (104). The brief below is
+kept as written; where the build differs, the list below says so and
+[Decisions.md](Decisions.md#technique-practice) has the reasoning.
+
+**Shipped differently from the brief** (all confirmed with the user):
+- Pace is a days-a-week target (starred ~3, repertoire ~4, both 3–4
+  alternating weeks), not x2/x3/x5 multipliers — [Decided](#decided) item 4.
+- Slow tier = slowest third of in-rotation items **by count**, not by tempo range.
+- A check-off can be **undone**; adding a scale or putting one back in
+  rotation **tops up today's list** at once; switching a scale off removes
+  its unfinished task from today.
+- Tempos are limited to 30–300.
+- The walk hint shows only when the key of the day is on today's list, and
+  keeps naming today's key after it's checked off.
+- On Master Agenda and Daily Practice the panel is hidden when today's list
+  is empty; a scales-only day reads "<tier> — technique only".
+- Piece keys are matched **as written** (G♭ ≠ F♯), and the key lists show
+  each enharmonic pair as one entry ("F♯/G♭ major") — see [Decided](#decided) item 1.
+- Backups merge technique data and never remove anything here.
 
 **Approved UI:** [`mockups/technique-practice.html`](mockups/technique-practice.html)
 — a saved copy of the "Technique Practice Mockup" artifact. It uses sample
@@ -200,7 +218,7 @@ methods. A method counts as "used" only when the task is done.
 pace targets, 85% starting tempo, 5 minutes per scale, 3 tasks per day, 3–4
 methods per scale, slowest third, 7-day cooldown) are starting values, not
 derived from any study. The canonical inventory is in
-[Research.md](Research.md#technique-practice-constants-designed-not-built).
+[Research.md](Research.md#technique-practice-constants).
 
 ## Not in v1
 

@@ -41,7 +41,7 @@ documents to consult for which kind of change.
 | [Architecture.md](Architecture.md) | How is the code organized, and how should it be split up? |
 | [Decisions.md](Decisions.md) | Why were things built this way, and what was rejected? |
 | [Roadmap.md](Roadmap.md) | What's done, what's next, in what order? |
-| [Technique-Practice.md](Technique-Practice.md) | How will daily scale and arpeggio practice work? (Designed, not built.) |
+| [Technique-Practice.md](Technique-Practice.md) | How does daily scale and arpeggio practice work, and what shipped differently from the brief? |
 | [AI-GUIDELINES.md](AI-GUIDELINES.md) | How should an AI assistant work in this project? |
 
 ## How this is meant to stay useful

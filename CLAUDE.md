@@ -262,6 +262,13 @@ chunking, scheduling, and confidence are actually computed, see
   (Pass 20). Iterating `timeline.days[]` ids instead is safe by
   construction. See
   [`docs/Data-Model.md`](docs/Data-Model.md#pieceprogress-keys-are-not-guaranteed-to-exist-in-the-chunk-set).
+- **No regex lookbehind (`(?<=…)`, `(?<!…)`) anywhere in `src/`.** The
+  build targets Safari 14, which can't parse it and esbuild can't rewrite
+  it — one instance blanks the whole app there, not just one screen.
+  `test/browser-compat.test.mjs` fails if it appears (Pass 101).
+- **Technique data is app-level — never `setPieces`/`updatePiece`.** It
+  lives in `App.jsx`'s `technique` state and its own localStorage key, and
+  every change goes through `updateTechnique` (Pass 100).
 - **Logic that needs a regression test belongs in `src/lib/`.** The test
   suite (`npm test`, `node:test`) is lib-level only — there is no harness
   for rendering components, so nothing in `components/` can be tested.
@@ -1749,11 +1756,10 @@ can't split it. Use it anywhere a key name is shown, and wrap it with its
 surrounding words when the parent is a flex row with a gap (buttons are).
 **Don't use regex lookbehind (`(?<=…)`/`(?<!…)`) anywhere:** the build
 targets Safari 14, which can't read it, and one instance stops the whole
-app loading there. `test/browser-compat.test.mjs` fails if it reappears. Still not built:
-the panel on Master Agenda/Daily Practice (Pass 102), piece keys and the
-"Repertoire in this key" pill (Pass 103 — the pill already renders if
-`repertoireKeys` matches, but that list is empty until then), technique
-data in backups, and a settings UI for scales per day / minutes per scale.
+app loading there. `test/browser-compat.test.mjs` fails if it reappears. Built
+since: the panel on Master Agenda/Daily Practice (Pass 102), piece keys
+(Pass 103), backups (Pass 104) — see below. Still not built: a settings UI
+for scales per day / minutes per scale.
 See [`docs/Architecture.md`](docs/Architecture.md#main-ui-components) and
 [`docs/Decisions.md`](docs/Decisions.md#technique-practice).
 
@@ -1783,3 +1789,28 @@ live in `lib/technique.js` with tests, not in the two components. **Technique st
 schedule count, `ScheduleBanner`, reschedule dialog or piece-progress
 code reads it (verified unchanged in the browser, reschedule dialog text
 included). Don't wire technique into those: it isn't part of any piece.
+
+**Since Pass 103**, a piece has two optional keys, `homeKey` and
+`otherKeys` (`{ tonic, quality }`, the technique items' shape), edited in
+`BasicsFields` (Wizard and Settings) and on `EDIT_FORM_FIELDS`. Backfilled
+to `null`, never a materialized value. The keys of every **active** piece
+(paused/archived don't count; mid-revival does) — `repertoireKeysFromPieces`,
+`lib/technique.js` — tag matching scales "Repertoire in this key" and pace
+them. **Matched as spelled** (`sameSpelledKey`: a G♭ major piece doesn't tag
+F♯ major), while the pickers show each enharmonic pair as **one** entry
+("F♯/G♭ major", 24 keys, saved as the first spelling; `keyOptionFor`,
+`technique/format.js`). Also: the app-wide font list names Helvetica Neue /
+Segoe UI Symbol after Inter and Fraunces, because neither has ♯/♭ and the
+browser's fallback drew "E♭" as "E ♭". See
+[`docs/Decisions.md`](docs/Decisions.md#technique-practice).
+
+**Since Pass 104**, backups carry the technique library: a separate
+`technique` block (own schema version) beside `pieces`, a "Technique
+library" row in both backup modals, and `mergeImportedTechnique`
+(`lib/storage.js`), which merges and **never removes anything here**. The
+newer checked tempo wins (with its date and check octaves), but an empty
+tempo never replaces a real one. An unreadable block, or unreadable scales
+in it, are reported instead of skipped (`readBackupTechnique`). Old and
+bare-array backups import as before. See
+[`docs/Algorithms.md`](docs/Algorithms.md#import-merge).
+

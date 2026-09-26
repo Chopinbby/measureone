@@ -324,6 +324,14 @@ scheduled day, or plain text mid-revival. See
 92, 94, and 96's own decision entries respectively; Pass 93's own entry
 sits earlier in [Decisions.md](Decisions.md#ux), just above Pass 94's).
 
+**Technique practice (Passes 98–104)** — daily scales and arpeggios: a
+Technique page (Today / Library / Methods), the same daily panel on Master
+Agenda and every piece's Daily Practice, piece keys that tag and pace
+"Repertoire in this key" scales, and technique data in backups. App-level
+data, never part of a piece. See [Technique-Practice.md](Technique-Practice.md)
+(including what shipped differently from the brief) and
+[Decisions.md](Decisions.md#technique-practice).
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold
@@ -332,17 +340,6 @@ Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 [Decisions.md](Decisions.md#ux) for the pinned-down panel placement).
 Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale.
-
-## Designed, queued for build
-
-- **Technique practice** — Passes 98–104. **Status: designed, not built**
-  (Pass 98 recorded the design in docs only). A daily list of up to 3 scale
-  and arpeggio tasks, each with 3–4 rotating practice methods, shown on
-  Master Agenda and every piece's Daily Practice, plus a Technique page
-  (Today / Library / Methods). App-level data, never "behind". Full brief:
-  [Technique-Practice.md](Technique-Practice.md); decisions:
-  [Decisions.md](Decisions.md#technique-practice). Levers kept for later,
-  not in v1: a settings UI for scales per day, and repertoire pace per key.
 
 ## Priority-ordered backlog
 
@@ -434,6 +431,12 @@ assuming this section is stale.
    having enough session history to tune against.
 5. Cloud sync / accounts / multi-device — everything is `localStorage`
    today, single browser only.
+6. **Technique practice follow-ups** (kept for later, not in v1): a
+   settings UI for scales per day and minutes per scale (defaults only
+   today); repertoire pace per key rather than per scale, if crowding at
+   3 tasks a day bothers real use (Decided 5); technique time in
+   Progress / "time practiced" / the consistency heatmap; offering to add
+   a missing key's scales. See [Technique-Practice.md](Technique-Practice.md#not-in-v1).
 
 ## Housekeeping (not urgent, but compounding)
 

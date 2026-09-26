@@ -106,7 +106,7 @@ export const CONFIDENCE_PRESETS = [
 // Technique practice (scales and arpeggios) — Pass 99, engine only. Every
 // number the engine in lib/technique.js tunes on lives here, so a change
 // after real use is one line. Hand-picked, not derived from a study — see
-// docs/Research.md#technique-practice-constants-designed-not-built and
+// docs/Research.md#technique-practice-constants and
 // docs/Technique-Practice.md.
 //
 // Pace is a days-a-week target, not the brief's original x3/x2/x5 exposure

@@ -820,6 +820,27 @@ with no warning in any direction — and restoring a *genuinely more-advanced*
 backup (e.g. from a second device) no longer silently loses that advanced
 ladder state to the "existing always wins" rule the way it used to.
 
+### Technique library (Pass 104)
+
+A backup's `technique` block is read by `readBackupTechnique` (returns
+`{ technique, unreadable, skippedItems }`, so an unreadable block or
+unreadable scales are reported, not skipped silently) and merged by
+`mergeImportedTechnique(existing, imported)` — both `lib/storage.js`.
+Nothing here is ever removed:
+- **Same item** = same form, key as spelled (`sameSpelledKey`) with minor
+  form, octaves and hands. The more recently *checked* tempo wins, moving
+  `evenTempo`, `lastCheckedDate` and `checkOctaves` together; a tie keeps
+  what's here, and an empty imported tempo never replaces a real one.
+  `lastPracticedDate` takes the later date, `practicedDates` the union,
+  and the imported method last-used dates fold in (later date per method)
+  under the local item's id. Star, rotation, octaves and hands stay local.
+- **New items** are added (fresh id if theirs is taken here); custom
+  methods are added unless one here has the same id or name; a method's
+  star/on-off state is added only where there's none here.
+- Today's list and settings stay local; the walk position comes from the
+  backup only if the library here was empty. `App.jsx` then tops up
+  today's list (`topUpDayList`).
+
 ## Adaptive review
 
 **Superseded as of Pass 5 of the maintenance-ladder build — kept in this
@@ -3479,12 +3500,12 @@ same pass).
 
 ## Technique practice engine (Pass 99)
 
-**Engine only — no screens, no saving, nothing reads piece keys yet.**
+Built in Pass 99; saved and wired up in Pass 100, on screen since 101.
 `src/lib/technique.js`, pure functions with no clock: every function that
 needs a date takes `today` (an ISO date string) and never reads the current
 date itself. Design: [Technique-Practice.md](Technique-Practice.md).
 Constants: `TECHNIQUE_*` in `src/lib/constants.js`, inventoried in
-[Research.md](Research.md#technique-practice-constants-designed-not-built).
+[Research.md](Research.md#technique-practice-constants).
 Tests: `test/technique.test.mjs`.
 
 ### Keys and the walk
@@ -3512,6 +3533,10 @@ Tests: `test/technique.test.mjs`.
   fails if it comes back.
 
 ### Pace: days-a-week targets (tier 1)
+
+`repertoireKeys` is every key of every **active** piece (its `homeKey`
+plus `otherKeys`; paused/archived pieces don't count, mid-revival does),
+built by `repertoireKeysFromPieces` and matched as spelled (see above).
 
 `paceDaysPerWeek(item, repertoireKeys, today)`: 4 for a repertoire-key item,
 3 for a starred one, and for an item that is both, 4 on even calendar weeks
@@ -3605,9 +3630,9 @@ library of methods. Methods are recorded as used only by `completeTask`.
 
 `topUpDayList(state, dayList, today)` fills a short list's free slots
 (pace, slow, walk, no carry-over) without touching what's already on it,
-done or not. `App.jsx` calls it only when a scale is added or put back in
-rotation, so someone's first scales show up the same day instead of
-tomorrow. It isn't run after a check-off, so finishing the key of the day
+done or not. `App.jsx` calls it only when a scale is added, put back in
+rotation or switched out of it (below), or after a backup import (Pass 104),
+so someone's first scales show up the same day instead of tomorrow. It isn't run after a check-off, so finishing the key of the day
 never pulls the next key's scales in early. `buildDayList` and
 `topUpDayList` share one private fill routine.
 
@@ -3626,3 +3651,16 @@ from `walkHint(items, walkPosition, dayList)`:
   day. On a day when starred, repertoire or slow scales fill every slot,
   the walk doesn't run, and the hint would otherwise name a key nobody is
   practicing.
+
+### Today's list on other screens (Pass 102)
+
+`techniqueTodaySummary(technique, today)` decides whether Master Agenda and
+Daily Practice show the shared panel — only when the saved list is
+today's and has at least one task whose scale still exists — and how many
+minutes it adds to Total planned (`minutesPerScale` per task, done or
+not). `agendaStatusLabel(totalMinutes, pieceCount, techniqueMinutes)`
+words Master Agenda's Status: the tier (Busy day > 60, Moderate > 30,
+else Light) uses the total including technique; "N pieces scheduled"
+never counts technique; a scales-only day reads "<tier> — technique
+only". Nothing schedule-related (behind-schedule, reschedule, the
+schedule banner) reads technique data.

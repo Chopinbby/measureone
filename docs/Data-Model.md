@@ -143,6 +143,20 @@ piece = {
                          // Algorithms.md#splitting-a-chunk-pass-97 and
                          // Decisions.md#splitting-a-chunk-pass-97.
   targetBPM,             // number | null — whole-piece default tempo target
+  homeKey,               // { tonic, quality } | null — Pass 103, "Key of the piece".
+                         // Same shape as a technique item's key (tonic spelled
+                         // "F♯"/"G♭"/…, quality "major"|"minor"). Matched AS
+                         // SPELLED: a G♭ major piece tags G♭ major scales, not
+                         // F♯ major ("Gb" = "G♭" is the same spelling). The
+                         // pickers show each enharmonic pair as ONE entry
+                         // ("F♯/G♭ major"), saved as the first spelling.
+                         // Backfilled to null, never a materialized default.
+  otherKeys,             // [{ tonic, quality }] | null — Pass 103, "Other keys in
+                         // this piece". Deduped by spelling, never repeats
+                         // homeKey; empty is stored as null. Both fields: set in
+                         // BasicsFields (Wizard + Settings), on EDIT_FORM_FIELDS,
+                         // read only by repertoireKeysFromPieces (lib/technique.js)
+                         // — active pieces only — to tag and pace Technique scales.
   bpmZones,              // [{ id, start, end, bpm }] — per-range tempo overrides
   recordings,            // [{ id, label, url }] — reference recordings (YouTube, Spotify, etc.),
                          // shown as links on the dashboard; purely referential, not embedded playback
@@ -1105,6 +1119,65 @@ either piece-level setting. See
 `fromSetup`, the BPM-seeding rule, and what this pass deliberately left
 out (Settings-side spot management, wiring focus-spot minutes into any
 cross-piece "time practiced" total).
+
+## Technique practice data (app-level)
+
+**Stored since Pass 100; on screen since Pass 101.** Technique practice data is
+**app-level, not part of any piece**: one `localStorage` key of its own,
+`measureone-technique`, with its own update path (`updateTechnique`,
+`App.jsx`). It never goes through `setPieces` or `updatePiece`. **In backups
+since Pass 104:** the backup file gets a top-level `technique` block (this
+whole object, with its own `schemaVersion`) beside `pieces`; everything
+else in the file is unchanged, and a backup without the block imports as
+before. Importing merges it into what's here (`mergeImportedTechnique`,
+`lib/storage.js`), never replacing it — see
+[Algorithms.md](Algorithms.md#import-merge). The only
+piece-level addition is two optional fields, built in Pass 103:
+`homeKey` and `otherKeys` (see [The piece object](#the-piece-object)). Pieces
+link to scales **by key, never by specific scale**. The keys of every active
+piece (paused and archived don't count; mid-revival does) feed the engine's
+repertoire pace and the "Repertoire in this key" tag, via
+`repertoireKeysFromPieces` (`lib/technique.js`).
+
+The schema is `validateAndMigrateTechnique` / `defaultTechnique`
+(`lib/storage.js`); the engine that reads it is `lib/technique.js`.
+
+```js
+{
+  schemaVersion: 1,             // a save with none is read as version 1
+  items: [{
+    id, form: "scale" | "arpeggio",
+    tonic: "F#",                // any spelling; enharmonics compare equal
+    quality: "major" | "minor",
+    minorForm: "natural" | "harmonic" | "melodic" | null,
+    octaves: 1-4, hands: "together" | "thirds" | "sixths",
+    evenTempo: number | null,   // last verified even tempo
+    checkOctaves: 1-4,          // octaves for the even-rhythm check
+    lastCheckedDate: ISO | null,   // last time a tempo was logged
+    lastPracticedDate: ISO | null, // last check-off of any kind
+    practicedDates: [ISO],      // last 14 days of practice; the weekly pace reads it
+    starred, inRotation,
+  }],
+  methodState: { [methodId]: { starred, enabled } }, // built-ins live in code
+  customMethods: [{ id, name, technique, description, appliesTo, custom: true }],
+  methodLastUsed: { [itemId]: { [methodId]: ISO } }, // written only on completion
+  walkPosition: 0-23,           // circle-of-fifths position; moves on completion
+  dayList: { date: ISO, tasks: [{ itemId, methodIds, done, tier, tempo,
+    undo? }] } | null,          // undo: only on a done task (Pass 101) — what
+                                // the check-off changed, for uncompleteTask,
+                                // plus the check octaves at the time
+  settings: { scalesPerDay: 3, minutesPerScale: 5 }, // defaults only, no UI in v1
+  updatedAt: epoch ms | null,
+}
+```
+
+- **`practicedDates` isn't in the design brief.** The engine's weekly pace
+  (starred about 3 days a week, repertoire about 4) needs to count the days
+  practiced this week, which `lastPracticedDate` alone can't give.
+- **Loading never throws.** A missing key gives defaults, and each
+  wrong-typed field falls back on its own rather than failing the whole
+  load. Unreadable JSON is copied to `measureone-technique-corrupt` before
+  defaults replace it, so the next save can't silently destroy it.
 
 ## Known simplifications worth knowing about
 

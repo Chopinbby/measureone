@@ -1161,6 +1161,346 @@ describe("[Pass 91 follow-up] focus spots — position-based measure backfill an
   });
 });
 
+/* ------------------------------------------------------------------ */
+/*  Technique data (Pass 100) — app-level, its own key and schema.     */
+/* ------------------------------------------------------------------ */
+
+import {
+  TECHNIQUE_KEY,
+  TECHNIQUE_CORRUPT_BACKUP_KEY,
+  TECHNIQUE_SCHEMA_VERSION,
+  defaultTechnique,
+  validateAndMigrateTechnique,
+  loadTechniqueFromStorage,
+  saveTechniqueToStorage,
+} from "../src/lib/storage.js";
+
+// Minimal in-memory localStorage for the load/save functions. `failWrites`
+// makes setItem throw the way a full browser store does.
+function installLocalStorage(initial = {}) {
+  const store = { ...initial };
+  const ls = {
+    failWrites: false,
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => {
+      if (ls.failWrites) throw new Error("QuotaExceededError");
+      store[k] = String(v);
+    },
+    removeItem: (k) => { delete store[k]; },
+    store,
+  };
+  globalThis.localStorage = ls;
+  return ls;
+}
+
+describe("technique storage (Pass 100)", () => {
+  test("defaults: empty library, walk at C, no list yet, 3 scales / 5 minutes", () => {
+    const d = defaultTechnique();
+    assert.equal(d.schemaVersion, TECHNIQUE_SCHEMA_VERSION);
+    assert.deepEqual(d.items, []);
+    assert.equal(d.walkPosition, 0);
+    assert.equal(d.dayList, null);
+    assert.deepEqual(d.settings, { scalesPerDay: 3, minutesPerScale: 5 });
+  });
+
+  test("a key separate from every piece's key", () => {
+    assert.ok(!TECHNIQUE_KEY.startsWith("measureone-piece:"));
+  });
+
+  test("migration: a save with no schemaVersion and missing fields is backfilled", () => {
+    const old = {
+      items: [{ id: "a", tonic: "D", quality: "major", evenTempo: 100 }],
+      walkPosition: 5,
+    };
+    const m = validateAndMigrateTechnique(old);
+    assert.equal(m.schemaVersion, TECHNIQUE_SCHEMA_VERSION);
+    assert.equal(m.walkPosition, 5);
+    assert.deepEqual(m.items[0], {
+      id: "a", form: "scale", tonic: "D", quality: "major", minorForm: null, octaves: 2,
+      hands: "together", evenTempo: 100, checkOctaves: 2, lastCheckedDate: null,
+      lastPracticedDate: null, practicedDates: [], starred: false, inRotation: true,
+    });
+    assert.deepEqual(m.methodState, {});
+    assert.deepEqual(m.settings, { scalesPerDay: 3, minutesPerScale: 5 });
+  });
+
+  test("migration keeps a valid save byte-for-byte after one round trip", () => {
+    const once = validateAndMigrateTechnique({
+      items: [{ id: "a", tonic: "F#", quality: "minor", minorForm: "melodic", octaves: 3, checkOctaves: 1, practicedDates: ["2025-01-06"] }],
+      methodState: { eyes: { starred: true, enabled: true } },
+      customMethods: [{ id: "m1", name: "LH alone", technique: "Memory", appliesTo: "scale" }],
+      methodLastUsed: { a: { eyes: "2025-01-06" } },
+      dayList: { date: "2025-01-06", tasks: [{ itemId: "a", methodIds: ["eyes"], done: true, tier: "walk", tempo: 90 }] },
+      walkPosition: 7,
+      updatedAt: 123,
+    });
+    assert.deepEqual(validateAndMigrateTechnique(JSON.parse(JSON.stringify(once))), once);
+  });
+
+  test("a done task's undo snapshot survives a save and reload (Pass 101)", () => {
+    const withUndo = validateAndMigrateTechnique({
+      items: [{ id: "a", tonic: "C", quality: "major" }],
+      dayList: { date: "2025-01-06", tasks: [{ itemId: "a", methodIds: ["eyes"], done: true, tier: "walk",
+        undo: { walkPosition: 0, advancedTo: 1, item: { lastPracticedDate: null, practicedDates: [], evenTempo: 90, lastCheckedDate: "2025-01-01" }, methodLastUsed: { eyes: null } } }] },
+    });
+    const u = withUndo.dayList.tasks[0].undo;
+    // checkOctaves: null — a snapshot saved before that field existed (Pass
+    // 101 review fix) reads as "unknown", and uncompleteTask then restores the
+    // tempo as it always did.
+    assert.deepEqual(u, { walkPosition: 0, advancedTo: 1, checkOctaves: null, item: { lastPracticedDate: null, practicedDates: [], evenTempo: 90, lastCheckedDate: "2025-01-01" }, methodLastUsed: { eyes: null } });
+    assert.deepEqual(validateAndMigrateTechnique(JSON.parse(JSON.stringify(withUndo))), withUndo);
+  });
+
+  test("corrupt fields fall back one at a time, not the whole save", () => {
+    const m = validateAndMigrateTechnique({
+      items: [{ id: "ok", tonic: "C", quality: "major" }, { id: "no-quality", tonic: "C" }, "junk", null],
+      walkPosition: 99,
+      dayList: { date: "not a date", tasks: [] },
+      settings: { scalesPerDay: -1, minutesPerScale: "five" },
+      methodLastUsed: { ok: { eyes: "yesterday", chain: "2025-01-01" } },
+    });
+    assert.deepEqual(m.items.map((i) => i.id), ["ok"]);
+    assert.equal(m.walkPosition, 0);
+    assert.equal(m.dayList, null);
+    assert.deepEqual(m.settings, { scalesPerDay: 3, minutesPerScale: 5 });
+    assert.deepEqual(m.methodLastUsed, { ok: { chain: "2025-01-01" } });
+    assert.deepEqual(validateAndMigrateTechnique("nonsense"), defaultTechnique());
+    assert.deepEqual(validateAndMigrateTechnique(null), defaultTechnique());
+  });
+
+  test("load: missing key gives defaults", () => {
+    installLocalStorage();
+    assert.deepEqual(loadTechniqueFromStorage(), defaultTechnique());
+  });
+
+  test("load: unreadable JSON gives defaults and sets the raw text aside", () => {
+    const ls = installLocalStorage({ [TECHNIQUE_KEY]: "{not json" });
+    assert.deepEqual(loadTechniqueFromStorage(), defaultTechnique());
+    assert.equal(ls.store[TECHNIQUE_CORRUPT_BACKUP_KEY], "{not json");
+  });
+
+  test("load: storage unavailable gives defaults instead of throwing", () => {
+    globalThis.localStorage = { getItem: () => { throw new Error("SecurityError"); } };
+    assert.deepEqual(loadTechniqueFromStorage(), defaultTechnique());
+  });
+
+  test("save then load round-trips; a failed write returns { ok: false }", () => {
+    const ls = installLocalStorage({ "measureone-piece:p1": "{\"id\":\"p1\"}" });
+    const t = validateAndMigrateTechnique({ items: [{ id: "a", tonic: "Eb", quality: "major" }], walkPosition: 3 });
+    assert.deepEqual(saveTechniqueToStorage(t), { ok: true });
+    assert.deepEqual(loadTechniqueFromStorage(), t);
+    assert.equal(ls.store["measureone-piece:p1"], "{\"id\":\"p1\"}", "piece key untouched");
+    ls.failWrites = true;
+    const res = saveTechniqueToStorage(t);
+    assert.equal(res.ok, false);
+    assert.ok(res.error);
+  });
+});
+
+/* ------------------------ Piece keys (Pass 103) ------------------------ */
+
+describe("piece keys: homeKey / otherKeys (Pass 103)", () => {
+  const base = { id: "pk", name: "Ballade", composer: "Chopin", totalMeasures: 40, startDate: "2026-07-01", progress: {}, updatedAt: 1000 };
+
+  test("a piece saved before the fields existed backfills both to null, not a materialized value", () => {
+    const m = validateAndMigratePiece(base);
+    assert.equal(m.homeKey, null);
+    assert.equal(m.otherKeys, null);
+  });
+
+  test("valid keys survive a load; bad ones become null; migrating twice changes nothing", () => {
+    const withKeys = validateAndMigratePiece({ ...base, homeKey: { tonic: "G", quality: "minor" }, otherKeys: [{ tonic: "B♭", quality: "major" }, { tonic: "G", quality: "minor" }] });
+    assert.deepEqual(withKeys.homeKey, { tonic: "G", quality: "minor" });
+    assert.deepEqual(withKeys.otherKeys, [{ tonic: "B♭", quality: "major" }], "the piece's own key is dropped from other keys");
+    assert.deepEqual(validateAndMigratePiece(JSON.parse(JSON.stringify(withKeys))), withKeys);
+    const bad = validateAndMigratePiece({ ...base, homeKey: "G minor", otherKeys: "nope" });
+    assert.equal(bad.homeKey, null);
+    assert.equal(bad.otherKeys, null);
+  });
+
+  test("re-importing a backup with the new fields is not flagged as a conflict, and keeps them", () => {
+    const existing = validateAndMigratePiece({ ...base, homeKey: { tonic: "G", quality: "minor" } });
+    const backup = JSON.parse(JSON.stringify(existing));
+    assert.deepEqual(diffImportedPiece(existing, backup), { hasDivergence: false, resolution: "existing" });
+    const merged = mergeImportedPiece(existing, backup, "existing");
+    assert.deepEqual(merged.homeKey, { tonic: "G", quality: "minor" });
+  });
+
+  test("re-importing an older-format backup WITHOUT the fields is not a conflict and doesn't wipe the keys", () => {
+    const existing = validateAndMigratePiece({ ...base, homeKey: { tonic: "G", quality: "minor" }, otherKeys: [{ tonic: "D", quality: "major" }] });
+    const { homeKey, otherKeys, ...oldFormat } = JSON.parse(JSON.stringify(existing));
+    assert.deepEqual(diffImportedPiece(existing, oldFormat), { hasDivergence: false, resolution: "existing" });
+    const merged = validateAndMigratePiece(mergeImportedPiece(existing, oldFormat, "existing"));
+    assert.deepEqual(merged.homeKey, { tonic: "G", quality: "minor" });
+    assert.deepEqual(merged.otherKeys, [{ tonic: "D", quality: "major" }]);
+  });
+
+  test("a piece that never set a key re-imports byte-identically", () => {
+    const existing = validateAndMigratePiece(base);
+    const backup = JSON.parse(JSON.stringify(existing));
+    assert.equal(diffImportedPiece(existing, backup).hasDivergence, false);
+    // Compared as saved text: mergeImportedPiece copies createdAt through even
+    // when it's undefined (this fixture has none), which JSON drops anyway.
+    assert.equal(JSON.stringify(validateAndMigratePiece(mergeImportedPiece(existing, backup, "existing"))), JSON.stringify(existing));
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Technique data in backups (Pass 104)                               */
+/* ------------------------------------------------------------------ */
+
+import { parseBackupTechnique, readBackupTechnique, mergeImportedTechnique } from "../src/lib/storage.js";
+
+// What downloadBackup writes, built the same way (it can't run under node:
+// it needs Blob/document), so the round trip exercises the real reader.
+const backupText = (pieces, technique) =>
+  JSON.stringify({ exportedAt: "2026-09-25T00:00:00.000Z", version: 1, pieces, ...(technique ? { technique } : {}) });
+
+const tItem = (id, tonic, quality, extra = {}) =>
+  ({ id, form: "scale", tonic, quality, octaves: 2, hands: "together", checkOctaves: 2, ...extra });
+
+describe("technique in backups (Pass 104)", () => {
+  const library = validateAndMigrateTechnique({
+    items: [
+      tItem("a", "G", "minor", { minorForm: "harmonic", evenTempo: 100, lastCheckedDate: "2026-09-10", starred: true }),
+      tItem("b", "F♯", "major", { evenTempo: 90, lastCheckedDate: "2026-09-01", practicedDates: ["2026-09-01"], lastPracticedDate: "2026-09-01" }),
+    ],
+    methodState: { eyes: { starred: true, enabled: true }, formula: { starred: false, enabled: false } },
+    customMethods: [{ id: "m1", name: "LH alone", technique: "Memory", appliesTo: "both" }],
+    methodLastUsed: { a: { eyes: "2026-09-10" } },
+    walkPosition: 7,
+  });
+
+  test("round trip: the block written next to pieces reads back identically; pieces are untouched", () => {
+    const text = backupText([{ id: "p1", name: "X", totalMeasures: 8 }], library);
+    assert.deepEqual(parseBackupTechnique(text), library);
+    assert.deepEqual(parseBackupPieces(text), [{ id: "p1", name: "X", totalMeasures: 8 }]);
+    const restored = mergeImportedTechnique(defaultTechnique(), parseBackupTechnique(text)).technique;
+    assert.deepEqual(restored.items.map((i) => [i.id, i.evenTempo, i.starred]), [["a", 100, true], ["b", 90, false]]);
+    assert.deepEqual(restored.methodState, library.methodState);
+    assert.deepEqual(restored.customMethods, library.customMethods);
+    assert.deepEqual(restored.methodLastUsed, library.methodLastUsed);
+    assert.equal(restored.walkPosition, 7, "empty library here: the walk resumes where the backup left it");
+  });
+
+  test("an old backup with no technique block, and a bare-array backup, give null (pieces import as before)", () => {
+    const old = backupText([{ id: "p1", name: "X", totalMeasures: 8 }], null);
+    assert.equal(parseBackupTechnique(old), null);
+    assert.deepEqual(parseBackupPieces(old), [{ id: "p1", name: "X", totalMeasures: 8 }]);
+    const bare = JSON.stringify([{ id: "p1", name: "X", totalMeasures: 8 }]);
+    assert.equal(parseBackupTechnique(bare), null);
+    assert.deepEqual(parseBackupPieces(bare), [{ id: "p1", name: "X", totalMeasures: 8 }]);
+    assert.equal(parseBackupTechnique(JSON.stringify({ pieces: [], technique: "junk" })), null);
+  });
+
+  test("same item, newer tempo here: what's here wins (and a tie keeps what's here)", () => {
+    const here = validateAndMigrateTechnique({ items: [tItem("x", "G", "minor", { minorForm: "harmonic", evenTempo: 120, lastCheckedDate: "2026-09-20", checkOctaves: 3 })] });
+    const { technique, stats } = mergeImportedTechnique(here, library);
+    const gm = technique.items.find((i) => i.tonic === "G");
+    assert.deepEqual([gm.id, gm.evenTempo, gm.lastCheckedDate, gm.checkOctaves], ["x", 120, "2026-09-20", 3]);
+    assert.equal(stats.temposUpdated, 0);
+    const tie = validateAndMigrateTechnique({ items: [tItem("x", "G", "minor", { minorForm: "harmonic", evenTempo: 111, lastCheckedDate: "2026-09-10" })] });
+    assert.equal(mergeImportedTechnique(tie, library).technique.items.find((i) => i.tonic === "G").evenTempo, 111);
+  });
+
+  test("same item, newer tempo in the backup: tempo, date and check octaves come over together; the rest stays", () => {
+    const here = validateAndMigrateTechnique({ items: [tItem("x", "F♯", "major", { evenTempo: 70, lastCheckedDate: "2026-08-01", checkOctaves: 4, starred: true, inRotation: false, lastPracticedDate: "2026-09-05", practicedDates: ["2026-09-05"] })] });
+    const newer = validateAndMigrateTechnique({ items: [tItem("q", "F♯", "major", { evenTempo: 95, lastCheckedDate: "2026-09-01", checkOctaves: 2, lastPracticedDate: "2026-09-01", practicedDates: ["2026-09-01"] })], methodLastUsed: { q: { eyes: "2026-09-01" } } });
+    const { technique, stats } = mergeImportedTechnique(here, newer);
+    const fs = technique.items[0];
+    assert.deepEqual([fs.id, fs.evenTempo, fs.lastCheckedDate, fs.checkOctaves], ["x", 95, "2026-09-01", 2]);
+    assert.deepEqual([fs.starred, fs.inRotation], [true, false], "star and rotation stay as they are here");
+    assert.equal(fs.lastPracticedDate, "2026-09-05");
+    assert.deepEqual(fs.practicedDates, ["2026-09-01", "2026-09-05"]);
+    assert.deepEqual(technique.methodLastUsed.x, { eyes: "2026-09-01" }, "imported method dates land on the local item's id");
+    assert.equal(stats.temposUpdated, 1);
+  });
+
+  test("identity is form + key (as spelled, with minor form) + octaves + hands", () => {
+    const here = validateAndMigrateTechnique({ items: [tItem("x", "G", "minor", { minorForm: "natural" })] });
+    const { technique, stats } = mergeImportedTechnique(here, library); // library's G minor is harmonic
+    assert.equal(technique.items.filter((i) => i.tonic === "G").length, 2, "natural and harmonic are two items");
+    assert.equal(stats.itemsAdded, 2);
+    const otherOctaves = validateAndMigrateTechnique({ items: [tItem("y", "G", "minor", { minorForm: "harmonic", octaves: 4, checkOctaves: 4 })] });
+    assert.equal(mergeImportedTechnique(otherOctaves, library).technique.items.length, 3);
+  });
+
+  test("new item: added, with a fresh id if its id is taken here; its method dates come too", () => {
+    const here = validateAndMigrateTechnique({ items: [tItem("a", "C", "major")] }); // id "a" taken by a different item
+    const { technique, stats } = mergeImportedTechnique(here, library);
+    const gm = technique.items.find((i) => i.tonic === "G");
+    assert.notEqual(gm.id, "a");
+    assert.deepEqual(technique.methodLastUsed[gm.id], { eyes: "2026-09-10" });
+    assert.equal(technique.items.find((i) => i.id === "a").tonic, "C", "the item here keeps its id");
+    assert.equal(stats.itemsAdded, 2);
+    assert.equal(technique.walkPosition, 0, "library here wasn't empty: its walk position stays");
+  });
+
+  test("nothing already here is ever removed; local method state and custom methods win", () => {
+    const here = validateAndMigrateTechnique({
+      items: [tItem("z", "D", "major", { evenTempo: 130, lastCheckedDate: "2026-09-24" })],
+      methodState: { eyes: { starred: false, enabled: false } },
+      customMethods: [{ id: "mine", name: "lh alone", technique: "Rhythm", appliesTo: "scale" }],
+      methodLastUsed: { z: { chain: "2026-09-24" } },
+      dayList: { date: "2026-09-25", tasks: [{ itemId: "z", methodIds: ["chain"], done: false, tier: "walk" }] },
+      settings: { scalesPerDay: 2, minutesPerScale: 7 },
+      walkPosition: 4,
+    });
+    const { technique } = mergeImportedTechnique(here, library);
+    for (const it of here.items) assert.ok(technique.items.some((i) => i.id === it.id && i.evenTempo === it.evenTempo));
+    assert.deepEqual(technique.methodState.eyes, { starred: false, enabled: false }, "local method state wins");
+    assert.deepEqual(technique.methodState.formula, { starred: false, enabled: false }, "missing state is added");
+    assert.deepEqual(technique.customMethods.map((m) => m.id), ["mine"], "same name ('LH alone') isn't added twice");
+    assert.deepEqual(technique.methodLastUsed.z, { chain: "2026-09-24" });
+    assert.deepEqual(technique.dayList, here.dayList);
+    assert.deepEqual(technique.settings, here.settings);
+    assert.equal(technique.walkPosition, 4);
+    // Merging the same backup twice adds nothing more.
+    const again = mergeImportedTechnique(technique, library);
+    assert.equal(again.stats.itemsAdded, 0);
+    assert.equal(again.technique.items.length, technique.items.length);
+  });
+});
+
+describe("technique backups: review fixes (Pass 104)", () => {
+  test("an empty tempo from the backup never replaces a real tempo here, even with a newer check date", () => {
+    // The other device did "Start fresh": tempo cleared, last check date kept (and newer than here).
+    const here = validateAndMigrateTechnique({ items: [tItem("x", "D", "major", { evenTempo: 110, lastCheckedDate: "2026-09-01", checkOctaves: 2 })] });
+    const fresh = validateAndMigrateTechnique({ items: [tItem("y", "D", "major", { evenTempo: null, lastCheckedDate: "2026-09-20", checkOctaves: 3 })] });
+    const { technique, stats } = mergeImportedTechnique(here, fresh);
+    const d = technique.items[0];
+    assert.deepEqual([d.evenTempo, d.lastCheckedDate, d.checkOctaves], [110, "2026-09-01", 2], "tempo, date and octaves all stay as they are here");
+    assert.equal(stats.temposUpdated, 0);
+    // With no tempo here either, nothing is lost by leaving it alone too.
+    const bothEmpty = validateAndMigrateTechnique({ items: [tItem("x", "D", "major", { evenTempo: null })] });
+    assert.equal(mergeImportedTechnique(bothEmpty, fresh).technique.items[0].evenTempo, null);
+  });
+
+  test("readBackupTechnique tells 'no block' apart from 'a block that can't be read'", () => {
+    const none = readBackupTechnique(JSON.stringify({ version: 1, pieces: [] }));
+    assert.deepEqual(none, { technique: null, unreadable: false, skippedItems: 0 });
+    assert.deepEqual(readBackupTechnique(JSON.stringify([{ id: "p" }])), { technique: null, unreadable: false, skippedItems: 0 });
+    for (const bad of ["junk", 42, null, [1, 2], { items: "nope" }]) {
+      const r = readBackupTechnique(JSON.stringify({ pieces: [], technique: bad }));
+      assert.equal(r.technique, null, JSON.stringify(bad));
+      assert.equal(r.unreadable, true, JSON.stringify(bad));
+    }
+    assert.equal(parseBackupTechnique(JSON.stringify({ pieces: [], technique: "junk" })), null, "parseBackupTechnique still just returns null");
+  });
+
+  test("scales in the block that can't be read are counted, not dropped silently", () => {
+    const r = readBackupTechnique(JSON.stringify({
+      pieces: [],
+      technique: { items: [tItem("ok", "C", "major"), { id: "bad", tonic: "C" }, "junk"] },
+    }));
+    assert.equal(r.unreadable, false);
+    assert.equal(r.technique.items.length, 1);
+    assert.equal(r.skippedItems, 2);
+    const clean = validateAndMigrateTechnique({ items: [tItem("ok", "C", "major"), tItem("ok2", "G", "major")] });
+    assert.equal(readBackupTechnique(backupText([], clean)).skippedItems, 0);
+  });
+});
+
 describe("[Pass 97 follow-up] chunkSplitPoints — default and load-time self-heal", () => {
   const splitPiece = (overrides) => ({
     id: "p1",

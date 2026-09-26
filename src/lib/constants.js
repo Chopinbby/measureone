@@ -102,3 +102,42 @@ export const CONFIDENCE_PRESETS = [
   { value: 75, label: "Comfortable" },
   { value: 100, label: "Solid" },
 ];
+
+// Technique practice (scales and arpeggios) — Pass 99, engine only. Every
+// number the engine in lib/technique.js tunes on lives here, so a change
+// after real use is one line. Hand-picked, not derived from a study — see
+// docs/Research.md#technique-practice-constants and
+// docs/Technique-Practice.md.
+//
+// Pace is a days-a-week target, not the brief's original x3/x2/x5 exposure
+// multipliers — superseded in Pass 98, see
+// docs/Decisions.md#technique-practice.
+export const TECHNIQUE_WALK_LAP_DAYS = 24; // circle-of-fifths walk: 12 majors + their relative minors
+export const TECHNIQUE_STARRED_DAYS_PER_WEEK = 3;
+export const TECHNIQUE_REPERTOIRE_DAYS_PER_WEEK = 4;
+// A scale that is both starred and in a repertoire key alternates by
+// calendar week: 4 days on even weeks, 3 on odd (counted from
+// TECHNIQUE_WEEK_PARITY_EPOCH, a Monday).
+export const TECHNIQUE_BOTH_DAYS_PER_WEEK_EVEN = 4;
+export const TECHNIQUE_BOTH_DAYS_PER_WEEK_ODD = 3;
+export const TECHNIQUE_WEEK_PARITY_EPOCH = "2024-01-01";
+// A paced scale isn't offered two days running unless the rest of its week
+// can't hold its remaining days otherwise — spreads 3-4 days across the
+// week instead of front-loading Monday to Thursday. Engine-level choice
+// (Pass 99), not from the brief.
+export const TECHNIQUE_PACE_MIN_GAP_DAYS = 2;
+export const TECHNIQUE_STARTING_TEMPO_FRACTION = 0.85; // of the last verified even tempo
+export const TECHNIQUE_MINUTES_PER_SCALE = 5;
+export const TECHNIQUE_TASKS_PER_DAY = 3;
+export const TECHNIQUE_METHODS_PER_SCALE_MIN = 3;
+export const TECHNIQUE_METHODS_PER_SCALE_MAX = 4;
+export const TECHNIQUE_MAX_METHODS_PER_TECHNIQUE = 2;
+export const TECHNIQUE_STARRED_METHOD_WEIGHT = 2; // "starred methods count double"
+export const TECHNIQUE_SLOW_FRACTION = 1 / 3; // slowest third of the user's own tempo range
+export const TECHNIQUE_SLOW_COOLDOWN_DAYS = 7;
+export const TECHNIQUE_WALK_ITEMS_PER_KEY_MAX = 2;
+// Accepted range for a logged even-rhythm tempo or a starting tempo typed in
+// the Add form. 30 is the mockup's floor; 300 is a sanity ceiling (Pass 101
+// review) so a typo like an extra digit can't become the baseline.
+export const TECHNIQUE_MIN_TEMPO = 30;
+export const TECHNIQUE_MAX_TEMPO = 300;

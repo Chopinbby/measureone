@@ -119,6 +119,31 @@ diverged from the original guess:
 | Revival auto-trigger thresholds | stop count > 5; 2+ chunks (or 1 combo) lost in a run-through; 60+ days untouched | Product judgment calls, not research-backed — flagged here so that's explicit |
 | Abandoned-plan reminder thresholds (Pass 83) | First fires at 14 days since last logged session; re-fires every 7 days after (21, 28, ...) | Product judgment calls, same category as the revival thresholds above — not research-backed, and not derived from the 60-day revival threshold either (a different question: this fires for a piece *not yet* finished, not one already learned) |
 
+## Technique practice constants
+
+Canonical inventory for Technique practice (built in Passes 99–104; the
+`TECHNIQUE_*` exports in `src/lib/constants.js`). Design: [Technique-Practice.md](Technique-Practice.md).
+Decisions: [Decisions.md](Decisions.md#technique-practice). All are
+starting values picked by feel, not derived from any study; the slow-tier
+numbers in particular are explicitly marked "tune after real use".
+
+| Constant | Value | What it controls | What it should eventually be backed by |
+|---|---|---|---|
+| Circle-of-fifths lap | 24 days | One key of the day per day, major then relative minor, around the circle | Fixed by the 24 major/minor keys, not tuned — listed because the walk's pace follows from it |
+| Starred pace | about 3 days a week | Target return interval for a starred scale (7 ÷ 3 ≈ 2.3 days) | Real data on how often a scale needs revisiting to keep improving vs. just staying put |
+| Repertoire-key pace | about 4 days a week | Target return interval for a scale in a key an active piece uses (7 ÷ 4 = 1.75 days) | Same as above |
+| Both (repertoire and starred) | 3–4 days a week, alternating weeks | Target return interval for a scale that is both. **Replaces the brief's original multipliers** (repertoire x3, starred x2, multiplied and capped at x5 on the 24-day lap — about every 8, 12, and 5 days), superseded in Pass 98 | Same as above |
+| Recommended starting tempo | 85% of the last verified even tempo | The "start here" tempo shown on an expanded task card | Real data on what fraction of a clean tempo makes a useful warm-up start |
+| Minutes per scale | 5 | Time each technique task adds to Master Agenda's Total planned | Real timing data from logged technique practice |
+| Tasks per day | 3 (max) | Size of each day's technique list, including carried-over tasks | Same as above, and how much technique time users actually keep up with |
+| Methods per scale | 3–4 | How many practice methods each task suggests | Whether more or fewer methods changes how much of the task gets done |
+| Slow tier cut-off | slowest third of the in-rotation items, by count (`TECHNIQUE_SLOW_FRACTION`) | Which items count as "slow" for tier 2. By count, not by tempo range, so a new library with no tempos yet doesn't make every item "slow" (Pass 99) | Tune after real use (Decided 2) |
+| Slow tier cooldown | 7 days | A slow item isn't offered again by tier 2 within 7 days of being practiced | Tune after real use (Decided 2) |
+| Pace spacing | at least 2 days apart (`TECHNIQUE_PACE_MIN_GAP_DAYS`) | A starred or repertoire scale isn't offered two days running unless the rest of the week can't hold its remaining days otherwise, so 3–4 days spread across the week | Not from the brief; an engine choice in Pass 99. Real data on whether spacing or back-to-back days helps more |
+| Tempo range | 30–300 (`TECHNIQUE_MIN_TEMPO` / `TECHNIQUE_MAX_TEMPO`) | Accepted even-rhythm check tempo and Add-form starting tempo. 30 is the mockup's floor; 300 is a sanity ceiling added in the Pass 101 review so a typo can't become the baseline | Real data on the fastest tempos people log; raise the ceiling if anyone legitimately exceeds it |
+| Library "rotation priority" sort weights | slowness 70%, days since last checked 30% (capped at 21 days) | Display order of the Library's default sort only — never the engine's tiers. Taken from the approved mockup; local constants in `TechniqueLibrary.jsx` | Whether this order actually matches what users want to see first |
+| Week-alternation start date | 2024-01-01, a Monday (`TECHNIQUE_WEEK_PARITY_EPOCH`) | Which calendar weeks count as "even" (4 days) vs. "odd" (3 days) for a scale that is both starred and repertoire | Arbitrary anchor, not a tuning value; changing it only swaps which weeks are 3 vs. 4 |
+
 ## Open research questions
 
 - **Does the spacing-effect literature (typically studied on verbal/declarative

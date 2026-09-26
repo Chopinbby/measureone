@@ -1,0 +1,420 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Technique Practice Mockup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+:root{--pg:#EEF0EC;--pg-ink:#202A33;--pg-soft:#57646F;--pg-faint:#8B96A0;--pg-line:rgba(32,42,51,0.16);--pg-accent:#8F6A2D}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--pg:#14181A;--pg-ink:#E9ECE6;--pg-soft:#B7BFB4;--pg-faint:#76827B;--pg-line:rgba(233,236,230,0.18);--pg-accent:#DBA76A}}
+:root[data-theme="dark"]{--pg:#14181A;--pg-ink:#E9ECE6;--pg-soft:#B7BFB4;--pg-faint:#76827B;--pg-line:rgba(233,236,230,0.18);--pg-accent:#DBA76A}
+body{background:var(--pg);color:var(--pg-ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.55}
+.page{max-width:900px;margin:0 auto;padding-inline:16px;padding-block:36px 64px}
+.pg-eyebrow{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--pg-accent);margin:0 0 8px}
+.pg-title{font-family:'Fraunces',Georgia,'Times New Roman',serif;font-weight:600;font-size:32px;line-height:1.12;margin:0 0 10px;text-wrap:balance}
+.pg-dek{color:var(--pg-soft);max-width:64ch;margin:0 0 22px}
+.pg-notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px 28px;margin-top:26px;padding-top:20px;border-top:1px solid var(--pg-line)}
+.pg-notes h2{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--pg-soft);margin:0 0 6px;font-weight:600}
+.pg-notes p{margin:0;color:var(--pg-soft);font-size:13.5px}
+.frame{max-width:820px}
+
+.mo{--paper:#EEF0EC;--card:#F8F9F6;--ink:#202A33;--soft:#57646F;--faint:#8B96A0;--line:rgba(32,42,51,0.14);--brass:#B98A3E;--deep:#8F6A2D;--teal:#2E6E63;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;min-height:860px;font-size:13px;line-height:1.5}
+.mo *{box-sizing:border-box}
+.mo button{font-family:inherit;cursor:pointer}
+.mo svg{flex:none}
+.mo .sb{width:184px;flex-shrink:0;background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:16px 10px}
+.mo .brand{display:flex;align-items:center;gap:7px;padding:4px 8px 14px;font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:16px;color:var(--deep)}
+.mo .brand svg{width:18px;height:18px}
+.mo .sw{display:flex;justify-content:space-between;align-items:center;gap:6px;width:100%;padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:10px}
+.mo .sw svg{width:14px;height:14px}
+.mo .nav{display:flex;flex-direction:column;gap:2px;flex:1}
+.mo .ni{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;border:none;background:transparent;color:var(--soft);font-size:13px;font-weight:500;text-align:left;width:100%}
+.mo .ni:hover{background:rgba(185,138,62,0.1);color:var(--ink)}
+.mo .ni.on{background:var(--brass);color:#fff}
+.mo .ni svg{width:16px;height:16px}
+.mo .div{height:1px;background:var(--line);margin:6px 4px}
+.mo .foot{border-top:1px solid var(--line);padding-top:10px;margin-top:8px}
+.mo .ghost{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:8px 12px;font-size:12px;font-weight:500;white-space:nowrap}
+.mo .ghost svg{width:14px;height:14px}
+.mo .ghost.full{width:100%}
+.mo .ghost.xs{padding:3px 9px;font-size:11.5px;border-radius:7px}
+.mo .ghost.xs svg{width:12px;height:12px}
+.mo .ghost.on{border-color:var(--brass);color:var(--deep);background:rgba(185,138,62,0.1)}
+.mo .ghost.on svg{fill:currentColor}
+.mo .ghost:hover{border-color:var(--brass)}
+.mo :focus-visible{outline:2px solid var(--deep);outline-offset:2px}
+.mo .main{flex:1;min-width:0;padding:22px 24px 28px}
+.mo .head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+.mo .eye{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;text-transform:uppercase;letter-spacing:.08em;font-size:10.5px;color:var(--deep);font-weight:600;margin:0 0 4px}
+.mo h1{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:24px;margin:0;color:var(--ink);line-height:1.15}
+.mo .sub{color:var(--soft);font-size:13px;margin:5px 0 0}
+.mo .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;background:#fff;padding:2px;gap:2px;margin-bottom:14px}
+.mo .seg button{border:none;background:transparent;padding:6px 14px;border-radius:7px;font-size:12.5px;font-weight:500;color:var(--soft)}
+.mo .seg.sm{margin-bottom:0}
+.mo .seg.sm button{padding:4px 11px;font-size:12px}
+.mo .seg button.active{background:var(--brass);color:#fff}
+.mo .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+.mo .ph{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:15px;margin:0;color:var(--ink);display:flex;align-items:center;gap:8px}
+.mo .ph svg{width:16px;height:16px}
+.mo .psum{color:var(--soft);font-size:12px;margin:3px 0 10px}
+.mo .item{display:flex;flex-wrap:wrap;gap:0 10px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;margin-bottom:8px}
+.mo .item.done{border-color:rgba(46,110,99,0.45);background:rgba(46,110,99,0.06)}
+.mo .chk{flex:none;width:20px;height:20px;border-radius:50%;border:1.5px solid var(--faint);background:#fff;display:flex;align-items:center;justify-content:center;color:#fff;padding:0;margin-top:1px}
+.mo .chk svg{width:12px;height:12px;stroke-width:3}
+.mo .chk.done{background:var(--teal);border-color:var(--teal)}
+.mo .it{font-weight:600;font-size:13.5px}
+.mo .tstar{display:inline-flex;color:var(--brass);vertical-align:-2px;margin-right:2px}
+.mo .tstar svg{width:13px;height:13px;fill:currentColor}
+.mo .meta{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:11px;color:var(--soft)}
+.mo .row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px}
+.mo .mrow{display:flex;gap:5px;align-items:flex-start;padding:3px 0}
+.mo .mname{font-weight:600;font-size:12.5px}
+.mo .mt{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.mo .md{color:var(--soft);font-size:12px;line-height:1.5;margin-top:1px}
+.mo .tt{display:inline-block;font-size:10.5px;padding:1px 8px;border-radius:20px;border:1px solid rgba(46,110,99,0.5);color:var(--teal);font-weight:600;letter-spacing:.02em;white-space:nowrap;flex:none}
+.mo .why{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500;background:rgba(185,138,62,0.14);color:var(--deep)}
+.mo .why svg{width:12px;height:12px}
+.mo .note{display:inline-flex;color:var(--deep);vertical-align:-1px;margin-left:4px}
+.mo .note svg{width:12px;height:12px}
+.mo .mh{font-weight:600;font-size:12.5px}
+.mo .msub{color:var(--soft);font-size:12px;margin:1px 0 6px;line-height:1.6}
+.mo .star{flex:none;border:none;background:transparent;color:var(--faint);padding:0;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px}
+.mo .mrow .star{margin-top:-1px}
+.mo .star svg{width:16px;height:16px}
+.mo .star.on{color:var(--brass)}
+.mo .star.on svg{fill:currentColor}
+.mo .st{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin:8px 0 10px;padding:10px 12px;background:var(--paper);border-radius:8px}
+.mo .stl{font-weight:600;font-size:12.5px}
+.mo .sts{color:var(--soft);font-size:12px;margin-top:1px}
+.mo .stv{font-size:16px;font-weight:600;color:var(--ink);white-space:nowrap;border-bottom:1px dotted var(--faint)}
+.mo .tip{position:relative;display:inline-block;cursor:help;outline:none}
+.mo .tp{display:none;position:absolute;right:0;bottom:calc(100% + 6px);background:var(--ink);color:#fff;font-size:11.5px;line-height:1.4;padding:6px 9px;border-radius:7px;white-space:nowrap;z-index:5;font-weight:500;font-family:'Inter',sans-serif}
+.mo .tip:hover .tp,.mo .tip:focus .tp{display:block}
+.mo .ok{color:var(--teal);font-size:12.5px;font-weight:500}
+.mo .hint{color:var(--soft);font-size:12px}
+.mo .prim{display:inline-flex;align-items:center;gap:6px;background:var(--brass);color:#fff;border:none;border-radius:9px;padding:7px 13px;font-size:12.5px;font-weight:600}
+.mo .prim.sm{padding:5px 11px;font-size:12px}
+.mo .pr{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.5;margin:0 0 10px}
+.mo .prb{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center}
+.mo input[type=number]{width:70px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:12.5px;background:#fff;color:var(--ink)}
+.mo input[type=text]{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;color:var(--ink)}
+.mo select{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;color:var(--ink);max-width:100%}
+.mo .field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.mo .field>span:first-child{font-size:12.5px;font-weight:600}
+.mo .chp{display:inline-flex;align-items:center;gap:6px;padding:4px 6px 4px 10px;border:1px solid var(--line);border-radius:20px;background:#fff;font-size:12px}
+.mo .chp button{border:none;background:transparent;color:var(--faint);padding:0 2px;font-size:14px;line-height:1}
+.mo .faded{opacity:.5}
+.mo .pc{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.mo .banner{display:flex;gap:24px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 16px;margin-bottom:12px}
+.mo .bl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:600}
+.mo .bn{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-weight:600;font-size:15px}
+.mo .lh,.mo .lr{display:grid;grid-template-columns:22px minmax(0,1fr) 72px 64px 52px;gap:8px;align-items:center}
+.mo .lh{padding:8px 0 4px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:600;border-top:1px solid var(--line);margin-top:10px}
+.mo .lw{border-top:1px solid var(--line)}
+.mo .lr{padding:7px 0}
+.mo .lr.off .it,.mo .lr.off .meta,.mo .lr.off .md{opacity:.5}
+.mo .bar{height:4px;border-radius:2px;background:var(--paper);overflow:hidden;margin-top:4px}
+.mo .bar i{display:block;height:100%;background:var(--brass);opacity:.85}
+.mo .ld{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:2px 0 12px 30px}
+.mo .ld label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--soft)}
+.mo .sw2{position:relative;width:32px;height:18px;border-radius:9px;border:1px solid var(--line);background:#fff;padding:0;justify-self:center}
+.mo .sw2::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--faint)}
+.mo .sw2.on{background:var(--teal);border-color:var(--teal)}
+.mo .sw2.on::after{left:16px;background:#fff}
+.mo .tg{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em;font-size:10.5px;color:var(--deep);font-weight:600;margin:14px 0 2px}
+.mo .mine{font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;padding:1px 6px;border-radius:20px;background:rgba(46,110,99,0.12);color:var(--teal);margin-left:4px}
+@media (max-width:640px){
+ .pg-title{font-size:26px}
+ .mo{flex-direction:column;min-height:0}
+ .mo .sb{width:100%;border-right:none;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;padding:10px}
+ .mo .brand{padding:4px 6px}
+ .mo .sw{width:auto;flex:1 1 150px;margin:0}
+ .mo .nav{flex-direction:row;flex-wrap:wrap;flex:1 1 100%}
+ .mo .ni{width:auto;padding:6px 9px}
+ .mo .div,.mo .foot{display:none}
+ .mo .main{padding:16px}
+ .mo .lh,.mo .lr{grid-template-columns:22px minmax(0,1fr) 64px 46px}
+ .mo .lh span:nth-child(4),.mo .lr>*:nth-child(4){display:none}
+ .mo .ld{grid-template-columns:1fr;padding-left:0}
+}
+@media (prefers-reduced-motion: reduce){.mo *{transition:none!important;animation:none!important}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js"></script>
+
+<div class="page">
+  <header>
+    <p class="pg-eyebrow">MeasureOne · Design reference</p>
+    <h1 class="pg-title">Technique practice</h1>
+    <p class="pg-dek">Interactive mockup of the scales-and-arpeggios feature. Use the sidebar to move between the Master Agenda, Technique, Daily Practice, and Settings; the piece switcher swaps the open piece. Everything here is sample data and resets when the page reloads.</p>
+  </header>
+
+  <div class="frame">
+    <div class="mo">
+      <nav class="sb">
+        <div class="brand"><i data-lucide="music" aria-hidden="true"></i> MeasureOne</div>
+        <button class="sw" id="sw"><span id="swn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span><i data-lucide="chevron-down" aria-hidden="true"></i></button>
+        <div class="nav">
+          <button class="ni" id="n-ma"><i data-lucide="layers" aria-hidden="true"></i><span>Master Agenda</span></button>
+          <button class="ni" id="n-tech"><i data-lucide="piano" aria-hidden="true"></i><span>Technique</span></button>
+          <div class="div"></div>
+          <button class="ni"><i data-lucide="layout-grid" aria-hidden="true"></i><span>Piece Overview</span></button>
+          <button class="ni"><i data-lucide="calendar-days" aria-hidden="true"></i><span>Timeline</span></button>
+          <button class="ni"><i data-lucide="music-2" aria-hidden="true"></i><span>Piece Map</span></button>
+          <button class="ni" id="n-today"><i data-lucide="list-checks" aria-hidden="true"></i><span>Daily Practice</span></button>
+          <button class="ni"><i data-lucide="chart-line" aria-hidden="true"></i><span>Progress</span></button>
+          <button class="ni" id="n-set"><i data-lucide="settings" aria-hidden="true"></i><span>Settings</span></button>
+        </div>
+        <div class="foot"><button class="ghost full"><i data-lucide="plus" aria-hidden="true"></i> Add new piece</button></div>
+      </nav>
+      <main class="main" id="main"></main>
+    </div>
+  </div>
+
+  <section class="pg-notes" aria-label="Notes on this mockup">
+    <div>
+      <h2>The sample day</h2>
+      <p>Today's list follows the priority order: a repertoire-key scale first (G minor, from the Ballade), a slow scale next (E♭ major arpeggio), and the circle-of-fifths walk last (D major, then B minor). The real cards carry no tier labels.</p>
+    </div>
+    <div>
+      <h2>Sample data</h2>
+      <p>Sixteen library items, thirteen practice methods, and two pieces. Star a method or a scale, check tasks off on any screen, or change a scale's check octaves in the Library to see the keep-or-start-fresh prompt.</p>
+    </div>
+    <div>
+      <h2>Not shown</h2>
+      <p>The Add scale or arpeggio form, the setup wizard's key field, and settings for scales per day and minutes per scale. Buttons with no behavior described here do nothing.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+var P=[
+ {name:'Ballade No. 1 in G minor',key:'G minor',stage:'learning',extra:[]},
+ {name:'Bach Prelude in B major',key:'B major',stage:'repertoire',extra:[]}
+];
+var L=[
+ {id:'a',title:'D major',form:'scale',tonic:'D',q:'major',oct:2,hands:'together',base:116,ago:20},
+ {id:'b',title:'D major arpeggio',form:'arp',tonic:'D',q:'major',oct:2,hands:'together',base:96,ago:26},
+ {id:'c',title:'G minor, harmonic',form:'scale',tonic:'G',q:'minor',oct:2,hands:'together',base:100,ago:11},
+ {id:'d',title:'B minor, natural',form:'scale',tonic:'B',q:'minor',oct:2,hands:'together',base:108,ago:15},
+ {id:'e',title:'B minor, harmonic',form:'scale',tonic:'B',q:'minor',oct:2,hands:'together',base:104,ago:15},
+ {id:'f',title:'B minor, melodic',form:'scale',tonic:'B',q:'minor',oct:2,hands:'together',base:100,ago:22},
+ {id:'g',title:'A major',form:'scale',tonic:'A',q:'major',oct:2,hands:'together',base:120,ago:12},
+ {id:'h',title:'F♯ minor, harmonic',form:'scale',tonic:'F♯',q:'minor',oct:2,hands:'together',base:96,ago:16},
+ {id:'i',title:'C major',form:'scale',tonic:'C',q:'major',oct:4,hands:'together',base:160,ago:3},
+ {id:'j',title:'A minor, natural',form:'scale',tonic:'A',q:'minor',oct:4,hands:'together',base:152,ago:9},
+ {id:'k',title:'G major',form:'scale',tonic:'G',q:'major',oct:2,hands:'together',base:132,ago:6},
+ {id:'l',title:'E minor, harmonic',form:'scale',tonic:'E',q:'minor',oct:2,hands:'together',base:124,ago:8},
+ {id:'m',title:'E♭ major arpeggio',form:'arp',tonic:'E♭',q:'major',oct:2,hands:'sixths',base:76,ago:19},
+ {id:'n',title:'B major',form:'scale',tonic:'B',q:'major',oct:4,hands:'together',base:112,ago:14},
+ {id:'o',title:'E major',form:'scale',tonic:'E',q:'major',oct:2,hands:'together',base:116,ago:10},
+ {id:'p',title:'D♭ major',form:'scale',tonic:'D♭',q:'major',oct:2,hands:'thirds',base:88,ago:8}
+];
+L.forEach(function(x){x.fav=false;x.inRot=true;x.checkOct=x.oct});
+L[14].inRot=false;
+var M=[
+ {id:'dotted',n:'Dotted rhythm, then its inverse',type:'Rhythm',d:'Long-short, then short-long, up and down the scale.',ap:'both'},
+ {id:'qqee',n:'Every order of quarter, quarter, eighth, eighth',type:'Rhythm',d:'Cycle through all the orderings of the four-note cell across the scale.',ap:'both'},
+ {id:'halfq',n:'Half notes against quarter notes',type:'Rhythm',d:'Half notes in one hand, quarter notes in the other, then swap.',ap:'both'},
+ {id:'eighthtrip',n:'Eighths against triplets',type:'Rhythm',d:'Eighths in one hand, triplets in the other. Feel where the beats line up.',ap:'both'},
+ {id:'ladder',n:'Subdivision ladder',type:'Rhythm',d:'Quarters, then eighths, then triplets, then sixteenths, keeping the beat steady.',ap:'both'},
+ {id:'pf',n:'One hand piano, the other forte',type:'Dynamics',d:'Right hand soft and left hand loud, then swap.',ap:'both'},
+ {id:'stac',n:'One hand staccato, the other legato',type:'Articulation',d:'Right hand staccato and left hand legato, then swap.',ap:'both'},
+ {id:'contrary',n:'Contrary motion from opposite ends',type:'Motion',d:'Start the hands at opposite ends of the keyboard and meet in the middle.',ap:'together'},
+ {id:'formula',n:'Formula (Russian) pattern',type:'Motion',d:'Play the scale using the formula (Russian) pattern.',ap:'scale'},
+ {id:'stagger',n:'Staggered entry',type:'Hand coordination',d:'One hand plays up to the third, fourth, fifth, or sixth scale degree, then the other hand starts its scale on the first.',ap:'together'},
+ {id:'cross',n:'Touch before the thumb crossing',type:'Fingering',d:'Stop on the finger before each thumb crossing and rest the thumb on its next note without playing it. Then continue.',ap:'both'},
+ {id:'eyes',n:'Eyes closed',type:'Memory',d:'Play it without looking at your hands.',ap:'both'},
+ {id:'chain',n:'Chaining',type:'Memory',d:'Build the passage one note at a time: notes 1–2, then 1–3, then 1–4, and so on.',ap:'both'}
+];
+M.forEach(function(m){m.fav=false;m.on=true;m.mine=false});
+M[0].fav=true;
+var TYPES=['Rhythm','Dynamics','Articulation','Motion','Hand coordination','Fingering','Memory'];
+var APPLY={both:'Scales and arpeggios',scale:'Scales only',arp:'Arpeggios only',together:'Hands together only'};
+var TD=[
+ {id:'c',ms:['eighthtrip','stagger','contrary','chain'],done:false,logged:false,val:104},
+ {id:'m',ms:['ladder','stac','eyes'],done:false,logged:false,val:78},
+ {id:'a',ms:['dotted','pf','cross','qqee'],done:false,logged:false,val:120}
+];
+var open='c',view='tech',sub='today',pi=0,lf='all',sortBy='priority',lopen=null,msg='',pend=null;
+var main=document.getElementById('main');
+var KEYS=['','C major','D major','E♭ major','B major','A minor','B minor','G minor','D minor'];
+var PC={'C':0,'C♯':1,'D♭':1,'D':2,'D♯':3,'E♭':3,'E':4,'F':5,'F♯':6,'G♭':6,'G':7,'G♯':8,'A♭':8,'A':9,'B♭':10,'B':11};
+var CIRCLE=[0,7,2,9,4,11,6,1,8,3,10,5];
+function cofIndex(x){var pc=PC[x.tonic];if(x.q==='major')return CIRCLE.indexOf(pc)*2;return CIRCLE.indexOf((pc+3)%12)*2+1}
+function fmtMin(m){var h=Math.floor(m/60),r=m%60;return h?h+'h '+r+'m':r+'m'}
+function ic(name){return '<i data-lucide="'+name+'" aria-hidden="true"></i>'}
+function icons(){if(window.lucide&&window.lucide.createIcons)window.lucide.createIcons()}
+function I(id){for(var i=0;i<L.length;i++)if(L[i].id===id)return L[i]}
+function Mt(id){for(var i=0;i<M.length;i++)if(M[i].id===id)return M[i]}
+function octTxt(n){return n+(n===1?' octave':' octaves')}
+function handsTxt(h){return h==='together'?'hands together':h==='thirds'?'hands a third apart':'hands a sixth apart'}
+function metaTxt(x){return octTxt(x.oct)+' · '+handsTxt(x.hands)}
+function linked(t){return P.some(function(p){return p.key===t.tonic+' '+t.q||p.extra.indexOf(t.id)>-1})}
+function shownOct(t){return pend&&pend.id===t.id?pend.to:t.checkOct}
+function requestOct(id,val){var t=I(id);if(val===t.checkOct){pend=null;return}if(t.base==null){t.checkOct=val;pend=null;return}pend={id:id,to:val}}
+function octPrompt(t){if(!pend||pend.id!==t.id)return '';return '<div class="pr"><div>Your ♩ = '+t.base+' was measured over '+octTxt(t.checkOct)+'. Keep it as a starting point, or start fresh?</div><div class="prb"><button class="prim sm" data-act="keep">Keep as starting point</button><button class="ghost xs" data-act="fresh">Start fresh</button></div></div>'}
+function star(on,act,xid,label){return '<button class="star'+(on?' on':'')+'" data-act="'+act+'" data-x="'+xid+'" aria-pressed="'+on+'" aria-label="'+label+'" title="'+label+'">'+ic('star')+'</button>'}
+function card(td){
+ var t=I(td.id),o=open===td.id,rec=t.base==null?null:Math.round(t.base*0.85);
+ var rows=td.ms.map(function(mid){var m=Mt(mid);
+  return '<div class="mrow">'+star(m.fav,'mfav',m.id,'Suggest this method more often')+'<div style="flex:1;min-width:0;cursor:pointer" data-act="open"><div class="mt"><span class="mname">'+m.n+'</span><span class="tt">'+m.type+'</span></div>'+(o?'<div class="md">'+m.d+'</div>':'')+'</div></div>'}).join('');
+ var pill=linked(t)?'<div class="row"><span class="why">'+ic('music')+'Repertoire in this key</span></div>':'';
+ var h='<div class="item'+(td.done?' done':'')+'" data-id="'+td.id+'">'+
+  '<button class="chk'+(td.done?' done':'')+'" data-act="tog" aria-label="'+(td.done?'Mark not done':'Mark done')+'">'+(td.done?ic('check'):'')+'</button>'+
+  '<div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;gap:8px;cursor:pointer" data-act="open"><div><div class="it">'+(t.fav?'<span class="tstar" title="You practice this scale more often">'+ic('star')+'</span> ':'')+t.title+'</div><div class="meta">'+metaTxt(t)+'</div></div><span style="color:var(--faint);display:inline-flex">'+ic('chevron-'+(o?'up':'down'))+'</span></div>'+
+  '<div style="margin-top:6px">'+rows+'</div>'+pill+'</div>';
+ if(o){
+  h+='<div style="flex:0 0 auto;margin-left:30px;width:calc(100% - 30px);margin-top:4px">'+
+   (t.base==null?'<div class="st"><div><div class="stl">No starting tempo yet</div><div class="sts">Your first even-rhythm check sets one.</div></div></div>':
+   '<div class="st"><div><div class="stl">Recommended starting tempo</div><div class="sts">Start here and work up while it stays clean.</div></div><span class="tip" tabindex="0"><span class="meta stv">♩ = '+rec+'</span><span class="tp" role="tooltip">85% of your last verified tempo (♩ = '+t.base+')</span></span></div>')+
+   (td.logged&&t.base!=null?'<div class="ok">Baseline updated to ♩ = '+t.base+'.</div>':td.done?'<div class="hint">Checked off without a tempo.'+(t.base==null?'':' Baseline stays at ♩ = '+t.base+'.')+'</div>':
+   '<div style="border-top:1px solid var(--line);padding-top:10px"><div class="mh">Finish with an even-rhythm check</div><div class="msub" style="margin-bottom:8px">Play '+octTxt(t.checkOct)+' evenly, no rhythm variation. Your cleanest tempo becomes the new baseline.</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="number" id="tempo-'+t.id+'" data-in="'+t.id+'" value="'+td.val+'" aria-label="Cleanest tempo"><button class="prim" data-act="log">Log check</button></div></div>')+
+   '<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px"><button class="ghost xs'+(t.fav?' on':'')+'" data-act="fav" aria-pressed="'+t.fav+'">'+ic('star')+(t.fav?'Practicing this scale more often':'Practice this scale more often')+'</button></div></div>';
+ }
+ return h+'</div>';
+}
+function panel(kind){
+ var n=TD.filter(function(x){return x.done}).length;
+ return '<div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 class="ph">'+ic('piano')+' Technique</h3><span class="meta">'+n+' of '+TD.length+' done</span></div>'+
+ '<p class="psum">Today\'s scales and arpeggios, about 5 minutes each.'+(kind==='tech'?' Circle of fifths: D major today, B minor next.':' Checking one off here counts everywhere it appears.')+'</p>'+TD.map(card).join('')+'</div>';
+}
+function techHead(){
+ var inr=L.filter(function(x){return x.inRot}).length;
+ return '<div class="head"><div><p class="eye">Technique</p><h1>Scales and arpeggios</h1><p class="sub">'+inr+' items in your rotation</p></div><button class="ghost">'+ic('plus')+' Add scale or arpeggio</button></div>'+
+ '<div class="seg">'+[['today','Today'],['library','Library'],['methods','Methods']].map(function(p){return '<button class="'+(sub===p[0]?'active':'')+'" data-act="sub" data-x="'+p[0]+'">'+p[1]+'</button>'}).join('')+'</div>';
+}
+function library(){
+ var act=L.filter(function(x){return x.inRot}),tm=act.filter(function(x){return x.base!=null}).map(function(x){return x.base}),mn=Math.min.apply(null,tm),mx=Math.max.apply(null,tm);
+ L.forEach(function(x){var slow=x.base==null?1:1-(x.base-mn)/((mx-mn)||1);x._n=0.7*slow+0.3*Math.min(x.ago/21,1);x._t=(x.fav||linked(x))?0:1});
+ var items=L.filter(function(x){return lf==='all'||x.form===lf});
+ items.sort(function(a,b){
+  if(a.inRot!==b.inRot)return a.inRot?-1:1;
+  if(sortBy==='cof')return (cofIndex(a)-cofIndex(b))||a.title.localeCompare(b.title);
+  if(sortBy==='tempo')return (a.base==null?0:a.base)-(b.base==null?0:b.base);
+  return (a._t-b._t)||(b._n-a._n);
+ });
+ var hd='<div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 class="ph">Library</h3><span class="meta">'+L.length+' items · '+act.length+' in rotation</span></div>'+
+ '<p class="psum">Starred scales come up about 3 days a week, and scales in a key from a piece you are playing about 4 days a week. A note icon marks those keys.</p>'+
+ '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="seg sm">'+[['all','All'],['scale','Scales'],['arp','Arpeggios']].map(function(p){return '<button class="'+(lf===p[0]?'active':'')+'" data-act="lf" data-x="'+p[0]+'">'+p[1]+'</button>'}).join('')+'</div>'+
+ '<select id="sortsel" aria-label="Sort by"><option value="priority"'+(sortBy==='priority'?' selected':'')+'>Sort: rotation priority</option><option value="cof"'+(sortBy==='cof'?' selected':'')+'>Sort: circle of fifths</option><option value="tempo"'+(sortBy==='tempo'?' selected':'')+'>Sort: slowest first</option></select></div>'+
+ '<div class="lh"><span></span><span>Item</span><span>Even tempo</span><span>Checked</span><span>Rotation</span></div>';
+ var rows=items.map(function(x){
+  var w=x.base==null?0:Math.round(25+75*(x.base-mn)/((mx-mn)||1));
+  var r='<div class="lw"><div class="lr'+(x.inRot?'':' off')+'">'+star(x.fav,'lfav',x.id,'Practice '+x.title+' more often')+
+  '<div style="min-width:0;cursor:pointer" data-act="lopen" data-x="'+x.id+'"><div class="it" style="font-size:13px">'+x.title+(linked(x)?'<span class="note" title="Repertoire in this key">'+ic('music')+'</span>':'')+'</div><div class="meta">'+(x.form==='scale'?'Scale':'Arpeggio')+' · '+metaTxt(x)+'</div></div>'+
+  '<div>'+(x.inRot?(x.base==null?'<div class="meta">Not set</div>':'<div class="meta" style="color:var(--ink)">♩ '+x.base+'</div><div class="bar"><i style="width:'+w+'%"></i></div>'):'<div class="meta">—</div>')+'</div>'+
+  '<div class="meta">'+(x.ago===0?'today':x.ago+' d ago')+'</div>'+
+  '<button class="sw2'+(x.inRot?' on':'')+'" role="switch" aria-checked="'+x.inRot+'" data-act="lrot" data-x="'+x.id+'" aria-label="Include '+x.title+' in rotation"></button></div>';
+  if(lopen===x.id){
+   var oc=function(cur){return [1,2,3,4].map(function(n){return '<option value="'+n+'"'+(n===cur?' selected':'')+'>'+octTxt(n)+'</option>'}).join('')};
+   r+='<div class="ld"><label>Octaves<select data-f="oct" data-x="'+x.id+'">'+oc(x.oct)+'</select></label>'+
+   '<label>Hands<select data-f="hands" data-x="'+x.id+'">'+[['together','Together'],['thirds','A third apart'],['sixths','A sixth apart']].map(function(p){return '<option value="'+p[0]+'"'+(x.hands===p[0]?' selected':'')+'>'+p[1]+'</option>'}).join('')+'</select></label>'+
+   '<label>Even-rhythm check<select data-f="checkOct" data-x="'+x.id+'">'+oc(shownOct(x))+'</select></label></div>'+
+   (octPrompt(x)?'<div style="padding:0 0 12px 30px">'+octPrompt(x)+'</div>':'');
+  }
+  return r+'</div>';
+ }).join('');
+ return hd+rows+'</div>';
+}
+function methodsView(){
+ var on=M.filter(function(m){return m.on}).length;
+ var h='<div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 class="ph">Practice methods</h3><span class="meta">'+M.length+' methods · '+on+' on</span></div>'+
+ '<p class="psum">Each time you practice a scale, 3 or 4 of these are suggested and rotate so you do not repeat the same ones. Star the ones you want more often. Turn off any you do not want.</p>';
+ TYPES.forEach(function(ty){
+  var ms=M.filter(function(m){return m.type===ty});if(!ms.length)return;
+  h+='<div class="tg">'+ty+'</div>'+ms.map(function(m){
+   return '<div class="lr'+(m.on?'':' off')+'" style="grid-template-columns:22px minmax(0,1fr) 40px;align-items:start;border-top:1px solid var(--line)"><div>'+star(m.fav,'mfav',m.id,'Suggest this method more often')+'</div><div><div class="it" style="font-size:13px">'+m.n+(m.mine?'<span class="mine">Yours</span>':'')+'</div><div class="md">'+m.d+'</div><div class="meta" style="margin-top:2px">'+APPLY[m.ap]+'</div></div><button class="sw2'+(m.on?' on':'')+'" role="switch" aria-checked="'+m.on+'" data-act="mon" data-x="'+m.id+'" aria-label="Include '+m.n+'" style="margin-top:2px"></button></div>'}).join('');
+ });
+ h+='</div>';
+ h+='<div class="panel"><h3 class="ph">Add your own method</h3><p class="psum">It joins the rotation right away.</p>'+
+ '<label class="field"><span>Name</span><input type="text" id="nm" placeholder="Left hand alone, eyes closed"></label>'+
+ '<label class="field"><span>Technique</span><select id="ty">'+TYPES.map(function(t){return '<option>'+t+'</option>'}).join('')+'</select></label>'+
+ '<label class="field"><span>How to play it</span><input type="text" id="ds" placeholder="Play the left hand alone without looking"></label>'+
+ '<label class="field"><span>Applies to</span><select id="ap"><option value="both">Scales and arpeggios</option><option value="scale">Scales only</option><option value="arp">Arpeggios only</option><option value="together">Hands together only</option></select></label>'+
+ '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="prim" data-act="addm">Add method</button><span id="merr" style="font-size:12.5px;color:#B5473A"></span>'+(msg?'<span class="ok">'+msg+'</span>':'')+'</div></div>';
+ return h;
+}
+function fadedPieces(){
+ return '<div class="faded"><div class="pc"><div><div class="it" style="font-family:\'Fraunces\',serif">Ballade No. 1 in G minor</div><div class="meta">Chopin</div></div><span class="meta">24 min</span></div><div class="pc"><div><div class="it" style="font-family:\'Fraunces\',serif">Bach Prelude in B major</div><div class="meta">Bach</div></div><span class="meta">18 min</span></div></div>';
+}
+function settings(){
+ var p=P[pi];
+ var chips=p.extra.map(function(id){var t=I(id);return '<span class="chp">'+t.title+'<button data-act="rm" data-x="'+id+'" aria-label="Remove '+t.title+'">×</button></span>'}).join('');
+ var opts='<option value="">Add a scale or arpeggio…</option>'+L.filter(function(t){return p.extra.indexOf(t.id)<0&&p.key!==t.tonic+' '+t.q}).map(function(t){return '<option value="'+t.id+'">'+t.title+'</option>'}).join('');
+ return '<div class="head"><div><h1>Settings</h1><p class="sub">'+p.name+'</p></div></div>'+
+ '<div class="panel"><h3 class="ph">Scales in this piece</h3><p class="psum">New fields, asked in the setup wizard too.</p>'+
+ '<label class="field"><span>Key of the piece (optional)</span><select id="key">'+KEYS.map(function(k){return '<option value="'+k+'"'+(k===p.key?' selected':'')+'>'+(k||'Not set')+'</option>'}).join('')+'</select><span class="hint">Scales in this key are tagged "Repertoire in this key" on your Technique cards.</span></label>'+
+ '<div class="field"><span>Other scales and arpeggios in this piece (optional)</span><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+chips+'<select id="addx">'+opts+'</select></div><span class="hint">For keys the piece passes through, like a second theme.</span></div></div>';
+}
+function render(){
+ ['ma','tech','today','set'].forEach(function(k){document.getElementById('n-'+k).className='ni'+(view===k?' on':'')});
+ document.getElementById('swn').textContent=P[pi].name;
+ var h='';
+ if(view==='ma'){
+  var tech=TD.length*5;
+  h='<div class="head"><div><h1>Master Practice Agenda</h1><p class="sub">Saturday, September 19</p></div></div>'+
+  '<div class="banner"><div><div class="bl">Total planned</div><div class="bn">'+fmtMin(54+tech)+'</div><div class="meta" style="margin-top:2px">includes '+tech+'m technique</div></div><div><div class="bl">Status</div><div class="bn">On track</div></div></div>'+panel('shared')+fadedPieces();
+ } else if(view==='tech'){
+  h=techHead()+(sub==='today'?panel('tech'):sub==='library'?library():methodsView());
+ } else if(view==='set'){
+  h=settings();
+ } else {
+  h='<div class="head"><div><h1>Daily Practice</h1><p class="sub">'+(P[pi].stage==='learning'?'Day 12 of 30':'Maintenance')+' · '+P[pi].name+'</p></div></div>'+panel('shared')+
+  '<div class="faded"><div class="pc"><div><div class="it">'+(pi===0?'Mm. 17–24':'Mm. 1–8')+'</div><div class="meta">'+(pi===0?'Section A':'Opening')+'</div></div><span class="meta">'+(pi===0?'NEW':'REVIEW')+'</span></div><div class="pc"><div><div class="it">'+(pi===0?'Mm. 9–16':'Mm. 25–32')+'</div><div class="meta">Review</div></div><span class="meta">REVIEW</span></div></div>';
+ }
+ main.innerHTML=h;
+ icons();
+}
+main.addEventListener('click',function(e){
+ var a=e.target.closest('[data-act]');if(!a)return;
+ var act=a.getAttribute('data-act'),x=a.getAttribute('data-x');
+ if(act!=='addm')msg='';
+ if(act!=='keep'&&act!=='fresh')pend=null;
+ if(act==='keep'||act==='fresh'){
+  if(pend){var pt=I(pend.id);pt.checkOct=pend.to;if(act==='fresh'){pt.base=null;TD.forEach(function(y){if(y.id===pt.id)y.val=''})}pend=null}
+  render();return;
+ }
+ if(act==='sub'){sub=x;render();return}
+ if(act==='lf'){lf=x;render();return}
+ if(act==='lopen'){lopen=lopen===x?null:x;render();return}
+ if(act==='lfav'){I(x).fav=!I(x).fav;render();return}
+ if(act==='lrot'){I(x).inRot=!I(x).inRot;render();return}
+ if(act==='mfav'){Mt(x).fav=!Mt(x).fav;render();return}
+ if(act==='mon'){Mt(x).on=!Mt(x).on;render();return}
+ if(act==='rm'){P[pi].extra=P[pi].extra.filter(function(v){return v!==x});render();return}
+ if(act==='addm'){
+  var nm=document.getElementById('nm').value.trim(),err=document.getElementById('merr');
+  if(!nm){err.textContent='Enter a name first';return}
+  var ds=document.getElementById('ds').value.trim();
+  M.push({id:'u'+(M.length+1),n:nm,type:document.getElementById('ty').value,d:ds||'Your own method.',ap:document.getElementById('ap').value,fav:false,on:true,mine:true});
+  msg='Added "'+nm+'".';render();return;
+ }
+ var it=a.closest('[data-id]'),td=null;
+ if(it){TD.forEach(function(y){if(y.id===it.getAttribute('data-id'))td=y})}
+ if(!td)return;
+ var t=I(td.id);
+ if(act==='tog'){td.done=!td.done;if(!td.done)td.logged=false}
+ else if(act==='open'){open=open===td.id?null:td.id}
+ else if(act==='fav'){t.fav=!t.fav}
+ else if(act==='log'){var inp=it.querySelector('input');var v=parseInt(inp.value,10);if(!v||v<30){inp.style.borderColor='#B5473A';return}td.val=v;t.base=v;t.ago=0;td.done=true;td.logged=true}
+ render();
+});
+main.addEventListener('input',function(e){
+ var id=e.target.getAttribute('data-in');
+ if(id){e.target.style.borderColor='';TD.forEach(function(y){if(y.id===id)y.val=e.target.value})}
+ if(e.target.id==='nm'){var er=document.getElementById('merr');if(er)er.textContent=''}
+});
+main.addEventListener('change',function(e){
+ var el=e.target;
+ if(el.getAttribute('data-f')!=='checkOct')pend=null;
+ if(el.id==='key'){P[pi].key=el.value;render()}
+ else if(el.id==='addx'&&el.value){P[pi].extra.push(el.value);render()}
+ else if(el.id==='sortsel'){sortBy=el.value;render()}
+ else if(el.getAttribute('data-f')){var f=el.getAttribute('data-f'),it2=I(el.getAttribute('data-x'));if(f==='checkOct'){requestOct(it2.id,parseInt(el.value,10))}else{it2[f]=f==='hands'?el.value:parseInt(el.value,10)}render()}
+});
+document.getElementById('n-ma').onclick=function(){view='ma';render()};
+document.getElementById('n-tech').onclick=function(){view='tech';render()};
+document.getElementById('n-today').onclick=function(){view='today';render()};
+document.getElementById('n-set').onclick=function(){view='set';render()};
+document.getElementById('sw').onclick=function(){pi=(pi+1)%P.length;render()};
+render();
+</script>
+
+</body></html>

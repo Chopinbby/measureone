@@ -3,6 +3,7 @@ import { todayISODate, addDaysISO, parseMeasurePosition } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
 import { isInRevival } from "./revival";
 import { generatePracticeChunks, reassociateTroubleSpots, validSplitPoints } from "./chunking";
+import { normalizePieceKey, normalizeOtherKeys, sameSpelledKey } from "./technique";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -397,6 +398,14 @@ export function validateAndMigratePiece(piece) {
     troubleSpotsEnabled: !!piece.troubleSpotsEnabled,
     troubleSpotDefaultMinutes:
       typeof piece.troubleSpotDefaultMinutes === "number" ? piece.troubleSpotDefaultMinutes : 5,
+    // Pass 103 — the key of the piece and other keys it passes through, in
+    // the same { tonic, quality } shape technique items use (Technique
+    // practice links pieces to scales by key, never by specific scale —
+    // docs/Technique-Practice.md, Decided 1). Backfilled to null, not to a
+    // materialized value, so a piece that never set them stays unchanged
+    // and a byte-identical re-import doesn't differ from what's stored.
+    homeKey: normalizePieceKey(piece.homeKey),
+    otherKeys: normalizeOtherKeys(piece.otherKeys, normalizePieceKey(piece.homeKey)),
     // Pass 97 — extra chunk-boundary measures layered on top of the uniform
     // chunkMode/customChunkSize stepping (generatePracticeChunks,
     // lib/chunking.js), one per chunk a learner has split in two from Daily
@@ -570,6 +579,183 @@ export function removePieceFromStorage(id) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Technique practice data (Pass 100) — app-level, not part of any    */
+/*  piece: one localStorage key of its own, its own schema version,    */
+/*  never read or written through setPieces/updatePiece. Shape:        */
+/*  docs/Data-Model.md#technique-practice-data-app-level. The engine   */
+/*  that reads it is lib/technique.js.                                 */
+/* ------------------------------------------------------------------ */
+
+export const TECHNIQUE_KEY = "measureone-technique";
+// Where an unreadable technique entry is copied before it's replaced with
+// defaults, so a corrupt save is set aside rather than silently lost.
+export const TECHNIQUE_CORRUPT_BACKUP_KEY = "measureone-technique-corrupt";
+export const TECHNIQUE_SCHEMA_VERSION = 1;
+
+export function defaultTechnique() {
+  return {
+    schemaVersion: TECHNIQUE_SCHEMA_VERSION,
+    items: [],
+    methodState: {}, // { [methodId]: { starred, enabled } }
+    customMethods: [],
+    methodLastUsed: {}, // { [itemId]: { [methodId]: ISO date } }
+    walkPosition: 0,
+    dayList: null, // { date, tasks: [{ itemId, methodIds, done, tier, tempo? }] }
+    settings: { scalesPerDay: 3, minutesPerScale: 5 },
+    updatedAt: null,
+  };
+}
+
+const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const isISODate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const positiveNumberOrNull = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+
+// One library item with every field the engine reads, defaulted. Also the
+// constructor for a newly added item (App.jsx's add handler). Returns null
+// for anything unusable (no id, or no tonic/quality to key it by).
+export function normalizeTechniqueItem(raw) {
+  if (!isPlainObject(raw) || raw.id == null || typeof raw.tonic !== "string") return null;
+  if (raw.quality !== "major" && raw.quality !== "minor") return null;
+  const octaves = Number.isInteger(raw.octaves) && raw.octaves >= 1 && raw.octaves <= 4 ? raw.octaves : 2;
+  return {
+    id: String(raw.id),
+    form: raw.form === "arpeggio" ? "arpeggio" : "scale",
+    tonic: raw.tonic,
+    quality: raw.quality,
+    minorForm: raw.quality === "minor" && ["natural", "harmonic", "melodic"].includes(raw.minorForm) ? raw.minorForm : null,
+    octaves,
+    hands: ["together", "thirds", "sixths"].includes(raw.hands) ? raw.hands : "together",
+    evenTempo: positiveNumberOrNull(raw.evenTempo),
+    checkOctaves: Number.isInteger(raw.checkOctaves) && raw.checkOctaves >= 1 && raw.checkOctaves <= 4 ? raw.checkOctaves : octaves,
+    lastCheckedDate: isISODate(raw.lastCheckedDate) ? raw.lastCheckedDate : null,
+    lastPracticedDate: isISODate(raw.lastPracticedDate) ? raw.lastPracticedDate : null,
+    practicedDates: Array.isArray(raw.practicedDates) ? raw.practicedDates.filter(isISODate) : [],
+    starred: !!raw.starred,
+    inRotation: raw.inRotation !== false,
+  };
+}
+
+// A done task's snapshot of what completing it changed, so the check-off
+// can be undone after a reload too (lib/technique.js uncompleteTask).
+function normalizeUndo(u) {
+  const item = isPlainObject(u.item) ? u.item : {};
+  return {
+    walkPosition: Number.isInteger(u.walkPosition) ? u.walkPosition : 0,
+    advancedTo: Number.isInteger(u.advancedTo) ? u.advancedTo : null,
+    checkOctaves: Number.isInteger(u.checkOctaves) ? u.checkOctaves : null,
+    item: {
+      lastPracticedDate: isISODate(item.lastPracticedDate) ? item.lastPracticedDate : null,
+      practicedDates: Array.isArray(item.practicedDates) ? item.practicedDates.filter(isISODate) : [],
+      evenTempo: positiveNumberOrNull(item.evenTempo),
+      lastCheckedDate: isISODate(item.lastCheckedDate) ? item.lastCheckedDate : null,
+    },
+    methodLastUsed: isPlainObject(u.methodLastUsed)
+      ? Object.fromEntries(Object.entries(u.methodLastUsed).map(([k, v]) => [k, isISODate(v) ? v : null]))
+      : {},
+  };
+}
+
+function normalizeDayList(raw) {
+  if (!isPlainObject(raw) || !isISODate(raw.date) || !Array.isArray(raw.tasks)) return null;
+  const tasks = raw.tasks
+    .filter((t) => isPlainObject(t) && t.itemId != null)
+    .map((t) => ({
+      itemId: String(t.itemId),
+      methodIds: Array.isArray(t.methodIds) ? t.methodIds.map(String) : [],
+      done: !!t.done,
+      tier: typeof t.tier === "string" ? t.tier : null,
+      tempo: positiveNumberOrNull(t.tempo),
+      ...(t.done && isPlainObject(t.undo) ? { undo: normalizeUndo(t.undo) } : {}),
+    }));
+  return { date: raw.date, tasks };
+}
+
+// Pure: any parsed value in, a complete, current-schema technique object
+// out. Missing fields are backfilled; wrong-typed fields fall back to their
+// default rather than failing the whole load. A save with no schemaVersion
+// is treated as version 1 (the first shipped shape).
+export function validateAndMigrateTechnique(raw) {
+  const d = defaultTechnique();
+  if (!isPlainObject(raw)) return d;
+  const items = Array.isArray(raw.items) ? raw.items.map(normalizeTechniqueItem).filter(Boolean) : [];
+  const methodState = {};
+  if (isPlainObject(raw.methodState)) {
+    for (const [id, st] of Object.entries(raw.methodState)) {
+      if (isPlainObject(st)) methodState[id] = { starred: !!st.starred, enabled: st.enabled !== false };
+    }
+  }
+  const customMethods = Array.isArray(raw.customMethods)
+    ? raw.customMethods.filter((m) => isPlainObject(m) && m.id != null && typeof m.name === "string" && m.name.trim())
+        .map((m) => ({
+          id: String(m.id),
+          name: m.name,
+          technique: typeof m.technique === "string" ? m.technique : "Rhythm",
+          description: typeof m.description === "string" ? m.description : "",
+          appliesTo: ["both", "scale", "arpeggio", "together"].includes(m.appliesTo) ? m.appliesTo : "both",
+          custom: true,
+        }))
+    : [];
+  const methodLastUsed = {};
+  if (isPlainObject(raw.methodLastUsed)) {
+    for (const [itemId, used] of Object.entries(raw.methodLastUsed)) {
+      if (!isPlainObject(used)) continue;
+      methodLastUsed[itemId] = Object.fromEntries(Object.entries(used).filter(([, v]) => isISODate(v)));
+    }
+  }
+  const walkPosition = Number.isInteger(raw.walkPosition) && raw.walkPosition >= 0 && raw.walkPosition < 24 ? raw.walkPosition : 0;
+  const settings = { ...d.settings };
+  if (isPlainObject(raw.settings)) {
+    if (Number.isInteger(raw.settings.scalesPerDay) && raw.settings.scalesPerDay >= 1) settings.scalesPerDay = raw.settings.scalesPerDay;
+    if (typeof raw.settings.minutesPerScale === "number" && raw.settings.minutesPerScale > 0) settings.minutesPerScale = raw.settings.minutesPerScale;
+  }
+  return {
+    schemaVersion: TECHNIQUE_SCHEMA_VERSION,
+    items,
+    methodState,
+    customMethods,
+    methodLastUsed,
+    walkPosition,
+    dayList: normalizeDayList(raw.dayList),
+    settings,
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : null,
+  };
+}
+
+// Never throws. Missing key → defaults. Unreadable JSON → the raw text is
+// copied to TECHNIQUE_CORRUPT_BACKUP_KEY first (so the next save can't
+// silently destroy it), then defaults. Storage unavailable → defaults.
+export function loadTechniqueFromStorage() {
+  try {
+    const raw = localStorage.getItem(TECHNIQUE_KEY);
+    if (!raw) return defaultTechnique();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      try {
+        localStorage.setItem(TECHNIQUE_CORRUPT_BACKUP_KEY, raw);
+      } catch (e2) {
+        /* nowhere to set it aside */
+      }
+      return defaultTechnique();
+    }
+    return validateAndMigrateTechnique(parsed);
+  } catch (e) {
+    return defaultTechnique();
+  }
+}
+
+// { ok: true } or { ok: false, error }, same contract as savePieceToStorage.
+export function saveTechniqueToStorage(technique) {
+  try {
+    localStorage.setItem(TECHNIQUE_KEY, JSON.stringify(technique));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Export reminder — nudges toward a backup export since this app has  */
 /*  no server-side persistence at all (see CLAUDE.md's "no backend").   */
 /*  App-level, not per-piece: a single export already bundles every     */
@@ -630,11 +816,18 @@ export function isExportReminderDue(lastExportedAt, firstUseAt, now = Date.now()
   return now - anchor >= EXPORT_REMINDER_INTERVAL_MS;
 }
 
-export function downloadBackup(pieces) {
+// `technique` (Pass 104, optional): the app-level technique object, written
+// as an extra top-level "technique" block next to "pieces". It carries its
+// own schemaVersion (validateAndMigrateTechnique). Everything else in the
+// file is exactly as before, so older app versions and parseBackupPieces
+// simply ignore it. Omitted entirely when null (the export modal's
+// "Technique library" row switched off).
+export function downloadBackup(pieces, technique = null) {
   const backup = {
     exportedAt: new Date().toISOString(),
     version: 1,
     pieces: Object.values(pieces),
+    ...(technique ? { technique } : {}),
   };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -654,6 +847,144 @@ export function downloadBackup(pieces) {
 export function parseBackupPieces(rawText) {
   const data = JSON.parse(rawText);
   return Array.isArray(data.pieces) ? data.pieces : Array.isArray(data) ? data : null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Technique data in backups (Pass 104).                              */
+/* ------------------------------------------------------------------ */
+
+// Reads a backup's technique block. Returns { technique, unreadable,
+// skippedItems }:
+// - no block (a backup from before Pass 104, exported with the Technique row
+//   off, or a bare-array backup): technique null, unreadable false;
+// - a block that's there but can't be read (not an object, or an `items`
+//   that isn't a list): technique null, unreadable TRUE — so the import can
+//   say so instead of quietly importing pieces only;
+// - otherwise the block validated to the current schema, plus how many of
+//   its scales couldn't be read (skipped by validateAndMigrateTechnique), so
+//   the import can say that too instead of dropping them without a word.
+// Throws only on unparseable JSON, same as parseBackupPieces.
+export function readBackupTechnique(rawText) {
+  const data = JSON.parse(rawText);
+  if (!data || Array.isArray(data) || !("technique" in data)) {
+    return { technique: null, unreadable: false, skippedItems: 0 };
+  }
+  const block = data.technique;
+  if (!isPlainObject(block) || ("items" in block && !Array.isArray(block.items))) {
+    return { technique: null, unreadable: true, skippedItems: 0 };
+  }
+  const technique = validateAndMigrateTechnique(block);
+  const skippedItems = Array.isArray(block.items) ? block.items.length - technique.items.length : 0;
+  return { technique, unreadable: false, skippedItems };
+}
+
+// Just the validated block, or null (no block, or unreadable).
+export function parseBackupTechnique(rawText) {
+  return readBackupTechnique(rawText).technique;
+}
+
+// Item identity for the merge: form, key (tonic as spelled + major/minor +
+// minor form — the design doc's "key"), octaves and hands. Two items that
+// differ only in tempo, star, rotation or dates are the same item.
+function sameTechniqueItem(a, b) {
+  return (
+    a.form === b.form &&
+    sameSpelledKey(a, b) &&
+    (a.minorForm || null) === (b.minorForm || null) &&
+    a.octaves === b.octaves &&
+    a.hands === b.hands
+  );
+}
+
+const laterDate = (a, b) => (!a ? b || null : !b ? a : a >= b ? a : b);
+
+// Merges a backup's technique block into what's here. Never removes
+// anything already here:
+// - Same item (sameTechniqueItem): the more recently CHECKED tempo wins —
+//   evenTempo, lastCheckedDate and checkOctaves move together, since a tempo
+//   only means something with the octaves it was measured over. A tie (or no
+//   check on either side) keeps what's here. An EMPTY tempo never replaces a
+//   real one here, even with a newer check date (a "Start fresh" on the
+//   other device clears the tempo but keeps the last check date) — that
+//   would remove something already here (Pass 104 review fix). Practice dates are combined
+//   (lastPracticedDate the later of the two, practicedDates the union), and
+//   the imported method last-used dates are folded in, later date per
+//   method. Star, rotation, octaves and hands stay as they are here.
+// - Items not here are added (a fresh id if theirs is already taken here).
+// - Custom methods not here (by id, or by the same name) are added; a
+//   method's saved star/on-off state is added only where there's none here.
+// - Today's list, settings and the walk position stay as they are — except
+//   the walk position is taken from the backup when the library here was
+//   empty (a restore onto a fresh device), so the walk resumes where it was.
+// Returns { technique, stats: { itemsAdded, temposUpdated, methodsAdded,
+// methodStatesAdded } } — stats feed the import modal's preview and the
+// final message.
+export function mergeImportedTechnique(existing, imported) {
+  const local = validateAndMigrateTechnique(existing);
+  const incoming = validateAndMigrateTechnique(imported);
+  const stats = { itemsAdded: 0, temposUpdated: 0, methodsAdded: 0, methodStatesAdded: 0 };
+
+  const items = local.items.map((it) => ({ ...it }));
+  const methodLastUsed = Object.fromEntries(Object.entries(local.methodLastUsed).map(([k, v]) => [k, { ...v }]));
+  const takenIds = new Set(items.map((it) => it.id));
+  const foldUsed = (targetId, used) => {
+    if (!used) return;
+    const into = { ...(methodLastUsed[targetId] || {}) };
+    for (const [mid, date] of Object.entries(used)) into[mid] = laterDate(into[mid], date);
+    methodLastUsed[targetId] = into;
+  };
+
+  for (const inc of incoming.items) {
+    const here = items.find((it) => sameTechniqueItem(it, inc));
+    if (here) {
+      const newerCheck = inc.lastCheckedDate && (!here.lastCheckedDate || inc.lastCheckedDate > here.lastCheckedDate);
+      if (newerCheck && inc.evenTempo != null) {
+        here.evenTempo = inc.evenTempo;
+        here.lastCheckedDate = inc.lastCheckedDate;
+        here.checkOctaves = inc.checkOctaves;
+        stats.temposUpdated++;
+      }
+      here.lastPracticedDate = laterDate(here.lastPracticedDate, inc.lastPracticedDate);
+      here.practicedDates = [...new Set([...here.practicedDates, ...inc.practicedDates])].sort();
+      foldUsed(here.id, incoming.methodLastUsed[inc.id]);
+    } else {
+      let id = inc.id;
+      while (takenIds.has(id)) id = `${inc.id}_imported_${Math.random().toString(36).slice(2, 7)}`;
+      takenIds.add(id);
+      items.push({ ...inc, id });
+      foldUsed(id, incoming.methodLastUsed[inc.id]);
+      stats.itemsAdded++;
+    }
+  }
+
+  const customMethods = [...local.customMethods];
+  for (const m of incoming.customMethods) {
+    const clash = customMethods.some((c) => c.id === m.id || c.name.trim().toLowerCase() === m.name.trim().toLowerCase());
+    if (!clash) {
+      customMethods.push(m);
+      stats.methodsAdded++;
+    }
+  }
+
+  const methodState = { ...local.methodState };
+  for (const [mid, st] of Object.entries(incoming.methodState)) {
+    if (!(mid in methodState)) {
+      methodState[mid] = st;
+      stats.methodStatesAdded++;
+    }
+  }
+
+  return {
+    technique: {
+      ...local,
+      items,
+      methodLastUsed,
+      customMethods,
+      methodState,
+      walkPosition: local.items.length === 0 ? incoming.walkPosition : local.walkPosition,
+    },
+    stats,
+  };
 }
 
 /* ------------------------------------------------------------------ */

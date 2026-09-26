@@ -163,3 +163,15 @@ describe("saving a chunk-size change keeps practice logged since the form opened
     assert.deepEqual(viaMerge, viaDraft);
   });
 });
+
+describe("Pass 103: piece keys are edit-form fields", () => {
+  test("homeKey and otherKeys are on the allow-list, so a Settings edit to them saves", () => {
+    assert.ok(EDIT_FORM_FIELDS.includes("homeKey"));
+    assert.ok(EDIT_FORM_FIELDS.includes("otherKeys"));
+    const live = basePiece({ homeKey: null, otherKeys: null });
+    const draft = { ...live, homeKey: { tonic: "D", quality: "major" }, otherKeys: [{ tonic: "A", quality: "major" }] };
+    const saved = mergeEditedPiece(live, draft);
+    assert.deepEqual(saved.homeKey, { tonic: "D", quality: "major" });
+    assert.deepEqual(saved.otherKeys, [{ tonic: "A", quality: "major" }]);
+  });
+});

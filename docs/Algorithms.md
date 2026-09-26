@@ -834,6 +834,27 @@ with no warning in any direction — and restoring a *genuinely more-advanced*
 backup (e.g. from a second device) no longer silently loses that advanced
 ladder state to the "existing always wins" rule the way it used to.
 
+### Technique library (Pass 104)
+
+A backup's `technique` block is read by `readBackupTechnique` (returns
+`{ technique, unreadable, skippedItems }`, so an unreadable block or
+unreadable scales are reported, not skipped silently) and merged by
+`mergeImportedTechnique(existing, imported)` — both `lib/storage.js`.
+Nothing here is ever removed:
+- **Same item** = same form, key as spelled (`sameSpelledKey`) with minor
+  form, octaves and hands. The more recently *checked* tempo wins, moving
+  `evenTempo`, `lastCheckedDate` and `checkOctaves` together; a tie keeps
+  what's here, and an empty imported tempo never replaces a real one.
+  `lastPracticedDate` takes the later date, `practicedDates` the union,
+  and the imported method last-used dates fold in (later date per method)
+  under the local item's id. Star, rotation, octaves and hands stay local.
+- **New items** are added (fresh id if theirs is taken here); custom
+  methods are added unless one here has the same id or name; a method's
+  star/on-off state is added only where there's none here.
+- Today's list and settings stay local; the walk position comes from the
+  backup only if the library here was empty. `App.jsx` then tops up
+  today's list (`topUpDayList`).
+
 ## Adaptive review
 
 **Superseded as of Pass 5 of the maintenance-ladder build — kept in this
@@ -3744,3 +3765,170 @@ wins while the other neighbor is left standalone — a cosmetic simplification
 of a two-box visual that can't show a three-way grouping, not a data issue.
 An unsplit piece renders byte-for-byte as before. This is display only:
 there's still no way to *un*-split from Piece Map (or anywhere).
+
+## Technique practice engine (Pass 99)
+
+Built in Pass 99; saved and wired up in Pass 100, on screen since 101.
+`src/lib/technique.js`, pure functions with no clock: every function that
+needs a date takes `today` (an ISO date string) and never reads the current
+date itself. Design: [Technique-Practice.md](Technique-Practice.md).
+Constants: `TECHNIQUE_*` in `src/lib/constants.js`, inventoried in
+[Research.md](Research.md#technique-practice-constants).
+Tests: `test/technique.test.mjs`.
+
+### Keys and the walk
+
+- `pitchClass(tonic)` maps a spelling ("F#", "G♭", "B#") to 0–11, so
+  enharmonic keys compare equal. `normalizeKey`/`sameKey` accept either
+  `{ tonic, quality }` or a string like "G minor". This sound-based match
+  is for the walk only (it has one F♯/G♭ day).
+- **Linking pieces to scales uses `sameSpelledKey` instead (Pass 103
+  follow-up):** the key as written, so "Gb" = "G♭", but G♭ major ≠ F♯
+  major. `isRepertoireItem` and the dedupe in `normalizeOtherKeys` use it,
+  and so does the Add form's duplicate check. A piece in G♭ major
+  tags and paces G♭ major scales only.
+- `WALK_KEYS` is the 24-position lap: each major around the circle of
+  fifths (C G D A E B F♯ D♭ A♭ E♭ B♭ F), each followed by its relative
+  minor (major + 9 semitones).
+- `effectiveWalkPosition(walkPosition, items)` is the first position at or
+  after the saved one whose key has an in-rotation item (wrapping).
+  `walkKeyOfDay(items, walkPosition)` returns that key and the next one
+  with items, for the Technique page's walk hint.
+- **The walk advances on completion, never by date.** Only `completeTask`
+  moves `walkPosition`, and only when the completed item is in the key of
+  the day (to the position after it). Advancing by calendar date is a
+  deliberate non-behavior; the test "advances on completion, not by date"
+  fails if it comes back.
+
+### Pace: days-a-week targets (tier 1)
+
+`repertoireKeys` is every key of every **active** piece (its `homeKey`
+plus `otherKeys`; paused/archived pieces don't count, mid-revival does),
+built by `repertoireKeysFromPieces` and matched as spelled (see above).
+
+`paceDaysPerWeek(item, repertoireKeys, today)`: 4 for a repertoire-key item,
+3 for a starred one, and for an item that is both, 4 on even calendar weeks
+and 3 on odd ones (Monday–Sunday weeks counted from
+`TECHNIQUE_WEEK_PARITY_EPOCH`); 0 otherwise. `paceStatus` counts the item's
+distinct practice days so far this week from `item.practicedDates`. It is
+due while days remain in its target, as long as it wasn't practiced
+yesterday (`TECHNIQUE_PACE_MIN_GAP_DAYS` = 2) — unless the rest of the week
+has no more days than it still needs, in which case it's due anyway. That
+spreads 3–4 days across the week instead of front-loading them. Urgency =
+remaining days ÷ days left in the week; tier 1 sorts on it ("most overdue
+first"). A missed target just resets on Monday — never "behind".
+
+This replaces the brief's original x3/x2/x5 multiplier model (see
+[Decisions.md](Decisions.md#technique-practice)). The simulation test (238
+days, 36-item library, everything completed) lands exactly on 4.0 / 3.0 /
+3.5 days a week for repertoire / starred / both, with the "both" item at
+4.0 on its 4-day weeks and 3.0 on its 3-day weeks. Ordinary items come up
+about 0.2 days a week, via the walk.
+
+### Slow scales (tier 2)
+
+`slowItems(items, today)`: the slowest third of in-rotation items **by
+count** (`Math.ceil(n / 3)`), ordered by even tempo ascending, no tempo
+first; then the ones practiced in the last 7 days are dropped. By count, not
+by where a tempo sits in the user's min–max range: a range cut would make
+every item "slow" in a new library with no tempos saved yet (or with all
+tempos equal), and tier 2 would crowd out the walk for weeks.
+
+### Building the day's list
+
+`buildDayList(state, today)` returns `{ date, tasks: [{ itemId, methodIds,
+done, tier }] }`, at most `TECHNIQUE_TASKS_PER_DAY` tasks, no item twice:
+
+0. **carried** — the previous list's unfinished tasks, same methods, only if
+   the item still exists and is in rotation; capped at the daily limit;
+1. **pace** — due tier-1 items, most urgent first;
+2. **slow** — `slowItems`;
+3. **walk** — up to 2 not-yet-listed items in the key of the day, the
+   longest since practiced first.
+
+If `previousList.date === today`, the previous list is returned unchanged,
+so the saved list is stable across screens. The walk takes only the key of
+the day; if slots are still free after it, the list is simply shorter. `tier`
+is internal (the cards show no tier labels).
+
+### Methods
+
+`pickMethods(item, methods, lastUsedForItem, today)`: methods that fit the
+item (`appliesTo`: "scale", "arpeggio", or "together" = `hands ===
+"together"` only; a third or sixth apart doesn't count) and are enabled.
+Ranked by days since used on this item (never used first), starred counting
+double, and at most 2 per technique. The last session's methods (those with
+the item's latest last-used date) are skipped, unless skipping would leave
+fewer than 3, in which case they fill in at the end. It picks 4 whenever 4
+fit (13 built-ins means 4 almost always), so 3 only happens with a narrow
+library of methods. Methods are recorded as used only by `completeTask`.
+
+### Completing, tempo, and octaves
+
+- `completeTask(state, itemId, today, tempo?)` returns new state (inputs
+  untouched). It marks the task done, sets `lastPracticedDate` and appends
+  to `practicedDates` (trimmed to 14 days), records the task's methods as
+  used, and may advance the walk. With a tempo it also sets `evenTempo` and
+  `lastCheckedDate`; a bare check-off leaves both alone.
+- `startingTempo(item)` = `round(evenTempo × 0.85)`, or `null` with no
+  tempo.
+- `changeCheckOctaves(item, n, choice?)` returns `"unchanged"`, `"applied"`
+  (no saved tempo, or with `choice` "keep" / "fresh"; "fresh" clears
+  `evenTempo`), or `"needs-prompt"` (a saved tempo and no choice yet; the
+  item is returned unchanged).
+
+- **Undo (Pass 101):** `completeTask` stores an `undo` snapshot on the
+  task: the walk position before and the position it advanced to, the
+  item's `lastPracticedDate`/`practicedDates`/`evenTempo`/`lastCheckedDate`,
+  and each of the task's methods' previous last-used date. `uncompleteTask`
+  puts them back and marks the task not done. The walk is only stepped
+  back if it still sits where this completion left it, so undoing an
+  earlier task never rewinds a later one's step. Star, rotation and octave
+  changes made in between are left alone. **The tempo isn't restored if
+  the check octaves changed since the check-off** (the snapshot records
+  them as `undo.checkOctaves`). Otherwise un-checking after a Library
+  "start fresh" would bring back a tempo measured over a different number
+  of octaves and silently undo that choice. A snapshot saved before this
+  field existed reads it as `null` (unknown) and restores the tempo as it
+  always did. A done task with no snapshot at all (saved before undo
+  existed) can't be un-checked; the card disables its check and says why. The snapshot is saved with the
+  list (`lib/storage.js` keeps it), so undo works after a reload too.
+
+### Topping up today's list (Pass 101)
+
+`topUpDayList(state, dayList, today)` fills a short list's free slots
+(pace, slow, walk, no carry-over) without touching what's already on it,
+done or not. `App.jsx` calls it only when a scale is added, put back in
+rotation or switched out of it (below), or after a backup import (Pass 104),
+so someone's first scales show up the same day instead of tomorrow. It isn't run after a check-off, so finishing the key of the day
+never pulls the next key's scales in early. `buildDayList` and
+`topUpDayList` share one private fill routine.
+
+**Switching a scale out of rotation mid-day** (Pass 101 review fix) also
+takes its unfinished task off today's list (`removeUnfinishedTask`; a done
+task stays as a record), then tops up the freed slot.
+
+**The walk hint** ("Circle of fifths: D major today, B minor next.") comes
+from `walkHint(items, walkPosition, dayList)`:
+- Once a walk-advancing task is checked off, "today" stays the key that
+  task finished (read from its `undo` snapshot) and "next" is where the
+  walk now sits. So the hint doesn't vanish or jump ahead the moment the
+  key of the day is done. If two keys were finished today, the first one
+  is "today".
+- Otherwise it shows only if a task on today's list is in the key of the
+  day. On a day when starred, repertoire or slow scales fill every slot,
+  the walk doesn't run, and the hint would otherwise name a key nobody is
+  practicing.
+
+### Today's list on other screens (Pass 102)
+
+`techniqueTodaySummary(technique, today)` decides whether Master Agenda and
+Daily Practice show the shared panel — only when the saved list is
+today's and has at least one task whose scale still exists — and how many
+minutes it adds to Total planned (`minutesPerScale` per task, done or
+not). `agendaStatusLabel(totalMinutes, pieceCount, techniqueMinutes)`
+words Master Agenda's Status: the tier (Busy day > 60, Moderate > 30,
+else Light) uses the total including technique; "N pieces scheduled"
+never counts technique; a scales-only day reads "<tier> — technique
+only". Nothing schedule-related (behind-schedule, reschedule, the
+schedule banner) reads technique data.

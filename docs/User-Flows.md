@@ -64,7 +64,10 @@ plus the work title specifically when "Multiple movements" is selected (see
 above); target tempo, tempo zones, recordings, and documents stay fully
 optional. The Timeline step no longer has a target-tempo field; it only sets
 the schedule itself (start date, deadline vs. minutes/day, practice days per
-week, chunk size).
+week, chunk size). **Since Pass 103**, `BasicsFields` also offers the
+piece's key and other keys it passes through (both optional; also on
+Settings' edit page) — scales in those keys get the "Repertoire in this
+key" tag and come up more often on the Technique list (flow 9).
 
 The Wizard is **create-only** — an existing piece is never edited through it;
 editing always goes through Settings instead.
@@ -99,7 +102,9 @@ Entry point: the Today tab, clicking a day card in Timeline
 (`handleSelectDay`, which sets `dayOverride` and jumps to Today), or —
 since the same session as Pass 43/45 — Overview's "Continue learning" /
 "Continue maintenance" button, which resets to real-time tracking rather
-than jumping to a specific day.
+than jumping to a specific day. **Since Pass 102**, on the real today the
+shared Technique panel (today's scales, flow 9) sits right under the page
+header, before the piece's own tasks — in the revival view too.
 
 1. `ScheduleBanner` shows if any chunks are behind schedule
    (`computeScheduleStatus`) and offers rescheduling — see flow 4.
@@ -479,10 +484,14 @@ Export picker — sorts by instead of creation date. See
 
 ## 7. Backup and restore
 
-Settings exposes **Export all** (`handleExportAll`, downloads every piece as
-a single JSON file) and **Import a backup** (`handleImportClick` →
-`handleImportFile`, also reachable from the empty state when there's no
-active piece). This is the only backup mechanism — there is no cloud sync
+Settings' "Backup & restore" panel has **Export pieces**
+(`handleExportClick` → `ExportPiecesModal`: pick which pieces to include,
+then one JSON file) and **Import backup** (`handleImportClick` →
+`handleImportFile` → `ImportPiecesModal`, also reachable from the empty
+state when there's no active piece). **Since Pass 104**, both also have a
+"Technique library" row: on by default for export; on import it previews
+what will be added and merges into the library here without removing
+anything, and says so if the file's technique library can't be read. This is the only backup mechanism — there is no cloud sync
 (see [Roadmap.md](Roadmap.md)), so this JSON export is the only way data
 survives clearing browser storage or moving to a new browser/device.
 
@@ -550,3 +559,32 @@ See [Algorithms.md](Algorithms.md#revival) and
 [Decisions.md](Decisions.md#revival) for the full mechanics and design
 history, including everything this flow used to look like as a standalone
 tab before Pass 88.
+
+## 9. Technique practice (scales and arpeggios)
+
+Since Passes 101–104. App-level, not tied to the open piece. Design:
+[Technique-Practice.md](Technique-Practice.md).
+
+1. **Sidebar → Technique** (second item, after Master Agenda). A new
+   library starts empty; "Add scale or arpeggio" (form, key, minor type,
+   octaves, hands, check octaves, optional starting tempo and star) adds
+   one, and it joins today's list at once if there's room.
+2. **Today** tab: up to 3 task cards (carried-over first, then starred /
+   repertoire-key scales that are due, slow scales, then the
+   circle-of-fifths walk, with a walk hint when its key is on the list).
+   Each card shows 3–4 practice methods; expanding it shows instructions,
+   a starting tempo (85% of the last check), and "Finish with an
+   even-rhythm check" (tempo 30–300 → Log check sets the baseline). The
+   circle checks a task off without a tempo; clicking it again undoes it.
+3. **Library** tab: filter, three sorts, star a scale, switch it in/out of
+   rotation, click a row to edit octaves / hands / check octaves (changing
+   check octaves on a scale with a tempo asks "keep as a starting point, or
+   start fresh?").
+4. **Methods** tab: star or switch off any method; add your own.
+5. The same list shows on **Master Agenda** (under Total planned, which
+   adds 5 minutes per task) and every piece's **Daily Practice**, real today
+   only, hidden when the list is empty. A check-off anywhere shows
+   everywhere. Scales are never "behind": unfinished ones carry to tomorrow.
+6. A piece's key (flow 1) tags matching scales "Repertoire in this key" and
+   paces them about 4 days a week while the piece is active.
+

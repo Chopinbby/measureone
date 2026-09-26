@@ -16,6 +16,7 @@ import {
   Download,
   X,
   AlertTriangle,
+  Piano,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange } from "./lib/utils";
@@ -51,7 +52,13 @@ import {
   saveLastExportedAt,
   loadOrInitFirstUseAt,
   isExportReminderDue,
+  loadTechniqueFromStorage,
+  saveTechniqueToStorage,
+  normalizeTechniqueItem,
+  readBackupTechnique,
+  mergeImportedTechnique,
 } from "./lib/storage";
+import { resolveMethods, buildDayList, completeTask, uncompleteTask, topUpDayList, removeUnfinishedTask, changeCheckOctaves, repertoireKeysFromPieces } from "./lib/technique";
 
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
@@ -68,6 +75,7 @@ import { MasterAgendaTab } from "./components/tabs/MasterAgendaTab";
 import { ProgressTab } from "./components/tabs/ProgressTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
 import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
+import { TechniqueTab } from "./components/tabs/TechniqueTab";
 
 /* ------------------------------------------------------------------ */
 /*  App shell                                                          */
@@ -75,6 +83,9 @@ import { AllPiecesTab } from "./components/tabs/AllPiecesTab";
 
 const NAV_BASE = [
   { key: "master-agenda", label: "Master Agenda", icon: Layers },
+  // App-level, like Master Agenda — the hairline divider after it (see the
+  // nav render) separates the app-wide items from the piece-scoped ones.
+  { key: "technique", label: "Technique", icon: Piano },
   { key: "overview", label: "Piece Overview", icon: LayoutGrid },
   { key: "timeline", label: "Timeline", icon: CalendarDays },
   { key: "map", label: "Piece Map", icon: Music2 },
@@ -215,7 +226,24 @@ export default function App() {
   }, [scrollToOnArrival, activeTab]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importCandidates, setImportCandidates] = useState(null);
+  // The chosen backup's technique block (Pass 104), or null when it has none
+  // (an older backup, a bare-array one, or exported with the row off).
+  const [importTechnique, setImportTechnique] = useState(null);
+  // What reading that block reported: { unreadable, skippedItems } — shown in
+  // the import modal and the final message rather than skipped silently.
+  const [importTechniqueInfo, setImportTechniqueInfo] = useState({ unreadable: false, skippedItems: 0 });
   const [storageError, setStorageError] = useState(false);
+  // Technique data (Pass 100) — app-level, one localStorage key of its own,
+  // never part of `pieces` and never touched by setPieces/updatePiece. Its
+  // write failures are tracked in their own flag so the pieces save effect
+  // (which resets storageError on every run) can't clear a technique
+  // failure, and vice versa; the banner shows while either is set.
+  const [technique, setTechnique] = useState(null);
+  const [techniqueStorageError, setTechniqueStorageError] = useState(false);
+  // "Today" for the technique list only. Nothing app-wide ticks the date
+  // while the app is open, so this has its own trigger (focus/visibility
+  // plus a slow interval, below). Other screens' "today" is untouched.
+  const [techniqueToday, setTechniqueToday] = useState(() => todayISODate());
   const [exportReminderDue, setExportReminderDue] = useState(false);
   const [exportReminderDismissed, setExportReminderDismissed] = useState(false);
   const importInputRef = useRef(null);
@@ -227,6 +255,7 @@ export default function App() {
     const found = loadPiecesFromStorage();
     setPieces(found);
     setActivePieceId(loadActivePieceId(found));
+    setTechnique(loadTechniqueFromStorage());
     setLoaded(true);
   }, []);
 
@@ -264,6 +293,40 @@ export default function App() {
     });
     setStorageError(anyFailed);
   }, [pieces, loaded]);
+
+  // Persist technique data, separately from pieces (see techniqueStorageError).
+  useEffect(() => {
+    if (!loaded || !technique) return;
+    setTechniqueStorageError(!saveTechniqueToStorage(technique).ok);
+  }, [technique, loaded]);
+
+  // Re-read the date when the window regains focus or becomes visible, and
+  // once a minute — setting the same date string is a no-op re-render-wise,
+  // so this only does anything when the day actually changed.
+  useEffect(() => {
+    const check = () => setTechniqueToday(todayISODate());
+    const onVisibility = () => { if (document.visibilityState === "visible") check(); };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", onVisibility);
+    const interval = setInterval(check, 60 * 1000);
+    return () => {
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Ensure today's technique list exists. buildDayList rolls the previous
+  // list's unfinished tasks forward (same methods) and returns an existing
+  // list for today unchanged, so this is stable across reloads and screens.
+  useEffect(() => {
+    if (!loaded || !technique) return;
+    if (technique.dayList?.date === techniqueToday) return;
+    updateTechnique((t) => ({
+      ...t,
+      dayList: buildDayList(techniqueEngineState(t), techniqueToday, t.settings.scalesPerDay),
+    }));
+  }, [loaded, technique, techniqueToday]);
 
   // Persist which piece is active.
   useEffect(() => {
@@ -412,11 +475,158 @@ export default function App() {
     setDeleteModalOpen(false);
   };
 
+  /* ------------------------------------------------------------------ */
+  /*  Technique practice handlers (Pass 100; undo and top-up Pass 101).  */
+  /*  Every technique change goes through updateTechnique — never        */
+  /*  setPieces/updatePiece. Called from TechniqueTab and its panel.     */
+  /* ------------------------------------------------------------------ */
+
+  // Every key of every ACTIVE piece (Pass 103): its own key plus the other
+  // keys it passes through. Paused/archived pieces don't count; a piece
+  // mid-revival is still active, so it does. Feeds the engine's pace tier
+  // (via techniqueEngineState) and the "Repertoire in this key" pill /
+  // Library note icon on every screen that shows technique.
+  const techniqueRepertoireKeys = useMemo(() => repertoireKeysFromPieces(pieces), [pieces]);
+
+  // The engine's view of the saved technique object.
+  function techniqueEngineState(t) {
+    return {
+      items: t.items,
+      methods: resolveMethods(t.methodState, t.customMethods),
+      methodLastUsed: t.methodLastUsed,
+      walkPosition: t.walkPosition,
+      previousList: t.dayList,
+      repertoireKeys: techniqueRepertoireKeys,
+    };
+  }
+
+  function updateTechnique(updater) {
+    setTechnique((prev) => {
+      if (!prev) return prev;
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (!next || next === prev) return prev;
+      return { ...next, updatedAt: Date.now() };
+    });
+  }
+
+  const updateTechniqueItem = (itemId, fn) =>
+    updateTechnique((t) => ({ ...t, items: t.items.map((it) => (it.id === itemId ? fn(it) : it)) }));
+
+  // Check-off (tempo omitted: a bare check-off, saved tempo unchanged) or
+  // an even-rhythm check with a tempo, which sets the new baseline.
+  const handleTechniqueComplete = (itemId, tempo = null) =>
+    updateTechnique((t) => {
+      if (!t.dayList) return t;
+      const done = completeTask(
+        { items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition },
+        itemId,
+        t.dayList.date,
+        tempo
+      );
+      return { ...t, items: done.items, dayList: done.dayList, methodLastUsed: done.methodLastUsed, walkPosition: done.walkPosition };
+    });
+  const handleTechniqueCheckOff = (itemId) => handleTechniqueComplete(itemId, null);
+  // Un-check: reverses everything the check-off changed (uncompleteTask).
+  const handleTechniqueUncheck = (itemId) =>
+    updateTechnique((t) => {
+      if (!t.dayList) return t;
+      const undone = uncompleteTask(
+        { items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition },
+        itemId
+      );
+      return { ...t, items: undone.items, dayList: undone.dayList, methodLastUsed: undone.methodLastUsed, walkPosition: undone.walkPosition };
+    });
+
+  // After a scale is added or put back in rotation, fill any free slots on
+  // today's list right away instead of waiting for tomorrow's list (Pass
+  // 101). Nothing already on the list is replaced.
+  const withTopUp = (t) =>
+    t.dayList ? { ...t, dayList: topUpDayList(techniqueEngineState(t), t.dayList, t.dayList.date, t.settings.scalesPerDay) } : t;
+  const handleTechniqueLogTempo = (itemId, tempo) => handleTechniqueComplete(itemId, tempo);
+
+  const handleTechniqueToggleStarItem = (itemId) =>
+    updateTechniqueItem(itemId, (it) => ({ ...it, starred: !it.starred }));
+  // Switching a scale off also takes its unfinished task off today's list
+  // (a done one stays as a record); either way, free slots are topped up.
+  const handleTechniqueToggleRotation = (itemId) =>
+    updateTechnique((t) => {
+      const next = { ...t, items: t.items.map((it) => (it.id === itemId ? { ...it, inRotation: !it.inRotation } : it)) };
+      const nowOn = next.items.find((it) => it.id === itemId)?.inRotation;
+      return withTopUp(nowOn ? next : { ...next, dayList: removeUnfinishedTask(next.dayList, itemId) });
+    });
+
+  const updateMethodState = (methodId, fn) =>
+    updateTechnique((t) => {
+      const cur = t.methodState[methodId] || { starred: false, enabled: true };
+      return { ...t, methodState: { ...t.methodState, [methodId]: fn(cur) } };
+    });
+  const handleTechniqueToggleStarMethod = (methodId) => updateMethodState(methodId, (s) => ({ ...s, starred: !s.starred }));
+  const handleTechniqueToggleMethod = (methodId) => updateMethodState(methodId, (s) => ({ ...s, enabled: !s.enabled }));
+
+  // fields: { form, tonic, quality, minorForm, octaves, hands, checkOctaves }.
+  // Returns false if the fields don't make a valid item.
+  const handleTechniqueAddItem = (fields) => {
+    const item = normalizeTechniqueItem({ ...fields, id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` });
+    if (!item) return false;
+    updateTechnique((t) => withTopUp({ ...t, items: [...t.items, item] }));
+    return true;
+  };
+
+  // Edits octaves / hands / form details. checkOctaves is deliberately not
+  // editable here — it goes through handleTechniqueChangeCheckOctaves so a
+  // saved tempo is never silently re-based.
+  const handleTechniqueEditItem = (itemId, patch) =>
+    updateTechniqueItem(itemId, (it) => {
+      const { checkOctaves, id, ...rest } = patch || {};
+      return normalizeTechniqueItem({ ...it, ...rest }) || it;
+    });
+
+  // choice: undefined (ask first), "keep", or "fresh". Returns the engine's
+  // status — "needs-prompt" means nothing changed and the screen should ask
+  // "keep as a starting point, or start fresh?" then call again with a choice.
+  const handleTechniqueChangeCheckOctaves = (itemId, newOctaves, choice) => {
+    const item = technique?.items.find((it) => it.id === itemId);
+    if (!item) return "unchanged";
+    const result = changeCheckOctaves(item, newOctaves, choice);
+    if (result.status === "applied") updateTechniqueItem(itemId, () => result.item);
+    return result.status;
+  };
+
+  // fields: { name, technique, description, appliesTo }. Returns false if
+  // the name is blank.
+  const handleTechniqueAddMethod = (fields) => {
+    const name = (fields?.name || "").trim();
+    if (!name) return false;
+    const method = {
+      id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      technique: fields.technique || "Rhythm",
+      description: (fields.description || "").trim(),
+      appliesTo: fields.appliesTo || "both",
+      custom: true,
+    };
+    updateTechnique((t) => ({ ...t, customMethods: [...t.customMethods, method] }));
+    return true;
+  };
+
+  // The panel's card handlers, shared by every surface that shows today's
+  // technique list (Technique page, Master Agenda, Daily Practice) — one
+  // list in App state, so a check-off anywhere shows everywhere.
+  const techniquePanelHandlers = {
+    onCheckOff: handleTechniqueCheckOff,
+    onUncheck: handleTechniqueUncheck,
+    onLogTempo: handleTechniqueLogTempo,
+    onToggleStarItem: handleTechniqueToggleStarItem,
+    onToggleStarMethod: handleTechniqueToggleStarMethod,
+  };
+
   const handleExportClick = () => setExportModalOpen(true);
 
-  const handleConfirmExport = (selectedIds) => {
+  // includeTechnique (Pass 104): the export modal's "Technique library" row,
+  // on by default. Off leaves the technique block out of the file entirely.
+  const handleConfirmExport = (selectedIds, includeTechnique = false) => {
     const subset = Object.fromEntries(selectedIds.map((id) => [id, pieces[id]]).filter(([, p]) => p));
-    downloadBackup(subset);
+    downloadBackup(subset, includeTechnique ? technique : null);
     const result = saveLastExportedAt(Date.now());
     if (!result.ok) setStorageError(true);
     setExportReminderDue(false);
@@ -433,23 +643,33 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = () => {
       let importedPieces;
+      let techniqueRead;
       try {
         importedPieces = parseBackupPieces(reader.result);
+        techniqueRead = readBackupTechnique(reader.result);
       } catch (e) {
         window.alert("That file doesn't look like a valid MeasureOne backup.");
         return;
       }
       const valid = (importedPieces || []).filter((p) => p && p.id);
-      if (valid.length === 0) {
-        window.alert("No pieces found in that backup file.");
+      // A backup can hold only a technique library (exported with every
+      // piece unticked) — that's still worth importing.
+      if (valid.length === 0 && !techniqueRead.technique) {
+        window.alert(
+          techniqueRead.unreadable
+            ? "The technique library in that backup couldn't be read, and it has no pieces, so there's nothing to import."
+            : "No pieces found in that backup file."
+        );
         return;
       }
+      setImportTechnique(techniqueRead.technique);
+      setImportTechniqueInfo({ unreadable: techniqueRead.unreadable, skippedItems: techniqueRead.skippedItems });
       setImportCandidates(valid);
     };
     reader.readAsText(file);
   };
 
-  const handleConfirmImport = (selectedIndices, ladderChoices = {}, orderChoice = "existing") => {
+  const handleConfirmImport = (selectedIndices, ladderChoices = {}, orderChoice = "existing", includeTechnique = false) => {
     const next = { ...pieces };
     let firstNewId = null;
     let updatedCount = 0;
@@ -518,10 +738,32 @@ export default function App() {
     });
     setPieces(next);
     if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
+    // Technique library (Pass 104): merged, never replaced — see
+    // mergeImportedTechnique (lib/storage.js). Goes through updateTechnique
+    // like every other technique change, and tops up today's list so newly
+    // added scales can join it straight away.
+    let techniqueStats = null;
+    if (includeTechnique && importTechnique && technique) {
+      techniqueStats = mergeImportedTechnique(technique, importTechnique).stats;
+      updateTechnique((t) => withTopUp(mergeImportedTechnique(t, importTechnique).technique));
+    }
+    const { unreadable: techniqueUnreadable, skippedItems } = importTechniqueInfo;
     setImportCandidates(null);
+    setImportTechnique(null);
+    setImportTechniqueInfo({ unreadable: false, skippedItems: 0 });
     const parts = [];
     if (createdCount) parts.push(`${createdCount} new piece${createdCount === 1 ? "" : "s"} added`);
     if (updatedCount) parts.push(`${updatedCount} existing piece${updatedCount === 1 ? "" : "s"} updated`);
+    if (techniqueStats) {
+      const t = techniqueStats;
+      parts.push(
+        `technique library merged (${t.itemsAdded} scale${t.itemsAdded === 1 ? "" : "s"} added, ` +
+          `${t.temposUpdated} newer tempo${t.temposUpdated === 1 ? "" : "s"}, ${t.methodsAdded} method${t.methodsAdded === 1 ? "" : "s"} added` +
+          (skippedItems > 0 ? `, ${skippedItems} unreadable scale${skippedItems === 1 ? "" : "s"} skipped` : "") +
+          ")"
+      );
+    }
+    if (techniqueUnreadable) parts.push("the technique library in the file couldn't be read, so it wasn't imported");
     window.alert(parts.length ? `Import complete: ${parts.join(", ")}.` : "Nothing selected — import cancelled.");
   };
 
@@ -2023,7 +2265,7 @@ export default function App() {
         }}
       />
 
-      {storageError && (
+      {(storageError || techniqueStorageError) && (
         <div className="storage-error-banner">
           <AlertTriangle size={18} />
           <div>
@@ -2176,14 +2418,16 @@ export default function App() {
               {NAV_BASE.map((n) => {
                 const Icon = n.icon;
                 return (
-                  <button
-                    key={n.key}
-                    className={`nav-item ${activeTab === n.key ? "active" : ""}`}
-                    onClick={() => { if (guardLeavingActiveWork()) setActiveTab(n.key); }}
-                  >
-                    <Icon size={17} />
-                    <span>{n.label}</span>
-                  </button>
+                  <React.Fragment key={n.key}>
+                    <button
+                      className={`nav-item ${activeTab === n.key ? "active" : ""}`}
+                      onClick={() => { if (guardLeavingActiveWork()) setActiveTab(n.key); }}
+                    >
+                      <Icon size={17} />
+                      <span>{n.label}</span>
+                    </button>
+                    {n.key === "technique" && <div className="nav-divider" role="separator" />}
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -2198,6 +2442,23 @@ export default function App() {
           </nav>
 
           <main className="main-content">
+            {activeTab === "technique" && technique && (
+              <TechniqueTab
+                technique={technique}
+                repertoireKeys={techniqueRepertoireKeys}
+                onCheckOff={handleTechniqueCheckOff}
+                onUncheck={handleTechniqueUncheck}
+                onLogTempo={handleTechniqueLogTempo}
+                onToggleStarItem={handleTechniqueToggleStarItem}
+                onToggleRotation={handleTechniqueToggleRotation}
+                onToggleStarMethod={handleTechniqueToggleStarMethod}
+                onToggleMethod={handleTechniqueToggleMethod}
+                onAddItem={handleTechniqueAddItem}
+                onEditItem={handleTechniqueEditItem}
+                onChangeCheckOctaves={handleTechniqueChangeCheckOctaves}
+                onAddMethod={handleTechniqueAddMethod}
+              />
+            )}
             {activeTab === "overview" && (
               <OverviewTab
                 piece={piece}
@@ -2224,6 +2485,9 @@ export default function App() {
                 onSelectPieceToday={(id) => switchToPiece(id, "today")}
                 onSelectDay={handleSelectDay}
                 onRescheduleAll={handleRescheduleAll}
+                technique={technique}
+                techniqueRepertoireKeys={techniqueRepertoireKeys}
+                techniqueHandlers={techniquePanelHandlers}
               />
             )}
             {activeTab === "timeline" && (
@@ -2262,6 +2526,9 @@ export default function App() {
                 currentDay={currentDay}
                 realCurrentDay={realCurrentDay}
                 isRealToday={currentDay === realCurrentDay}
+                technique={technique}
+                techniqueRepertoireKeys={techniqueRepertoireKeys}
+                techniqueHandlers={techniquePanelHandlers}
                 onDayChange={(d) => setDayOverride(clamp(d, 1, timeline.days.length))}
                 onJumpToday={() => setDayOverride(null)}
                 onLogSession={handleLogSession}
@@ -2349,6 +2616,7 @@ export default function App() {
       {exportModalOpen && (
         <ExportPiecesModal
           pieceGroups={pieceGroups}
+          techniqueItemCount={technique?.items.length || 0}
           onCancel={() => setExportModalOpen(false)}
           onExport={handleConfirmExport}
         />
@@ -2357,7 +2625,11 @@ export default function App() {
         <ImportPiecesModal
           candidates={importCandidates}
           existingPieces={pieces}
-          onCancel={() => setImportCandidates(null)}
+          techniqueCandidate={importTechnique}
+          techniqueUnreadable={importTechniqueInfo.unreadable}
+          techniqueSkippedItems={importTechniqueInfo.skippedItems}
+          existingTechnique={technique}
+          onCancel={() => { setImportCandidates(null); setImportTechnique(null); setImportTechniqueInfo({ unreadable: false, skippedItems: 0 }); }}
           onImport={handleConfirmImport}
         />
       )}
@@ -2447,6 +2719,14 @@ export default function App() {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
+/* Inter and Fraunces have no ♯ or ♭, so the browser borrowed a system
+   font whose ♭ sits in a full-width box with a wide blank left side — "E♭"
+   read as "E ♭" in piece names, placeholders and headings. Naming
+   Helvetica Neue (Mac) / Segoe UI Symbol (Windows) right after them makes
+   the browser draw just those symbols snugly; every other character is
+   still Inter/Fraunces. IBM Plex Mono has its own ♯/♭ at its fixed width,
+   so .mono is deliberately left as is (a fallback there would break
+   column alignment). */
 .measureone-app {
   --paper: #EEF0EC;
   --paper-card: #F8F9F6;
@@ -2459,7 +2739,7 @@ const CSS = `
   --teal: #2E6E63;
   --brick: #B5473A;
   --white: #FFFFFF;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', 'Helvetica Neue', 'Segoe UI Symbol', sans-serif;
   color: var(--ink);
   background: var(--paper);
   min-height: 100%;
@@ -2468,7 +2748,7 @@ const CSS = `
 }
 .measureone-app *, .measureone-app *::before, .measureone-app *::after { box-sizing: border-box; }
 .measureone-app h1, .measureone-app h2, .measureone-app h3 {
-  font-family: 'Fraunces', serif; font-weight: 600; margin: 0; color: var(--ink);
+  font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; margin: 0; color: var(--ink);
 }
 .measureone-app .mono { font-family: 'IBM Plex Mono', monospace; }
 .measureone-app button { font-family: inherit; cursor: pointer; }
@@ -2484,7 +2764,7 @@ const CSS = `
   width: 232px; flex-shrink: 0; background: var(--paper-card); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; padding: 20px 14px; position: sticky; top: 0; height: 100vh;
 }
-.brand { display: flex; align-items: center; gap: 8px; padding: 6px 10px 20px; font-family: 'Fraunces', serif; font-weight: 600; font-size: 18px; color: var(--brass-deep); }
+.brand { display: flex; align-items: center; gap: 8px; padding: 6px 10px 20px; font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 18px; color: var(--brass-deep); }
 .nav-list { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .nav-item {
   display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; border: none;
@@ -2670,7 +2950,7 @@ const CSS = `
 .derived-stat strong { color: var(--brass-deep); }
 
 .schedule-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(181,71,58,0.08); border: 1px solid rgba(181,71,58,0.3); border-radius: 14px; padding: 16px 20px; }
-.schedule-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
+.schedule-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brick); }
 .schedule-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; max-width: 480px; }
 .schedule-banner-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
@@ -2678,23 +2958,23 @@ const CSS = `
    brick red, since this never requires action (proceeding as-is is always
    fine, see ScheduleFields.jsx). */
 .plan-fit-banner { background: rgba(185,138,62,0.1); border: 1px solid rgba(185,138,62,0.35); border-radius: 14px; padding: 14px 18px; margin: 4px 0 18px; }
-.plan-fit-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14.5px; margin: 0 0 4px; color: var(--brass-deep); }
+.plan-fit-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 14.5px; margin: 0 0 4px; color: var(--brass-deep); }
 .plan-fit-banner-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0; line-height: 1.5; }
 
 .storage-error-banner { display: flex; align-items: center; gap: 14px; background: rgba(181,71,58,0.1); border-bottom: 1px solid rgba(181,71,58,0.35); color: var(--brick); padding: 12px 24px; }
 .storage-error-banner svg { flex-shrink: 0; }
-.storage-error-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brick); }
+.storage-error-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brick); }
 .storage-error-sub { font-size: 12px; color: var(--ink-soft); margin: 0; max-width: 620px; }
 .storage-error-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
 .export-reminder-banner { display: flex; align-items: center; gap: 14px; background: rgba(185,138,62,0.1); border-bottom: 1px solid rgba(185,138,62,0.35); color: var(--brass-deep); padding: 12px 24px; }
 .export-reminder-banner svg { flex-shrink: 0; }
-.export-reminder-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brass-deep); }
+.export-reminder-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 14px; margin: 0 0 2px; color: var(--brass-deep); }
 .export-reminder-sub { font-size: 12px; color: var(--ink-soft); margin: 0; max-width: 620px; }
 .export-reminder-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
 .export-reminder-dismiss { background: transparent; border: none; color: var(--ink-soft); cursor: pointer; padding: 4px; flex-shrink: 0; display: inline-flex; border-radius: 6px; }
 .export-reminder-dismiss:hover { color: var(--ink); background: rgba(32,42,51,0.06); }
 .revival-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(185,138,62,0.1); border: 1px solid rgba(185,138,62,0.35); border-radius: 14px; padding: 16px 20px; }
-.revival-banner-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brass); }
+.revival-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--brass); }
 .revival-banner-reasons { font-size: 12.5px; color: var(--ink-soft); margin: 0; padding-left: 18px; max-width: 480px; }
 
 .confidence-legend { display: flex; gap: 18px; font-size: 13px; color: var(--ink-soft); flex-wrap: wrap; }
@@ -2958,7 +3238,7 @@ const CSS = `
 .pairs-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .pair-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); flex-wrap: wrap; }
 .pair-row input { width: 52px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; font-size: 13px; text-align: center; font-family: 'IBM Plex Mono', monospace; background: var(--white); color: var(--ink); }
-.pair-row input.name-input { width: 120px; text-align: left; font-family: 'Inter', sans-serif; }
+.pair-row input.name-input { width: 120px; text-align: left; font-family: 'Inter', 'Helvetica Neue', 'Segoe UI Symbol', sans-serif; }
 .pair-label { flex-shrink: 0; }
 
 .recording-row { display: flex; align-items: center; gap: 6px; }
@@ -2977,13 +3257,18 @@ const CSS = `
 .time-summary-item { display: flex; flex-direction: column; gap: 2px; }
 .time-summary-label { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
 .time-summary-num { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; color: var(--brass-deep); }
+/* Pass 102: "includes Nm technique" under Master Agenda's Total planned. */
+.time-summary-sub { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft); }
+/* Pass 104 review fix: import modal note when a backup's technique library
+   (or some of its scales) couldn't be read — said, not skipped silently. */
+.wizard-hint.import-warning { color: var(--brick); background: rgba(181,71,58,0.06); border: 1px solid rgba(181,71,58,0.25); border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; }
 .time-status { font-size: 12px; color: var(--ink-soft); }
 .time-status.busy { color: var(--brick); }
 
 .master-agenda-cards { display: flex; flex-direction: column; gap: 14px; }
 .piece-card { background: var(--paper-card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
 .piece-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.piece-title { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 600; color: var(--ink); margin: 0; }
+.piece-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-size: 16px; font-weight: 600; color: var(--ink); margin: 0; }
 .piece-meta { display: flex; gap: 12px; align-items: center; }
 .piece-time { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 600; color: var(--brass-deep); }
 .tasks-list { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--ink-soft); }
@@ -2996,4 +3281,140 @@ const CSS = `
 .piece-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
 .link-btn { background: transparent; border: none; color: var(--brass-deep); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; transition: color 0.15s; padding: 0; font-family: inherit; }
 .link-btn:hover { color: var(--brass); text-decoration: underline; }
+
+/* ---------------------------------------------------------------- */
+/*  Technique practice (Pass 101) — the Technique page, the shared   */
+/*  panel (components/tabs/technique/TechniquePanel.jsx), Library    */
+/*  and Methods. Built to docs/mockups/technique-practice.html.      */
+/* ---------------------------------------------------------------- */
+.nav-divider { height: 1px; background: var(--line); margin: 6px 4px; }
+.tq-page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.tq-h1 { font-size: 26px; line-height: 1.15; }
+.tq-page-sub { margin-top: 6px; font-size: 13px; }
+.tq-subtabs { align-self: flex-start; margin-bottom: -8px; }
+.tq-seg-sm button { padding: 5px 12px; font-size: 12.5px; }
+.tq-panel { padding: 16px 18px; }
+.tq-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tq-panel .tq-panel-title { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; }
+.tq-panel-sub { color: var(--ink-soft); font-size: 12.5px; margin: 4px 0 12px; line-height: 1.5; }
+.tq-meta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft); }
+.tq-ink { color: var(--ink); }
+.tq-empty { border: 1px dashed var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.tq-empty p { margin: 0; font-size: 13px; color: var(--ink-soft); }
+
+/* Task card: done = filled teal check + tinted card, never a strikethrough. */
+.tq-card { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); margin-bottom: 8px; }
+.tq-card.done { border-color: rgba(46,110,99,0.45); background: rgba(46,110,99,0.06); }
+.tq-check { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--ink-faint); background: var(--white); display: flex; align-items: center; justify-content: center; color: var(--white); padding: 0; margin-top: 1px; }
+.tq-check.done { background: var(--teal); border-color: var(--teal); }
+/* A check-off saved before undo existed can't be reversed: stays teal, just not clickable. */
+.tq-check:disabled { cursor: default; }
+.tq-card-main { flex: 1; min-width: 0; }
+.tq-card-head { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
+.tq-title { font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tq-title-star { display: inline-flex; color: var(--brass); }
+.tq-title-star svg { fill: currentColor; }
+.tq-chevron { color: var(--ink-faint); display: inline-flex; }
+.tq-methods { margin-top: 6px; }
+.tq-method-row { display: flex; gap: 5px; align-items: flex-start; padding: 3px 0; }
+.tq-method-body { flex: 1; min-width: 0; cursor: pointer; }
+.tq-method-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.tq-method-name { font-weight: 600; font-size: 12.5px; }
+.tq-method-desc { color: var(--ink-soft); font-size: 12px; line-height: 1.5; margin-top: 1px; }
+.tq-tech-tag { flex: none; font-size: 10.5px; padding: 1px 8px; border-radius: 20px; border: 1px solid rgba(46,110,99,0.5); color: var(--teal); font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+.tq-pill-row { margin-top: 7px; }
+.tq-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; background: rgba(185,138,62,0.14); color: var(--brass-deep); }
+.tq-expanded { margin-top: 6px; }
+.tq-start { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin: 8px 0 10px; padding: 10px 12px; background: var(--paper); border-radius: 8px; }
+.tq-start-label { font-weight: 600; font-size: 12.5px; }
+.tq-start-sub { color: var(--ink-soft); font-size: 12px; margin-top: 1px; }
+.tq-start-value { font-size: 16px; font-weight: 600; color: var(--ink); white-space: nowrap; border-bottom: 1px dotted var(--ink-faint); }
+.tq-tip { position: relative; display: inline-block; cursor: help; outline: none; }
+.tq-tip-text { display: none; position: absolute; right: 0; bottom: calc(100% + 6px); background: var(--ink); color: var(--white); font-size: 11.5px; line-height: 1.4; padding: 6px 9px; border-radius: 7px; white-space: nowrap; z-index: 5; font-weight: 500; }
+.tq-tip:hover .tq-tip-text, .tq-tip:focus .tq-tip-text { display: block; }
+.tq-check-section { border-top: 1px solid var(--line); padding-top: 10px; }
+.tq-check-heading { font-weight: 600; font-size: 12.5px; }
+.tq-check-sub { color: var(--ink-soft); font-size: 12px; margin: 1px 0 8px; line-height: 1.6; }
+.tq-check-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tq-tempo-input input { width: 76px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; background: var(--white); color: var(--ink); }
+.tq-tempo-input.error input { border-color: var(--brick); }
+.tq-ok { color: var(--teal); font-size: 12.5px; font-weight: 500; margin: 0; }
+.tq-hint { color: var(--ink-soft); font-size: 12px; margin: 0; }
+.tq-error { color: var(--brick); font-size: 12.5px; }
+.tq-more-often { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+.ghost-btn.tq-xs { padding: 3px 9px; font-size: 11.5px; border-radius: 7px; gap: 5px; }
+.ghost-btn.tq-on { border-color: var(--brass); color: var(--brass-deep); background: rgba(185,138,62,0.1); }
+.ghost-btn.tq-on svg { fill: currentColor; }
+
+/* Stars: the lucide Star, centered in a fixed square; filled when on. */
+.tq-star { flex: none; border: none; background: transparent; color: var(--ink-faint); padding: 0; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; }
+.tq-star svg { display: block; }
+.tq-star:hover { color: var(--brass-deep); }
+.tq-star.on { color: var(--brass); }
+.tq-star.on svg { fill: currentColor; }
+.tq-method-row .tq-star { margin-top: -1px; }
+
+/* Library */
+.tq-lib-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Accidentals: Inter has no ♭, and the browser's fallback draws it in a
+   full-em box with a wide blank left side (read as "E ♭"). These fonts draw
+   ♯/♭ snugly; KeyText.jsx wraps them. The select gets the same stack since
+   a native option can't hold a span. */
+.tq-acc { font-family: 'Helvetica Neue', 'Segoe UI Symbol', 'Arial Unicode MS', sans-serif; }
+.tq-select { font-family: 'Inter', 'Helvetica Neue', 'Segoe UI Symbol', sans-serif; }
+/* Pass 103: the piece's key fields (BasicsFields) — set apart by a divider
+   inside the Wizard/Settings basics form, with key chips for "Other keys". */
+.key-fields { border-top: 1px solid var(--line); padding-top: 14px; }
+.key-fields .field { margin-bottom: 10px; }
+.field .field-hint { font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+.key-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.key-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--line); border-radius: 20px; background: var(--white); font-size: 12.5px; }
+.key-chip button { border: none; background: transparent; color: var(--ink-faint); padding: 0 2px; font-size: 15px; line-height: 1; }
+.key-chip button:hover { color: var(--brick); }
+.tq-select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: 12.5px; background: var(--white); color: var(--ink); max-width: 100%; }
+.tq-lib-grid { display: grid; grid-template-columns: 22px minmax(0,1fr) 72px 64px 52px; gap: 8px; align-items: center; }
+.tq-lib-head { padding: 8px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; border-top: 1px solid var(--line); margin-top: 10px; }
+.tq-lib-row-wrap { border-top: 1px solid var(--line); }
+.tq-lib-row { padding: 7px 0; }
+.tq-lib-row.off .tq-title, .tq-lib-row.off .tq-meta { opacity: .5; }
+.tq-lib-item { min-width: 0; cursor: pointer; }
+.tq-lib-item .tq-title { font-size: 13px; }
+.tq-note { display: inline-flex; color: var(--brass-deep); margin-left: 2px; }
+.tq-bar { height: 4px; border-radius: 2px; background: var(--paper); overflow: hidden; margin-top: 4px; }
+.tq-bar i { display: block; height: 100%; background: var(--brass); opacity: .85; }
+.tq-switch { position: relative; width: 32px; height: 18px; border-radius: 9px; border: 1px solid var(--line); background: var(--white); padding: 0; justify-self: center; flex: none; }
+.tq-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-faint); transition: left .15s; }
+.tq-switch.on { background: var(--teal); border-color: var(--teal); }
+.tq-switch.on::after { left: 16px; background: var(--white); }
+.tq-row-editor { padding: 2px 0 12px 30px; }
+.tq-editor-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+.tq-editor-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink-soft); }
+.tq-editor-field input[type="number"] { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; background: var(--white); color: var(--ink); }
+.tq-editor-field .segmented { align-self: flex-start; }
+.tq-prompt { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; margin-top: 10px; }
+.tq-prompt-buttons { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Methods */
+.tq-group-label { font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .06em; font-size: 10.5px; color: var(--brass-deep); font-weight: 600; margin: 14px 0 2px; }
+.tq-method-item { display: grid; grid-template-columns: 22px minmax(0,1fr) 40px; gap: 8px; align-items: start; padding: 7px 0; border-top: 1px solid var(--line); }
+.tq-method-item.off .tq-method-item-body { opacity: .5; }
+.tq-method-item .tq-switch { margin-top: 2px; }
+.tq-mine { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; padding: 1px 6px; border-radius: 20px; background: rgba(46,110,99,0.12); color: var(--teal); margin-left: 4px; }
+.tq-add-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tq-panel .field .tq-select { align-self: stretch; }
+
+/* Add form */
+.tq-add-grid { margin: 10px 0 12px; }
+.tq-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 12px; }
+
+@media (max-width: 820px) {
+  .nav-divider { display: none; }
+}
+@media (max-width: 640px) {
+  .tq-lib-grid { grid-template-columns: 22px minmax(0,1fr) 64px 46px; }
+  .tq-lib-grid > *:nth-child(4) { display: none; }
+  .tq-editor-grid { grid-template-columns: 1fr; }
+  .tq-row-editor { padding-left: 0; }
+}
+
 `;

@@ -2,6 +2,11 @@ import { useState, useEffect } from "react";
 import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
+import { KeyText } from "./technique/KeyText";
+import { keyOptionFor } from "./technique/format";
+
+// "D major", or "F♯/G♭ major" for an enharmonic pair, as in the key list.
+const keyLabel = (k) => keyOptionFor(k)?.label || `${k.tonic} ${k.quality}`;
 import { SectionsEditor } from "../fields/SectionsEditor";
 import { DifficultyEditor } from "../fields/DifficultyEditor";
 import { RecurringEditor } from "../fields/RecurringEditor";
@@ -94,6 +99,10 @@ export function SettingsTab({
             {piece.composer && <div><dt>Composer</dt><dd>{piece.composer}</dd></div>}
             <div><dt>Measures</dt><dd className="mono">{piece.totalMeasures}</dd></div>
             <div><dt>Schedule</dt><dd className="mono">{piece.daysToLearn} days, {formatMinutes(piece.minutesPerDay)}/day</dd></div>
+            {piece.homeKey && <div><dt>Key</dt><dd><KeyText text={keyLabel(piece.homeKey)} /></dd></div>}
+            {piece.otherKeys?.length > 0 && (
+              <div><dt>Other keys</dt><dd><KeyText text={piece.otherKeys.map(keyLabel).join(", ")} /></dd></div>
+            )}
           </dl>
           {piece.notes && (
             <div className="piece-notes">

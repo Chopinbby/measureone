@@ -264,6 +264,13 @@ chunking, scheduling, and confidence are actually computed, see
   (Pass 20). Iterating `timeline.days[]` ids instead is safe by
   construction. See
   [`docs/Data-Model.md`](docs/Data-Model.md#pieceprogress-keys-are-not-guaranteed-to-exist-in-the-chunk-set).
+- **No regex lookbehind (`(?<=…)`, `(?<!…)`) anywhere in `src/`.** The
+  build targets Safari 14, which can't parse it and esbuild can't rewrite
+  it — one instance blanks the whole app there, not just one screen.
+  `test/browser-compat.test.mjs` fails if it appears (Pass 101).
+- **Technique data is app-level — never `setPieces`/`updatePiece`.** It
+  lives in `App.jsx`'s `technique` state and its own localStorage key, and
+  every change goes through `updateTechnique` (Pass 100).
 - **Logic that needs a regression test belongs in `src/lib/`.** The test
   suite (`npm test`, `node:test`) is lib-level only — there is no harness
   for rendering components, so nothing in `components/` can be tested.
@@ -1776,3 +1783,98 @@ are recorded in [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) (reusing the
 resize predicate at load time; a review "reproduction" that didn't show what it
 claimed). See [`docs/Algorithms.md`](docs/Algorithms.md#splitting-a-chunk-pass-97)
 and [`docs/Decisions.md`](docs/Decisions.md#splitting-a-chunk-pass-97).
+
+**Since Pass 101**, there's a **Technique page** — daily scales and
+arpeggios, the first visible piece of the Technique practice design
+(Passes 98–100 recorded the design, built the engine, and wired up
+storage; see [`docs/Technique-Practice.md`](docs/Technique-Practice.md)).
+"Technique" sits in `NAV_BASE` right after Master Agenda, with a hairline
+divider (`.nav-divider`) before the piece-scoped items; it goes through the
+same `guardLeavingActiveWork` click path as every other nav item.
+**Technique data is app-level, not part of any piece**: one localStorage
+key of its own (`measureone-technique`, `loadTechniqueFromStorage`/
+`saveTechniqueToStorage`, `lib/storage.js`), held in `App.jsx`'s
+`technique` state, and **never goes through `setPieces` or
+`updatePiece`** — every change goes through `updateTechnique` and the
+`handleTechnique*` handlers. The engine is `lib/technique.js` (pure, no
+clock). The page is `components/tabs/TechniqueTab.jsx`; the pieces it's
+built from are in `components/tabs/technique/`, and **the shared panel is
+`TechniquePanel.jsx`** — standalone on purpose, so Pass 102 can put the
+same component on Master Agenda and Daily Practice (`variant="shared"`).
+Three calls made on direct request while building it, beyond the pass
+card: a check-off can be **undone** (`uncompleteTask`, with an `undo`
+snapshot saved on the task); adding a scale or putting one back in
+rotation **tops up today's list** right away (`topUpDayList`); and the
+Library's summary uses the days-a-week pace sentence. Review fixes in the
+same pass: switching a scale off removes its unfinished task from today's
+list; the walk hint (`walkHint`) hides when the key of the day isn't on
+the list but keeps naming today's key after it's checked off; un-checking
+doesn't bring back a tempo if the check octaves changed since; tempos are
+limited to 30–300; a check-off saved before undo existed shows as
+un-uncheckable instead of silently ignoring clicks; the Library's
+never-checked label reads "Not yet"; and key names render
+through `KeyText.jsx`. Inter has no ♭, and the fallback font drew it with
+a wide blank left side, so "E♭" read as "E ♭". `KeyText` puts ♯/♭ in a
+tighter font (`.tq-acc`) and wraps the name in one span so a flex `gap`
+can't split it. Use it anywhere a key name is shown, and wrap it with its
+surrounding words when the parent is a flex row with a gap (buttons are).
+**Don't use regex lookbehind (`(?<=…)`/`(?<!…)`) anywhere:** the build
+targets Safari 14, which can't read it, and one instance stops the whole
+app loading there. `test/browser-compat.test.mjs` fails if it reappears. Built
+since: the panel on Master Agenda/Daily Practice (Pass 102), piece keys
+(Pass 103), backups (Pass 104) — see below. Still not built: a settings UI
+for scales per day / minutes per scale.
+See [`docs/Architecture.md`](docs/Architecture.md#main-ui-components) and
+[`docs/Decisions.md`](docs/Decisions.md#technique-practice).
+
+**Since Pass 102**, the same `TechniquePanel` (`variant="shared"`, sub-line
+"…Checking one off here counts everywhere it appears.", no walk hint)
+also appears on **Master Agenda** — directly under the Total planned
+banner, above the random-piece button and the Learning/Maintenance/Revival
+switcher — and on **Daily Practice**, right under the page header (normal
+view and the revival view alike). It's one list in `App.jsx` state, so a
+check-off on any screen shows on all of them; the handlers reach both tabs
+as a single `techniquePanelHandlers` prop bundle. Both surfaces show it
+only on the real today (Master Agenda's `selectedDate === today`, Daily
+Practice's `isRealToday`; revival counts as today), only once the saved
+list is today's, and — a call made in this pass, not on the card — only if
+that list has at least one task, so no empty panel shows on every piece's
+page when the library is empty or every scale is switched off (the
+Technique page still shows its own empty states). **Total planned adds
+`minutesPerScale` (5) per task on today's list**, done or not, carried
+over or new, with an "includes Nm technique" line under the number. That
+counts toward the Busy (>60)/Moderate (>30) tier, but never toward "N
+pieces scheduled". A day with scales but no pieces reads **"<tier> —
+technique only"** ("Light — technique only" at the default 15 minutes;
+em dash, matching the other labels, confirmed with the user) instead of
+"Nothing scheduled". The visibility/minutes rule
+(`techniqueTodaySummary`) and the Status wording (`agendaStatusLabel`)
+live in `lib/technique.js` with tests, not in the two components. **Technique stays out of every schedule path** — no behind-
+schedule count, `ScheduleBanner`, reschedule dialog or piece-progress
+code reads it (verified unchanged in the browser, reschedule dialog text
+included). Don't wire technique into those: it isn't part of any piece.
+
+**Since Pass 103**, a piece has two optional keys, `homeKey` and
+`otherKeys` (`{ tonic, quality }`, the technique items' shape), edited in
+`BasicsFields` (Wizard and Settings) and on `EDIT_FORM_FIELDS`. Backfilled
+to `null`, never a materialized value. The keys of every **active** piece
+(paused/archived don't count; mid-revival does) — `repertoireKeysFromPieces`,
+`lib/technique.js` — tag matching scales "Repertoire in this key" and pace
+them. **Matched as spelled** (`sameSpelledKey`: a G♭ major piece doesn't tag
+F♯ major), while the pickers show each enharmonic pair as **one** entry
+("F♯/G♭ major", 24 keys, saved as the first spelling; `keyOptionFor`,
+`technique/format.js`). Also: the app-wide font list names Helvetica Neue /
+Segoe UI Symbol after Inter and Fraunces, because neither has ♯/♭ and the
+browser's fallback drew "E♭" as "E ♭". See
+[`docs/Decisions.md`](docs/Decisions.md#technique-practice).
+
+**Since Pass 104**, backups carry the technique library: a separate
+`technique` block (own schema version) beside `pieces`, a "Technique
+library" row in both backup modals, and `mergeImportedTechnique`
+(`lib/storage.js`), which merges and **never removes anything here**. The
+newer checked tempo wins (with its date and check octaves), but an empty
+tempo never replaces a real one. An unreadable block, or unreadable scales
+in it, are reported instead of skipped (`readBackupTechnique`). Old and
+bare-array backups import as before. See
+[`docs/Algorithms.md`](docs/Algorithms.md#import-merge).
+

@@ -1873,7 +1873,7 @@ one unified formula.**
 implements this, called from `OverviewTab` to drive the "This piece might
 be due for a revival" banner (suppressed while a revival is already
 active). Returns every condition that independently fired, not just the
-first — see [Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7)
+first — see [Algorithms.md](Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83)
 for the full mechanics.
 
 - **Why:** Conditions 1 and 2 can only fire if a run-through was actually
@@ -5753,7 +5753,7 @@ component (`ReassessSequencePanel`) instead of continuing to share
   Next/Finish) is the same code, relocated — not rebuilt. What's actually
   new is the segmented per-chunk progress bar and the "Progress" modal
   (grid of difficulty-tinted, checkmark-when-rated squares) — see
-  [Algorithms.md](Algorithms.md#the-reassessment-panel-pass-87) for both.
+  [Algorithms.md](Algorithms.md#revival) for both.
 - **In-cell numbers in the Progress modal — resolved with the user before
   building:** the originating request said "no in-cell numbers once the
   piece has enough chunks to make them illegible," which read as
@@ -6940,10 +6940,232 @@ linked to Today's Practice — display and navigation only, no editing.**
 - See [Algorithms.md](Algorithms.md#splitting-a-chunk-pass-97) for the full
   mechanism.
 
+## Technique practice
+
+**Designed in Pass 98, built in Passes 99–104.** The full brief is
+[Technique-Practice.md](Technique-Practice.md); the hand-picked numbers are
+inventoried in
+[Research.md](Research.md#technique-practice-constants).
+These entries record the design decisions and what each one ruled out.
+
+- **The per-scale practice methods are a new build, not a revival of the
+  removed `suggestMethods()`.** [Product-Principles.md](Product-Principles.md#recommend-the-highest-impact-next-action)
+  already anticipated this: if a "recommend a specific technique" feature
+  came back, it would be new, since `suggestMethods()` no longer exists.
+  Technique practice suggests methods for *scales and arpeggios* from a
+  library the user controls (star, switch off, add their own), rotated by
+  how long since each was used — not a rotating tip attached to a *piece
+  chunk* the way Pass 31's removed function worked. Alternative
+  considered: reviving `suggestMethods()` and extending it — rejected,
+  because the Pass 31 judgment (a fixed per-role requirement line is
+  clearer on a chunk card) still holds for chunks and isn't being
+  revisited.
+- **Unfinished technique tasks carry over to the next day, with the same
+  methods; they don't disappear.** Carry-over is what keeps this feature
+  consistent with [No punishment mechanics](Product-Principles.md#no-punishment-mechanics)
+  and the "never behind" rule: nothing is ever counted as missed, and
+  carried tasks count toward the day's 3, so nothing piles up either.
+  Alternative considered: let an unfinished day's list vanish at midnight
+  and build a fresh one — rejected, because a scale chosen for a reason
+  (due, slow, key of the day) would silently lose its turn, and the
+  rotation would drift toward whatever the user happened to finish.
+- **The circle-of-fifths walk is the last tier, not one input to a single
+  score.** Priority order is carried over → repertoire-key and starred →
+  slow → walk. Alternative considered: rank every item by one blended
+  score (due-ness, slowness, key of the day) — rejected, because tiers are
+  easy to explain ("why is this here?") and guarantee that a due
+  repertoire scale is never outranked by a walk scale. The cost — the walk
+  can be crowded out — is accepted explicitly (Decided 3 and 5 below).
+- **Method stars are global per method, not per scale.** Starring "Eyes
+  closed" makes it come up more on every scale. Alternative considered:
+  per-scale method stars — rejected as far more to manage (13+ methods ×
+  every library item) for a preference that is usually about the method,
+  not the scale.
+- **One pill label, "Repertoire in this key", for every active piece.**
+  Alternative considered: different labels for a piece being learned vs.
+  one in maintenance or finished (or naming the piece) — rejected as extra
+  distinctions that don't change what the user should do with the scale.
+- **Check octaves are set in the Add form and Library, not on the task
+  card.** Changing them on an item with a saved tempo asks "keep as a
+  starting point or start fresh". Alternative considered: an octave
+  selector on the card — rejected, because a tempo measured over 2 octaves
+  isn't comparable to one over 4, and a per-session selector would quietly
+  mix the two in one baseline.
+- **Exposure is read as a return interval, not as extra lottery weight.**
+  "Due" means enough days have passed since an item was last practiced for
+  its target pace; most overdue first. Alternative considered: treat the
+  boost as a weighted random chance of being picked — rejected as
+  unpredictable (a favorite could go weeks without coming up, or come up
+  three days running) and impossible to explain on the Library page.
+- **Pace for repertoire-key and starred scales is a days-a-week target,
+  not an exposure multiplier on the 24-day lap (Pass 98, confirmed by the
+  user).** Starred ≈ 3 days a week, repertoire key ≈ 4 days a week, both
+  ≈ 3–4 days a week (alternating weeks). **This supersedes the brief's
+  original "5x cap" model**: multipliers of x3 (repertoire) and x2
+  (starred), multiplied together and capped at x5, read as a return
+  interval of 24 ÷ multiplier — about every 8, 12, and 5 days. That model
+  was the alternative considered and rejected: it was much slower than
+  the pace the user actually wants (well under once a week for a starred
+  or repertoire scale), and it disagreed with the mockup's own Library
+  sentence. Known consequence, accepted under Decided 5 below: at this
+  pace a single repertoire key with several library items (say four
+  minor-form scales and arpeggios) can take most of the 21 weekly task
+  slots on its own.
+- **Pass 101 calls, made by the user when the Technique page was built:**
+  - **Library summary copy uses the days-a-week sentence**
+    ([Technique-Practice.md](Technique-Practice.md#mockup-vs-brief) item b),
+    even though the Pass 101 card said the mockup's "3 days / 4 days a
+    week" sentence must appear nowhere. That card predated the switch to
+    days-a-week pace. Alternatives: a sentence with no numbers, or none.
+  - **Check-off can be undone** (the mockup's circle toggles both ways).
+    Alternative: one-way check-off, with undo left to a later pass.
+  - **Adding a scale tops up today's list right away.** Alternative: keep
+    the list fixed for the day, which leaves a new user's first day empty.
+  - **A new library starts empty**, with a prompt to add a scale.
+    Alternative: pre-filling the 24 major and minor scales.
+  - **Review fixes before commit:** un-checking doesn't restore a tempo if
+    the check octaves changed since (it would undo a keep/start-fresh
+    choice); a check-off saved before undo existed is shown as
+    un-uncheckable rather than silently ignoring clicks; tempos are
+    limited to 30–300 (a typo can't become the baseline); the walk hint
+    hides when the key of the day isn't on today's list but keeps naming
+    today's key once it's checked off. Also: **no regex lookbehind
+    anywhere** — the build targets Safari 14, which can't parse it, so one
+    instance blanks the whole app there (`test/browser-compat.test.mjs`).
+- **Pass 102 — the same panel on Master Agenda and Daily Practice.** One
+  shared list in App state, so a check-off anywhere shows everywhere; real
+  today only. Calls made while building it:
+  - **Hidden on those two screens when today's list is empty** (library
+    empty, or every scale switched off), so a piece's page isn't cluttered
+    for someone who doesn't use Technique. The Technique page always shows
+    its panel. Alternative: always show it, empty state included.
+  - **Status on a scales-only day reads "<tier> — technique only"**
+    (confirmed with the user; em dash to match the other labels), instead
+    of "Nothing scheduled". Technique minutes count toward the Busy/Moderate
+    tier but never toward "N pieces scheduled". Alternatives: "Light,
+    technique only" (the card's comma), or leave "Nothing scheduled".
+  - **The visibility/minutes rule and the Status wording live in
+    `lib/technique.js`** (`techniqueTodaySummary`, `agendaStatusLabel`)
+    with tests, not in the two screens — found in review: component logic
+    can't be tested.
+- **Pass 104 — technique data in backups: merged, never replaced.** The
+  backup gets a separate `technique` block (own schema version) beside
+  `pieces`; old backups and bare-array backups import as before. Merge
+  rules (`mergeImportedTechnique`): same item = same form, key (as
+  spelled, with minor form), octaves and hands; the more recently
+  checked tempo wins and brings its check date and check octaves with it
+  (a tempo only means something with its octaves); a tie keeps what's
+  here; practice dates are combined; missing scales, custom methods and
+  method star/on-off states are added; the walk position is taken from
+  the backup only when the library here was empty (a restore). Review
+  fixes: an **empty** tempo from a backup (a "Start fresh" elsewhere)
+  never replaces a real one here, even with a newer check date — that
+  would remove something already here; and a technique block that can't
+  be read, or scales in it that can't, are **reported** in the import
+  modal and final message instead of skipped silently. Alternative
+  deferred on purpose: a per-item conflict picker. Known, accepted: since
+  identity uses the key as spelled, a scale saved as "G♭ major" (only
+  possible during the brief 26-key list, so only in test data) won't merge
+  with an "F♯ major" twin — both stay.
+- **Pass 103 follow-up, on direct request — pieces link to scales by the
+  key as written, not as sounded.** A piece in G♭ major tags and paces G♭
+  major scales, not F♯ major ("technically it's a different key").
+  **The key lists never show two separate enharmonic entries** (a
+  follow-up to the follow-up, on direct request): a piece's key fields and
+  "Add scale or arpeggio" offer the 24 keys, with each enharmonic pair as
+  ONE entry labelled with both spellings ("F♯/G♭ major", "D♯/E♭ minor"),
+  saved as the first spelling. So a piece and a scale picked from the same
+  entry always match. A key stored with the other spelling (an import, or
+  the brief 26-key list) still shows as its combined entry (`keyOptionFor`,
+  `technique/format.js`). Alternatives considered: splitting the pairs into
+  26 separate entries (built briefly, then rejected: "don't show two
+  separate enharmonic scales"); showing only the more common spelling
+  (rejected because F♯ and G♭ major are about equally common); all 30 key
+  signatures; and matching enharmonics as the same key (the Pass 103
+  card's rule, superseded). The walk still groups by sound
+  (one F♯/G♭ day). The pace itself is unchanged (a repertoire scale is
+  still about 4 days a week). In the same follow-up, the "Scales in this
+  piece" heading was removed from the key fields (Wizard and Settings), and
+  the hint under "Key of the piece" gained "These scales will show up more
+  often in your practice routine."
+- **Decided 1 — piece links are by key ("Other keys in this piece"), not
+  by specific scale.** A piece stores its key and other keys it passes
+  through; every library item in those keys gets the repertoire pill and
+  pace. Alternative ruled out: linking by specific scale (the mockup's
+  "Other scales and arpeggios in this piece" chips) — more precise, but
+  asks the user to know which scale forms a passage uses, and misses a
+  scale added to the library later.
+- **Decided 2 — the slow-tier numbers (slowest third, 7-day cooldown) stay
+  as starting values, to tune after real use.** Alternative ruled out:
+  settling on different values now, with no usage data to pick them from.
+  Listed in [Research.md](Research.md#technique-practice-constants).
+- **Decided 3 — if a user stars very many scales, the walk can starve;
+  accepted.** Alternative ruled out: a guard against the walk starving
+  (for example, always reserving one daily slot for the walk). Starring
+  many scales is a choice the user can undo, and a reserved slot would
+  push out a due scale the user asked to see more.
+- **Decided 4 — a scale that is both repertoire and starred comes up 3–4
+  days a week, alternating weeks between 3 and 4.** Confirmed by the user
+  when Pass 98 was run. The pass had proposed recording the brief's x5 cap
+  (about every 5 days), while the original decision message had said "5
+  days a week". Alternatives ruled out: the x5 cap (a lower pace than
+  wanted) and 5 days a week (a higher one).
+- **Decided 5 — crowding at 3 tasks a day is accepted; the priority order
+  stands.** Alternative ruled out: a smaller daily list for the higher
+  tiers (capping how many of the 3 slots repertoire/starred scales may
+  take), which would break the priority order. Levers kept for later, if
+  crowding bothers real use: a settings UI for scales per day, or
+  repertoire pace per key rather than per item (see
+  [Roadmap.md](Roadmap.md#priority-ordered-backlog)).
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
+
+- **Technique practice — known gaps found in the Passes 99–100 review.**
+  Items 1 and 2 are still open; 3–5 are resolved:
+  1. **A check-off just after midnight lands on yesterday's list.**
+     `App.jsx` re-reads the date on focus, on visibility, and once a
+     minute, so for up to a minute after midnight `handleTechniqueComplete`
+     still completes against the old `dayList` and records that practice
+     under yesterday's date. The rollover then drops it as done.
+  2. **A scale with missing fields is dropped for good on the next save.**
+     `validateAndMigrateTechnique` (`lib/storage.js`) silently skips an
+     item it can't read (for example, no major/minor), and the next save
+     writes the library without it. The app itself never writes such an
+     item; only a hand-edited save could. The corrupt-JSON copy
+     (`measureone-technique-corrupt`) only covers a whole unreadable
+     entry, not a single bad item. A task still pointing at a dropped
+     item's id stays on the list, so the screens must handle a missing
+     item (they do: the panel skips it). **Since Pass 104, importing a
+     backup reports how many of its scales couldn't be read** instead of
+     dropping them silently — but loading this app's own saved data still
+     drops them without a word.
+  3. ~~**Technique data isn't in backups yet.**~~ **Resolved in Pass 104**
+     (see the Pass 104 entry in [Technique practice](#technique-practice)).
+     Original note: `downloadBackup`/import only carried pieces.
+  4. ~~**A check-off can't be undone.**~~ **Resolved in Pass 101, on
+     direct request: built** (`uncompleteTask`, see
+     [Algorithms.md](Algorithms.md#completing-tempo-and-octaves)). Original
+     note: `lib/technique.js` had no undo, and
+     reversing a completion would mean restoring the walk position,
+     `lastPracticedDate`/`practicedDates`, the tempo, and each method's
+     last-used date, none of which is snapshotted today. The mockup's
+     check circle toggles both ways, so the screen pass needs a decision:
+     build an undo (with a snapshot, like a piece session's
+     `ladderSnapshot`) or make check-off one-way.
+  5. **Two engine constants weren't in Research.md** (the "not two days
+     running" spacing and the week-alternation start date). Added in the
+     same commit as this entry; listed here so the Pass 99 summary's flag
+     is closed.
+
+- **Master Agenda's Status wording has two pre-existing quirks** (seen
+  while building Pass 102, not caused by it, not fixed): the count isn't
+  pluralized ("Light — 1 pieces scheduled"), and a day whose pieces add up
+  to 0 minutes still reads "Light — 2 pieces scheduled" next to "Total
+  planned 0m". Both live in `agendaStatusLabel` / the agenda's minute
+  totals; worth a decision on wording if touched.
 
 - ~~**A piece that's already been rescheduled once via "cram it into what's
   left" while its own plan was already fully elapsed can permanently stop

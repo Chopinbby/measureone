@@ -754,6 +754,14 @@ is truncated past roughly 200 characters, so a long message needs its tail
 confirmed separately (here, by having already read the exact source line)
 rather than assumed complete from the console alone.
 
+**That suppression also means `confirm()` always returns `false` to the
+page**, so the *confirmed* half of a confirm-guarded action (Pass 97's chunk
+split) can never run through a real click here — only the "cancel" path does.
+To verify the accepted path, run `window.confirm = () => true` in the page
+first (via the JS tool; it lasts until the next navigation/reload), then click.
+Read the console for the exact wording *before* overriding it — once it's
+overridden, no suppressed-dialog warning is written any more.
+
 ## A console error right after a sequence of edits may be a stale HMR artifact, not a live bug
 
 Vite's dev server hot-reloads on every file save, and the in-session
@@ -955,6 +963,44 @@ to touch, not just confirm the script exited without error. A clean exit
 code proves the substitutions that ran, ran; it says nothing about
 substitutions that never got the chance to, or ones that ran in the wrong
 spot.
+
+## A predicate that's right for one question can be the wrong predicate for a nearby one — write the "must NOT change" test next to the "must change" tests
+
+Pass 97 needed to clean up stored split points in two different situations
+that sound alike: after a Settings resize ("does the *new* grid land on this
+measure by itself?" — `survivingSplitPoints`) and on every load ("could the app
+itself have made this on the *current* grid?" — `validSplitPoints`). The first
+attempt at the load-time fix simply reused the resize predicate. It looked
+right, and every test written for "bad points get cleared" passed — but it
+would have wiped every legitimate split on every reload, because a real split
+is by definition *not* on the uniform grid. The only reason it didn't ship: a
+test asserting "a legitimate split survives a load" was written in the same
+sitting and failed against it. **When you add a check that removes or rewrites
+stored data, write the test that a known-good input is left alone before (or
+alongside) the tests that bad input is removed** — and when reusing an existing
+predicate in a new place, re-derive what question it actually answers rather
+than trusting its name. Then verify the tests can fail (revert the fix, and
+also try the wrong-but-tempting version); both were done here.
+
+## A review's "reproduction" has to demonstrate the state it claims — a plausible-looking output isn't proof
+
+A self-review of Pass 97 claimed to have reproduced a bug ("split point 11 on a
+size-3 grid creates stray 1-measure slivers"). It hadn't: 11 is a perfectly
+legitimate midpoint of measures 10-12, and the trailing 1-measure chunk was
+just the plain size-3 grid's own remainder for 16 measures. The underlying gap
+(stale split points from a mismatched import) was real, but its severity and
+its example were wrong, and the first tests written around that example
+encoded the wrong idea of "invalid". Before calling a state invalid, check it
+against how the app would actually *produce* that state (here: splits are only
+ever made at a chunk's midpoint, so "invalid" means "not producible by
+successive midpoint splits"), and say so plainly when a later check shows an
+earlier claim was overstated.
+
+Same session, smaller cousin: a "split in half" rule needs a test for the
+**odd** count, not just the even ones. `computeSplitMeasure` first used
+`Math.ceil` and passed every even-length case while silently producing 3+2
+instead of the specified 2+3 for every odd one — the pass's own worked example
+(mm. 9-12, four measures) doesn't distinguish ceil from floor.
 
 ## Empty storage after a session restart isn't proof of a wipe — check before concluding
 

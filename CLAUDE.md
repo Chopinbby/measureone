@@ -211,7 +211,9 @@ chunking, scheduling, and confidence are actually computed, see
   (it used to, via a `sequentialMode` prop that rendered this same grid
   unfiltered underneath its own modal; that's retired in favor of a
   dedicated `ReassessSequencePanel`, see the Revival section below), so
-  there's no second caller of this grid to keep in sync with anymore.
+  there's no second caller of this grid to keep in sync with anymore. Since
+  Pass 97 a chunk split in two is drawn beside its other half inside one
+  dashed box — derived live from `piece.chunkSplitPoints`, display only.
 - **Section run-throughs must stay a computed-fresh-every-render gate, not
   a persisted "unlocked" flag.** As of Pass 49, `sectionRunThroughGate`
   (`lib/chunking.js`) recomputes due/locked state from live session counts
@@ -318,6 +320,29 @@ chunking, scheduling, and confidence are actually computed, see
   fix. If you add a new field to the edit form (`SettingsTab.jsx` or any
   of the shared field-editor components), add it to `EDIT_FORM_FIELDS`
   too. See [`docs/Decisions.md`](docs/Decisions.md#ux).
+
+- **Chunk splitting (Pass 97): three traps.** (1) **Two different
+  split-point checks exist and must never be swapped.** `survivingSplitPoints`
+  answers the *resize* question ("does the NEW grid already land on this
+  measure?") and lives on the Settings-save path via
+  `splitPointsAfterStructureEdit`; `validSplitPoints` answers the *load*
+  question ("could the app itself have made this on the CURRENT grid?") and
+  runs in `validateAndMigratePiece`. A real split is never on the uniform
+  grid, so using the resize rule at load time wipes every legitimate split on
+  every reload — this exact mistake was made and only a test caught it. (2)
+  **The first half keeps the parent's id** (`c${start}` — its start measure
+  doesn't move), so only the second half gets a new progress entry, built as a
+  spread of the parent's minus `sessions` (stays first-half-only, so time
+  isn't double-counted) and `troubleSpots` (re-homed by measure position via
+  `reassociateTroubleSpots`). Because it's a spread, a new per-chunk field is
+  carried to the second half automatically — no hand-maintained list, unlike
+  the three App.jsx session handlers. (3) **`chunkSplitPoints` is not in
+  `CHUNK_STRUCTURE_FIELDS`** on purpose (the Settings form never edits it);
+  a split keeps `rescheduleMarker` instead of nulling it, patched by
+  `insertSplitHalfIntoMarkerChain` — don't "fix" that back to
+  `handleSavePiece`'s null-the-marker behavior. The "midpoint" gives the extra
+  measure to the SECOND half (5 → 2+3, `Math.floor`); test the odd count.
+  See [`docs/Algorithms.md`](docs/Algorithms.md#splitting-a-chunk-pass-97).
 
 ## Revival
 
@@ -1719,6 +1744,45 @@ navigation only — adding, resolving, or deleting a spot is still only
 ever done from Daily Practice or the Wizard. See
 [`docs/Algorithms.md`](docs/Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
 and [`docs/Decisions.md`](docs/Decisions.md#focus-spots-v1).
+
+**Since Pass 97**, Daily Practice has a "Split a chunk" panel
+(`SplitChunkPanel`, `components/tabs/today/`), directly below `ReassessPanel`:
+one button per chunk practiced today that's a base chunk of 2+ measures,
+hidden entirely (no empty message) when none qualify and never shown in
+Interleaved mode or during a revival. Clicking one asks a `window.confirm`
+naming the exact result — "Split mm. 9-12 into 9-10 and 11-12? This can't be
+undone." — then splits it at its midpoint. **There is no undo and no merge;
+merging is wanted but deferred** (Roadmap backlog item 6 — the hard part is
+what happens to the halves' history, not the boundary). The mechanism: a new
+persisted `piece.chunkSplitPoints` (extra chunk boundaries layered on the
+uniform grid, merged in by `generatePracticeChunks`, so nothing downstream
+changed); the second half inherits the parent's ladder state/`doneDays`/BPMs/
+confidence/flag (so nothing newly reads as behind) but not `sessions[]`; a
+combo on the reused first-half id starts fresh, and the seam to the next chunk
+carries over only when its measure range is identical. A piece with a
+`rescheduleMarker` keeps it — re-snapshotted, with the second half inserted
+after the parent in every marker in the `previous` chain that lists it.
+**Settings edits**: if only `totalMeasures` changes (chunk step unchanged),
+every still-valid split stays and the added measures just become new chunks
+(16 → 23 adds a 4-measure and a 3-measure chunk); if the chunk size changes,
+splits survive only where the new grid already lands on that measure (4 → 2
+keeps them all, silently; 4 → 3 asks first, naming each split lost). A
+`totalMeasures`/`chunkMode`/`customChunkSize` edit still clears
+`rescheduleMarker`, as it did before. **On every load and after every import**
+`validSplitPoints` also clears any split point the piece's own grid couldn't
+have produced (a mismatched backup import can create one). Piece Map draws a
+split pair inside one dashed box (`computeSplitDisplayGroups`; display only;
+a twice-split chunk is drawn with only one neighbor). **Known open, logged in
+[`docs/Decisions.md`](docs/Decisions.md#open-questions), not fixed:** an
+import can still keep a mismatched split that merely *looks* like a valid
+midpoint; splitting overwrites any coincidentally-orphaned progress at the
+second half's id; a split deep in the maintenance ladder was only unit-tested;
+and the panel can vanish right after a split when the recomputed schedule
+turns both halves into historical cards. Two real mistakes worth knowing about
+are recorded in [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) (reusing the
+resize predicate at load time; a review "reproduction" that didn't show what it
+claimed). See [`docs/Algorithms.md`](docs/Algorithms.md#splitting-a-chunk-pass-97)
+and [`docs/Decisions.md`](docs/Decisions.md#splitting-a-chunk-pass-97).
 
 **Since Pass 101**, there's a **Technique page** — daily scales and
 arpeggios, the first visible piece of the Technique practice design

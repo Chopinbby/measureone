@@ -161,6 +161,9 @@ header, before the piece's own tasks — in the revival view too.
    confidence" stat — see flow 3 below.
 8. `ReassessPanel` is available for re-rating difficulty on today's measure
    ranges after practicing them — see flow 5.
+9. **Since Pass 97**, right below it, a "Split a chunk" panel appears when at
+   least one chunk practiced today is 2+ measures — see flow 5a. It's absent
+   otherwise (no empty message), and never shown in Interleaved mode.
 
 Today has four view modes, not just one: **Day view** (the numbered steps
 above), **Week** (added Pass 22 — 7 day-cards, current day highlighted,
@@ -409,6 +412,33 @@ directly into `piece.measureDifficulty` for that range and closes the panel
 in the same action — matching how difficulty was originally entered at setup
 (per-measure, not per-chunk). There is no undo for this — see
 [Data-Model.md](Data-Model.md#known-simplifications-worth-knowing-about).
+
+## 5a. Splitting a chunk that turned out too dense (Pass 97)
+
+After practicing a chunk today, Today's Practice shows "Found a particularly
+dense passage? Split a chunk into two independent chunks." with one button per
+eligible chunk (a chunk of 2+ measures you logged today). Click one and a
+browser confirmation names the exact result — *"Split mm. 9-12 into 9-10 and
+11-12? This can't be undone."* On OK, the chunk becomes two independent chunks
+at its midpoint (an odd count puts the extra measure in the second half: 5 →
+2+3). Both halves start with the original's stage, tempo, confidence and
+"done today" status, so nothing looks newly behind; the practice-session log
+stays with the first half, so time practiced isn't counted twice. Either half
+can be split again; a 1-measure chunk can't be split. **There is no undo and no
+way to merge two halves back together yet** (deferred).
+
+On Piece Map the two halves sit together in one dashed box so it's visible they
+came from one chunk. Afterward, the two halves usually show up as read-only
+"historical" cards for today (they aren't in today's live schedule any more),
+which is also why the Split panel disappears until something else is
+practiced.
+
+**Interaction with Settings** ("Edit piece settings" → Save changes): adding
+measures to the end of a piece (chunk size unchanged) keeps every split —
+the new measures just become new chunks. Changing the chunk size keeps splits
+the new size already lines up with (4 → 2 keeps them all, silently) and asks
+before dropping any it can't (4 → 3), naming each one. See
+[Algorithms.md](Algorithms.md#interaction-with-a-later-settings-structure-edit).
 
 ## 6. Multi-piece switching
 

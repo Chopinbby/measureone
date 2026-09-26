@@ -5,6 +5,7 @@
 // silently drop data. See docs/AI-GUIDELINES.md and CLAUDE.md for context.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { generatePracticeChunks } from "../src/lib/chunking.js";
 import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue, diffImportedPiece } from "../src/lib/storage.js";
 
 const fresh = {
@@ -1497,5 +1498,96 @@ describe("technique backups: review fixes (Pass 104)", () => {
     assert.equal(r.skippedItems, 2);
     const clean = validateAndMigrateTechnique({ items: [tItem("ok", "C", "major"), tItem("ok2", "G", "major")] });
     assert.equal(readBackupTechnique(backupText([], clean)).skippedItems, 0);
+  });
+});
+
+describe("[Pass 97 follow-up] chunkSplitPoints — default and load-time self-heal", () => {
+  const splitPiece = (overrides) => ({
+    id: "p1",
+    name: "Split",
+    totalMeasures: 16,
+    measureDifficulty: Array(16).fill(1),
+    chunkMode: "custom",
+    customChunkSize: 4,
+    progress: {},
+    ...overrides,
+  });
+
+  test("a piece saved before Pass 97 (no chunkSplitPoints key at all) loads with an empty list", () => {
+    assert.deepEqual(validateAndMigratePiece(splitPiece({})).chunkSplitPoints, []);
+  });
+
+  test("a non-array chunkSplitPoints (corrupted/hand-edited) falls back to empty, not a crash", () => {
+    assert.deepEqual(validateAndMigratePiece(splitPiece({ chunkSplitPoints: "nope" })).chunkSplitPoints, []);
+  });
+
+  test("[guards the wrong first fix] a legitimate split is NOT wiped on load — real splits are never on the uniform grid", () => {
+    // 11 splits 9-12 (size 4) into 9-10/11-12; 3 splits 1-4 into 1-2/3-4.
+    // A first attempt reused the resize rule ("is it on the grid?") here
+    // and would have cleared both on every single load.
+    const migrated = validateAndMigratePiece(splitPiece({ chunkSplitPoints: [3, 11] }));
+    assert.deepEqual(migrated.chunkSplitPoints, [3, 11]);
+  });
+
+  test("a re-split (a half split again) survives load", () => {
+    // One 8-measure grid chunk: 5 (4+4), then 3 (splits 1-4), then 7 (splits 5-8).
+    const migrated = validateAndMigratePiece(
+      splitPiece({ totalMeasures: 8, measureDifficulty: Array(8).fill(1), customChunkSize: 8, chunkSplitPoints: [3, 5, 7] })
+    );
+    assert.deepEqual(migrated.chunkSplitPoints, [3, 5, 7]);
+  });
+
+  test("[the actual gap] a split point the app could not have made on this grid is cleared on load", () => {
+    // 13 belongs to a size-8 world (midpoint of 9-16). This piece says size
+    // 7 (as if a backup import paired one device's points with the other's
+    // chunk size): 13 lands inside grid chunk 8-14, whose only legitimate
+    // midpoint is 11. Left in place it cuts that chunk 5+2 (8-12 / 13-14),
+    // a shape the app can never create itself.
+    const migrated = validateAndMigratePiece(splitPiece({ customChunkSize: 7, chunkSplitPoints: [13] }));
+    assert.deepEqual(migrated.chunkSplitPoints, []);
+    const shape = generatePracticeChunks(migrated).map((c) => c.measureCount);
+    assert.deepEqual(shape, [7, 7, 2], "chunk shape is back to the plain uniform grid");
+  });
+
+  test("only the impossible point is cleared — legitimate ones on the same piece survive", () => {
+    // 3 and 11 are real midpoints; 14 sits in grid chunk 13-16 whose midpoint is 15.
+    const migrated = validateAndMigratePiece(splitPiece({ chunkSplitPoints: [3, 11, 14] }));
+    assert.deepEqual(migrated.chunkSplitPoints, [3, 11]);
+  });
+
+  test("a deep point whose parent split is missing is cleared (a half can't exist before its parent was split)", () => {
+    const migrated = validateAndMigratePiece(
+      splitPiece({ totalMeasures: 8, measureDifficulty: Array(8).fill(1), customChunkSize: 8, chunkSplitPoints: [3] })
+    );
+    assert.deepEqual(migrated.chunkSplitPoints, []);
+  });
+
+  test("a redundant point already on the grid is dropped (no-op boundary; keeping it would only cause a confusing later warning)", () => {
+    assert.deepEqual(validateAndMigratePiece(splitPiece({ customChunkSize: 2, chunkSplitPoints: [11] })).chunkSplitPoints, []);
+  });
+
+  test("a split point past the piece's own last measure is cleared", () => {
+    const migrated = validateAndMigratePiece(splitPiece({ totalMeasures: 8, measureDifficulty: Array(8).fill(1), chunkSplitPoints: [11] }));
+    assert.deepEqual(migrated.chunkSplitPoints, []);
+  });
+
+  test("focus spots are homed against the HEALED chunk shape, not the broken one", () => {
+    // Size 7 grid: 1-7, 8-14, 15-16. Stale point 13 would (unhealed) carve
+    // out a chunk c13 (13-14) and a spot at measure 13 would be homed
+    // there. Healed, measure 13 belongs to c8 (8-14).
+    const migrated = validateAndMigratePiece(
+      splitPiece({
+        customChunkSize: 7,
+        chunkSplitPoints: [13],
+        progress: {
+          c13: {
+            doneDays: [],
+            troubleSpots: [{ id: "fs1", name: "n", position: "13", startMeasure: 13, endMeasure: 13, resolved: false, sessions: [] }],
+          },
+        },
+      })
+    );
+    assert.deepEqual(migrated.chunkSplitPoints, []);
+    assert.deepEqual(migrated.progress.c8.troubleSpots.map((s) => s.id), ["fs1"]);
   });
 });

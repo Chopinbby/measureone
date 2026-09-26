@@ -316,13 +316,19 @@ Pass 59's gap-proportional ratchet replaced it as the live mechanism).
 **Pass 96** redesigned the Piece Map chunk card: a new Focus spots
 column next to Related chunks, each spot linking into Daily Practice —
 an open spot to its practice card, a resolved one to the chunk's next
-scheduled day, or plain text mid-revival. See
+scheduled day, or plain text mid-revival. **Pass 97** let a learner split
+a too-dense chunk into two independent chunks from Daily Practice (a "Split a
+chunk" panel below Reassess; confirm-and-no-undo; history copied to the
+second half, not double-counted; reschedule history preserved; a split pair
+drawn together on Piece Map), with rules for what a later Settings edit or a
+mismatched backup import does to existing splits. See
 [CLAUDE.md](../CLAUDE.md)'s own changelog and
 [Decisions.md](Decisions.md#scheduling),
 [Decisions.md](Decisions.md#ux), and
 [Decisions.md](Decisions.md#focus-spots-v1) for the full detail (Passes
 92, 94, and 96's own decision entries respectively; Pass 93's own entry
-sits earlier in [Decisions.md](Decisions.md#ux), just above Pass 94's).
+sits earlier in [Decisions.md](Decisions.md#ux), just above Pass 94's;
+Pass 97's is [Decisions.md](Decisions.md#splitting-a-chunk-pass-97)).
 
 **Technique practice (Passes 98–104)** — daily scales and arpeggios: a
 Technique page (Today / Library / Methods), the same daily panel on Master
@@ -431,7 +437,15 @@ assuming this section is stale.
    having enough session history to tune against.
 5. Cloud sync / accounts / multi-device — everything is `localStorage`
    today, single browser only.
-6. **Technique practice follow-ups** (kept for later, not in v1): a
+6. **Merge two split chunks back into one** — explicitly wanted, deliberately
+   deferred from Pass 97 (no undo exists for a split). The representation
+   leaves the door open (a split is one boundary measure in
+   `piece.chunkSplitPoints`, so un-splitting is removing it), but the hard part
+   isn't the boundary: it's what happens to the two halves' *history* if
+   either was practiced separately after the split (whose sessions count,
+   whose ladder stage wins). Needs its own design pass. See
+   [Decisions.md](Decisions.md#splitting-a-chunk-pass-97).
+7. **Technique practice follow-ups** (kept for later, not in v1): a
    settings UI for scales per day and minutes per scale (defaults only
    today); repertoire pace per key rather than per scale, if crowding at
    3 tasks a day bothers real use (Decided 5); technique time in

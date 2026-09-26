@@ -48,6 +48,7 @@ export function defaultPiece() {
     practiceDaysPerWeek: 7,
     chunkMode: "auto",
     customChunkSize: 4,
+    chunkSplitPoints: [],
     targetBPM: null,
     // Pass 103 — key of the piece / other keys it passes through, both
     // optional ({ tonic, quality } like technique items). Drives the

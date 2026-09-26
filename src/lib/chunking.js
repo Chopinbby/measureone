@@ -14,6 +14,13 @@ export function autoChunkSize() {
   return 4;
 }
 
+// The uniform grid's step, from a piece's (or draft's) own settings — one
+// place for the formula generatePracticeChunks and the two split-point
+// checks below all need, so they can't drift apart.
+export function chunkGridSize({ chunkMode, customChunkSize, totalMeasures }) {
+  return chunkMode === "auto" ? autoChunkSize(totalMeasures) : Math.max(1, Number(customChunkSize) || 4);
+}
+
 export function weightedDifficultyFromArray(measureDifficulty, start, end) {
   let sum = 0;
   const count = end - start + 1;
@@ -32,17 +39,27 @@ export function generatePracticeChunks(piece) {
     recurringMode,
     recurringMeasures,
     recurringPairs,
+    chunkSplitPoints,
   } = piece;
 
-  const size =
-    chunkMode === "auto"
-      ? autoChunkSize(totalMeasures)
-      : Math.max(1, Number(customChunkSize) || 4);
+  const size = chunkGridSize(piece);
+
+  // Pass 97 — a piece can carry extra chunk-boundary measures on top of the
+  // uniform `size` stepping (a learner splitting a chunk in two from Daily
+  // Practice, see splitPracticeChunk below). Merged into one sorted, deduped
+  // boundary list rather than special-cased, so a split point that happens
+  // to coincide with the uniform grid anyway (see survivingSplitPoints
+  // below) is just a harmless no-op instead of needing its own branch.
+  const boundarySet = new Set();
+  for (let start = 1; start <= totalMeasures; start += size) boundarySet.add(start);
+  (chunkSplitPoints || []).forEach((m) => {
+    if (Number.isInteger(m) && m > 1 && m <= totalMeasures) boundarySet.add(m);
+  });
+  const boundaries = [...boundarySet].sort((a, b) => a - b);
 
   const chunks = [];
-  let index = 0;
-  for (let start = 1; start <= totalMeasures; start += size) {
-    const end = Math.min(start + size - 1, totalMeasures);
+  boundaries.forEach((start, index) => {
+    const end = index + 1 < boundaries.length ? boundaries[index + 1] - 1 : totalMeasures;
     const { avg, label } = weightedDifficultyFromArray(measureDifficulty, start, end);
 
     let recurring = false;
@@ -79,9 +96,107 @@ export function generatePracticeChunks(piece) {
       effort,
       linkedIds: [],
     });
-    index++;
-  }
+  });
   return chunks;
+}
+
+// Pass 97 — a base practice chunk of 2+ measures can be split in two from
+// Daily Practice; a 1-measure chunk offers no split (1 is the smallest
+// chunk this app allows). Transitions, combos, and section run-throughs
+// never reach this check — only a `kind: "section"` chunk is ever offered.
+export function canSplitChunk(chunk) {
+  return !!chunk && chunk.kind === "section" && chunk.measureCount >= 2;
+}
+
+// The midpoint measure a split creates a new boundary at — the extra
+// measure on an odd count goes to the SECOND half (5 -> 2+3, not 3+2), so
+// the first half's own size is the floor, not the ceiling, of half the
+// chunk's measure count. Matches CLAUDE.md's stated rule.
+export function computeSplitMeasure(chunk) {
+  return chunk.start + Math.floor(chunk.measureCount / 2);
+}
+
+// Which of a piece's existing split points remain valid chunk boundaries
+// under a NEW chunkMode/customChunkSize/totalMeasures — used by App.jsx's
+// handleSavePiece to decide, on a structural Settings edit, which splits
+// survive silently and which must be cleared with a confirmation. A split
+// point survives when the new uniform grid already lands on that exact
+// measure on its own (e.g. resizing 4 -> 2, since a midpoint split of a
+// 4-measure chunk sits exactly on a 2-measure boundary too) — carrying it
+// forward is then a pure no-op, not a guess at how the old boundary maps
+// onto a new one it doesn't actually align with. See CLAUDE.md's
+// "Interaction with later Settings edits."
+export function survivingSplitPoints(points, { totalMeasures, chunkMode, customChunkSize }) {
+  const size = chunkGridSize({ totalMeasures, chunkMode, customChunkSize });
+  return (points || []).filter(
+    (m) => Number.isInteger(m) && m > 1 && m <= totalMeasures && (m - 1) % size === 0
+  );
+}
+
+// Load-time validity check for stored split points — a DIFFERENT question
+// from survivingSplitPoints above, and the two must not be swapped. That
+// one asks "does a NEW grid reproduce this measure by itself" (right for a
+// resize, where the old grid is gone); this one asks "could the app itself
+// have produced this set of points on the piece's CURRENT grid." A real
+// split is by definition NOT on the uniform grid (it's an extra boundary),
+// so reusing the grid-coincidence rule at load time would wipe every
+// legitimate split — caught by a test before it shipped.
+//
+// The app only ever creates a split at a chunk's own midpoint
+// (computeSplitMeasure), and a half can only be split after its parent was,
+// so every legitimate set is a downward-closed tree of midpoints inside a
+// uniform-grid chunk: walk each grid chunk, keep its midpoint only if
+// stored, then recurse into both halves. A point the walk never reaches
+// (a stale point from a different grid, a deep point missing its parent, a
+// point already on the grid, past the last measure) is one the app could
+// not have made on this grid — dropped. A mismatched point that happens to
+// LOOK like a valid midpoint of some current chunk can't be told apart from
+// a real one and is kept, which is harmless: it yields an ordinary
+// midpoint-shaped chunk pair.
+export function validSplitPoints(points, { totalMeasures, chunkMode, customChunkSize }) {
+  const wanted = new Set((points || []).filter((m) => Number.isInteger(m)));
+  if (!wanted.size) return [];
+  const size = chunkGridSize({ totalMeasures, chunkMode, customChunkSize });
+  const found = [];
+  const walk = (start, end) => {
+    const count = end - start + 1;
+    if (count < 2) return;
+    const mid = start + Math.floor(count / 2);
+    if (!wanted.has(mid)) return;
+    found.push(mid);
+    walk(start, mid - 1);
+    walk(mid, end);
+  };
+  for (let start = 1; start <= totalMeasures; start += size) {
+    walk(start, Math.min(start + size - 1, totalMeasures));
+  }
+  return found.sort((a, b) => a - b);
+}
+
+// Which of a piece's split points a Settings structure edit (totalMeasures /
+// chunkMode / customChunkSize) keeps, and which it loses — the save-time
+// decision handleSavePiece (App.jsx) acts on.
+//
+// If the uniform grid itself didn't move (same step — e.g. only totalMeasures
+// changed, or auto -> custom 4), every existing chunk and split stays exactly
+// where it is: the added measures simply extend the grid, and only a split
+// that's no longer a legitimate midpoint on the new grid is lost (validSplitPoints
+// — e.g. a split inside a short last chunk that the new measures then
+// lengthen, or one past a shortened end). If the step DID change, the old
+// grid is gone, so the resize rule applies: a split survives only where the
+// new grid already lands on that exact measure (survivingSplitPoints), never
+// guessed at.
+//
+// Only points that actually meant something before are considered: a stored
+// point the old grid couldn't have produced, or one already sitting on it, was
+// a no-op and is never reported "lost" (the load-time heal in storage.js
+// drops those anyway). `oldPiece`/`newPiece` need only the three structure
+// fields plus oldPiece.chunkSplitPoints.
+export function splitPointsAfterStructureEdit(oldPiece, newPiece) {
+  const meaningful = validSplitPoints(oldPiece.chunkSplitPoints, oldPiece);
+  const sameGrid = chunkGridSize(oldPiece) === chunkGridSize(newPiece);
+  const kept = sameGrid ? validSplitPoints(meaningful, newPiece) : survivingSplitPoints(meaningful, newPiece);
+  return { kept, lost: meaningful.filter((m) => !kept.includes(m)) };
 }
 
 export function generateTransitionChunks(practiceChunks, measureDifficulty) {
@@ -271,6 +386,118 @@ export function reassociateTroubleSpots(progress, practiceChunks) {
     next[chunkId] = { ...(next[chunkId] || progress[chunkId] || { doneDays: [] }), troubleSpots: spots };
   });
   return next;
+}
+
+// Pass 97 — splits an existing base practice chunk into two. Returns the
+// fields App.jsx's handler (handleSplitChunk) needs to write onto the piece,
+// or null if `chunkId` doesn't currently identify a splittable base
+// practice chunk. Pure: the caller applies these via updatePiece and
+// separately handles any rescheduleMarker chaining (a piece-level concern —
+// see docs/Algorithms.md#rescheduling — not something this function
+// touches).
+//
+// The FIRST half always keeps the parent's own id (`c${start}` doesn't
+// change when the start measure doesn't move) — only the second half is
+// ever a genuinely new id. That's why only the second half needs a fresh
+// progress entry at all: the first half's history, including its session
+// log, simply continues to exist under the same key it always has.
+export function splitPracticeChunk(piece, chunkId) {
+  const practiceChunks = generatePracticeChunks(piece);
+  const chunk = practiceChunks.find((c) => c.id === chunkId);
+  if (!canSplitChunk(chunk)) return null;
+
+  const splitMeasure = computeSplitMeasure(chunk);
+  const firstHalfId = chunk.id;
+  const secondHalfId = `c${splitMeasure}`;
+  const chunkSplitPoints = [...new Set([...(piece.chunkSplitPoints || []), splitMeasure])].sort((a, b) => a - b);
+  const newPracticeChunks = generatePracticeChunks({ ...piece, chunkSplitPoints });
+
+  const progress = { ...piece.progress };
+  const parentEntry = progress[firstHalfId] || { doneDays: [] };
+  // Ladder state, doneDays, BPMs, manual confidence, the flag — every
+  // per-chunk field EXCEPT sessions[] (stays exclusive to the first half,
+  // so practice-time totals/session counts aren't double-counted) and
+  // troubleSpots (re-homed below by measure position, not duplicated onto
+  // both halves).
+  const { sessions, troubleSpots, ...restEntry } = parentEntry;
+  progress[secondHalfId] = { ...restEntry, sessions: [] };
+
+  // "Start fresh" for a combo anchored to the parent's own id (CLAUDE.md's
+  // Connectors rule) — the first half keeps that id, but its neighbor
+  // context has changed (its immediate "next" is now the second half, not
+  // whatever used to follow the whole original chunk), so a combo
+  // recomputed at this id post-split describes a structurally different
+  // block than whatever history, if any, was logged against it before.
+  delete progress[`x_${firstHalfId}`];
+
+  // The one cheap connector exception: the seam between the second half and
+  // whatever follows it covers the exact same measures the parent's own
+  // seam-to-next did, whenever the second half is 2+ measures — checked by
+  // comparing the two computed ranges directly rather than asserting the
+  // condition analytically (a 1-measure second half shifts the transition's
+  // own span by one measure and must NOT carry over).
+  const oldTransitions = generateTransitionChunks(practiceChunks, piece.measureDifficulty);
+  const oldNext = oldTransitions.find((t) => t.linkedIds[0] === firstHalfId);
+  if (oldNext && progress[oldNext.id]) {
+    const newTransitions = generateTransitionChunks(newPracticeChunks, piece.measureDifficulty);
+    const newNext = newTransitions.find((t) => t.linkedIds[0] === secondHalfId);
+    if (newNext && newNext.start === oldNext.start && newNext.end === oldNext.end) {
+      progress[newNext.id] = progress[oldNext.id];
+      delete progress[oldNext.id];
+    }
+  }
+
+  const reassociated = reassociateTroubleSpots(progress, newPracticeChunks);
+
+  return { chunkSplitPoints, progress: reassociated, firstHalfId, secondHalfId, splitMeasure };
+}
+
+// Pass 97 follow-up — Piece Map's persistent "these two came from one
+// split" visual grouping, requested after reviewing the pre-build mockup.
+// Derived live from piece.chunkSplitPoints, not a separate persisted
+// relationship — nothing about a split chunk's own data needs to remember
+// it was ever split (CLAUDE.md's "after this one-time copy the halves are
+// ordinary, independent chunks"); this reads the same boundary list
+// generatePracticeChunks already consumes, purely for display grouping.
+//
+// Returns `gridChunks` laid out one item per render slot, in the same
+// left-to-right order: `{ first, second: null }` for a standalone chunk, or
+// `{ first, second }` for two chunks whose shared boundary is one of the
+// piece's own split points.
+//
+// A chunk can only ever be shown paired with ONE neighbor, even though a
+// chunk re-split more than once can sit at two different split boundaries
+// at once (its own boundary with whatever's now on its other side, from an
+// earlier split of the same original chunk) — split points are processed
+// in ascending measure order and the first pairing to claim a chunk wins;
+// the second pairing that would also claim it is simply skipped, leaving
+// that neighbor standalone rather than attempting a three-way (or deeper)
+// grouping this two-box visual has no way to represent. A cosmetic
+// simplification, not a data question — chunkSplitPoints itself is
+// completely unaffected either way.
+export function computeSplitDisplayGroups(gridChunks, chunkSplitPoints) {
+  const secondByFirst = new Map();
+  const claimed = new Set();
+  [...(chunkSplitPoints || [])]
+    .sort((a, b) => a - b)
+    .forEach((m) => {
+      const second = gridChunks.find((c) => c.start === m);
+      const first = gridChunks.find((c) => c.end === m - 1);
+      if (!first || !second || claimed.has(first.id) || claimed.has(second.id)) return;
+      secondByFirst.set(first.id, second);
+      claimed.add(first.id);
+      claimed.add(second.id);
+    });
+
+  const skip = new Set();
+  const items = [];
+  gridChunks.forEach((c) => {
+    if (skip.has(c.id)) return;
+    const second = secondByFirst.get(c.id) || null;
+    if (second) skip.add(second.id);
+    items.push({ first: c, second });
+  });
+  return items;
 }
 
 /* ------------------------------------------------------------------ */

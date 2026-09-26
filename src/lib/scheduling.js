@@ -1106,14 +1106,31 @@ export function insertSplitHalfIntoMarkerChain(marker, firstHalfId, secondHalfId
 // checked off, so a consolidation day is judged by "__consolidation__"'s
 // own doneDays instead of the individual chunk ids it blankets. See
 // docs/Decisions.md#scheduling.
-export function classifyDayCompletion(day, piece, currentDay) {
+//
+// Only what is still OWED on this day is judged. An id movedIdsForDay
+// (below) says a reschedule has already relocated — or that was simply done
+// on some other day — no longer belongs to this day, so it doesn't count
+// against it. Before this, a day where some tasks were done on time and the
+// rest were moved off by a reschedule stayed "behind" forever: nothing was
+// left to do there, and no reschedule could clear it (each one re-moved the
+// same already-moved tasks), so the "N days behind" banner never went away
+// no matter how many times Reschedule was clicked. A day whose ids were ALL
+// moved has nothing owed and reads "empty", same as a rest day.
+// `chunkById` is optional like countBehindDays'/isDayFullySwept's (it lets a
+// connector that rode along via a linked practice chunk be recognized as
+// moved) — pass it; omitting it can only under-detect a move, so a day may
+// read "behind" that shouldn't.
+export function classifyDayCompletion(day, piece, currentDay, chunkById = {}) {
   if (day.dayNumber >= currentDay) return "future";
-  const ids = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
-  if (!ids.length) return "empty";
+  const allIds = [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds];
+  if (!allIds.length) return "empty";
   if (day.type === "consolidation") {
     const consolidationDoneDays = (piece.progress["__consolidation__"] || {}).doneDays || [];
     return consolidationDoneDays.includes(day.dayNumber) ? "done" : "behind";
   }
+  const moved = movedIdsForDay(day, piece, chunkById);
+  const ids = allIds.filter((id) => !moved.has(id));
+  if (!ids.length) return "empty";
   const allDone = ids.every((id) => ((piece.progress[id] || {}).doneDays || []).includes(day.dayNumber));
   return allDone ? "done" : "behind";
 }
@@ -1270,13 +1287,13 @@ export function classifyDayEmptyState(day, piece, chunkById = {}) {
 // as of currentDay — a day-count sibling to computeScheduleStatus's
 // chunk-count missedCount, for surfaces that want to say "N days behind"
 // instead of "N chunks behind" (a day with several missed chunks only
-// counts once here). A fully-swept day (isDayFullySwept, above) is
-// excluded rather than counted "behind" — same rule the day-list surfaces
-// already applied to themselves, now shared here too.
+// counts once here). Each day is judged only on what's still owed on it —
+// classifyDayCompletion drops any task a reschedule already moved off that
+// day — so a fully-swept day (isDayFullySwept, above) and a day that's
+// half done and half moved both stay out of this count. Only a day with
+// something genuinely still owed, and not done, is "behind".
 export function countBehindDays(piece, timeline, currentDay, chunkById = {}) {
-  return timeline.days.filter(
-    (d) => !isDayFullySwept(d, piece, chunkById) && classifyDayCompletion(d, piece, currentDay) === "behind"
-  ).length;
+  return timeline.days.filter((d) => classifyDayCompletion(d, piece, currentDay, chunkById) === "behind").length;
 }
 
 // Will the not-yet-started work actually fit in the days this plan has

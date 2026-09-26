@@ -26,7 +26,7 @@ export function TimelineTab({ chunks, chunkSet, timeline, piece, currentDay, rea
           <h3>Week {wi + 1}</h3>
           <div className="week-grid">
             {week.map((d) => {
-              const completion = classifyDayCompletion(d, piece, currentDay);
+              const completion = classifyDayCompletion(d, piece, currentDay, chunkById);
               // A day before the reschedule's asOfDay still carries its
               // pre-reschedule newChunkIds/specialChunkIds/reviewChunkIds —
               // getEffectiveTimeline (lib/scheduling.js) only replaces days

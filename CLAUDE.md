@@ -242,18 +242,34 @@ chunking, scheduling, and confidence are actually computed, see
   `piece`), never persisted. If something schedule-related needs to persist
   (like the reschedule marker), it goes on `piece` as input data, and the
   derivation recomputes from it.
-- **`countBehindDays`/`isDayFullySwept` (`lib/scheduling.js`) take an
-  optional fourth `chunkById` argument — pass it.** It defaults to `{}` so
+- **`countBehindDays`/`isDayFullySwept`/`classifyDayCompletion`
+  (`lib/scheduling.js`) take an optional fourth `chunkById` argument —
+  pass it.** It defaults to `{}` so
   a caller that omits it degrades gracefully instead of crashing, but
   degrading means *silently under-detecting* a reschedule sweep (a
   connector that rode along via a linked practice chunk, rather than being
   listed directly on the marker, won't be recognized as moved) — the same
   symptom class Pass 74's follow-up fix exists to prevent, just reintroduced
   quietly at whichever call site forgets the argument. Every current call
-  site (`ScheduleBanner`, `OverviewTab`, `MasterAgendaTab`'s two sites,
-  `findStuckBehindPieces`) builds `chunkById` from whatever chunk set it
+  site (`ScheduleBanner`, `OverviewTab`, `TimelineTab`, `TodayTab`'s
+  catch-up scan, `MasterAgendaTab`'s two sites, `findStuckBehindPieces`)
+  builds `chunkById` from whatever chunk set it
   already has in scope — a new call site should do the same rather than
   relying on the default.
+- **A past day is judged only on what's still *owed* on it — tasks a
+  reschedule already moved away never count against it.**
+  `classifyDayCompletion` drops every id `movedIdsForDay` reports before
+  deciding `"done"`/`"behind"` (nothing left → `"empty"`), and
+  `countBehindDays` is just "how many days classify as `"behind"`." This
+  was a real bug: a day where some tasks were done on time and the rest
+  were moved by a reschedule was neither "fully swept" nor "done," so it
+  read "behind" forever — the "N days behind" banner survived every
+  reschedule, and "Reschedule" clicked again changed nothing (reproduced:
+  14 → 5 → 5 → 5). If you add another "is this day behind/done" check,
+  route it through `classifyDayCompletion` rather than reading `doneDays`
+  against a day's raw id lists, or the same symptom comes back for that
+  surface. See [`docs/Algorithms.md`](docs/Algorithms.md#rescheduling) and
+  [`docs/Decisions.md`](docs/Decisions.md#scheduling).
 - **A key in `piece.progress` may not exist in the chunk set — always
   handle the miss.** `piece.progress` is persisted; the chunk set is
   re-derived. Three kinds of key won't resolve: `__consolidation__`,

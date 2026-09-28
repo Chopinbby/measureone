@@ -25,6 +25,7 @@ import {
   hasPendingProvisionalSession,
   findRelatedChunks,
   parseMeasurePosition,
+  newId,
 } from "../src/lib/utils.js";
 
 describe("loggedSessions (Pass 29) — filters out skipped sessions, keeps real ones", () => {
@@ -338,5 +339,65 @@ describe("[Pass 91 follow-up] parseMeasurePosition — validates a focus spot's 
 
   test("totalMeasures is optional — omitting it parses format only, for lenient recovery of old data", () => {
     assert.deepEqual(parseMeasurePosition("500"), { start: 500, end: 500 });
+  });
+});
+
+describe("[Pass 107] newId — ids that can't collide across devices", () => {
+  // Swaps globalThis.crypto for the duration of `fn`, then puts the real one
+  // back (it's a configurable getter in Node, like `window.crypto`).
+  const withCrypto = (replacement, fn) => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { value: replacement, configurable: true, writable: true });
+    try {
+      return fn();
+    } finally {
+      if (original) Object.defineProperty(globalThis, "crypto", original);
+      else delete globalThis.crypto;
+    }
+  };
+  const SHAPE = /^([a-z]+)_([0-9a-z]+)_([0-9a-z]{10})$/;
+
+  test("format: the prefix, the time in base 36, then 10 random characters", () => {
+    const before = Date.now();
+    const id = newId("p");
+    const after = Date.now();
+    const m = SHAPE.exec(id);
+    assert.ok(m, `unexpected shape: ${id}`);
+    assert.equal(m[1], "p");
+    const time = parseInt(m[2], 36);
+    assert.ok(time >= before && time <= after, "the middle part is the creation time");
+    assert.equal(SHAPE.exec(newId("fs"))[1], "fs");
+  });
+
+  test("10,000 calls give 10,000 distinct ids (most share the same millisecond)", () => {
+    const ids = new Set();
+    for (let i = 0; i < 10000; i++) ids.add(newId("p"));
+    assert.equal(ids.size, 10000);
+  });
+
+  test("uses crypto.getRandomValues when present, skipping bytes that would bias the characters", () => {
+    // 255 and 252 must be skipped; 0 → "0", 35 → "z", 36 → "0", 251 → "z".
+    const pattern = [255, 0, 35, 36, 251, 252];
+    let calls = 0;
+    const fakeCrypto = {
+      getRandomValues(arr) {
+        calls++;
+        for (let i = 0; i < arr.length; i++) arr[i] = pattern[i % pattern.length];
+        return arr;
+      },
+    };
+    const id = withCrypto(fakeCrypto, () => newId("t"));
+    assert.ok(calls >= 1, "crypto.getRandomValues was used");
+    assert.equal(SHAPE.exec(id)[3], "0z0z0z0z0z");
+  });
+
+  test("still works with crypto unavailable (Math.random fallback)", () => {
+    const ids = withCrypto(undefined, () => {
+      assert.equal(globalThis.crypto, undefined);
+      return Array.from({ length: 1000 }, () => newId("w"));
+    });
+    ids.forEach((id) => assert.match(id, SHAPE));
+    assert.equal(new Set(ids).size, 1000);
+    assert.ok(globalThis.crypto, "the real crypto is back afterwards");
   });
 });

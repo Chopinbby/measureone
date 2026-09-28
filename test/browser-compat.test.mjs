@@ -21,3 +21,13 @@ test("no regex lookbehind anywhere in src/ (unsupported before Safari 16.4)", ()
   const offenders = sourceFiles("src").filter((f) => /\(\?<[=!]/.test(readFileSync(f, "utf8")));
   assert.deepEqual(offenders, []);
 });
+
+// crypto.randomUUID() only exists from Safari 15.4 (and only on https or
+// localhost), so on Safari 14 it throws "not a function" the moment the app
+// tries to make a new piece, work, scale, method or focus spot. New ids come
+// from newId (lib/utils.js), which uses crypto.getRandomValues instead.
+// Pass 107.
+test("no randomUUID anywhere in src/ (unsupported before Safari 15.4)", () => {
+  const offenders = sourceFiles("src").filter((f) => readFileSync(f, "utf8").includes("randomUUID"));
+  assert.deepEqual(offenders, []);
+});

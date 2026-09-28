@@ -6,6 +6,40 @@
 
 export const MS_PER_DAY = 86400000;
 
+// Pass 107: the id for a new record (piece, work, technique item, custom
+// method, focus spot), made so two devices can't produce the same one. Same
+// shape as the ids before it: a prefix, the time (now base 36, to stay short;
+// nothing reads it back out), then random characters from
+// crypto.getRandomValues, which Safari 14 has. (The newer UUID helper on
+// `crypto` is Safari 15.4+ only; test/browser-compat.test.mjs keeps it out.)
+// Math.random is only a fallback for an environment with no crypto at all.
+// Existing ids are never rewritten: activePieceId, workId links, progress
+// keys and focus spot ids all point at them.
+const ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+const ID_RANDOM_LENGTH = 10;
+
+function randomIdChars(length) {
+  const cryptoObj = globalThis.crypto;
+  let out = "";
+  if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
+    // Bytes of 252 (= 36 × 7) and up are skipped, so every character is
+    // equally likely; a plain `% 36` would slightly favor the first four.
+    while (out.length < length) {
+      const bytes = cryptoObj.getRandomValues(new Uint8Array(length * 2));
+      for (let i = 0; i < bytes.length && out.length < length; i++) {
+        if (bytes[i] < 252) out += ID_ALPHABET[bytes[i] % 36];
+      }
+    }
+    return out;
+  }
+  while (out.length < length) out += ID_ALPHABET[Math.floor(Math.random() * 36)];
+  return out;
+}
+
+export function newId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}_${randomIdChars(ID_RANDOM_LENGTH)}`;
+}
+
 export function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }

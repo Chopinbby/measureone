@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Check, X, ChevronLeft, ChevronRight, Sparkles, Target, Plus } from "lucide-react";
 import { generateAllChunks, reassociateTroubleSpots } from "../lib/chunking";
 import { computeTimeline } from "../lib/scheduling";
-import { todayISODate, addDaysISO, formatMinutes, formatRange, parseMeasurePosition } from "../lib/utils";
+import { todayISODate, addDaysISO, formatMinutes, formatRange, parseMeasurePosition, newId } from "../lib/utils";
 import { DIFFICULTY_META } from "../lib/constants";
 import { BasicsFields } from "./fields/BasicsFields";
 import { SectionsEditor } from "./fields/SectionsEditor";
@@ -435,7 +435,7 @@ function FocusSpotsStep({ draft, set, chunkSet }) {
       : [
           ...spots,
           {
-            id: `fs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            id: newId("fs"),
             name,
             position,
             startMeasure: positionParsed.start,

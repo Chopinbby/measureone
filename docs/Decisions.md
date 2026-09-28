@@ -7291,6 +7291,43 @@ what it rules out.
 These are unresolved — don't treat the absence of a decision as an
 oversight to silently fix; surface it instead.
 
+- **Accounts groundwork — follow-ups found in the Passes 105–106 review
+  (2026-09-28).** Logged, not fixed; none blocks building on either pass.
+  1. **Nothing enforces "never edit a piece in place."** Since Pass 106
+     the save only writes a piece whose object changed (`diffPieceMaps`,
+     `lib/storage.js`), so a piece edited in place would silently never be
+     saved. The old save-everything effect used to mask that kind of bug
+     by rewriting the piece on the next unrelated change. A search found no
+     current case. Proposed: a CLAUDE.md "Rules that matter every session"
+     bullet. See [Architecture.md](Architecture.md#state-management).
+  2. **Three docs still describe the old save-everything behavior**:
+     the SOW's §2 note from Pass 105
+     ([SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md#2-current-state--whats-actually-in-the-codebase-today)),
+     which counts six storage call sites (deleting a piece now goes
+     through the save effect) and says the auto-save "rewrites every
+     piece"; the AI-GUIDELINES lesson on
+     [cleaning up test data](AI-GUIDELINES.md#cleaning-up-manually-injected-test-data-needs-a-reload-not-just-a-storage-write),
+     which says the save effect writes every entry back; and the closed
+     benchmark entry further down this list, which quotes the old effect's
+     code. Doc-only.
+  3. **An old piece's upgraded shape now reaches storage only when that
+     piece next changes**, not right after loading (the old effect rewrote
+     every piece once on load). Harmless locally: every load re-upgrades in
+     memory, and the only two upgrades that produce a new value each time
+     (a missing start date or save time) are still written back by
+     `loadPiecesFromStorage` itself. **For Pass 110:** upload pieces as the
+     app holds them after `validateAndMigratePiece`, not the raw stored
+     text.
+  4. **A failed removal of a deleted piece's storage key is still
+     silent** (`removePieceFromStorage` swallows the error, as before Pass
+     106), so the piece would reappear on reload with no banner.
+     Pre-existing, not a regression.
+  5. **An unverified claim in
+     [Accounts-and-Backend.md](Accounts-and-Backend.md#open-questions)**:
+     that the owner's own invitation and reset emails arrive only if the
+     account uses the same email address as the owner's Supabase login.
+     Inferred from Supabase's "project team members only" rule, not
+     confirmed in its docs. Check before Pass 109.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

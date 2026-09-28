@@ -7176,6 +7176,116 @@ These entries record the design decisions and what each one ruled out.
   repertoire pace per key rather than per item (see
   [Roadmap.md](Roadmap.md#priority-ordered-backlog)).
 
+## Accounts and backend
+
+**Designed in Pass 105 (2026-09-27), not built.** The full design is
+[Accounts-and-Backend.md](Accounts-and-Backend.md); the plain-language case
+for the project, and its risks, is
+[SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md). Decided 1–5 are the
+user's calls; Design A–J were recommended while scoping. Each entry records
+what it rules out.
+
+- **Decided 1 — Supabase: one managed service for sign-in, the database
+  (Postgres) and, later, file storage.** Alternative ruled out: Firebase,
+  the same basic shape from Google
+  ([SOW §5.1](SOW-Accounts-and-Sync.md#51-backend-hosting-approach)). The
+  SOW's reasons for Supabase: a standard relational database is a closer
+  fit to the piece/progress data and isn't locked to one company's format,
+  and sign-in, database and file storage come as one package. Renting a
+  server and running it all ourselves was ruled out earlier, in the same
+  section.
+- **Decided 2 — sign-in uses Supabase's built-in email-and-password
+  accounts.** Alternative ruled out: a login system of our own
+  ([SOW §5.2](SOW-Accounts-and-Sync.md#52-build-auth-yourself-or-use-the-managed-services-built-in-version)),
+  which would mean getting password storage, reset emails and session
+  security right ourselves, forever. Also ruled out for Phase 1: "sign in
+  with Google" (the SOW had it as optional, §4A).
+- **Decided 3 — accounts are optional.** Signed out, the app is exactly
+  today's app, saving to this browser only; signing in adds a copy in the
+  account. Alternative ruled out: requiring an account before the app can
+  be used at all (the SOW's other option, §4D).
+- **Decided 4 — new accounts are by invitation only until Phase 3.** Open
+  sign-up is switched off in the Supabase dashboard, people are invited
+  from there, and the app has no "create account" form. Alternative ruled
+  out: open sign-up (and a sign-up form in the app) before Phase 3's
+  privacy policy, terms and real email provider exist. **Found while
+  recording this, not yet resolved:** Supabase's built-in email sender only
+  delivers to members of the project's own team, so invitations to anyone
+  else fail — see
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#open-questions).
+- **Decided 5 — no live multi-device sync in Phase 1.** Decided earlier
+  ([SOW §5.3](SOW-Accounts-and-Sync.md#53-is-live-multi-device-sync-required-on-day-one)).
+  Alternative ruled out: sync from day one. Phase 1 fixes the data-loss
+  problem on its own; sync is Phase 2.
+- **Design A — local first.** This browser's copy stays the working copy,
+  signed in or not, so the app stays instant and keeps working with no
+  connection; while signed in, changes are also sent to the account in the
+  background, and the account copy is the durable one. Alternative ruled
+  out: reading and writing only the server while signed in — every action
+  would need a connection, and a failed request would lose the change.
+- **Design B — one row per piece, holding the whole piece object as JSON**
+  (exactly what `localStorage` holds today) plus its owner, schema
+  version, a revision number, updated-at and deleted-at; one row per
+  account for the technique data. Everything read back goes through
+  `validateAndMigratePiece` / `validateAndMigrateTechnique`, the same as a
+  local load. Alternative ruled out: splitting a piece across many tables
+  (sessions, progress and so on) — much more work, every new piece field
+  (this app adds them often) would need a database change, and the server
+  never needs to look inside a piece.
+- **Design C — never overwrite silently.** A device remembers the revision
+  it last saw for each row, and an upload only succeeds if the row is still
+  at that revision; otherwise it's refused and the piece is held as
+  "changed on another device" for the person to settle with the existing
+  import picker (`diffImportedPiece` / `mergeImportedPiece`). Alternative
+  ruled out: "last save wins", which is the quiet overwrite
+  [SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong)
+  risk 3 warns about.
+- **Design D — deleting a piece marks its row deleted (deleted-at), it
+  doesn't erase it,** so it can't reappear from another device and can be
+  recovered by hand. Deleting the account erases everything (Pass 113).
+  Alternative ruled out: erasing the row when the piece is deleted — a
+  device that still has the piece could upload it again, and a mistaken
+  delete would have nothing to recover.
+- **Design E — some things stay on the device, not in the account:**
+  which piece is open (`activePieceId`), the export-reminder dates, the
+  technique corrupt-copy key, and view state. Alternative ruled out:
+  putting these in the account as well. They describe this browser, not
+  the practice record: which piece this browser has open, when this
+  browser last exported a file, a recovery copy of this browser's own
+  unreadable data.
+- **Design F — the database itself enforces that an account can read and
+  write only its own rows** (row-level security), so an app bug can't
+  expose someone else's data. The app holds only the public key; the
+  secret (`service_role`) key never goes in the app, the repo or Vercel.
+  Alternative ruled out: trusting the app's own code to ask only for the
+  right rows ([SOW §4E](SOW-Accounts-and-Sync.md#e-security-basics): app
+  code is where bugs happen). The secret key is kept out because it skips
+  those rules entirely.
+- **Design G — connection settings** (`VITE_SUPABASE_URL`,
+  `VITE_SUPABASE_ANON_KEY`) live in `.env.local` for local development
+  (never committed) and in Vercel's environment settings for the live
+  site; when they're missing, the app runs exactly as today with no
+  sign-in offered. Alternatives ruled out: making the settings required
+  (tests and a fresh checkout would then need a Supabase account to run),
+  and committing them to the repo.
+- **Design H — new records get ids with a random part (Pass 107);
+  existing ids are never rewritten.** Alternatives ruled out: keeping
+  timestamp-only ids, which two devices could both generate
+  ([SOW §2](SOW-Accounts-and-Sync.md#2-current-state--whats-actually-in-the-codebase-today));
+  and rewriting existing ids to the new format, since everything already
+  saved, and every backup already exported, refers to the current ones.
+- **Design I — sign-in lives in an Account panel on the Settings landing
+  page and as a link on the welcome screen.** A new device has no sidebar
+  until a piece exists, so Settings alone can't be reached there.
+  Alternatives ruled out: sign-in reachable only from inside the app
+  (unreachable on a new device, which is exactly where restoring an
+  account matters), and a sign-in screen in front of the app (which
+  Decided 3 rules out).
+- **Design J — the first upload from a device always asks first** ("Back
+  up the N pieces on this device to name@example.com?"), so one browser's
+  pieces never land in the wrong account by surprise. Alternative ruled
+  out: uploading automatically as soon as someone signs in.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

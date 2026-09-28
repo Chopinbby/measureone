@@ -42,6 +42,7 @@ documents to consult for which kind of change.
 | [Decisions.md](Decisions.md) | Why were things built this way, and what was rejected? |
 | [Roadmap.md](Roadmap.md) | What's done, what's next, in what order? |
 | [Technique-Practice.md](Technique-Practice.md) | How does daily scale and arpeggio practice work, and what shipped differently from the brief? |
+| [Accounts-and-Backend.md](Accounts-and-Backend.md) | How will optional accounts and the account copy of your data work (Supabase, local first), and in what order is it built? *Designed, not built.* |
 | [AI-GUIDELINES.md](AI-GUIDELINES.md) | How should an AI assistant work in this project? |
 
 ## How this is meant to stay useful

@@ -435,8 +435,31 @@ assuming this section is stale.
 4. A genuinely *learned* (not hand-tuned) confidence/interval model — see
    [Research.md](Research.md) for what groundwork this needs first. Gated on
    having enough session history to tune against.
-5. Cloud sync / accounts / multi-device — everything is `localStorage`
-   today, single browser only.
+5. **Accounts and backend** — an optional account (Supabase) that keeps a
+   copy of every piece and the technique library, so losing a browser no
+   longer means losing everything. Designed in Pass 105 (2026-09-27), not
+   built; everything is still `localStorage`, single browser only, today.
+   See [Accounts-and-Backend.md](Accounts-and-Backend.md) for the design
+   and [SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md) for the
+   plain-language case. Pass plan:
+   - **Phase 0:** 105, recording the design in the docs.
+   - **Phase 1:** 106 save only what changed; 107 ids that can't collide;
+     108 the Supabase project, tables, security rules and connection; 109
+     sign in, sign out, invite and reset links; 110 first backup, verified
+     by reading it back; 111 keep the backup current after every change,
+     with a quiet status line and automatic retry; 112 restore onto a new
+     device; 113 account settings (change email or password, sign out,
+     delete account). Manual export and the export reminder stay
+     throughout Phase 1
+     ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
+     risk 1).
+   - **Phase 2:** multi-device sync, and what happens offline.
+   - **Phase 3:** open sign-up, privacy policy and terms, a real email
+     provider, monitoring.
+
+   **Open before Pass 109:** Supabase's built-in email sender can't deliver
+   invitations to anyone outside the Supabase project's own team — see
+   [Accounts-and-Backend.md](Accounts-and-Backend.md#open-questions).
 6. **Merge two split chunks back into one** — explicitly wanted, deliberately
    deferred from Pass 97 (no undo exists for a split). The representation
    leaves the door open (a split is one boundary measure in

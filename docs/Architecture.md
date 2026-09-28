@@ -257,18 +257,36 @@ library.
   through, always updating `pieces[activePieceId]`. **Use this, not
   `setPieces` directly**, for any change to the active piece. Persistence
   itself, though, is **not** scoped to just the active piece: the
-  auto-save `useEffect` writes every entry in `pieces` to `localStorage`
-  whenever that object changes (**Pass 29 follow-up** — it used to persist
+  auto-save `useEffect` writes any piece in `pieces` that changed, whichever
+  piece it is (**Pass 29 follow-up** — it used to persist
   only `pieces[activePieceId]`, which silently lost a discard applied to a
   *different* piece than the one a handler switched to in the same event —
   see [Decisions.md](Decisions.md#spaced-repetition--maintenance)). If you
   add a handler that mutates a piece other than the currently active one,
   it's already covered — nothing extra to remember at the call site.
-  **Measured, in a later session, at generously-scaled synthetic data**
-  (100 pieces × 1,600 logged sessions each, ~20MB): the full re-save takes
-  ~48ms, well under any perceptible threshold — see
-  [Decisions.md](Decisions.md#open-questions) for the benchmark; not a
-  performance concern at any realistic scale.
+  **Since Pass 106 it writes only what changed**: `lastSavedPiecesRef` holds
+  the `pieces` map as last written (set to the loaded map on load, so a
+  reload writes nothing), and `savePieceChanges` (`lib/storage.js`) writes
+  each piece `diffPieceMaps` reports changed and removes each one it reports
+  gone — which is how a deleted piece's key is removed now;
+  `handleDeletePiece` no longer does it itself. Removals run before writes,
+  so deleting an old piece to free space after a full-storage failure lets
+  the retried write succeed in that same run. **"Changed" means a
+  different object, not a newer `updatedAt`**, since not every change goes
+  through `updatePiece`'s bump (a re-imported older backup can add sessions
+  without moving `updatedAt`). That's only exact because nothing edits a
+  piece object in place — keep it that way: a piece mutated in place would
+  never be written. A failed write isn't marked saved, so it's retried on
+  the next change, and `storageError` still means "this run had a failed
+  write". Import and "Reschedule all" still also save their pieces directly
+  (a harmless second write). Before Pass 106 the effect re-saved every
+  piece on every change; **measured, in a later session, at
+  generously-scaled synthetic data** (100 pieces × 1,600 logged sessions
+  each, ~20MB), that full re-save took ~48ms — see
+  [Decisions.md](Decisions.md#open-questions) for the benchmark. Pass 106
+  wasn't about speed locally; it's the groundwork for sending only changed
+  pieces to an account copy — see
+  [Accounts-and-Backend.md](Accounts-and-Backend.md).
 - `handleSavePiece` (`SettingsTab`'s "Save changes") additionally runs
   `migrateOrphanedProgress(piece, updated)` (`lib/chunking.js`, a later
   session) before persisting — reattaches any `piece.progress` entry whose

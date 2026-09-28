@@ -41,7 +41,7 @@ import {
   loadActivePieceId,
   savePieceToStorage,
   saveActivePieceIdToStorage,
-  removePieceFromStorage,
+  savePieceChanges,
   downloadBackup,
   parseBackupPieces,
   findMatchingPiece,
@@ -131,6 +131,10 @@ function PieceStatusBadge({ status }) {
 
 export default function App() {
   const [pieces, setPieces] = useState({});
+  // The `pieces` map as last written to storage (Pass 106) — the save effect
+  // below writes only what differs from it. A ref, not state: it's
+  // bookkeeping for that effect, nothing renders from it.
+  const lastSavedPiecesRef = useRef({});
   const [activePieceId, setActivePieceId] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -253,14 +257,18 @@ export default function App() {
   // Load every saved piece, then whichever one was active last.
   useEffect(() => {
     const found = loadPiecesFromStorage();
+    // What's in storage now IS `found` (loadPiecesFromStorage already writes
+    // back any piece whose shape it migrated), so the save effect's first run
+    // after load has nothing to write.
+    lastSavedPiecesRef.current = found;
     setPieces(found);
     setActivePieceId(loadActivePieceId(found));
     setTechnique(loadTechniqueFromStorage());
     setLoaded(true);
   }, []);
 
-  // Persists every piece in `pieces` whenever that object changes — not
-  // just the active one. Originally scoped to "only the active piece" on
+  // Persists every piece in `pieces` that changed — any piece, not just
+  // the active one. Originally scoped to "only the active piece" on
   // the assumption that nothing ever mutates a piece other than the one
   // currently open; the discard-on-leave-Interleaved guard above
   // (guardLeavingInterleaved/confirmAndDiscardProvisional) broke that
@@ -274,7 +282,7 @@ export default function App() {
   // one, and that discard was computed correctly in memory but never
   // written to localStorage, silently reverting on next reload. Found via
   // manual browser testing, not by inspection — the in-memory state looked
-  // right the whole time. Saving every piece here removes the assumption
+  // right the whole time. Considering every piece here removes the assumption
   // this depended on entirely, rather than special-casing this one call
   // site (bulk reschedule, below, already had to work around the same
   // "only active" gap in its own way, for the same underlying reason: nothing
@@ -285,13 +293,18 @@ export default function App() {
   // Surface it instead: a banner stays up until a save actually succeeds
   // again, so recovering (e.g. after deleting an old piece to free up space)
   // clears it on its own.
+  //
+  // Pass 106: writes only the pieces whose object changed since the last
+  // successful save, and removes the ones that are gone (deleting a piece
+  // relies on this; handleDeletePiece no longer removes it itself). A failed
+  // write isn't marked saved, so it's retried on the next change, and
+  // storageError still means "this run had a failed write" — see
+  // savePieceChanges (lib/storage.js).
   useEffect(() => {
     if (!loaded) return;
-    let anyFailed = false;
-    Object.entries(pieces).forEach(([id, p]) => {
-      if (!savePieceToStorage(id, p).ok) anyFailed = true;
-    });
-    setStorageError(anyFailed);
+    const { saved, failed } = savePieceChanges(lastSavedPiecesRef.current, pieces);
+    lastSavedPiecesRef.current = saved;
+    setStorageError(failed.length > 0);
   }, [pieces, loaded]);
 
   // Persist technique data, separately from pieces (see techniqueStorageError).
@@ -466,7 +479,6 @@ export default function App() {
       delete next[idToDelete];
       return next;
     });
-    removePieceFromStorage(idToDelete);
     setActivePieceId(remainingIds[0] || null);
     setEditDraftState(null);
     setSettingsEditing(false);

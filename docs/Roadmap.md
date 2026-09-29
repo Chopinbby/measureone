@@ -444,15 +444,21 @@ assuming this section is stale.
    plain-language case. Pass plan:
    - **Phase 0:** 105, recording the design in the docs.
    - **Phase 1:** 106 save only what changed; 107 ids that can't collide;
-     108 the Supabase project, tables, security rules and connection; 109
-     sign in, sign out, invite and reset links; 110 first backup, verified
-     by reading it back; 111 keep the backup current after every change,
-     with a quiet status line and automatic retry; 112 restore onto a new
-     device; 113 account settings (change email or password, sign out,
-     delete account). Manual export and the export reminder stay
-     throughout Phase 1
+     108 the **test** Supabase project, tables, security rules, and its
+     connection to preview sites and local development; 109 sign in, sign
+     out, invite and reset links; 110 first backup, verified by reading it
+     back; 111 keep the backup current after every change, with a quiet
+     status line and automatic retry; 112 restore onto a new device; 113
+     account settings (change email or password, sign out, delete account).
+     Manual export and the export reminder stay throughout Phase 1
      ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
      risk 1).
+   - **Go-live:** 114, added in Pass 108 — create the production project,
+     apply the same migration files, and give Vercel's Production
+     environment its settings. Until then the live site has no backend, so
+     each Phase 1 pass can be merged as it's finished without anything
+     appearing on the live site (see
+     [Decisions.md](Decisions.md#accounts-and-backend)).
    - **Phase 2:** multi-device sync, and what happens offline.
    - **Phase 3:** open sign-up, privacy policy and terms, a real email
      provider, monitoring.

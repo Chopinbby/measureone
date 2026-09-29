@@ -151,15 +151,25 @@ Copy and share the Vercel URL. Anyone can now:
 
 ### Updating Your App
 
-If you make changes locally:
+Never commit or push straight to `main`: whatever is on `main` is the live
+site. Every change goes through a branch and a pull request instead:
 
-```bash
-git add .
-git commit -m "Your commit message"
-git push origin main
-```
+1. Make the change on its own branch, commit it, and push the branch.
+2. Open a pull request into `main`. Vercel builds a **preview** of that
+   branch at its own address (the link appears in the pull request) and
+   leaves the live site alone.
+3. Try the change on the preview. The preview is a different address, so
+   it starts with no pieces: export a backup from the live site and import
+   it there to test with real data. Nothing done on a preview touches the
+   live site's data.
+4. Merge the pull request once it's right. Vercel then updates the live
+   site automatically, usually within a minute or two.
 
-Vercel automatically redeploys whenever you push to `main`.
+Merge one change at a time, oldest first, and export a backup from the live
+site before merging anything that changes how data is saved. If a merge
+breaks something, Vercel's dashboard can switch the live site back to the
+previous deployment in one click (Deployments → the previous one → Promote
+to Production / Instant Rollback) while the fix is made.
 
 ### Monitoring
 

@@ -7267,7 +7267,9 @@ what it rules out.
   site; when they're missing, the app runs exactly as today with no
   sign-in offered. Alternatives ruled out: making the settings required
   (tests and a fresh checkout would then need a Supabase account to run),
-  and committing them to the repo.
+  and committing them to the repo. *Superseded in part by the Pass 108
+  entry below: two projects, and the live site gets its settings only at
+  go-live (Pass 114), not as soon as they exist.*
 - **Design H — new records get ids with a random part (Pass 107);
   existing ids are never rewritten.** Alternatives ruled out: keeping
   timestamp-only ids, which two devices could both generate
@@ -7285,6 +7287,34 @@ what it rules out.
   up the N pieces on this device to name@example.com?"), so one browser's
   pieces never land in the wrong account by surprise. Alternative ruled
   out: uploading automatically as soon as someone signs in.
+- **Pass 108 — two Supabase projects, and the live site connected only at
+  go-live (decided by the user, 2026-09-29).** A **test** project
+  (`measureone-test`) serves Vercel's Preview environment and local
+  development; a separate **production** project is created and given to
+  Vercel's Production environment in a new Pass 114 (go-live), after Phase 1
+  is done. Until then the live site has no backend settings at all. Why:
+  testing never touches the account copy of anyone's real data, and
+  accounts reach the live site in one deliberate step instead of the moment
+  sign-in code is merged, so each pass can be merged as it's finished.
+  Alternative ruled out: one project for everything, connected to the live
+  site as well (Design G as first written) — simpler and one free project
+  instead of two, but testing would share the database holding real data.
+  Cost accepted: Supabase's Free plan allows 2 active projects, so test plus
+  production uses both. See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#setup-test-project).
+- **Pass 108 — signed-in accounts get only read, add and change; nobody can
+  delete a row.** The migration narrows Supabase's default table
+  permissions (every privilege, delete and truncate included) to select,
+  insert and update for signed-in accounts and nothing for signed-out
+  visitors, then row-level security narrows those to the account's own
+  rows. There's no delete policy either. Why: pieces are deleted by marking
+  them (Design D), so no app code ever needs a real delete; without the
+  permission, an accidental delete in a later pass fails with an error
+  instead of silently affecting nothing. Rows disappear only when their
+  account is deleted, by cascade. Alternatives ruled out: keeping the
+  default permissions and relying on the missing delete policy alone
+  (would block deletes too, but quietly), and a delete policy for a row's
+  own owner (would break Design D).
 
 ## Open questions
 

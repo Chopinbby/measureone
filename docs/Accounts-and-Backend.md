@@ -91,7 +91,9 @@ see [Algorithms.md](Algorithms.md#import-merge)). Nothing is ever decided by
 
 **D. Deleting a piece marks its row deleted** (deleted-at) instead of erasing
 it, so it can't reappear from another device and can be recovered by hand.
-Deleting the account erases everything (Pass 113).
+Deleting the account erases everything. During Phase 1 that's done by the
+project owner from the Supabase dashboard, on request; in the app before
+Phase 3 (see the pass plan).
 
 **E. Stays on the device, not in the account:** which piece is open
 (`activePieceId`), the export-reminder dates, the technique corrupt-copy key,
@@ -182,8 +184,13 @@ docs).
 - **111** Keep the backup current after every change, with a quiet status
   line and automatic retry.
 - **112** Restore onto a new device.
-- **113** Account settings (change email or password, sign out, delete
-  account).
+- **113** Account settings (change email or password, sign out). **No
+  in-app "delete my account" in Phase 1** (decided by the user,
+  2026-09-29): the app's public key can't delete a sign-in account, and
+  that needs code running inside Supabase with its admin powers. Until
+  then, anyone who wants their account deleted asks, and the project owner
+  deletes it in the Supabase dashboard (Authentication → Users). Their rows
+  go with it automatically (checked in Pass 108).
 - **114** Go-live (added in Pass 108): create the production project, apply
   the same migration files to it, and give Vercel's Production environment
   its two settings. Until this pass the live site has no backend.
@@ -195,7 +202,12 @@ risk 1).
 **Phase 2:** multi-device sync, and what happens offline.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
-monitoring.
+monitoring, and an in-app "delete my account", which must exist before
+strangers can sign up. The likely way is a "delete my account" database
+function in a new migration file: it only ever deletes the caller's own
+account, and it has nothing to deploy separately. A Supabase Edge Function
+is the alternative. Either one is a small, deliberate exception to "no
+server code of our own".
 
 ## Setup (test project)
 
@@ -237,8 +249,10 @@ checkout needs its own copy.
   delete was refused.
 - Both tables have row-level security on, and signed-out visitors ("anon")
   have no table permissions at all.
-- Deleting the two test accounts removed every row they owned (the cascade
-  account deletion will rely on in Pass 113). No test accounts remain.
+- Deleting the two test accounts removed every row they owned: the same
+  cascade that deleting someone's account from the dashboard relies on in
+  Phase 1, and that in-app deletion will rely on later. No test accounts
+  remain.
 
 **Free-plan limits, checked 2026-09-29** on Supabase's
 [pricing](https://supabase.com/pricing) page (check again before relying on

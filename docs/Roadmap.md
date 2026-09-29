@@ -449,7 +449,8 @@ assuming this section is stale.
      out, invite and reset links; 110 first backup, verified by reading it
      back; 111 keep the backup current after every change, with a quiet
      status line and automatic retry; 112 restore onto a new device; 113
-     account settings (change email or password, sign out, delete account).
+     account settings (change email or password, sign out; deleting an
+     account stays a by-request dashboard job during Phase 1).
      Manual export and the export reminder stay throughout Phase 1
      ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
      risk 1).
@@ -461,7 +462,8 @@ assuming this section is stale.
      [Decisions.md](Decisions.md#accounts-and-backend)).
    - **Phase 2:** multi-device sync, and what happens offline.
    - **Phase 3:** open sign-up, privacy policy and terms, a real email
-     provider, monitoring.
+     provider, monitoring, and an in-app "delete my account" (probably a
+     database function) before strangers can sign up.
 
    **Open before Pass 109:** Supabase's built-in email sender can't deliver
    invitations to anyone outside the Supabase project's own team — see

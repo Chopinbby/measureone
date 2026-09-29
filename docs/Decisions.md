@@ -7242,8 +7242,9 @@ what it rules out.
   risk 3 warns about.
 - **Design D — deleting a piece marks its row deleted (deleted-at), it
   doesn't erase it,** so it can't reappear from another device and can be
-  recovered by hand. Deleting the account erases everything (Pass 113).
-  Alternative ruled out: erasing the row when the piece is deleted — a
+  recovered by hand. Deleting the account erases everything (from the
+  dashboard in Phase 1, in the app later; see the entry on deleting an
+  account below). Alternative ruled out: erasing the row when the piece is deleted — a
   device that still has the piece could upload it again, and a mistaken
   delete would have nothing to recover.
 - **Design E — some things stay on the device, not in the account:**
@@ -7328,6 +7329,23 @@ what it rules out.
   Cost accepted: a little more code in Pass 109, and a short pause the first
   time someone opens sign-in. See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#design).
+- **No in-app "delete my account" in Phase 1; deletions done by hand from
+  the dashboard (decided by the user, 2026-09-29).** Found in Pass 108:
+  the app's public key can't delete a sign-in account, not even the
+  caller's own. That takes Supabase's admin powers, which never go in the
+  app, the repo or Vercel (Design F), so an in-app delete needs code
+  running inside Supabase. For Phase 1's handful of invited people, anyone
+  who wants their account gone asks, and the owner deletes it in the
+  dashboard; their rows go with it by cascade (checked in Pass 108). Pass
+  113 keeps change email or password and sign out. **Before Phase 3's open
+  sign-up**, an in-app delete, probably a "delete my account" database
+  function in a new migration file, which only ever deletes the caller's
+  own account and has nothing to deploy separately (the user's likely
+  choice). Alternatives: a Supabase Edge Function holding the secret key
+  inside Supabase (Supabase's usual pattern, but more moving parts and a
+  separate deploy step), and building the function in Phase 1 now (more
+  work before it's needed by anyone). Either way it's a small, deliberate
+  exception to "no server code of our own".
 
 ## Open questions
 

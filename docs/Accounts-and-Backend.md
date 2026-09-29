@@ -4,7 +4,7 @@
 > keeping a copy of every piece and the technique library in the account, on
 > Supabase. The plain-language case for doing this at all, and the risks it
 > has to guard against, is [SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md).
-> **Audience:** Anyone building or changing Passes 106–113, and anyone asking
+> **Audience:** Anyone building or changing Passes 106–114, and anyone asking
 > "where does my data live once I sign in?"
 > **Scope:** What was decided, how the account copy works (its shape on the
 > server, conflicts, deletes, security, connection settings), known limits of
@@ -24,9 +24,13 @@
 > revisited, or Supabase's terms change in a way [Known limits](#known-limits)
 > depends on.
 
-**Status: designed, not built (Pass 105, 2026-09-27).** No code exists for
-any of this yet. The app today saves everything to this browser only. Phase 1
-is built in Passes 106–113 — see [Pass plan](#pass-plan).
+**Status: designed (Pass 105, 2026-09-27); Phase 1 being built.** Passes
+106–113 build it and Pass 114 puts it live — see [Pass plan](#pass-plan).
+Since Pass 108 a **test** Supabase project exists with the tables and
+security rules, connected to preview sites and local development only (see
+[Setup](#setup-test-project)). Nothing in the app uses it yet, and the live
+site has no backend at all: it saves everything to the browser only, as it
+always has.
 
 ## Decided
 
@@ -44,9 +48,10 @@ alternative it rules out, in [Decisions.md](Decisions.md#accounts-and-backend).
    saving to this browser only. Signing in adds a copy in the account.
 4. **New accounts are by invitation only until Phase 3:** open sign-up is
    switched off in the Supabase dashboard, people are invited from there,
-   and the app has no "create account" form. (See
-   [Open questions](#open-questions): Supabase's built-in email sender
-   can't currently deliver those invitations to most people.)
+   and the app has no "create account" form. During Phase 1 the only
+   account is the owner's own, because Supabase's built-in email sender
+   reaches only the project's own team (decided 2026-09-29; see
+   [Open questions](#open-questions)).
 5. **No live multi-device sync in Phase 1**
    ([SOW §5.3](SOW-Accounts-and-Sync.md#53-is-live-multi-device-sync-required-on-day-one),
    decided earlier).
@@ -83,11 +88,17 @@ revision. If another device changed it in between, the upload is refused and
 the piece is held as "changed on another device" for the person to settle
 with the existing import picker (`diffImportedPiece` / `mergeImportedPiece`,
 see [Algorithms.md](Algorithms.md#import-merge)). Nothing is ever decided by
-"last save wins".
+"last save wins". **The database keeps the count, not the app** (decided by
+the user, 2026-09-29): a database rule raises a row's revision by one and
+sets its updated-at on every change, so the app only says which revision it
+expects ("save only if still at 5") and can't get the counting wrong. The
+rule is a new migration file in Pass 110, the first pass that saves rows.
 
 **D. Deleting a piece marks its row deleted** (deleted-at) instead of erasing
 it, so it can't reappear from another device and can be recovered by hand.
-Deleting the account erases everything (Pass 113).
+Deleting the account erases everything. During Phase 1 that's done by the
+project owner from the Supabase dashboard, on request; in the app before
+Phase 3 (see the pass plan).
 
 **E. Stays on the device, not in the account:** which piece is open
 (`activePieceId`), the export-reminder dates, the technique corrupt-copy key,
@@ -100,9 +111,16 @@ key never goes in the app, the repo or Vercel.
 
 **G. Connection settings** (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
 live in `.env.local` for local development (never committed) and in Vercel's
-environment settings for the live site. When they're missing the app runs
-exactly as today with no sign-in offered, so tests and a fresh checkout need
-no account.
+environment settings. When they're missing the app runs exactly as today
+with no sign-in offered, so tests and a fresh checkout need no account.
+**Two projects, not one** (changed in Pass 108, on the user's decision): a
+**test** project for Vercel's **Preview** environment and local development,
+and a separate **production** project for the live site, created and
+connected only at go-live (Pass 114). Until then Vercel's Production
+environment has no Supabase settings. So testing never touches the account
+copy of anyone's real data, and accounts reach the live site in one
+deliberate step rather than as soon as sign-in code is merged. (The design
+as first written had one project, connected to the live site too.)
 
 **H. New records get ids with a random part** (Pass 107); existing ids are
 never rewritten.
@@ -114,6 +132,18 @@ exists).
 **J. The first upload from a device always asks first** ("Back up the N
 pieces on this device to name@example.com?"), so one browser's pieces never
 land in the wrong account by surprise.
+
+**K. The account code is downloaded only when it's needed** (decided by the
+user, 2026-09-29, for Pass 109). The Supabase library is about 59 KB
+compressed, on top of the app's 139 KB. It loads only when someone opens the
+Account panel to sign in, or on a device that already has a signed-in
+session. A signed-out visitor downloads exactly what they do today (Decided
+3). Supabase keeps a signed-in session in this browser's storage, so the app
+can check for one without loading the library first. `src/lib/backend.js`
+imports the library directly today (nothing uses it yet), so Pass 109 changes
+that to load it on demand. Ruled out: including it in every visitor's
+download (simpler, but about 42% more for everyone, including people who
+never sign in).
 
 ## Known limits
 
@@ -151,14 +181,30 @@ docs).
 ([SOW §7](SOW-Accounts-and-Sync.md#7-suggested-phases)):
 - **106** Save only what changed.
 - **107** Ids that can't collide.
-- **108** The Supabase project, tables, security rules and connection.
-- **109** Sign in, sign out, invite and reset links.
-- **110** First backup, verified by reading it back.
+- **108** The **test** Supabase project, tables, security rules, and its
+  connection to preview sites and local development (see
+  [Setup](#setup-test-project)).
+- **109** Sign in, sign out, invite and reset links. In Phase 1 only the
+  owner's own account is invited (the built-in email sender reaches only
+  the project team), and the test project's Site URL moves to this pass's
+  preview address while it's tested.
+- **110** First backup, verified by reading it back. Also adds the second
+  migration file: the database rule that raises each row's revision and sets
+  its updated-at on every change (Design C). It's run once on the test
+  project, like the first, and on production at go-live.
 - **111** Keep the backup current after every change, with a quiet status
   line and automatic retry.
 - **112** Restore onto a new device.
-- **113** Account settings (change email or password, sign out, delete
-  account).
+- **113** Account settings (change email or password, sign out). **No
+  in-app "delete my account" in Phase 1** (decided by the user,
+  2026-09-29): the app's public key can't delete a sign-in account, and
+  that needs code running inside Supabase with its admin powers. Until
+  then, anyone who wants their account deleted asks, and the project owner
+  deletes it in the Supabase dashboard (Authentication → Users). Their rows
+  go with it automatically (checked in Pass 108).
+- **114** Go-live (added in Pass 108): create the production project, apply
+  the same migration files to it, and give Vercel's Production environment
+  its two settings. Until this pass the live site has no backend.
 
 Manual export and the export reminder stay throughout Phase 1
 ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
@@ -167,7 +213,71 @@ risk 1).
 **Phase 2:** multi-device sync, and what happens offline.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
-monitoring.
+monitoring, and an in-app "delete my account", which must exist before
+strangers can sign up. The likely way is a "delete my account" database
+function in a new migration file: it only ever deletes the caller's own
+account, and it has nothing to deploy separately. A Supabase Edge Function
+is the alternative. Either one is a small, deliberate exception to "no
+server code of our own".
+
+## Setup (test project)
+
+Done in Pass 108 (2026-09-29). The dashboard steps were done by the user; the
+checks were run against the project itself, not read off the settings pages.
+
+**Supabase: one project, `measureone-test`**, Free plan.
+- **Authentication → Sign In / Providers:** "Allow new users to sign up"
+  switched **off** (invitation only, Decided 4). The Email provider stays on.
+  Confirmed from the project's own auth settings: sign-up disabled, email on.
+- **Authentication → URL Configuration:**
+  - Site URL `http://localhost:5173`: where a dashboard invitation opens
+    while testing. **Pass 109 switches it to its own preview address**
+    (decided 2026-09-29), so invitation and reset links work from any
+    device, not only on the Mac running the development server.
+  - Redirect URLs `http://localhost:5173/**` and
+    `https://*-measure-one.vercel.app/**` (every preview address ends in
+    `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
+- **Tables and security rules:** `supabase/migrations/0001_accounts_backend.sql`,
+  run once in the SQL Editor. Future changes go in new numbered files, applied
+  to the test project first and to production at go-live.
+- **Where the two settings come from:** Project Settings → **Data API** (the
+  project URL; the page shows the address ending `/rest/v1/`, and the setting
+  is the address without that ending) and → **API Keys** (the
+  **publishable** key, `sb_publishable_…`). The secret key was never copied.
+
+**Vercel:** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` added under the
+project's Settings → Environment Variables as type **Config** (neither is a
+secret), **Preview only**. Production and Development have none. Vercel
+applies them from the next build, so a branch pushed after that picks them up.
+
+**Local development:** the same two settings in `.env.local` (git ignores it;
+`.env.example` shows the shape). It lives in each checkout, so a second
+checkout needs its own copy.
+
+**Checked for real (Pass 108):**
+- 27 of 27 checks passed, signed in as two throwaway test accounts. Each could
+  add, read and change its own rows. A could not read B's rows, add rows in
+  B's name, change B's rows, or move its own row to B. Nobody could delete a
+  row, not even its owner (Design D). Signed out, every read, add, change and
+  delete was refused.
+- Both tables have row-level security on, and signed-out visitors ("anon")
+  have no table permissions at all.
+- Deleting the two test accounts removed every row they owned: the same
+  cascade that deleting someone's account from the dashboard relies on in
+  Phase 1, and that in-app deletion will rely on later. No test accounts
+  remain.
+
+**Free-plan limits, checked 2026-09-29** on Supabase's
+[pricing](https://supabase.com/pricing) page (check again before relying on
+them):
+- **2 active projects.** Test plus production uses both.
+- Paused after **1 week** without activity (restorable from the dashboard;
+  see [Known limits](#known-limits)). The test project will pause between
+  testing sessions, so wake it before testing.
+- **500 MB** database, **50,000** monthly active users, **1 GB** file
+  storage.
+- **No automatic backups** on the Free plan.
+- Built-in email: see [Known limits](#known-limits).
 
 ## Where this differs from the SOW
 
@@ -193,16 +303,22 @@ Where the two disagree, this doc is the current plan:
 These are unresolved. Don't treat the absence of a decision as an oversight
 to silently fix; surface it instead.
 
-- **How do invited people get their invitation and password-reset emails
-  in Phase 1?** Found while checking [Known limits](#known-limits) in Pass
-  105. Decided 4 has people invited from the Supabase dashboard, but the
+- ~~**How do invited people get their invitation and password-reset emails
+  in Phase 1?**~~ **Resolved 2026-09-29 (the user's call): nobody else, for
+  now.** During Phase 1 the only account is the owner's own, invited from
+  the dashboard; other people get accounts once email is sorted out (by
+  hand-made accounts, or a real email provider, at the latest in Phase 3).
+  Pass 109 confirms that the owner's own invitation arrives, which settles
+  the inference below. The original question, kept for the record: found
+  while checking [Known limits](#known-limits) in Pass 105. Decided 4 has people invited from the Supabase dashboard, but the
   built-in email sender only delivers to members of the Supabase project's
   own team. The owner's own account should work only if it uses the same
   email address as the owner's Supabase login (inferred from that rule,
   not confirmed in Supabase's docs; check before Pass 109). Anyone else's
   invitation and
   password-reset emails would fail. Needs a decision before Pass 109 (invite
-  and reset links). Options, none chosen:
+  and reset links). Options at the time (the first two remain the ways to
+  add other people later):
   - set up a real email provider in Phase 1 instead of Phase 3;
   - create each account by hand in the Supabase dashboard with a starting
     password (no email needed to create it), accepting that the person's

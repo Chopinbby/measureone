@@ -112,22 +112,26 @@ relevant to planning the migration.)*
   but it's a real head start: a decent chunk of the hard thinking a proper
   sync system needs has already been done once, for a simpler case.
 
-**Note added 2026-09-27 (Pass 105):** two things have changed since this
-section was written.
+**Note added 2026-09-27 (Pass 105; updated 2026-09-29 after Pass 106):**
+two things have changed since this section was written.
 - **Technique data is a second kind of data to back up.** The daily scales
   and arpeggios feature (Passes 98–104) keeps its library in its own
   `localStorage` key, `measureone-technique`, separate from every piece.
   It belongs to the person, not to any piece, and it's already in backup
   files. The design gives it one row per account in the account copy.
-- **App.jsx saves or removes piece and technique data in six places**,
-  not one: the auto-save that rewrites every piece whenever any piece
-  changes; the technique auto-save; deleting a piece; importing a backup
-  (twice: once for a piece that matches one already here, once for a new
-  one); and "Reschedule all", which saves the other pieces it reschedules
-  directly. These are the places an account copy has to follow. Loading
-  still happens in one place, when the app opens. (`ImportPiecesModal`
-  also uses a few of `storage.js`'s merge helpers, but none that touch
-  storage.)
+- **App.jsx saves or removes piece and technique data in five places**,
+  not one: the pieces auto-save, which writes each piece that changed and
+  removes the ones that were deleted; the technique auto-save; importing a
+  backup (twice: once for a piece that matches one already here, once for
+  a new one); and "Reschedule all", which saves the other pieces it
+  reschedules directly. The pieces from import and "Reschedule all" are
+  also saved by the pieces auto-save, so that one save step sees every
+  piece change. These are the places an account copy has to follow.
+  Loading still happens in one place, when the app opens.
+  (`ImportPiecesModal` also uses a few of `storage.js`'s merge helpers, but
+  none that touch storage.) When this note was first written there were
+  six: the auto-save then rewrote every piece whenever any piece changed,
+  and deleting a piece removed its entry separately. Pass 106 changed both.
 
 **Bottom line:** the plumbing that needs replacing is small and isolated.
 The work isn't "rewire the whole app" — it's "design and build the concept

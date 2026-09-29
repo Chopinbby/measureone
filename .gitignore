@@ -4,3 +4,8 @@ dist
 .claude/settings.local.json
 measureone-backup-*.json
 misc documents/
+
+# Connection settings (Pass 108): never committed. See .env.example and DEPLOYMENT.md.
+.env
+.env.local
+.env.*.local

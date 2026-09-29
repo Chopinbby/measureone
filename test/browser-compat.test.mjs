@@ -6,7 +6,7 @@
 // Found in review of Pass 101 (components/tabs/technique/format.js).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 function sourceFiles(dir) {
@@ -31,3 +31,22 @@ test("no randomUUID anywhere in src/ (unsupported before Safari 15.4)", () => {
   const offenders = sourceFiles("src").filter((f) => readFileSync(f, "utf8").includes("randomUUID"));
   assert.deepEqual(offenders, []);
 });
+
+// The same lookbehind rule, applied to what actually ships. The checks above
+// read src/ only, but a library's code (the Supabase client, from Pass 109 on)
+// goes into the build without ever passing through src/. This reads
+// dist/assets/*.js, so it only means something right after `npm run build`
+// (a stale dist/ gives a stale answer); with no build there to read, it skips
+// and says so rather than passing silently. Pass 108.
+const bundleDir = join("dist", "assets");
+const bundleFiles = existsSync(bundleDir)
+  ? readdirSync(bundleDir).filter((n) => n.endsWith(".js")).map((n) => join(bundleDir, n))
+  : [];
+test(
+  "no regex lookbehind in the built bundle, dist/assets/*.js (unsupported before Safari 16.4)",
+  { skip: bundleFiles.length === 0 ? "no build to scan: run `npm run build` first" : false },
+  () => {
+    const offenders = bundleFiles.filter((f) => /\(\?<[=!]/.test(readFileSync(f, "utf8")));
+    assert.deepEqual(offenders, []);
+  }
+);

@@ -4,7 +4,7 @@
 > keeping a copy of every piece and the technique library in the account, on
 > Supabase. The plain-language case for doing this at all, and the risks it
 > has to guard against, is [SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md).
-> **Audience:** Anyone building or changing Passes 106–113, and anyone asking
+> **Audience:** Anyone building or changing Passes 106–114, and anyone asking
 > "where does my data live once I sign in?"
 > **Scope:** What was decided, how the account copy works (its shape on the
 > server, conflicts, deletes, security, connection settings), known limits of
@@ -24,9 +24,13 @@
 > revisited, or Supabase's terms change in a way [Known limits](#known-limits)
 > depends on.
 
-**Status: designed, not built (Pass 105, 2026-09-27).** No code exists for
-any of this yet. The app today saves everything to this browser only. Phase 1
-is built in Passes 106–113 — see [Pass plan](#pass-plan).
+**Status: designed (Pass 105, 2026-09-27); Phase 1 being built.** Passes
+106–113 build it and Pass 114 puts it live — see [Pass plan](#pass-plan).
+Since Pass 108 a **test** Supabase project exists with the tables and
+security rules, connected to preview sites and local development only (see
+[Setup](#setup-test-project)). Nothing in the app uses it yet, and the live
+site has no backend at all: it saves everything to the browser only, as it
+always has.
 
 ## Decided
 
@@ -100,9 +104,16 @@ key never goes in the app, the repo or Vercel.
 
 **G. Connection settings** (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
 live in `.env.local` for local development (never committed) and in Vercel's
-environment settings for the live site. When they're missing the app runs
-exactly as today with no sign-in offered, so tests and a fresh checkout need
-no account.
+environment settings. When they're missing the app runs exactly as today
+with no sign-in offered, so tests and a fresh checkout need no account.
+**Two projects, not one** (changed in Pass 108, on the user's decision): a
+**test** project for Vercel's **Preview** environment and local development,
+and a separate **production** project for the live site, created and
+connected only at go-live (Pass 114). Until then Vercel's Production
+environment has no Supabase settings. So testing never touches the account
+copy of anyone's real data, and accounts reach the live site in one
+deliberate step rather than as soon as sign-in code is merged. (The design
+as first written had one project, connected to the live site too.)
 
 **H. New records get ids with a random part** (Pass 107); existing ids are
 never rewritten.
@@ -151,7 +162,9 @@ docs).
 ([SOW §7](SOW-Accounts-and-Sync.md#7-suggested-phases)):
 - **106** Save only what changed.
 - **107** Ids that can't collide.
-- **108** The Supabase project, tables, security rules and connection.
+- **108** The **test** Supabase project, tables, security rules, and its
+  connection to preview sites and local development (see
+  [Setup](#setup-test-project)).
 - **109** Sign in, sign out, invite and reset links.
 - **110** First backup, verified by reading it back.
 - **111** Keep the backup current after every change, with a quiet status
@@ -159,6 +172,9 @@ docs).
 - **112** Restore onto a new device.
 - **113** Account settings (change email or password, sign out, delete
   account).
+- **114** Go-live (added in Pass 108): create the production project, apply
+  the same migration files to it, and give Vercel's Production environment
+  its two settings. Until this pass the live site has no backend.
 
 Manual export and the export reminder stay throughout Phase 1
 ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
@@ -168,6 +184,61 @@ risk 1).
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring.
+
+## Setup (test project)
+
+Done in Pass 108 (2026-09-29). The dashboard steps were done by the user; the
+checks were run against the project itself, not read off the settings pages.
+
+**Supabase: one project, `measureone-test`**, Free plan.
+- **Authentication → Sign In / Providers:** "Allow new users to sign up"
+  switched **off** (invitation only, Decided 4). The Email provider stays on.
+  Confirmed from the project's own auth settings: sign-up disabled, email on.
+- **Authentication → URL Configuration:**
+  - Site URL `http://localhost:5173`: where a dashboard invitation opens
+    while testing. Revisit in Pass 109, when invitations are first used.
+  - Redirect URLs `http://localhost:5173/**` and
+    `https://*-measure-one.vercel.app/**` (every preview address ends in
+    `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
+- **Tables and security rules:** `supabase/migrations/0001_accounts_backend.sql`,
+  run once in the SQL Editor. Future changes go in new numbered files, applied
+  to the test project first and to production at go-live.
+- **Where the two settings come from:** Project Settings → **Data API** (the
+  project URL; the page shows the address ending `/rest/v1/`, and the setting
+  is the address without that ending) and → **API Keys** (the
+  **publishable** key, `sb_publishable_…`). The secret key was never copied.
+
+**Vercel:** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` added under the
+project's Settings → Environment Variables as type **Config** (neither is a
+secret), **Preview only**. Production and Development have none. Vercel
+applies them from the next build, so a branch pushed after that picks them up.
+
+**Local development:** the same two settings in `.env.local` (git ignores it;
+`.env.example` shows the shape). It lives in each checkout, so a second
+checkout needs its own copy.
+
+**Checked for real (Pass 108):**
+- 27 of 27 checks passed, signed in as two throwaway test accounts. Each could
+  add, read and change its own rows. A could not read B's rows, add rows in
+  B's name, change B's rows, or move its own row to B. Nobody could delete a
+  row, not even its owner (Design D). Signed out, every read, add, change and
+  delete was refused.
+- Both tables have row-level security on, and signed-out visitors ("anon")
+  have no table permissions at all.
+- Deleting the two test accounts removed every row they owned (the cascade
+  account deletion will rely on in Pass 113). No test accounts remain.
+
+**Free-plan limits, checked 2026-09-29** on Supabase's
+[pricing](https://supabase.com/pricing) page (check again before relying on
+them):
+- **2 active projects.** Test plus production uses both.
+- Paused after **1 week** without activity (restorable from the dashboard;
+  see [Known limits](#known-limits)). The test project will pause between
+  testing sessions, so wake it before testing.
+- **500 MB** database, **50,000** monthly active users, **1 GB** file
+  storage.
+- **No automatic backups** on the Free plan.
+- Built-in email: see [Known limits](#known-limits).
 
 ## Where this differs from the SOW
 

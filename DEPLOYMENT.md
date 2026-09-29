@@ -91,7 +91,33 @@ Vercel should auto-detect these, but verify:
 - **Build Command**: `npm run build` (auto-detected)
 - **Output Directory**: `dist` (auto-detected)
 - **Install Command**: `npm ci` (auto-detected)
-- **Environment Variables**: Leave empty (none needed for this app)
+- **Environment Variables** (Pass 108): two, both optional, for the account
+  backend. With both empty the app runs exactly as it did before accounts:
+  no sign-in offered, everything saved in the browser only.
+  - `VITE_SUPABASE_URL`: the Supabase project's URL (`https://<ref>.supabase.co`).
+  - `VITE_SUPABASE_ANON_KEY`: the project's **public** key, called
+    "publishable" (starts `sb_publishable_`) or, on older projects, "anon".
+
+  **Where to find them:** Supabase dashboard → the project → **Project
+  Settings**: the URL under **Data API**, the public key under **API Keys**.
+
+  **Which environment gets which project** (Vercel → Project Settings →
+  Environment Variables, choosing the environment for each variable):
+  - **Preview** (every branch's preview site) and **local development**
+    (`.env.local`, copied from `.env.example`, never committed): the **test**
+    project, `measureone-test`.
+  - **Production** (the live site): **leave empty until go-live** (Pass 114),
+    when a separate production project is created. Until then the live site
+    has no account backend at all.
+
+  The public key is safe in the browser: the database's row-level security
+  rules decide what each signed-in account can read and write (see
+  `supabase/migrations/`). **Never add the secret key** (starts `sb_secret_`,
+  or the older `service_role` key) anywhere: not in Vercel, not in
+  `.env.local`, not in the repo. It bypasses those rules entirely.
+
+  These values are built into the app when Vercel builds it, so after adding
+  or changing one, redeploy (or push a new commit) for it to take effect.
 
 Click "Deploy"
 

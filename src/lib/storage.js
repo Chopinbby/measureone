@@ -578,6 +578,49 @@ export function removePieceFromStorage(id) {
   }
 }
 
+// Pass 106: which pieces need writing, comparing the `pieces` map as it was
+// last saved against the current one. A piece counts as changed when its
+// object isn't the same object as last time — identity, not `updatedAt`,
+// because not every change goes through updatePiece's `updatedAt` bump
+// (import builds its merged pieces directly, for one). Identity is exact
+// here because nothing edits a piece in place: every path that changes a
+// piece hands React a new object for it. Removed = saved last time, gone now.
+export function diffPieceMaps(lastSaved, current) {
+  const prev = lastSaved || {};
+  const next = current || {};
+  const has = (obj, id) => Object.prototype.hasOwnProperty.call(obj, id);
+  return {
+    changed: Object.keys(next).filter((id) => !has(prev, id) || prev[id] !== next[id]),
+    removed: Object.keys(prev).filter((id) => !has(next, id)),
+  };
+}
+
+// Pass 106: the pieces save effect's whole job, here rather than in App.jsx
+// so it can be tested. Writes each changed piece, removes each removed one,
+// and returns `saved`, the map to compare against next time. A piece whose
+// write failed keeps its OLD entry in `saved` (or none, if it's new), so it
+// still counts as changed on the next run and gets retried then — the retry
+// the old rewrite-every-piece effect got for free. `write`/`remove` are
+// parameters only so a test can make a write fail.
+export function savePieceChanges(lastSaved, current, write = savePieceToStorage, remove = removePieceFromStorage) {
+  const { changed, removed } = diffPieceMaps(lastSaved, current);
+  const saved = { ...(lastSaved || {}) };
+  const failed = [];
+  // Removals first: deleting an old piece is how someone frees space after a
+  // full-storage failure, and a retried write in the same run should get
+  // that space (handleDeletePiece used to remove the key itself, before
+  // this effect ran, so the retry always came after the removal).
+  removed.forEach((id) => {
+    remove(id);
+    delete saved[id];
+  });
+  changed.forEach((id) => {
+    if (write(id, current[id]).ok) saved[id] = current[id];
+    else failed.push(id);
+  });
+  return { saved, failed, changed, removed };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Technique practice data (Pass 100) — app-level, not part of any    */
 /*  piece: one localStorage key of its own, its own schema version,    */

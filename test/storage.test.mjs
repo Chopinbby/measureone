@@ -6,7 +6,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generatePracticeChunks } from "../src/lib/chunking.js";
-import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue, diffImportedPiece } from "../src/lib/storage.js";
+import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue, diffImportedPiece, diffPieceMaps, savePieceChanges } from "../src/lib/storage.js";
 
 const fresh = {
   id: "p_fresh",
@@ -1589,5 +1589,146 @@ describe("[Pass 97 follow-up] chunkSplitPoints — default and load-time self-he
     );
     assert.deepEqual(migrated.chunkSplitPoints, []);
     assert.deepEqual(migrated.progress.c8.troubleSpots.map((s) => s.id), ["fs1"]);
+  });
+});
+
+describe("[Pass 106] diffPieceMaps — save only what changed", () => {
+  const a = { id: "a", name: "Nocturne", updatedAt: 1000 };
+  const b = { id: "b", name: "Etude", updatedAt: 2000 };
+
+  test("the same object is not changed", () => {
+    assert.deepEqual(diffPieceMaps({ a, b }, { a, b }), { changed: [], removed: [] });
+  });
+
+  test("a replaced object is changed, even with the same updatedAt and identical content", () => {
+    const aCopy = { ...a };
+    assert.deepEqual(diffPieceMaps({ a, b }, { a: aCopy, b }), { changed: ["a"], removed: [] });
+  });
+
+  test("[regression] a re-imported older backup that adds a session keeps updatedAt but is still changed", () => {
+    // mergeImportedPiece keeps the newer side's updatedAt, so a merge that
+    // only ADDS history from an older backup doesn't move it. A save keyed
+    // on updatedAt would never write this piece; identity catches it.
+    const existing = { id: "a", name: "Nocturne", updatedAt: 2000, progress: { c1: { doneDays: [1], sessions: [{ day: 1, cleanReps: 3, bpm: 60 }] } } };
+    const olderBackup = { id: "a", name: "Nocturne", updatedAt: 1000, progress: { c1: { doneDays: [1, 2], sessions: [{ day: 1, cleanReps: 3, bpm: 60 }, { day: 2, cleanReps: 4, bpm: 62 }] } } };
+    const merged = mergeImportedPiece(existing, olderBackup);
+    assert.equal(merged.updatedAt, existing.updatedAt);
+    assert.equal(merged.progress.c1.sessions.length, 2);
+    assert.deepEqual(diffPieceMaps({ a: existing }, { a: merged }), { changed: ["a"], removed: [] });
+  });
+
+  test("a new id is changed", () => {
+    assert.deepEqual(diffPieceMaps({ a }, { a, b }), { changed: ["b"], removed: [] });
+  });
+
+  test("a missing id is removed", () => {
+    assert.deepEqual(diffPieceMaps({ a, b }, { a }), { changed: [], removed: ["b"] });
+  });
+
+  test("empty maps on either side", () => {
+    assert.deepEqual(diffPieceMaps({}, {}), { changed: [], removed: [] });
+    assert.deepEqual(diffPieceMaps({}, { a, b }), { changed: ["a", "b"], removed: [] });
+    assert.deepEqual(diffPieceMaps({ a, b }, {}), { changed: [], removed: ["a", "b"] });
+    assert.deepEqual(diffPieceMaps(null, undefined), { changed: [], removed: [] });
+  });
+});
+
+describe("[Pass 106] savePieceChanges — writes, removals, and retrying a failed write", () => {
+  // A stand-in for savePieceToStorage/removePieceFromStorage that records
+  // calls and fails any id in `failing`.
+  const fakeStorage = (failing = new Set()) => {
+    const log = { writes: [], removes: [] };
+    const write = (id) => {
+      log.writes.push(id);
+      return failing.has(id) ? { ok: false, error: new Error("QuotaExceededError") } : { ok: true };
+    };
+    const remove = (id) => log.removes.push(id);
+    return { log, write, remove, failing };
+  };
+  const a = { id: "a", updatedAt: 1 };
+  const b = { id: "b", updatedAt: 1 };
+  const c = { id: "c", updatedAt: 1 };
+
+  test("writes only the changed piece and removes the removed one", () => {
+    const s = fakeStorage();
+    const a2 = { ...a, name: "renamed" };
+    const out = savePieceChanges({ a, b, c }, { a: a2, b }, s.write, s.remove);
+    assert.deepEqual(s.log.writes, ["a"]);
+    assert.deepEqual(s.log.removes, ["c"]);
+    assert.deepEqual(out.failed, []);
+    assert.deepEqual(out.saved, { a: a2, b });
+    assert.equal(out.saved.a, a2);
+  });
+
+  test("nothing changed: no writes, no removals, nothing failed", () => {
+    const s = fakeStorage();
+    const out = savePieceChanges({ a, b }, { a, b }, s.write, s.remove);
+    assert.deepEqual(s.log, { writes: [], removes: [] });
+    assert.deepEqual(out.failed, []);
+  });
+
+  test("a failed write is retried on the next change, and failed empties once it succeeds (the banner clears)", () => {
+    const s = fakeStorage(new Set(["a"]));
+    const a2 = { ...a, name: "logged a session" };
+
+    // Run 1: a's write fails. It must NOT be marked saved.
+    const run1 = savePieceChanges({ a, b }, { a: a2, b }, s.write, s.remove);
+    assert.deepEqual(run1.failed, ["a"]);
+    assert.equal(run1.saved.a, a, "the failed piece keeps its old saved entry");
+
+    // Run 2: storage recovers; the next change is to b only. a is untouched
+    // since run 1, but still differs from what was saved, so it's retried.
+    s.failing.clear();
+    s.log.writes.length = 0;
+    const b2 = { ...b, name: "edited b" };
+    const run2 = savePieceChanges(run1.saved, { a: a2, b: b2 }, s.write, s.remove);
+    assert.deepEqual(s.log.writes.sort(), ["a", "b"]);
+    assert.deepEqual(run2.failed, []);
+    assert.deepEqual(run2.saved, { a: a2, b: b2 });
+  });
+
+  test("a brand-new piece whose first write fails is retried too", () => {
+    const s = fakeStorage(new Set(["c"]));
+    const run1 = savePieceChanges({ a }, { a, c }, s.write, s.remove);
+    assert.deepEqual(run1.failed, ["c"]);
+    assert.equal("c" in run1.saved, false);
+
+    s.failing.clear();
+    s.log.writes.length = 0;
+    const run2 = savePieceChanges(run1.saved, { a, c }, s.write, s.remove);
+    assert.deepEqual(s.log.writes, ["c"]);
+    assert.deepEqual(run2.failed, []);
+  });
+
+  test("[regression] deleting an old piece to free space lets the failed write succeed in the same run (the banner clears right away)", () => {
+    // Storage is full: every write fails until something is removed. This
+    // is the recovery the save effect's comment promises, and it used to
+    // work because handleDeletePiece removed the key before the effect ran.
+    let full = true;
+    const writes = [];
+    const write = (id) => { writes.push(id); return full ? { ok: false } : { ok: true }; };
+    const remove = () => { full = false; };
+    const a2 = { ...a, name: "logged a session" };
+
+    const run1 = savePieceChanges({ a, b }, { a: a2, b }, write, remove);
+    assert.deepEqual(run1.failed, ["a"]);
+
+    // The next change is deleting b. Removal must come first, so a's retry
+    // in this same run finds room.
+    const run2 = savePieceChanges(run1.saved, { a: a2 }, write, remove);
+    assert.deepEqual(run2.failed, [], "a's retry should succeed once b's space is freed");
+    assert.deepEqual(run2.saved, { a: a2 });
+  });
+
+  test("a piece deleted while its write was still failing is removed, not rewritten", () => {
+    const s = fakeStorage(new Set(["a"]));
+    const a2 = { ...a, name: "changed" };
+    const run1 = savePieceChanges({ a, b }, { a: a2, b }, s.write, s.remove);
+    s.log.writes.length = 0;
+    const run2 = savePieceChanges(run1.saved, { b }, s.write, s.remove);
+    assert.deepEqual(s.log.writes, []);
+    assert.deepEqual(s.log.removes, ["a"]);
+    assert.deepEqual(run2.saved, { b });
+    assert.deepEqual(run2.failed, []);
   });
 });

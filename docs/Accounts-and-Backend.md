@@ -197,8 +197,10 @@ to silently fix; surface it instead.
   in Phase 1?** Found while checking [Known limits](#known-limits) in Pass
   105. Decided 4 has people invited from the Supabase dashboard, but the
   built-in email sender only delivers to members of the Supabase project's
-  own team. The owner's own account works only if it uses the same email
-  address as the owner's Supabase login. Anyone else's invitation and
+  own team. The owner's own account should work only if it uses the same
+  email address as the owner's Supabase login (inferred from that rule,
+  not confirmed in Supabase's docs; check before Pass 109). Anyone else's
+  invitation and
   password-reset emails would fail. Needs a decision before Pass 109 (invite
   and reset links). Options, none chosen:
   - set up a real email provider in Phase 1 instead of Phase 3;

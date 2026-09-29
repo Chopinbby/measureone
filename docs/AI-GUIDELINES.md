@@ -562,10 +562,12 @@ When verifying a fix by writing a scratch piece directly into
 is still open in the same tab, its own state (`pieces`, held in React,
 loaded once from storage) still has the old data in memory — and this
 app's auto-save effect (see [Architecture.md](Architecture.md#state-management))
-writes every entry in that in-memory state back to `localStorage`
-whenever it changes, for any reason, including one that has nothing to do
-with the piece you just tried to delete. The next such write silently
-resurrects the "removed" test piece.
+writes that in-memory copy back to `localStorage` the next time the piece
+changes in memory. Before Pass 106 it was worse: the effect rewrote every
+piece whenever *any* piece changed, for any reason, including one that had
+nothing to do with the piece you just tried to delete (the worked example
+below is from then). Either way, the next such write silently resurrects
+the "removed" test piece.
 
 Worked example (same session, Pass 57/58 browser verification): a test
 piece was removed via `removeItem` and confirmed gone via

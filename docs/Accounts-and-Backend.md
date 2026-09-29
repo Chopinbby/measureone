@@ -126,6 +126,18 @@ exists).
 pieces on this device to name@example.com?"), so one browser's pieces never
 land in the wrong account by surprise.
 
+**K. The account code is downloaded only when it's needed** (decided by the
+user, 2026-09-29, for Pass 109). The Supabase library is about 59 KB
+compressed, on top of the app's 139 KB. It loads only when someone opens the
+Account panel to sign in, or on a device that already has a signed-in
+session. A signed-out visitor downloads exactly what they do today (Decided
+3). Supabase keeps a signed-in session in this browser's storage, so the app
+can check for one without loading the library first. `src/lib/backend.js`
+imports the library directly today (nothing uses it yet), so Pass 109 changes
+that to load it on demand. Ruled out: including it in every visitor's
+download (simpler, but about 42% more for everyone, including people who
+never sign in).
+
 ## Known limits
 
 The design brief listed these and said to check Supabase's current terms

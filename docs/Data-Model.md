@@ -37,7 +37,10 @@ so this schema stays the one to check. See
 
 ```js
 piece = {
-  id,                    // string, e.g. "p_1699999999999"
+  id,                    // string, e.g. "p_muli5877_a9y5yn6fwi": newId("p")
+                         // (lib/utils.js), since Pass 107. Older pieces keep
+                         // their original "p_1699999999999" form; existing ids
+                         // are never rewritten.
   name,                  // string — what this plan is for. For a movement of a
                          // multi-movement work, this is the movement ("I. Allegro"),
                          // not the work title. See #works below.
@@ -1043,7 +1046,8 @@ array nested under the chunk's own `progress[id]`.
 
 ```js
 TroubleSpot = {
-  id,           // string, e.g. "fs_<timestamp>_<random>"
+  id,           // string, e.g. "fs_muli8uvo_nuc42u4wyf": newId("fs"), since
+                //   Pass 107 (older spots keep "fs_<timestamp>_<random>")
   name,         // string — what the learner called it
   position,     // string, required (not optional as of the same-session
                 // follow-up below) — a measure label like "47", "47a", or

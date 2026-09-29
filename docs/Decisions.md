@@ -7315,6 +7315,19 @@ what it rules out.
   default permissions and relying on the missing delete policy alone
   (would block deletes too, but quietly), and a delete policy for a row's
   own owner (would break Design D).
+- **Design K — the account code is downloaded only when it's needed
+  (decided by the user, 2026-09-29, for Pass 109).** The Supabase library
+  (about 59 KB compressed, measured in Pass 108, on top of the app's 139
+  KB) loads only when someone opens the Account panel to sign in, or on a
+  device that already has a signed-in session, so a signed-out visitor
+  downloads exactly what they do today, which keeps Decided 3 literally
+  true. Alternative ruled out: including it in every visitor's download.
+  That's simpler, but it's about 42% more for everyone, including people who
+  never sign in. On wifi that's unnoticeable, but on a slow phone
+  connection it's maybe half a second on the first open after an update.
+  Cost accepted: a little more code in Pass 109, and a short pause the first
+  time someone opens sign-in. See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#design).
 
 ## Open questions
 
@@ -7323,6 +7336,7 @@ oversight to silently fix; surface it instead.
 
 - **Accounts groundwork — follow-ups found in the Passes 105–106 review
   (2026-09-28).** Logged, not fixed; none blocks building on either pass.
+  Item 2 is resolved; 1 and 3–5 are still open.
   1. **Nothing enforces "never edit a piece in place."** Since Pass 106
      the save only writes a piece whose object changed (`diffPieceMaps`,
      `lib/storage.js`), so a piece edited in place would silently never be
@@ -7330,8 +7344,10 @@ oversight to silently fix; surface it instead.
      by rewriting the piece on the next unrelated change. A search found no
      current case. Proposed: a CLAUDE.md "Rules that matter every session"
      bullet. See [Architecture.md](Architecture.md#state-management).
-  2. **Three docs still describe the old save-everything behavior**:
-     the SOW's §2 note from Pass 105
+  2. ~~**Three docs still describe the old save-everything behavior.**~~
+     **Resolved 2026-09-29, on request:** all three updated, plus
+     Data-Model.md's two id examples, which still showed the pre-Pass 107
+     format. What was stale: the SOW's §2 note from Pass 105
      ([SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md#2-current-state--whats-actually-in-the-codebase-today)),
      which counts six storage call sites (deleting a piece now goes
      through the save effect) and says the auto-save "rewrites every
@@ -7868,7 +7884,10 @@ oversight to silently fix; surface it instead.
   surfaced: `savePieceToStorage` (`lib/storage.js`) catches a write failure
   and `App.jsx` surfaces a persistent banner until a save actually succeeds
   again, so a quota error is visible, not a silently lost session. No code
-  change — this closes the question, not a fix.
+  change — this closes the question, not a fix. *Mechanics since superseded
+  by Pass 106: the effect now writes only the pieces that changed
+  (`savePieceChanges`, `lib/storage.js`), so the full re-save timed here no
+  longer happens. See [Architecture.md](Architecture.md#state-management).*
 - ~~**Settings' "Save changes" isn't gated on piece name or total measures
   being present/non-zero, the way the Wizard's "Next" already was before
   this session and still is.**~~ **Resolved.** `SettingsTab`'s "Save

@@ -1,9 +1,11 @@
 # Scope of Work: User Accounts, Backend, and Sync
 
-**Status:** Planning document — no code has been written against this yet.
+**Status:** Phase 0 decided on 2026-09-27; the technical design is
+[Accounts-and-Backend.md](Accounts-and-Backend.md). No code has been written
+against this yet. This document stays the plain-language record of why.
 **Written for:** a non-technical reader making product decisions. Technical
 terms are explained the first time they're used.
-**Last updated:** 2026-08-18.
+**Last updated:** 2026-09-27.
 
 ---
 
@@ -109,6 +111,23 @@ relevant to planning the migration.)*
   logic was built for one-time file imports, not live multi-device sync,
   but it's a real head start: a decent chunk of the hard thinking a proper
   sync system needs has already been done once, for a simpler case.
+
+**Note added 2026-09-27 (Pass 105):** two things have changed since this
+section was written.
+- **Technique data is a second kind of data to back up.** The daily scales
+  and arpeggios feature (Passes 98–104) keeps its library in its own
+  `localStorage` key, `measureone-technique`, separate from every piece.
+  It belongs to the person, not to any piece, and it's already in backup
+  files. The design gives it one row per account in the account copy.
+- **App.jsx saves or removes piece and technique data in six places**,
+  not one: the auto-save that rewrites every piece whenever any piece
+  changes; the technique auto-save; deleting a piece; importing a backup
+  (twice: once for a piece that matches one already here, once for a new
+  one); and "Reschedule all", which saves the other pieces it reschedules
+  directly. These are the places an account copy has to follow. Loading
+  still happens in one place, when the app opens. (`ImportPiecesModal`
+  also uses a few of `storage.js`'s merge helpers, but none that touch
+  storage.)
 
 **Bottom line:** the plumbing that needs replacing is small and isolated.
 The work isn't "rewire the whole app" — it's "design and build the concept
@@ -270,6 +289,10 @@ in one place.
 
 ### 5.1 Backend hosting approach
 
+**Decided 2026-09-27: Supabase.** See
+[Accounts-and-Backend.md](Accounts-and-Backend.md#decided) and
+[Decisions.md](Decisions.md#accounts-and-backend).
+
 *"Managed service" or "BaaS" (backend-as-a-service) means a company runs
 the server, the database, and often the login system for you, and you pay
 them a fee that scales with usage — you configure it, you don't operate
@@ -310,6 +333,10 @@ free-tier limits change over time and shouldn't be taken from this
 document as current fact.
 
 ### 5.2 Build auth yourself, or use the managed service's built-in version
+
+**Decided 2026-09-27: Supabase's built-in sign-in** (email and password; no
+"sign in with Google" in Phase 1). See
+[Accounts-and-Backend.md](Accounts-and-Backend.md#decided).
 
 You indicated no strong preference and asked for a recommendation:
 **use the managed service's built-in authentication** rather than building
@@ -362,6 +389,27 @@ paying the monthly bill as usage grows. This is the concrete basis for the
 recommendation above — for a solo, non-specialist maintainer, the time and
 risk difference between these two columns is large, and it grows every
 year attacks get more sophisticated.
+
+### 5.5 Does the app still work signed out?
+
+*Listed as open in §7, Phase 0 ("whether logged-out/local-only mode
+survives at all"), and in §4D.*
+
+**Decided 2026-09-27: yes, the signed-out mode stays.** Accounts are
+optional. Signed out, the app is exactly today's app, saving to this
+browser only; signing in adds a copy in the account. See
+[Accounts-and-Backend.md](Accounts-and-Backend.md#decided).
+
+### 5.6 Who can create an account before Phase 3?
+
+*Listed as open in §7, Phase 3 ("decide what a public sign-up flow looks
+like").*
+
+**Decided 2026-09-27: new accounts are by invitation only until Phase 3.**
+Open sign-up is switched off, people are invited from the Supabase
+dashboard, and the app has no "create account" form. See
+[Accounts-and-Backend.md](Accounts-and-Backend.md#decided), including its
+open question on how those invitations get delivered.
 
 ---
 

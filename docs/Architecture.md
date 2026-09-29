@@ -22,7 +22,10 @@
   injected via a `<style>` tag inside the root component. All colors go
   through CSS custom properties defined on `.measureone-app` (see
   "Design tokens" below). There is no Tailwind and no CSS modules.
-- No backend. All persistence is client-side `localStorage`.
+- No backend. All persistence is client-side `localStorage`. (Designed,
+  not built: persistence will gain an optional account copy on Supabase,
+  with this browser's copy staying the working copy — see
+  [Accounts-and-Backend.md](Accounts-and-Backend.md).)
 - No React Router — navigation is a simple `activeTab` string in state,
   switched via a sidebar.
 

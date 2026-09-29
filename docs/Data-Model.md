@@ -29,6 +29,12 @@ banner (**Pass 12** — `lib/storage.js`; see
 reads it — the fallback anchor for "never exported yet," so upgrading into
 this feature doesn't make a long-time user look instantly overdue).
 
+**Designed, not built: an account copy.** Once accounts exist, the server
+keeps each piece exactly as it's stored locally (the whole object as one
+JSON value, with the owner, revision and dates beside it, not inside it),
+so this schema stays the one to check. See
+[Accounts-and-Backend.md](Accounts-and-Backend.md).
+
 ```js
 piece = {
   id,                    // string, e.g. "p_1699999999999"

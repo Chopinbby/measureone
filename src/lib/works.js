@@ -8,6 +8,8 @@
 /*  confidence has to know works exist. See docs/Data-Model.md#works.  */
 /* ------------------------------------------------------------------ */
 
+import { newId } from "./utils";
+
 // A work exists exactly when the user has given a work title. Typing one on a
 // standalone piece promotes it into a (single-part) work; clearing it drops
 // the piece back out of the group.
@@ -15,7 +17,7 @@ export function ensureWorkId(piece) {
   const named = (piece.workName || "").trim();
   if (!named) return piece.workId ? { ...piece, workId: null } : piece;
   if (piece.workId) return piece;
-  return { ...piece, workId: `w_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` };
+  return { ...piece, workId: newId("w") };
 }
 
 // Sibling parts of the same work, in creation order, so a part's position in

@@ -19,7 +19,7 @@ import {
   Piano,
 } from "lucide-react";
 
-import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange } from "./lib/utils";
+import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange, newId } from "./lib/utils";
 import {
   generateAllChunks,
   migrateOrphanedProgress,
@@ -438,7 +438,7 @@ export default function App() {
 
   const handleComplete = (finished, options = {}) => {
     if (!guardLeavingActiveWork()) return;
-    const id = `p_${Date.now()}`;
+    const id = newId("p");
     // Appends to the end of the switcher without waiting for a reload to
     // backfill it (validateAndMigratePiece isn't in the create path) —
     // Date.now() sorts after every existing piece's sortOrder/createdAt.
@@ -578,7 +578,7 @@ export default function App() {
   // fields: { form, tonic, quality, minorForm, octaves, hands, checkOctaves }.
   // Returns false if the fields don't make a valid item.
   const handleTechniqueAddItem = (fields) => {
-    const item = normalizeTechniqueItem({ ...fields, id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` });
+    const item = normalizeTechniqueItem({ ...fields, id: newId("t") });
     if (!item) return false;
     updateTechnique((t) => withTopUp({ ...t, items: [...t.items, item] }));
     return true;
@@ -610,7 +610,7 @@ export default function App() {
     const name = (fields?.name || "").trim();
     if (!name) return false;
     const method = {
-      id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: newId("m"),
       name,
       technique: fields.technique || "Rhythm",
       description: (fields.description || "").trim(),
@@ -733,7 +733,7 @@ export default function App() {
         savePieceToStorage(match.id, merged);
         updatedCount++;
       } else {
-        const id = next[p.id] ? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : p.id;
+        const id = next[p.id] ? newId("p") : p.id;
         // validateAndMigratePiece re-derives daysToLearn against
         // minutesPerDay for "minutes" mode (otherwise an imported piece
         // just keeps whatever daysToLearn the backup happened to carry,
@@ -1337,7 +1337,7 @@ export default function App() {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId] || { doneDays: [] };
       const spot = {
-        id: `fs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        id: newId("fs"),
         name,
         position: position || "",
         // Validated by the caller (ChecklistItem's add-spot form) before

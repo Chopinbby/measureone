@@ -447,7 +447,8 @@ assuming this section is stale.
      108 the **test** Supabase project, tables, security rules, and its
      connection to preview sites and local development; 109 sign in, sign
      out, invite and reset links; 110 first backup, verified by reading it
-     back; 111 keep the backup current after every change, with a quiet
+     back (plus the database rule that keeps each row's revision count);
+     111 keep the backup current after every change, with a quiet
      status line and automatic retry; 112 restore onto a new device; 113
      account settings (change email or password, sign out; deleting an
      account stays a by-request dashboard job during Phase 1).

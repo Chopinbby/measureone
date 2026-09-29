@@ -87,7 +87,11 @@ revision. If another device changed it in between, the upload is refused and
 the piece is held as "changed on another device" for the person to settle
 with the existing import picker (`diffImportedPiece` / `mergeImportedPiece`,
 see [Algorithms.md](Algorithms.md#import-merge)). Nothing is ever decided by
-"last save wins".
+"last save wins". **The database keeps the count, not the app** (decided by
+the user, 2026-09-29): a database rule raises a row's revision by one and
+sets its updated-at on every change, so the app only says which revision it
+expects ("save only if still at 5") and can't get the counting wrong. The
+rule is a new migration file in Pass 110, the first pass that saves rows.
 
 **D. Deleting a piece marks its row deleted** (deleted-at) instead of erasing
 it, so it can't reappear from another device and can be recovered by hand.
@@ -180,7 +184,10 @@ docs).
   connection to preview sites and local development (see
   [Setup](#setup-test-project)).
 - **109** Sign in, sign out, invite and reset links.
-- **110** First backup, verified by reading it back.
+- **110** First backup, verified by reading it back. Also adds the second
+  migration file: the database rule that raises each row's revision and sets
+  its updated-at on every change (Design C). It's run once on the test
+  project, like the first, and on production at go-live.
 - **111** Keep the backup current after every change, with a quiet status
   line and automatic retry.
 - **112** Restore onto a new device.

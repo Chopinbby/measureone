@@ -7346,6 +7346,17 @@ what it rules out.
   separate deploy step), and building the function in Phase 1 now (more
   work before it's needed by anyone). Either way it's a small, deliberate
   exception to "no server code of our own".
+- **The database keeps the revision count, not the app (decided by the
+  user, 2026-09-29, for Pass 110).** Design C's overwrite protection
+  depends on every save raising the row's revision by exactly one. A
+  database rule (a trigger, in a new migration file) now does that and sets
+  updated-at on every change; the app only states the revision it expects
+  ("save only if still at 5"). Why: the safety check lives in the database,
+  like the security rules, so a later app bug can't quietly weaken it.
+  Alternative ruled out: the app sending the next revision number itself
+  (works, but a wrong number would silently undermine "never overwrite
+  silently"). See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#design).
 
 ## Open questions
 

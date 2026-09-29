@@ -466,8 +466,10 @@ assuming this section is stale.
      provider, monitoring, and an in-app "delete my account" (probably a
      database function) before strangers can sign up.
 
-   **Open before Pass 109:** Supabase's built-in email sender can't deliver
-   invitations to anyone outside the Supabase project's own team — see
+   **Settled before Pass 109:** Supabase's built-in email sender can't
+   deliver invitations to anyone outside the Supabase project's own team,
+   so during Phase 1 the only account is the owner's own; other people get
+   accounts once email is sorted out — see
    [Accounts-and-Backend.md](Accounts-and-Backend.md#open-questions).
 6. **Merge two split chunks back into one** — explicitly wanted, deliberately
    deferred from Pass 97 (no undo exists for a split). The representation

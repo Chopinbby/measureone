@@ -48,9 +48,10 @@ alternative it rules out, in [Decisions.md](Decisions.md#accounts-and-backend).
    saving to this browser only. Signing in adds a copy in the account.
 4. **New accounts are by invitation only until Phase 3:** open sign-up is
    switched off in the Supabase dashboard, people are invited from there,
-   and the app has no "create account" form. (See
-   [Open questions](#open-questions): Supabase's built-in email sender
-   can't currently deliver those invitations to most people.)
+   and the app has no "create account" form. During Phase 1 the only
+   account is the owner's own, because Supabase's built-in email sender
+   reaches only the project's own team (decided 2026-09-29; see
+   [Open questions](#open-questions)).
 5. **No live multi-device sync in Phase 1**
    ([SOW §5.3](SOW-Accounts-and-Sync.md#53-is-live-multi-device-sync-required-on-day-one),
    decided earlier).
@@ -183,7 +184,10 @@ docs).
 - **108** The **test** Supabase project, tables, security rules, and its
   connection to preview sites and local development (see
   [Setup](#setup-test-project)).
-- **109** Sign in, sign out, invite and reset links.
+- **109** Sign in, sign out, invite and reset links. In Phase 1 only the
+  owner's own account is invited (the built-in email sender reaches only
+  the project team), and the test project's Site URL moves to this pass's
+  preview address while it's tested.
 - **110** First backup, verified by reading it back. Also adds the second
   migration file: the database rule that raises each row's revision and sets
   its updated-at on every change (Design C). It's run once on the test
@@ -227,7 +231,9 @@ checks were run against the project itself, not read off the settings pages.
   Confirmed from the project's own auth settings: sign-up disabled, email on.
 - **Authentication → URL Configuration:**
   - Site URL `http://localhost:5173`: where a dashboard invitation opens
-    while testing. Revisit in Pass 109, when invitations are first used.
+    while testing. **Pass 109 switches it to its own preview address**
+    (decided 2026-09-29), so invitation and reset links work from any
+    device, not only on the Mac running the development server.
   - Redirect URLs `http://localhost:5173/**` and
     `https://*-measure-one.vercel.app/**` (every preview address ends in
     `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
@@ -297,16 +303,22 @@ Where the two disagree, this doc is the current plan:
 These are unresolved. Don't treat the absence of a decision as an oversight
 to silently fix; surface it instead.
 
-- **How do invited people get their invitation and password-reset emails
-  in Phase 1?** Found while checking [Known limits](#known-limits) in Pass
-  105. Decided 4 has people invited from the Supabase dashboard, but the
+- ~~**How do invited people get their invitation and password-reset emails
+  in Phase 1?**~~ **Resolved 2026-09-29 (the user's call): nobody else, for
+  now.** During Phase 1 the only account is the owner's own, invited from
+  the dashboard; other people get accounts once email is sorted out (by
+  hand-made accounts, or a real email provider, at the latest in Phase 3).
+  Pass 109 confirms that the owner's own invitation arrives, which settles
+  the inference below. The original question, kept for the record: found
+  while checking [Known limits](#known-limits) in Pass 105. Decided 4 has people invited from the Supabase dashboard, but the
   built-in email sender only delivers to members of the Supabase project's
   own team. The owner's own account should work only if it uses the same
   email address as the owner's Supabase login (inferred from that rule,
   not confirmed in Supabase's docs; check before Pass 109). Anyone else's
   invitation and
   password-reset emails would fail. Needs a decision before Pass 109 (invite
-  and reset links). Options, none chosen:
+  and reset links). Options at the time (the first two remain the ways to
+  add other people later):
   - set up a real email provider in Phase 1 instead of Phase 3;
   - create each account by hand in the Supabase dashboard with a starting
     password (no email needed to create it), accepting that the person's

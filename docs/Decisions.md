@@ -7209,9 +7209,17 @@ what it rules out.
   from there, and the app has no "create account" form. Alternative ruled
   out: open sign-up (and a sign-up form in the app) before Phase 3's
   privacy policy, terms and real email provider exist. **Found while
-  recording this, not yet resolved:** Supabase's built-in email sender only
-  delivers to members of the project's own team, so invitations to anyone
-  else fail — see
+  recording this:** Supabase's built-in email sender only delivers to
+  members of the project's own team, so invitations to anyone else fail.
+  **Resolved 2026-09-29, the user's call:** during Phase 1 the only account
+  is the owner's own, and other people get accounts once email is sorted
+  out. Alternatives: accounts made by hand in the dashboard with a starting
+  password (works without email, but a forgotten password can't be reset
+  by email), and a real email provider now rather than in Phase 3 (needs a
+  domain the owner controls and some setup). Both stay available for
+  adding people later. Same session: while testing, the test project's
+  Site URL (where invitation and reset links open) moves from localhost to
+  Pass 109's preview address, so links work from any device. See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#open-questions).
 - **Decided 5 — no live multi-device sync in Phase 1.** Decided earlier
   ([SOW §5.3](SOW-Accounts-and-Sync.md#53-is-live-multi-device-sync-required-on-day-one)).
@@ -7402,7 +7410,9 @@ oversight to silently fix; surface it instead.
      that the owner's own invitation and reset emails arrive only if the
      account uses the same email address as the owner's Supabase login.
      Inferred from Supabase's "project team members only" rule, not
-     confirmed in its docs. Check before Pass 109.
+     confirmed in its docs. Now that Phase 1's only account is the
+     owner's own (decided 2026-09-29), Pass 109 settles this by sending
+     that invitation and checking it arrives.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

@@ -70,6 +70,7 @@ import {
   needsBackendAtStartup,
   loadBackend,
   authLink,
+  isConnectionProblem,
   EXPIRED_LINK_MESSAGE,
 } from "./lib/backend";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
@@ -432,7 +433,12 @@ export default function App() {
     const client = await loadBackend();
     if (!client) return;
     const { error } = await client.auth.signOut({ scope: "local" });
-    if (error) window.alert("Couldn't sign out. Check your connection and try again.");
+    // With no connection the library still removes the session from this device
+    // (and announces the sign-out) before reporting that the service couldn't be
+    // told, so a connection problem here is not a failed sign-out: this device
+    // is signed out, and the service's own copy of the session simply expires.
+    // Only some other kind of failure is worth an alert.
+    if (error && !isConnectionProblem(error)) window.alert("Couldn't sign out. Try again in a moment.");
   };
 
   // Check the export reminder once pieces are loaded — app-level (not

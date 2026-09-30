@@ -262,7 +262,11 @@ flow 10, has the screen-by-screen version):
 - **Wrong email and wrong password get one message**, for the same reason.
 - **Sign out signs out this device only** (`scope: "local"`). The library's
   default signs the account out of every device. It removes nothing from this
-  device's pieces or technique data.
+  device's pieces or technique data. With no connection it still signs this
+  device out (the library removes the saved sign-in first, then reports that
+  the service couldn't be told), so the app treats a connection problem there
+  as a normal sign-out, not a failure; the service's own copy of the session
+  simply expires later.
 - **Choose a password.** Twice, at least 6 characters (Supabase's default
   minimum, a dashboard setting); if the dashboard's minimum is higher, the
   service's own message is shown. "Not now" closes the window and leaves the

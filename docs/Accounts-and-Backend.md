@@ -288,10 +288,13 @@ checks were run against the project itself, not read off the settings pages.
   switched **off** (invitation only, Decided 4). The Email provider stays on.
   Confirmed from the project's own auth settings: sign-up disabled, email on.
 - **Authentication → URL Configuration:**
-  - Site URL `http://localhost:5173`: where a dashboard invitation opens
-    while testing. **Pass 109 switches it to its own preview address**
-    (decided 2026-09-29), so invitation and reset links work from any
-    device, not only on the Mac running the development server.
+  - Site URL `https://measureone-git-claude-pass-109-sign-in-measure-one.vercel.app`
+    (the Pass 109 branch's preview address; it was `http://localhost:5173`
+    until Pass 109, changed 2026-09-30). A dashboard invitation opens the Site
+    URL, so with the preview address invitation links work on any device, not
+    only on the Mac running the development server. Reset links don't use it:
+    they return to the site that asked. **If that branch's preview is ever
+    removed, change the Site URL before sending another invitation.**
   - Redirect URLs `http://localhost:5173/**` and
     `https://*-measure-one.vercel.app/**` (every preview address ends in
     `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
@@ -302,6 +305,10 @@ checks were run against the project itself, not read off the settings pages.
   project URL; the page shows the address ending `/rest/v1/`, and the setting
   is the address without that ending) and → **API Keys** (the
   **publishable** key, `sb_publishable_…`). The secret key was never copied.
+
+**Accounts:** one, the owner's own, invited from the dashboard on 2026-09-30
+(Authentication → Users → Add user → Send invitation). Nobody else has one
+(Phase 1, see [Open questions](#open-questions)).
 
 **Vercel:** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` added under the
 project's Settings → Environment Variables as type **Config** (neither is a
@@ -366,8 +373,10 @@ to silently fix; surface it instead.
   now.** During Phase 1 the only account is the owner's own, invited from
   the dashboard; other people get accounts once email is sorted out (by
   hand-made accounts, or a real email provider, at the latest in Phase 3).
-  Pass 109 confirms that the owner's own invitation arrives, which settles
-  the inference below. The original question, kept for the record: found
+  **Confirmed in Pass 109 (2026-09-30):** the owner's own invitation
+  arrived, and its link opened the app signed in, so the built-in sender does
+  deliver to the owner's own address (the one used for the Supabase login).
+  The original question, kept for the record: found
   while checking [Known limits](#known-limits) in Pass 105. Decided 4 has people invited from the Supabase dashboard, but the
   built-in email sender only delivers to members of the Supabase project's
   own team. The owner's own account should work only if it uses the same

@@ -204,7 +204,10 @@ docs).
   go with it automatically (checked in Pass 108).
 - **114** Go-live (added in Pass 108): create the production project, apply
   the same migration files to it, and give Vercel's Production environment
-  its two settings. Until this pass the live site has no backend.
+  its two settings. Until this pass the live site has no backend. **The
+  production project stays on Supabase's Free plan** (decided by the user,
+  2026-09-29). That means it pauses after a week without use, and there are
+  no automatic backups; see [Free-plan consequences](#free-plan-consequences).
 
 Manual export and the export reminder stay throughout Phase 1
 ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
@@ -266,6 +269,22 @@ checkout needs its own copy.
   cascade that deleting someone's account from the dashboard relies on in
   Phase 1, and that in-app deletion will rely on later. No test accounts
   remain.
+
+### Free-plan consequences
+
+The production project stays on the Free plan (decided 2026-09-29; revisit if
+paused projects or the lack of backups ever cause a real problem, since the
+paid Pro plan doesn't pause projects and takes daily backups; check its
+current price and terms then):
+- **A pause stops the account copy updating, not practice.** The app always
+  works from this browser's copy first (Design A), so a paused project only
+  means changes wait to be uploaded until someone restores it from the
+  dashboard (up to a year after the pause).
+- **No automatic backups.** The account copy is a second copy of the data,
+  next to this browser's copy and any exported backup files. If Supabase lost
+  the database, nothing would restore the account copies. The manual export
+  and the export reminder stay for that reason. Take a manual export of the
+  database before each release (Supabase dashboard).
 
 **Free-plan limits, checked 2026-09-29** on Supabase's
 [pricing](https://supabase.com/pricing) page (check again before relying on

@@ -28,9 +28,11 @@
 106–113 build it and Pass 114 puts it live — see [Pass plan](#pass-plan).
 Since Pass 108 a **test** Supabase project exists with the tables and
 security rules, connected to preview sites and local development only (see
-[Setup](#setup-test-project)). Nothing in the app uses it yet, and the live
-site has no backend at all: it saves everything to the browser only, as it
-always has.
+[Setup](#setup-test-project)). **Since Pass 109, on those sites only, a
+person can sign in and out** (see [Sign-in behavior](#sign-in-behavior-pass-109)),
+but signing in moves no data yet: nothing is uploaded or downloaded until
+Passes 110–112. The live site has no backend at all: it saves everything to
+the browser only, as it always has.
 
 ## Decided
 
@@ -184,10 +186,11 @@ docs).
 - **108** The **test** Supabase project, tables, security rules, and its
   connection to preview sites and local development (see
   [Setup](#setup-test-project)).
-- **109** Sign in, sign out, invite and reset links. In Phase 1 only the
+- **109** Sign in, sign out, invite and reset links (built; see
+  [Sign-in behavior](#sign-in-behavior-pass-109)). In Phase 1 only the
   owner's own account is invited (the built-in email sender reaches only
   the project team), and the test project's Site URL moves to this pass's
-  preview address while it's tested.
+  preview address while it's tested. No data moves.
 - **110** First backup, verified by reading it back. Also adds the second
   migration file: the database rule that raises each row's revision and sets
   its updated-at on every change (Design C). It's run once on the test
@@ -219,6 +222,57 @@ function in a new migration file: it only ever deletes the caller's own
 account, and it has nothing to deploy separately. A Supabase Edge Function
 is the alternative. Either one is a small, deliberate exception to "no
 server code of our own".
+
+## Sign-in behavior (Pass 109)
+
+What was built, and the small choices made building it (docs/User-Flows.md,
+flow 10, has the screen-by-screen version):
+
+- **Where it lives.** `src/lib/backend.js` is the only file that touches the
+  Supabase library. `App.jsx` holds who's signed in (`authSession`, just
+  `{ email, userId }`; the library keeps the real session) and listens for
+  sign-in changes. `SignInModal.jsx` and `ChoosePasswordModal.jsx` are the
+  two windows; the Account panel is in `SettingsTab.jsx` (after "Backup &
+  restore"); the welcome screen has a quiet "Sign in" link (Design I).
+- **Off unless connected.** `isBackendConfigured()` gates everything: with the
+  two settings missing (the live site, a fresh checkout, `npm test`) no panel,
+  link or window renders anywhere and the library is never loaded.
+- **Design K, built.** The library is a separate download (about 59 KB
+  compressed), fetched only when needed: at startup if this device already
+  holds a saved sign-in (its key, `sb-<project>-auth-token`, is checked
+  without the library) or the person arrived from an invite or reset link,
+  and otherwise when someone opens sign-in. The main app grew by about 3.6 KB
+  compressed for the new windows and helpers. If a supabase-js upgrade ever
+  changed that key name, a signed-in device would look signed out until
+  sign-in is opened: check `authStorageKeyFor` against the library's own
+  `client.auth.storageKey` after upgrading.
+- **An invitation link is read from the address, not from the library.** The
+  library announces a password reset by name (`PASSWORD_RECOVERY`) but reports
+  an invitation only as an ordinary "signed in", so the app reads the link's
+  `type` from the address before the library removes it (`parseAuthLink`,
+  `authLink`). An expired or already-used link arrives as an error in the
+  address; the app shows a plain note in the sign-in window and clears the
+  address.
+- **Forgot password always gets the same answer**: "If that address has an
+  account, a reset link is on its way." Only a failed connection says
+  something different. Unknown address, service-side error and rate limit all
+  look alike, so the form can't be used to find out who has an account. The
+  cost: a real person who's rate-limited (the built-in email sender allows
+  about 2 messages an hour) is told a link is on its way when none was sent.
+- **Wrong email and wrong password get one message**, for the same reason.
+- **Sign out signs out this device only** (`scope: "local"`). The library's
+  default signs the account out of every device. It removes nothing from this
+  device's pieces or technique data.
+- **Choose a password.** Twice, at least 6 characters (Supabase's default
+  minimum, a dashboard setting); if the dashboard's minimum is higher, the
+  service's own message is shown. "Not now" closes the window and leaves the
+  person signed in without a new password (they can use "Forgot password?"
+  later).
+- **The password is never logged or stored by the app.** It lives in the
+  window's state only while the form is open and is cleared on success or
+  close; the library keeps its session, never the password.
+- **Invitation links open the project's Site URL**; reset links return to the
+  site that asked (the current address, which has to be on the redirect list).
 
 ## Setup (test project)
 

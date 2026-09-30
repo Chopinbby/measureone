@@ -494,6 +494,9 @@ what will be added and merges into the library here without removing
 anything, and says so if the file's technique library can't be read. This is the only backup mechanism — there is no cloud sync
 (see [Roadmap.md](Roadmap.md)), so this JSON export is the only way data
 survives clearing browser storage or moving to a new browser/device.
+**Signing in ([flow 10](#10-signing-in-optional-pass-109)) doesn't change
+that yet:** it backs nothing up until a later update, so export and the
+export reminder work exactly as before.
 
 **Since Pass 32a**, importing a backup that matches existing pieces also
 offers a "keep what's here" / "use the imported order" choice for switcher
@@ -588,3 +591,45 @@ Since Passes 101–104. App-level, not tied to the open piece. Design:
 6. A piece's key (flow 1) tags matching scales "Repertoire in this key" and
    paces them about 4 days a week while the piece is active.
 
+## 10. Signing in (optional, Pass 109)
+
+**Only on sites connected to an account service.** That's preview sites and
+local development for now; the live site has no account service until
+go-live, so there nothing below appears anywhere and the app is exactly as
+it was. Signing in **moves no data** (nothing is uploaded or downloaded, and
+no piece, technique data or banner changes); it only says who's signed in.
+Accounts are **by invitation for now**: there's no sign-up form. See
+[Accounts-and-Backend.md](Accounts-and-Backend.md).
+
+**Two ways in** (`SignInModal`, opened by `openSignIn`, `App.jsx`):
+1. Settings → **Account** panel (after "Backup & restore") → **Sign in**.
+2. The welcome screen, when there are no pieces yet (a new device has no
+   sidebar): a quiet **Sign in** link under "Start a new piece".
+
+**The sign-in window:**
+1. Email and password, then **Sign in**. A wrong email or password gets one
+   plain message ("That email and password don't match..."), the same for
+   both, so the form can't be used to find out who has an account. No
+   connection gets its own plain message. Neither changes any local data.
+2. **Forgot password?** asks for the email and sends a reset link. It
+   always answers "If that address has an account, a reset link is on its
+   way.", whether or not the address has one. Only a failed connection
+   says something different.
+
+**Arriving from a link in an email** (an invitation from the Supabase
+dashboard, or a reset link):
+1. The link opens the app and signs the person in. An invitation opens the
+   project's Site URL (currently the Pass 109 preview address); a reset link
+   returns to whichever site asked for it.
+2. The **Choose a password** window opens: the new password twice (at least
+   6 characters; the service's own minimum is the real rule), then **Save
+   password**. **Not now** closes it and leaves the person signed in,
+   without a new password.
+3. A link that has expired or was already used opens the sign-in window with
+   a plain note saying so, where a fresh reset link can be asked for.
+
+**Signed in:** Settings → Account shows the email address and **Sign out**.
+The panel also says signing in doesn't back anything up yet. **Sign out**
+signs out this device only, and leaves this device's pieces and technique
+data exactly as they are. The person stays signed in across reloads (the
+account library keeps the session, never the password).

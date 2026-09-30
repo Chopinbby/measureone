@@ -36,7 +36,9 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
 - No CSS framework — a single hand-written CSS string (`const CSS = \`...\``)
   injected via a `<style>` tag inside the root component, using CSS custom
   properties defined on `.measureone-app`. No Tailwind, no CSS modules.
-- No backend. All persistence is client-side `localStorage`.
+- No backend. All persistence is client-side `localStorage`. (Since Pass 109 an
+  optional account sign-in exists on sites connected to an account service, but
+  it stores nothing yet; see "Since Pass 109" below.)
 - No React Router — navigation is a simple `activeTab` string in state.
 
 ## Running it locally
@@ -1913,3 +1915,38 @@ this was rebuilt against current `main` rather than rebased. New:
 house-style rule in
 [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md#no-em-dashes-in-user-facing-copy).
 Code comments and docs are untouched by design.
+
+**Since Pass 109**, MeasureOne has an optional **account sign-in** (Supabase),
+the first visible piece of the accounts work (Passes 105-108 were groundwork:
+the design in [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md),
+save-only-what-changed, collision-safe ids, the test project). **Signing in
+moves no data yet**: nothing is uploaded or downloaded until Passes 110-112;
+it only says who's signed in. Four things worth knowing:
+- **The app must keep working with the backend unconfigured, and nothing
+  account-related may render then.** `isBackendConfigured()`
+  (`lib/backend.js`) is false when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
+  are missing, which is the live site (its Production environment has no
+  Supabase settings until go-live, Pass 114), a fresh checkout and `npm test`.
+  `authEnabled` in `App.jsx` gates every account surface: the Account panel,
+  the welcome-screen link, both windows. A new account surface must check it.
+- **Auth state lives in `App.jsx`** (`authSession`, only `{ email, userId }`;
+  the library holds the real session), kept current by one
+  `onAuthStateChange` listener attached by `attachAuthListener`. Never store
+  or log the password (the sign-in and choose-a-password windows keep it in
+  component state only while open).
+- **`lib/backend.js` is the only file that may touch the library, and never
+  through a top-level import** (Design K): the library is a separate ~59 KB
+  download fetched by `loadBackend()` only when needed (a saved session on
+  this device, an invite or reset link in the address, or someone opening
+  sign-in), so a signed-out visitor downloads what they always did. An
+  invitation link is announced by the library only as an ordinary sign-in, so
+  its `type` is read from the address (`authLink`, captured at file load,
+  before the library can remove it).
+- **Two entry points**, plus the links in emails: Settings → Account
+  (`SettingsTab`, after "Backup & restore") and a quiet "Sign in" link on the
+  welcome screen (no pieces yet, so no sidebar). Sign out is this device only
+  (`scope: "local"`) and leaves local data alone. "Forgot password?" always
+  answers the same sentence, and a wrong email and a wrong password get one
+  message, so the forms can't reveal who has an account. See
+  [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
+  and [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#sign-in-behavior-pass-109).

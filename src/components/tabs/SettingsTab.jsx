@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { KeyText } from "./technique/KeyText";
@@ -45,6 +45,14 @@ export function SettingsTab({
   onExportClick,
   onImportClick,
   onSetStatus,
+  // Account sign-in (Pass 109). authEnabled is false whenever no account
+  // backend is configured (the live site, a fresh checkout), and then the
+  // Account panel doesn't render at all.
+  authEnabled,
+  authChecking,
+  authEmail,
+  onSignIn,
+  onSignOut,
 }) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
@@ -86,6 +94,36 @@ export function SettingsTab({
             </button>
           </div>
         </div>
+        {/* Account (Pass 109). Signing in doesn't move any data yet, so the
+            panel says so in both states. Signing out leaves this device's
+            pieces and technique data exactly as they are. */}
+        {authEnabled && (
+          <div className="panel">
+            <h3>Account</h3>
+            {authChecking ? (
+              <p className="wizard-hint" style={{ margin: 0 }}>Checking your account...</p>
+            ) : authEmail ? (
+              <>
+                <p className="wizard-hint" style={{ marginBottom: 12 }}>
+                  Signed in as <strong>{authEmail}</strong>. Signing in doesn't back anything up yet. Backups come
+                  in a later update. Signing out doesn't remove anything from this device.
+                </p>
+                <button className="ghost-btn" onClick={onSignOut}>
+                  <LogOut size={14} /> Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="wizard-hint" style={{ marginBottom: 12 }}>
+                  Signing in doesn't back anything up yet. Backups come in a later update.
+                </p>
+                <button className="ghost-btn" onClick={onSignIn}>
+                  <LogIn size={14} /> Sign in
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {/* Read-only summary of whichever piece "Edit piece settings" will
             open — everything else about the current piece (status, revival,
             focus spots, delete, every editable field) lives behind that

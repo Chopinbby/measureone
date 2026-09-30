@@ -7324,6 +7324,16 @@ what it rules out.
   default permissions and relying on the missing delete policy alone
   (would block deletes too, but quietly), and a delete policy for a row's
   own owner (would break Design D).
+- **The production project stays on Supabase's Free plan (decided by the
+  user, 2026-09-29, for Pass 114).** Consequences accepted: a project idle
+  for a week pauses (the account copy stops updating until it's restored
+  from the dashboard; practice itself carries on, since the app works from
+  this browser's copy first), and there are no automatic backups (the
+  account copy is one copy among this browser's copy and exported files,
+  and nothing would restore it if Supabase lost the database). Alternative
+  ruled out for now: the paid Pro plan (no pausing, daily backups, a
+  monthly cost; check its current price and terms if it's ever revisited).
+  See [Accounts-and-Backend.md](Accounts-and-Backend.md#free-plan-consequences).
 - **Design K — the account code is downloaded only when it's needed
   (decided by the user, 2026-09-29, for Pass 109).** The Supabase library
   (about 59 KB compressed, measured in Pass 108, on top of the app's 139

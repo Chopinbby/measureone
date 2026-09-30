@@ -28,9 +28,11 @@
 106–113 build it and Pass 114 puts it live — see [Pass plan](#pass-plan).
 Since Pass 108 a **test** Supabase project exists with the tables and
 security rules, connected to preview sites and local development only (see
-[Setup](#setup-test-project)). Nothing in the app uses it yet, and the live
-site has no backend at all: it saves everything to the browser only, as it
-always has.
+[Setup](#setup-test-project)). **Since Pass 109, on those sites only, a
+person can sign in and out** (see [Sign-in behavior](#sign-in-behavior-pass-109)),
+but signing in moves no data yet: nothing is uploaded or downloaded until
+Passes 110–112. The live site has no backend at all: it saves everything to
+the browser only, as it always has.
 
 ## Decided
 
@@ -184,10 +186,11 @@ docs).
 - **108** The **test** Supabase project, tables, security rules, and its
   connection to preview sites and local development (see
   [Setup](#setup-test-project)).
-- **109** Sign in, sign out, invite and reset links. In Phase 1 only the
+- **109** Sign in, sign out, invite and reset links (built; see
+  [Sign-in behavior](#sign-in-behavior-pass-109)). In Phase 1 only the
   owner's own account is invited (the built-in email sender reaches only
   the project team), and the test project's Site URL moves to this pass's
-  preview address while it's tested.
+  preview address while it's tested. No data moves.
 - **110** First backup, verified by reading it back. Also adds the second
   migration file: the database rule that raises each row's revision and sets
   its updated-at on every change (Design C). It's run once on the test
@@ -223,6 +226,61 @@ account, and it has nothing to deploy separately. A Supabase Edge Function
 is the alternative. Either one is a small, deliberate exception to "no
 server code of our own".
 
+## Sign-in behavior (Pass 109)
+
+What was built, and the small choices made building it (docs/User-Flows.md,
+flow 10, has the screen-by-screen version):
+
+- **Where it lives.** `src/lib/backend.js` is the only file that touches the
+  Supabase library. `App.jsx` holds who's signed in (`authSession`, just
+  `{ email, userId }`; the library keeps the real session) and listens for
+  sign-in changes. `SignInModal.jsx` and `ChoosePasswordModal.jsx` are the
+  two windows; the Account panel is in `SettingsTab.jsx` (after "Backup &
+  restore"); the welcome screen has a quiet "Sign in" link (Design I).
+- **Off unless connected.** `isBackendConfigured()` gates everything: with the
+  two settings missing (the live site, a fresh checkout, `npm test`) no panel,
+  link or window renders anywhere and the library is never loaded.
+- **Design K, built.** The library is a separate download (about 59 KB
+  compressed), fetched only when needed: at startup if this device already
+  holds a saved sign-in (its key, `sb-<project>-auth-token`, is checked
+  without the library) or the person arrived from an invite or reset link,
+  and otherwise when someone opens sign-in. The main app grew by about 3.6 KB
+  compressed for the new windows and helpers. If a supabase-js upgrade ever
+  changed that key name, a signed-in device would look signed out until
+  sign-in is opened: check `authStorageKeyFor` against the library's own
+  `client.auth.storageKey` after upgrading.
+- **An invitation link is read from the address, not from the library.** The
+  library announces a password reset by name (`PASSWORD_RECOVERY`) but reports
+  an invitation only as an ordinary "signed in", so the app reads the link's
+  `type` from the address before the library removes it (`parseAuthLink`,
+  `authLink`). An expired or already-used link arrives as an error in the
+  address; the app shows a plain note in the sign-in window and clears the
+  address.
+- **Forgot password always gets the same answer**: "If that address has an
+  account, a reset link is on its way." Only a failed connection says
+  something different. Unknown address, service-side error and rate limit all
+  look alike, so the form can't be used to find out who has an account. The
+  cost: a real person who's rate-limited (the built-in email sender allows
+  about 2 messages an hour) is told a link is on its way when none was sent.
+- **Wrong email and wrong password get one message**, for the same reason.
+- **Sign out signs out this device only** (`scope: "local"`). The library's
+  default signs the account out of every device. It removes nothing from this
+  device's pieces or technique data. With no connection it still signs this
+  device out (the library removes the saved sign-in first, then reports that
+  the service couldn't be told), so the app treats a connection problem there
+  as a normal sign-out, not a failure; the service's own copy of the session
+  simply expires later.
+- **Choose a password.** Twice, at least 6 characters (Supabase's default
+  minimum, a dashboard setting); if the dashboard's minimum is higher, the
+  service's own message is shown. "Not now" closes the window and leaves the
+  person signed in without a new password (they can use "Forgot password?"
+  later).
+- **The password is never logged or stored by the app.** It lives in the
+  window's state only while the form is open and is cleared on success or
+  close; the library keeps its session, never the password.
+- **Invitation links open the project's Site URL**; reset links return to the
+  site that asked (the current address, which has to be on the redirect list).
+
 ## Setup (test project)
 
 Done in Pass 108 (2026-09-29). The dashboard steps were done by the user; the
@@ -233,10 +291,13 @@ checks were run against the project itself, not read off the settings pages.
   switched **off** (invitation only, Decided 4). The Email provider stays on.
   Confirmed from the project's own auth settings: sign-up disabled, email on.
 - **Authentication → URL Configuration:**
-  - Site URL `http://localhost:5173`: where a dashboard invitation opens
-    while testing. **Pass 109 switches it to its own preview address**
-    (decided 2026-09-29), so invitation and reset links work from any
-    device, not only on the Mac running the development server.
+  - Site URL `https://measureone-git-claude-pass-109-sign-in-measure-one.vercel.app`
+    (the Pass 109 branch's preview address; it was `http://localhost:5173`
+    until Pass 109, changed 2026-09-30). A dashboard invitation opens the Site
+    URL, so with the preview address invitation links work on any device, not
+    only on the Mac running the development server. Reset links don't use it:
+    they return to the site that asked. **If that branch's preview is ever
+    removed, change the Site URL before sending another invitation.**
   - Redirect URLs `http://localhost:5173/**` and
     `https://*-measure-one.vercel.app/**` (every preview address ends in
     `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
@@ -247,6 +308,10 @@ checks were run against the project itself, not read off the settings pages.
   project URL; the page shows the address ending `/rest/v1/`, and the setting
   is the address without that ending) and → **API Keys** (the
   **publishable** key, `sb_publishable_…`). The secret key was never copied.
+
+**Accounts:** one, the owner's own, invited from the dashboard on 2026-09-30
+(Authentication → Users → Add user → Send invitation). Nobody else has one
+(Phase 1, see [Open questions](#open-questions)).
 
 **Vercel:** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` added under the
 project's Settings → Environment Variables as type **Config** (neither is a
@@ -327,8 +392,10 @@ to silently fix; surface it instead.
   now.** During Phase 1 the only account is the owner's own, invited from
   the dashboard; other people get accounts once email is sorted out (by
   hand-made accounts, or a real email provider, at the latest in Phase 3).
-  Pass 109 confirms that the owner's own invitation arrives, which settles
-  the inference below. The original question, kept for the record: found
+  **Confirmed in Pass 109 (2026-09-30):** the owner's own invitation
+  arrived, and its link opened the app signed in, so the built-in sender does
+  deliver to the owner's own address (the one used for the Supabase login).
+  The original question, kept for the record: found
   while checking [Known limits](#known-limits) in Pass 105. Decided 4 has people invited from the Supabase dashboard, but the
   built-in email sender only delivers to members of the Supabase project's
   own team. The owner's own account should work only if it uses the same

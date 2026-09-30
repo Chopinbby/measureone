@@ -63,6 +63,16 @@ import { resolveMethods, buildDayList, completeTask, uncompleteTask, topUpDayLis
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
 import { DeletePieceModal } from "./components/DeletePieceModal";
+import { SignInModal } from "./components/SignInModal";
+import { ChoosePasswordModal } from "./components/ChoosePasswordModal";
+import {
+  isBackendConfigured,
+  needsBackendAtStartup,
+  loadBackend,
+  authLink,
+  isConnectionProblem,
+  EXPIRED_LINK_MESSAGE,
+} from "./lib/backend";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { Wizard } from "./components/Wizard";
@@ -237,6 +247,20 @@ export default function App() {
   // the import modal and the final message rather than skipped silently.
   const [importTechniqueInfo, setImportTechniqueInfo] = useState({ unreadable: false, skippedItems: 0 });
   const [storageError, setStorageError] = useState(false);
+  // Account sign-in (Pass 109). Optional: when the backend isn't configured
+  // (the live site, a fresh checkout, tests) authEnabled is false and none of
+  // this renders anywhere. `authSession` is just who's signed in, { email,
+  // userId } or null; the library holds the real session. Signing in moves no
+  // data yet (Passes 110-112), it only says who's signed in. The library
+  // itself is downloaded only when needed (lib/backend.js, Design K).
+  const authEnabled = isBackendConfigured();
+  const [authSession, setAuthSession] = useState(null);
+  const [authChecking, setAuthChecking] = useState(() => needsBackendAtStartup());
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [signInNotice, setSignInNotice] = useState("");
+  const [choosePasswordMode, setChoosePasswordMode] = useState(null); // null | "invite" | "reset"
+  const authListenerRef = useRef(false);
+  const authLinkHandledRef = useRef(false);
   // Technique data (Pass 100) — app-level, one localStorage key of its own,
   // never part of `pieces` and never touched by setPieces/updatePiece. Its
   // write failures are tracked in their own flag so the pieces save effect
@@ -346,6 +370,76 @@ export default function App() {
     if (!loaded) return;
     saveActivePieceIdToStorage(activePieceId);
   }, [activePieceId, loaded]);
+
+  // Account sign-in (Pass 109). Starts listening for sign-in changes, once,
+  // which is what downloads the library (see lib/backend.js). Runs at startup
+  // only when the library is needed then (a session saved on this device, or
+  // an invite or reset link in the address), and when someone opens sign-in.
+  const attachAuthListener = () => {
+    if (!authEnabled || authListenerRef.current) return;
+    authListenerRef.current = true;
+    loadBackend().then((client) => {
+      if (!client) {
+        authListenerRef.current = false;
+        setAuthChecking(false);
+        return;
+      }
+      client.auth.onAuthStateChange((event, session) => {
+        setAuthChecking(false);
+        setAuthSession(session && session.user ? { email: session.user.email || "", userId: session.user.id } : null);
+        // Arriving from an invite or reset link: the link has signed the person
+        // in, so ask them to choose a password (once). The library announces a
+        // reset by name but an invite only as a plain sign-in, so the link's
+        // type comes from the address (authLink), read before the library ran.
+        if (!authLinkHandledRef.current) {
+          if (event === "PASSWORD_RECOVERY") {
+            authLinkHandledRef.current = true;
+            setChoosePasswordMode("reset");
+          } else if (session && authLink && authLink.type === "invite") {
+            authLinkHandledRef.current = true;
+            setChoosePasswordMode("invite");
+          } else if (session && authLink && authLink.type === "recovery") {
+            authLinkHandledRef.current = true;
+            setChoosePasswordMode("reset");
+          }
+        }
+      });
+    });
+  };
+
+  useEffect(() => {
+    if (!authEnabled) return;
+    // An expired or already-used link: say so, in the sign-in window, where a
+    // fresh reset link can be asked for.
+    if (authLink && authLink.error) {
+      setSignInNotice(EXPIRED_LINK_MESSAGE);
+      setSignInOpen(true);
+    }
+    if (needsBackendAtStartup()) attachAuthListener();
+    else setAuthChecking(false);
+  }, []);
+
+  const openSignIn = () => {
+    if (!authEnabled) return;
+    setSignInNotice("");
+    setSignInOpen(true);
+    attachAuthListener();
+  };
+
+  // Signs out this device only ("local"): the library's default would sign the
+  // account out of every device it's on. Leaves this device's pieces and
+  // technique data exactly as they are.
+  const handleSignOut = async () => {
+    const client = await loadBackend();
+    if (!client) return;
+    const { error } = await client.auth.signOut({ scope: "local" });
+    // With no connection the library still removes the session from this device
+    // (and announces the sign-out) before reporting that the service couldn't be
+    // told, so a connection problem here is not a failed sign-out: this device
+    // is signed out, and the service's own copy of the session simply expires.
+    // Only some other kind of failure is worth an alert.
+    if (error && !isConnectionProblem(error)) window.alert("Couldn't sign out. Try again in a moment.");
+  };
 
   // Check the export reminder once pieces are loaded — app-level (not
   // per-piece), since export already bundles every piece into one backup.
@@ -2343,6 +2437,21 @@ export default function App() {
               <button className="ghost-btn" style={{ marginTop: 16 }} onClick={handleImportClick}>
                 <Upload size={14} /> Import a backup
               </button>
+              {/* Only when an account backend is configured (Pass 109): a new
+                  device has no sidebar until a piece exists, so this is the way
+                  in to sign-in there (docs/Accounts-and-Backend.md, Design I). */}
+              {authEnabled && !authChecking && (
+                authSession ? (
+                  <p className="wizard-hint" style={{ margin: "18px 0 0" }}>
+                    Signed in as {authSession.email}.{" "}
+                    <button type="button" className="link-btn" onClick={handleSignOut}>Sign out</button>
+                  </p>
+                ) : (
+                  <button type="button" className="link-btn" style={{ display: "block", marginTop: 18 }} onClick={openSignIn}>
+                    Sign in
+                  </button>
+                )
+              )}
             </div>
           </div>
         </div>
@@ -2610,6 +2719,11 @@ export default function App() {
                 onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
+                authEnabled={authEnabled}
+                authChecking={authChecking}
+                authEmail={authSession ? authSession.email : null}
+                onSignIn={openSignIn}
+                onSignOut={handleSignOut}
               />
             )}
           </main>
@@ -2621,6 +2735,12 @@ export default function App() {
       )}
       {revivalModalOpen && piece && (
         <RevivalEntryModal piece={piece} onCancel={() => setRevivalModalOpen(false)} onStart={handleStartRevival} />
+      )}
+      {authEnabled && signInOpen && (
+        <SignInModal notice={signInNotice} onClose={() => { setSignInOpen(false); setSignInNotice(""); }} />
+      )}
+      {authEnabled && choosePasswordMode && (
+        <ChoosePasswordModal mode={choosePasswordMode} onClose={() => setChoosePasswordMode(null)} />
       )}
       {deleteModalOpen && piece && (
         <DeletePieceModal piece={piece} onCancel={() => setDeleteModalOpen(false)} onConfirm={handleDeletePiece} />
@@ -3218,7 +3338,7 @@ const CSS = `
    The sidebar's .ghost-btn.full is its own, intentionally full-width thing. */
 .field > .segmented, .field > .ghost-btn, .field > .primary-btn, .field > .danger-btn,
 .pairs-list > .ghost-btn { align-self: flex-start; }
-.field input[type="text"], .field input[type="number"], .field input[type="date"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
+.field input[type="text"], .field input[type="email"], .field input[type="password"], .field input[type="number"], .field input[type="date"] { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); }
 .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: var(--white); color: var(--ink); font-family: inherit; resize: vertical; }
 .field input:disabled { color: var(--ink-faint); background: var(--paper); }
 .field-row { display: flex; gap: 16px; }

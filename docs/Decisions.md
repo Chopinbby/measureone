@@ -7423,6 +7423,70 @@ oversight to silently fix; surface it instead.
      confirmed in its docs. Now that Phase 1's only account is the
      owner's own (decided 2026-09-29), Pass 109 settles this by sending
      that invitation and checking it arrives.
+- **Accounts first backup (Pass 110) — follow-ups found in the review of the
+  revision-counting rule and the backup module (2026-10-01).** Logged, not
+  fixed; none blocks building on them. Found while the module existed but
+  the button didn't yet, so items 2 to 4 are cheapest to fix while the
+  button is still being written. Already checked, so these are what's left:
+  the SQL in a real Postgres engine (18 of 18 checks), the database
+  library's real requests, four real exported backups (including the August
+  ones, in the older format) through the app's own loader and a real JSON
+  column (all matched as data; compared as text, none would have), and the
+  failure paths (a connection drop mid-upload, another device adding the
+  same piece in the gap, 120 pieces, a deleted row, a full device storage,
+  a 503).
+  1. **A 5xx answer from the account service reads as "Something went
+     wrong", not "couldn't reach the account service".** The library gives a
+     failed request's error no HTTP status, so `isConnectionProblem`
+     (`lib/backend.js`) only recognises a dropped connection, not a 503. The
+     likely real case is a paused Free-plan project (idle for a week; the
+     test project will pause between testing sessions). Nothing is lost and
+     a message is still shown; it just doesn't say why. The library also
+     retries a failed read three times first, so a down service takes
+     several seconds to report. Pass 111's quiet status line is the natural
+     place to tell "paused" apart.
+  2. **"Ask first" (Design J) lives only in the button's code, not in
+     `backUpDevice`** (`lib/accountSync.js`). A later caller (Pass 111) that
+     forgot the question could upload a browser's pieces to an account by
+     surprise. Proposed: make `backUpDevice` refuse unless the caller says
+     the question was answered, or the device record already shows a checked
+     backup to that account (`hasRecordedBackup`).
+  3. **The result's detail line counts pieces only.** "0 added this time, 12
+     already in your account" can appear on the press that just added the
+     technique library. Wording only.
+  4. **An unexpected crash loses the "some pieces may already be in your
+     account" hint.** `backUpDevice` catches anything unexpected and reports
+     the generic message, but `sentAny` lives inside the run, so it's gone.
+     Rare: the library already turns a piece it can't send (a circular one,
+     say) into an ordinary "couldn't be sent", checked.
+  5. **A backup reads every piece's full data twice**, before uploading (to
+     see what's there) and after (to check). Fine now (the 25 real pieces
+     come to well under 1 MB, the biggest about 60 KB), too heavy for Pass
+     111's automatic path, which should read only revisions and compare them
+     with the device record's fingerprints.
+  6. **A device-record entry whose revision isn't a finite number is dropped
+     silently** (`cleanEntry`, `lib/accountSync.js`), so that piece would
+     look never-recorded. The database sends revisions as numbers, so this
+     is defensive only; coercing with `Number()` would remove the doubt.
+  7. **After one backup, any later change on this device makes a second
+     press report that piece as "already in your account and different,
+     left as it is".** That's the card's rule (Pass 110 never overwrites),
+     not a bug: the account copy is simply older than this device's. Pass
+     111 keeps it current. **A constraint for Pass 111, from the same
+     rule:** a piece that differs gets no entry in the device record on
+     purpose (recording the revision it has now would let a later upload
+     write over it), so Pass 111 must treat "a row exists but this device has
+     no entry for it" as held, never as safe to upload over. The technique
+     row follows the same rule.
+  8. **The failure-path checks aren't committed as tests** (named in the
+     review's "not verified" line, not one of its P2s). The committed tests
+     cover insert-only, recording only what matched, a read-back mismatch
+     and a dropped connection on the first read. A scratch script covered
+     the rest: a drop mid-upload, another device adding the same piece in
+     the gap (with different and with identical data), the technique row
+     already there and different, 120 pieces (three pages per read), a
+     deleted row, a full device storage and a 503. Worth turning into tests
+     in `test/accountSync.test.mjs` when the pass is finished.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

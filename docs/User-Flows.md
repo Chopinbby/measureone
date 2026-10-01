@@ -494,9 +494,11 @@ what will be added and merges into the library here without removing
 anything, and says so if the file's technique library can't be read. This is the only backup mechanism — there is no cloud sync
 (see [Roadmap.md](Roadmap.md)), so this JSON export is the only way data
 survives clearing browser storage or moving to a new browser/device.
-**Signing in ([flow 10](#10-signing-in-optional-pass-109)) doesn't change
-that yet:** it backs nothing up until a later update, so export and the
-export reminder work exactly as before.
+**On sites connected to an account service, signing in and backing up to an
+account ([flow 10](#10-signing-in-optional-pass-109),
+[flow 11](#11-backing-up-this-device-optional-pass-110)) add a second copy but
+don't change any of this:** export and the export reminder work exactly as
+before, and the live site has no account service yet.
 
 **Since Pass 32a**, importing a backup that matches existing pieces also
 offers a "keep what's here" / "use the imported order" choice for switcher
@@ -596,8 +598,10 @@ Since Passes 101–104. App-level, not tied to the open piece. Design:
 **Only on sites connected to an account service.** That's preview sites and
 local development for now; the live site has no account service until
 go-live, so there nothing below appears anywhere and the app is exactly as
-it was. Signing in **moves no data** (nothing is uploaded or downloaded, and
-no piece, technique data or banner changes); it only says who's signed in.
+it was. Signing in itself **moves no data** (nothing is uploaded or downloaded,
+and no piece, technique data or banner changes); it only says who's signed
+in. Copying this device's data to the account is a separate, explicit step
+([flow 11](#11-backing-up-this-device-optional-pass-110)).
 Accounts are **by invitation for now**: there's no sign-up form. See
 [Accounts-and-Backend.md](Accounts-and-Backend.md).
 
@@ -628,8 +632,52 @@ dashboard, or a reset link):
 3. A link that has expired or was already used opens the sign-in window with
    a plain note saying so, where a fresh reset link can be asked for.
 
-**Signed in:** Settings → Account shows the email address and **Sign out**.
-The panel also says signing in doesn't back anything up yet. **Sign out**
+**Signed in:** Settings → Account shows the email address, **Back up this
+device** ([flow 11](#11-backing-up-this-device-optional-pass-110)) and
+**Sign out**. **Sign out**
 signs out this device only, and leaves this device's pieces and technique
 data exactly as they are. The person stays signed in across reloads (the
 account library keeps the session, never the password).
+
+## 11. Backing up this device (optional, Pass 110)
+
+**Only when signed in, and only on sites connected to an account service**
+(preview sites and local development for now; on the live site nothing below
+appears anywhere). It **copies** this browser's pieces and technique library
+to the account and checks the copy. It never changes anything on this device,
+never replaces or deletes anything the account already holds, and isn't
+automatic (that's Pass 111) or a restore (Pass 112). Design:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#first-backup-behavior-pass-110).
+
+1. Settings → **Account** → **Back up this device** (`handleBackUpDevice`,
+   `App.jsx`).
+2. **The first time for an account on this device, a question first**: "Back
+   up the 12 pieces and the technique library on this device to
+   name@example.com?" (OK or Cancel). Cancel does nothing. Once a checked
+   backup is recorded on this device for that account, pressing again skips the
+   question, since all it can do is add what's missing. A different account
+   signing in on the same browser is asked again.
+3. While it runs the button reads **Backing up...** and both buttons are
+   disabled. Leaving Settings and coming back doesn't interrupt it.
+4. **The result**, in plain words, under the buttons:
+   - **Backed up and checked: 12 of 12 pieces and the technique library.**
+     Everything was read back from the account and matched what this device
+     holds. Beneath it: how many were added this time and how many were
+     already there, and when it was checked.
+   - **Already in your account and different, left as it is: ...** for a piece
+     the account already had that doesn't match this device (or that the
+     account marks deleted). It's neither counted as backed up nor touched;
+     settling those is a later update. The technique library gets its own
+     sentence when it's the one that differs.
+   - **Didn't match when read back from your account: ...** or **Couldn't be
+     sent: ...**, in red, with "Press Back up this device to try again."
+   - **No connection** ("Couldn't reach the account service..."), signed out,
+     or an unexpected failure: it says so, in red, and records nothing.
+     Pressing again is safe.
+5. Pressing again after something changed on this device reports that changed
+   piece as "already in your account and different, left as it is": this
+   update never overwrites, so the account copy stays as it was. Keeping it
+   current is Pass 111.
+
+Nothing on this device changes in any of these cases. Manual export and the
+export reminder are unaffected.

@@ -7426,8 +7426,9 @@ oversight to silently fix; surface it instead.
 - **Accounts first backup (Pass 110) — follow-ups found in the review of the
   revision-counting rule and the backup module (2026-10-01).** Logged, not
   fixed; none blocks building on them. Found while the module existed but
-  the button didn't yet, so items 2 to 4 are cheapest to fix while the
-  button is still being written. Already checked, so these are what's left:
+  the button didn't yet, so items 2 to 4 were cheapest to fix then. The
+  button is built now (same pass) and they are still open. Already checked,
+  so these are what's left:
   the SQL in a real Postgres engine (18 of 18 checks), the database
   library's real requests, four real exported backups (including the August
   ones, in the older format) through the app's own loader and a real JSON

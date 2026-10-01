@@ -30,8 +30,12 @@ Since Pass 108 a **test** Supabase project exists with the tables and
 security rules, connected to preview sites and local development only (see
 [Setup](#setup-test-project)). **Since Pass 109, on those sites only, a
 person can sign in and out** (see [Sign-in behavior](#sign-in-behavior-pass-109)),
-but signing in moves no data yet: nothing is uploaded or downloaded until
-Passes 110–112. The live site has no backend at all: it saves everything to
+but signing in alone moves no data. **Since Pass 110 a signed-in person can
+press "Back up this device"** to copy this browser's pieces and technique
+library to their account, checked by reading it back (see
+[First backup behavior](#first-backup-behavior-pass-110)). Nothing is kept
+current automatically until Pass 111, and nothing is downloaded into a device
+until Pass 112. The live site has no backend at all: it saves everything to
 the browser only, as it always has.
 
 ## Decided
@@ -94,7 +98,8 @@ see [Algorithms.md](Algorithms.md#import-merge)). Nothing is ever decided by
 the user, 2026-09-29): a database rule raises a row's revision by one and
 sets its updated-at on every change, so the app only says which revision it
 expects ("save only if still at 5") and can't get the counting wrong. The
-rule is a new migration file in Pass 110, the first pass that saves rows.
+rule is a new migration file, `0002_revision_counter.sql`, built in Pass 110,
+the first pass that saves rows.
 
 **D. Deleting a piece marks its row deleted** (deleted-at) instead of erasing
 it, so it can't reappear from another device and can be recovered by hand.
@@ -133,7 +138,9 @@ exists).
 
 **J. The first upload from a device always asks first** ("Back up the N
 pieces on this device to name@example.com?"), so one browser's pieces never
-land in the wrong account by surprise.
+land in the wrong account by surprise. Built in Pass 110: asked the first time
+a device backs up to an account (see
+[First backup behavior](#first-backup-behavior-pass-110)).
 
 **K. The account code is downloaded only when it's needed** (decided by the
 user, 2026-09-29, for Pass 109). The Supabase library is about 59 KB
@@ -194,7 +201,8 @@ docs).
 - **110** First backup, verified by reading it back. Also adds the second
   migration file: the database rule that raises each row's revision and sets
   its updated-at on every change (Design C). It's run once on the test
-  project, like the first, and on production at go-live.
+  project, like the first, and on production at go-live. Built; see
+  [First backup behavior](#first-backup-behavior-pass-110).
 - **111** Keep the backup current after every change, with a quiet status
   line and automatic retry.
 - **112** Restore onto a new device.
@@ -281,6 +289,90 @@ flow 10, has the screen-by-screen version):
 - **Invitation links open the project's Site URL**; reset links return to the
   site that asked (the current address, which has to be on the redirect list).
 
+## First backup behavior (Pass 110)
+
+What was built, and the small choices made building it (docs/User-Flows.md,
+flow 11, has the screen-by-screen version):
+
+- **Where it lives.** `src/lib/accountSync.js` has no React and gets the
+  client only from `loadBackend()`, so the library is still downloaded on
+  demand (the main download grew by about 3.3 KB compressed; the library's own
+  file is unchanged). `App.jsx` holds the button's handler
+  (`handleBackUpDevice`) and the last result (`backup`); the button and the
+  result lines are in the Account panel (`SettingsTab.jsx`).
+- **The revision rule is in the database.**
+  `supabase/migrations/0002_revision_counter.sql` puts a rule (a trigger) on
+  both tables: revision is 1 on insert and the old revision plus one on every
+  update, and updated-at is set, whatever the app sent (Design C). Run it once
+  on the test project, after the first file; running it twice is harmless.
+  Production gets it at go-live (Pass 114). It was checked in a real Postgres
+  engine: the app's own value is overridden, a save "only if still at revision
+  N" at a stale N changes nothing, the first migration's security rules still
+  hold, and nobody can call the rule by hand.
+- **A press does five things, in order:** reads every row the account holds;
+  adds a row for each piece, and the technique library, that the account
+  lacks; reads everything back; compares it with what this device held;
+  records on this device only what matched.
+- **It only ever adds.** Nothing in this pass changes or deletes a row the
+  account already holds. A piece whose id already has a row is compared:
+  matching counts as backed up; different, or marked deleted, is listed as
+  "Already in your account and different, left as it is" and not touched
+  (settling those is Pass 112). The technique row follows the same rule. If
+  another device adds the same id in the gap between the read and the add, the
+  database refuses the duplicate and it's treated the same way. "Save only if
+  still at revision N" (`changePieceRow`, `changeTechniqueRow`) is built and
+  tested but nothing calls it until Pass 111. A piece deleted on this device
+  is not uploaded as a deletion (Pass 111).
+- **Compared as data, never as text.** The database reorders an object's keys
+  and JSON drops undefined fields, so two copies of one piece are never the
+  same text (`sameData`, `lib/accountSync.js`). Checked on real backups through
+  a real JSON column, including older-format ones: every piece matched as
+  data, and none would have as text.
+- **It uploads what the app holds**: the in-memory pieces, after
+  `validateAndMigratePiece`, not the raw stored text (the Pass 105 to 106
+  follow-up in [Decisions.md](Decisions.md#open-questions)). They are read
+  once, when the button is pressed, so what's uploaded and compared is what
+  this device held at that moment, even if something changes while it runs.
+- **The first backup to an account asks first (Design J); later ones don't.**
+  The question is `window.confirm`: "Back up the 12 pieces and the technique
+  library on this device to name@example.com?" It's asked unless this
+  device's record already shows a checked backup to that account, in which
+  case pressing again goes straight through, since all it can do is add what's
+  missing. A different account signing in on this browser has no record, so
+  it's asked again. The asking lives in `handleBackUpDevice`, not in
+  `backUpDevice`.
+- **The device record** (`measureone-account-sync`, stays on this device,
+  Design E) is filed under the signed-in account's user id: for each piece and
+  for the technique row, the revision this device last saw and a fingerprint
+  of what it uploaded, and when the backup was last checked. It's written only
+  once the read-back matches. **A piece that differs gets no entry, on
+  purpose** (an entry it already had is kept as it was): recording the
+  revision it has now would let a later pass write over it. Pass 111 must
+  treat "a row exists but this device has no entry for it" as held.
+- **The result is plain words**: "Backed up and checked: 12 of 12 pieces and
+  the technique library.", then which pieces were already there, which are
+  different, which didn't match when read back or couldn't be sent, and when it
+  was checked. If it can't finish (no connection, signed out, anything
+  unexpected) it says so and records nothing; pressing again is safe, because
+  anything already added is found and counted as backed up. The library
+  retries a failed read three times first, so a down service takes several
+  seconds to report.
+- **It never changes this device.** The only thing written here is the device
+  record. Checked in the browser, with the real app and library against a local
+  stand-in for the database: every piece, the technique library and the
+  open-piece setting were byte-for-byte identical before and after the first
+  press, a second press, a press with one account row changed by hand, and a
+  press with no connection. The real test project is checked on the branch's
+  preview.
+- **A running backup survives leaving Settings**, and both buttons are
+  disabled while it runs. A result is shown only to the account that asked for
+  it.
+- **Logged, not fixed:** the review's follow-ups are in
+  [Decisions.md](Decisions.md#open-questions) ("Accounts first backup (Pass
+  110)"): a paused project reads as a generic failure, "ask first" isn't
+  enforced inside `backUpDevice`, the result's detail line counts pieces only,
+  and the failure-path checks aren't committed as tests.
+
 ## Setup (test project)
 
 Done in Pass 108 (2026-09-29). The dashboard steps were done by the user; the
@@ -302,8 +394,10 @@ checks were run against the project itself, not read off the settings pages.
     `https://*-measure-one.vercel.app/**` (every preview address ends in
     `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
 - **Tables and security rules:** `supabase/migrations/0001_accounts_backend.sql`,
-  run once in the SQL Editor. Future changes go in new numbered files, applied
-  to the test project first and to production at go-live.
+  run once in the SQL Editor. Then `0002_revision_counter.sql` (Pass 110), the
+  rule that keeps each row's revision count: run once, after the first file.
+  Future changes go in new numbered files, applied to the test project first
+  and to production at go-live.
 - **Where the two settings come from:** Project Settings → **Data API** (the
   project URL; the page shows the address ending `/rest/v1/`, and the setting
   is the address without that ending) and → **API Keys** (the

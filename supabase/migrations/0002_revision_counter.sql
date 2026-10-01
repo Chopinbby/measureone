@@ -16,6 +16,18 @@
 -- No grants or revokes are needed here. The function below is a trigger
 -- function, which the database refuses to run any other way, and a trigger
 -- runs whenever its table is written, whoever the signed-in account is.
+--
+-- Two messages the dashboard may show when you run this:
+-- * "This query includes destructive operations": a false alarm. It's the two
+--   `drop trigger if exists` lines below, which drop only the rules this same
+--   file creates (and do nothing on a first run). No table, column or row is
+--   touched.
+-- * "deadlock detected" (40P01): the file changes both tables in one go, and
+--   another process using the same tables at that moment (seen once, on the
+--   test project, in Pass 110) can collide with it. Run the file again. If it
+--   keeps happening, run it in three parts, each on its own: the function,
+--   then the pieces trigger, then the technique trigger. Each part touches
+--   one table, so it can't collide.
 
 create or replace function public.keep_revision()
 returns trigger

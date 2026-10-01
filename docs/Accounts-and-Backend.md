@@ -214,7 +214,9 @@ docs).
   deletes it in the Supabase dashboard (Authentication → Users). Their rows
   go with it automatically (checked in Pass 108).
 - **114** Go-live (added in Pass 108): create the production project, apply
-  the same migration files to it, and give Vercel's Production environment
+  the same migration files to it (see the notes under
+  [Setup](#setup-test-project) on the deadlock and "destructive operations"
+  messages), and give Vercel's Production environment
   its two settings. Until this pass the live site has no backend. **The
   production project stays on Supabase's Free plan** (decided by the user,
   2026-09-29). That means it pauses after a week without use, and there are
@@ -396,6 +398,17 @@ checks were run against the project itself, not read off the settings pages.
 - **Tables and security rules:** `supabase/migrations/0001_accounts_backend.sql`,
   run once in the SQL Editor. Then `0002_revision_counter.sql` (Pass 110), the
   rule that keeps each row's revision count: run once, after the first file.
+  Applied to the test project on 2026-10-01. Two messages to expect when
+  running it (also noted at the top of the file): the dashboard warns that it
+  "includes destructive operations", which is a false alarm (the two `drop
+  trigger if exists` lines drop only the rules the file itself creates; no
+  table, column or row is touched); and the first attempt on the test project
+  failed with a deadlock error (`40P01`), a collision with another process
+  using the same two tables, because the file changes both in one go. It
+  succeeded on a later attempt. **If the dashboard reports a deadlock (at
+  go-live too), run the file again; if it keeps happening, run it in three
+  parts, each on its own: the function, then the `pieces` trigger, then the
+  `technique` trigger.** Each part touches one table, so it can't collide.
   Future changes go in new numbered files, applied to the test project first
   and to production at go-live.
 - **Where the two settings come from:** Project Settings → **Data API** (the

@@ -1,6 +1,6 @@
 import { Sparkline } from "../Sparkline";
 import { NumberInput } from "../NumberInput";
-import { computePracticeHistory } from "../../lib/history";
+import { computePracticeHistory, computeIntroductionProgress } from "../../lib/history";
 import { formatRange, loggedSessions, addDaysISO } from "../../lib/utils";
 import { SESSION_OUTCOME_META, DIFFICULTY_META, EFFORT_TO_MIN } from "../../lib/constants";
 import {
@@ -69,26 +69,15 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
   });
 
   // Actual vs. planned progress — how many practice chunks were planned to
-  // be introduced by each day vs. how many actually were.
-  const firstDoneDay = {};
-  practiceChunks.forEach((c) => {
-    const dd = (piece.progress[c.id] || {}).doneDays || [];
-    if (dd.length) firstDoneDay[c.id] = Math.min(...dd);
-  });
-  const plannedByDay = {};
-  let cumPlanned = 0;
-  timeline.days.forEach((d) => {
-    cumPlanned += d.newChunkIds.length;
-    plannedByDay[d.dayNumber] = cumPlanned;
-  });
-  const actualByDay = {};
-  let cumActual = 0;
-  for (let d = 1; d <= timeline.days.length; d++) {
-    cumActual += Object.values(firstDoneDay).filter((fd) => fd === d).length;
-    actualByDay[d] = cumActual;
-  }
-  const maxCum = Math.max(plannedByDay[timeline.days.length] || 1, 1);
-  const chartDays = timeline.days.slice(0, Math.min(timeline.days.length, Math.max(currentDay + 3, 14)));
+  // be introduced by each day vs. how many actually were. See
+  // lib/history.js for why each chunk counts once even after a reschedule.
+  const { days: introductionDays, firstDoneDay, scaleMax } = computeIntroductionProgress(
+    piece,
+    practiceChunks,
+    timeline,
+    currentDay
+  );
+  const chartDays = introductionDays.slice(0, Math.max(currentDay + 3, 14));
 
   // Estimated vs. actual practice time — "recently practiced" reuses the
   // Consistency panel's own trailing window (consistencyWindow/Start,
@@ -280,20 +269,24 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
 
       <div className="panel">
         <h3>Actual vs. planned progress</h3>
-        <div className="progress-chart">
-          {chartDays.map((d) => {
-            const p = plannedByDay[d.dayNumber];
-            const a = actualByDay[d.dayNumber];
-            return (
-              <div key={d.dayNumber} className="progress-chart-col" title={`Day ${d.dayNumber}: ${a} actual / ${p} planned`}>
-                <div className="progress-chart-bars">
-                  <div className="progress-chart-bar planned" style={{ height: `${(p / maxCum) * 100}%` }} />
-                  <div className="progress-chart-bar actual" style={{ height: `${(a / maxCum) * 100}%` }} />
-                </div>
-                {d.dayNumber % 5 === 0 && <span className="progress-chart-label mono">{d.dayNumber}</span>}
+        {/* by-day: one column per plan day, so the columns have to shrink
+            to fit however many days the plan has, and every column keeps
+            the same label slot (empty on unnumbered days) so all the bars
+            share one baseline. */}
+        <div className="progress-chart by-day">
+          {chartDays.map(({ dayNumber, planned, actual }) => (
+            <div
+              key={dayNumber}
+              className="progress-chart-col"
+              title={actual === null ? `Day ${dayNumber}: ${planned} planned` : `Day ${dayNumber}: ${actual} actual / ${planned} planned`}
+            >
+              <div className="progress-chart-bars">
+                <div className="progress-chart-bar planned" style={{ height: `${(planned / scaleMax) * 100}%` }} />
+                <div className="progress-chart-bar actual" style={{ height: `${((actual || 0) / scaleMax) * 100}%` }} />
               </div>
-            );
-          })}
+              <span className="progress-chart-label mono">{dayNumber % 5 === 0 ? dayNumber : ""}</span>
+            </div>
+          ))}
         </div>
         <div className="chart-legend">
           <span><i className="dot" style={{ background: "var(--ink-faint)" }} />Planned</span>

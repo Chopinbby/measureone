@@ -5047,6 +5047,34 @@ button spacing, and the obsolete "Tempo ratchet" editor removed.**
   from them. Comments and docs stay exempt by design. The house-style rule
   is in [AI-GUIDELINES.md](AI-GUIDELINES.md#no-em-dashes-in-user-facing-copy).
 
+**Fix: Progress's "Actual vs. planned progress" chart — four bugs, reported
+from a screenshot of a 57-day plan.**
+
+- **Overflowed the card.** Each day's column had a fixed minimum width, so
+  a plan past about 40 days ran off the right edge. Columns now shrink to
+  fit (`.progress-chart.by-day`, scoped so the "Estimated vs. actual
+  practice time" chart, which shares the base classes, is unchanged).
+- **Every 5th day's bars sat higher.** Only numbered days rendered a label,
+  and the label pushed that column's bars up, reading as a spike every five
+  days. Every column now reserves the same label slot.
+- **"Planned" double-counted after a reschedule.** A running sum of each
+  day's `newChunkIds` counted every chunk the learner hadn't started twice:
+  on its original day and again where the reschedule moved it. Real data:
+  35 planned on a 27-chunk piece, 80 on a 24-chunk one. Each chunk now
+  counts once, on its first planned day. **Chosen over "count each chunk at
+  its current planned day"**, which would rewrite past days so a
+  reschedule made the learner look like they had been on schedule all
+  along; first appearance keeps the past as it was actually planned.
+- **"Actual" drew bars on future days**, carrying today's total forward.
+- The math moved to `computeIntroductionProgress` (`lib/history.js`) so the
+  double-count has a regression test (`test/history.test.mjs`), confirmed
+  to fail with the old running sum. See
+  [Algorithms.md](Algorithms.md#actual-vs-planned-progress).
+- **Not fixed, noticed while verifying:** at mid-size windows (roughly
+  820–1180px) the Consistency heatmap above this chart holds the whole page
+  wider than the window. Pre-existing and unrelated to this chart; left for
+  its own change.
+
 ## Data model
 
 **Decision: `piece.sections` (musical form) and practice chunks are kept as

@@ -15,7 +15,15 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computePracticeHistory, findNextOccurrenceDay, findHistoricalItemsForDay, findNextScheduledDay } from "../src/lib/history.js";
+import {
+  computePracticeHistory,
+  findNextOccurrenceDay,
+  findHistoricalItemsForDay,
+  findNextScheduledDay,
+  computeIntroductionProgress,
+} from "../src/lib/history.js";
+import { generateAllChunks } from "../src/lib/chunking.js";
+import { getEffectiveTimeline } from "../src/lib/scheduling.js";
 
 // Minimal fixtures — computePracticeHistory only reads `progress` and
 // `sections` off the piece, and `id`/`start`/`end` off each chunk.
@@ -381,5 +389,87 @@ describe("findHistoricalItemsForDay", () => {
     const timeline = buildTimeline(1);
     assert.doesNotThrow(() => findHistoricalItemsForDay(piece({ c1: logged(5) }), [c1], timeline, 5));
     assert.deepEqual(findHistoricalItemsForDay(piece({ c1: logged(5) }), [c1], timeline, 5), []);
+  });
+});
+
+// Progress's "Actual vs. planned progress" chart. The bug: "planned" was a
+// running sum of each day's newChunkIds, and after a reschedule every chunk
+// the learner hadn't started yet is listed twice in the effective timeline
+// (on its original day, which is kept, and again on the day the reschedule
+// moved it to). Real data had "planned" at 35 on a 27-chunk piece and 80 on
+// a 24-chunk one.
+describe("[regression] computeIntroductionProgress: each chunk counts once as planned, even after a reschedule", () => {
+  const reschedulablePiece = (overrides) => ({
+    totalMeasures: 40,
+    measureDifficulty: Array(40).fill(1),
+    chunkMode: "custom",
+    customChunkSize: 4,
+    recurringMode: "none",
+    recurringMeasures: 0,
+    recurringPairs: [],
+    practiceDaysPerWeek: 7,
+    minutesPerDay: 30,
+    daysToLearn: 16,
+    startDate: "2026-01-01",
+    progress: {},
+    ...overrides,
+  });
+
+  test("planned never exceeds the number of chunks, and ends at exactly that many", () => {
+    const plain = reschedulablePiece();
+    const chunkSet = generateAllChunks(plain);
+    const ids = chunkSet.practiceChunks.map((c) => c.id);
+    // Only the first chunk was ever started; rescheduled on day 6, so
+    // everything else the old plan had put on days 1-5 is placed again.
+    const piece = reschedulablePiece({
+      progress: { [ids[0]]: { doneDays: [1], sessions: [] } },
+      rescheduleMarker: { asOfDay: 6, remainingChunkOrder: ids.slice(1), remainingConnectorIds: [], previous: null },
+    });
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+
+    // Setup check: the timeline really does list some chunks twice. If this
+    // ever stops being true, the assertions below no longer prove anything.
+    const rawSum = timeline.days.reduce((n, d) => n + d.newChunkIds.length, 0);
+    assert.ok(rawSum > ids.length, `expected a double-listed timeline, got ${rawSum} entries for ${ids.length} chunks`);
+
+    const { days, scaleMax } = computeIntroductionProgress(piece, chunkSet.practiceChunks, timeline, 6);
+    days.forEach((d) => assert.ok(d.planned <= ids.length, `day ${d.dayNumber}: planned ${d.planned} > ${ids.length} chunks`));
+    assert.equal(days[days.length - 1].planned, ids.length);
+    assert.equal(scaleMax, ids.length);
+  });
+
+  test("planned is cumulative and never goes down", () => {
+    const piece = reschedulablePiece();
+    const chunkSet = generateAllChunks(piece);
+    const timeline = getEffectiveTimeline(piece, chunkSet);
+    const { days } = computeIntroductionProgress(piece, chunkSet.practiceChunks, timeline, 1);
+    days.slice(1).forEach((d, i) => assert.ok(d.planned >= days[i].planned));
+  });
+});
+
+describe("computeIntroductionProgress: actual", () => {
+  const timeline = {
+    days: [1, 2, 3, 4].map((n) => ({ dayNumber: n, newChunkIds: n === 1 ? ["c1", "c2"] : [], specialChunkIds: [], reviewChunkIds: [] })),
+  };
+  const practiceChunks = [chunk("c1", 1, 4), chunk("c2", 5, 8)];
+
+  test("a chunk counts as started on its FIRST logged day, not every day it was practiced", () => {
+    const piece = { progress: { c1: logged(2, 1, 3) } };
+    const { days, firstDoneDay } = computeIntroductionProgress(piece, practiceChunks, timeline, 4);
+    assert.deepEqual(firstDoneDay, { c1: 1 });
+    assert.deepEqual(days.map((d) => d.actual), [1, 1, 1, 1]);
+  });
+
+  test("days after currentDay have no actual value, instead of carrying today's total forward", () => {
+    const piece = { progress: { c1: logged(1), c2: logged(2) } };
+    const { days } = computeIntroductionProgress(piece, practiceChunks, timeline, 2);
+    assert.deepEqual(days.map((d) => d.actual), [1, 2, null, null]);
+    assert.deepEqual(days.map((d) => d.planned), [2, 2, 2, 2]);
+  });
+
+  test("progress keys that aren't practice chunks never count", () => {
+    const piece = { progress: { __consolidation__: logged(1), sr_s1: logged(1), t1: logged(1) } };
+    const { days } = computeIntroductionProgress(piece, practiceChunks, timeline, 4);
+    assert.deepEqual(days.map((d) => d.actual), [0, 0, 0, 0]);
   });
 });

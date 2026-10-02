@@ -386,7 +386,7 @@ export function computeConfidenceAsOf(chunk, piece, asOfDay) {
 export const PROGRESS_TIER_META = {
   untouched: { label: "Not touched", color: "var(--ink-faint)" },
   learned: { label: "Learned", color: "var(--brick)" },
-  comfortable: { label: "Comfortable", color: "var(--brass)" },
+  comfortable: { label: "Comfortable", color: "var(--warm)" },
   mastered: { label: "Mastered", color: "var(--teal)" },
 };
 

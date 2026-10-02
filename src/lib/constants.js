@@ -28,7 +28,7 @@ export const LONG_PLAN_DAYS_MINUTES_MODE = 90;
 
 export const DIFFICULTY_META = {
   easy: { label: "Workable", color: "var(--teal)" },
-  medium: { label: "Challenging", color: "var(--brass)" },
+  medium: { label: "Challenging", color: "var(--warm)" },
   hard: { label: "Difficult", color: "var(--brick)" },
 };
 export const LEVEL_LABEL = { 1: "easy", 2: "medium", 3: "hard" };
@@ -63,7 +63,7 @@ export const ROLE_LABEL = {
 //   chunk again soon isn't a surprise once it's read as needing rework.
 export const SESSION_OUTCOME_META = {
   pass: { label: "Full pass", color: "var(--teal)" },
-  "soft-miss": { label: "Partial pass", color: "var(--brass)" },
+  "soft-miss": { label: "Partial pass", color: "var(--warm)" },
   fail: { label: "Needs rework", color: "var(--brick)" },
 };
 

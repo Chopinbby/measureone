@@ -112,7 +112,7 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
               <button
                 key={date}
                 className="day-card clickable"
-                style={{ borderColor: "var(--brass)", boxShadow: "inset 0 0 0 1px var(--brass)" }}
+                style={{ borderColor: "var(--accent)", boxShadow: "inset 0 0 0 1px var(--accent)" }}
                 onClick={() => onSelectDay(null)}
               >
                 <div className="day-card-head">
@@ -215,7 +215,7 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
             <button
               key={d.dayNumber}
               className={`day-card clickable ${d.type}`}
-              style={isCurrent ? { borderColor: "var(--brass)", boxShadow: "inset 0 0 0 1px var(--brass)" } : undefined}
+              style={isCurrent ? { borderColor: "var(--accent)", boxShadow: "inset 0 0 0 1px var(--accent)" } : undefined}
               onClick={() => onSelectDay(d.dayNumber)}
             >
               <div className="day-card-head">

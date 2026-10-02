@@ -235,7 +235,7 @@ export function PieceMapTab({
 
       <div className="confidence-legend">
         <span><i className="dot" style={{ background: "var(--brick)" }} /> Needs work</span>
-        <span><i className="dot" style={{ background: "var(--brass)" }} /> Developing</span>
+        <span><i className="dot" style={{ background: "var(--warm)" }} /> Developing</span>
         <span><i className="dot" style={{ background: "var(--teal)" }} /> Confident</span>
       </div>
 

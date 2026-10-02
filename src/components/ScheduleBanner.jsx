@@ -56,7 +56,7 @@ export function ScheduleBanner({ piece, chunkSet, timeline, realCurrentDay, onRe
         </p>
       </div>
       <div className="schedule-banner-actions">
-        <button className="primary-btn" onClick={onReschedule}>
+        <button className="primary-btn outline-accent" onClick={onReschedule}>
           <RotateCcw size={15} /> Reschedule remaining days
         </button>
         {hasCatchUp && (

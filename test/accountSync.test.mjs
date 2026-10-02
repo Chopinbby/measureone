@@ -936,6 +936,48 @@ describe("refusals and failures (Pass 111)", () => {
   });
 });
 
+describe("a second browser (Pass 111)", () => {
+  // A fresh browser signed in to an account that already has a library: its
+  // own technique library is empty (or at least different), the account holds
+  // the real one. That's the situation the owner's preview checks start from.
+  const accountLibrary = () => ({ ...reloadedTechnique(), walkPosition: 5 });
+  const emptyLibrary = () => validateAndMigrateTechnique({});
+
+  test("the first backup adds this browser's piece and leaves the account's technique library alone; the automatic upload then holds that library and still sends the piece", async () => {
+    const storage = memoryStorage();
+    const fake = syncFake({
+      pieceRows: [pieceRow(piece("old"), { user_id: USER })],
+      techniqueRows: [{ user_id: USER, data: reorder(viaJson(accountLibrary())), revision: 1 }],
+    });
+    const mine = { n1: piece("n1") };
+    const first = await backUpDevice({ pieces: mine, technique: emptyLibrary(), userId: USER, getClient: async () => fake.client, storage, now: () => 1000 });
+    assert.equal(first.added, 1);
+    assert.equal(first.technique, "different");
+    assert.equal(fake.rows.technique[0].revision, 1, "the account's library is untouched");
+
+    // Nothing waits for the piece; the library has no record, so it's an add.
+    const waiting = computeWaiting({ pieces: mine, technique: emptyLibrary(), accountRecord: recordOf(storage) });
+    assert.deepEqual(waiting.items.map((i) => `${i.kind}:${i.action}`), ["technique:add"]);
+
+    // The add is refused (the row exists), read again, found different: held.
+    const lib = emptyLibrary();
+    const r = await runSync(mine, lib, fake, storage);
+    assert.deepEqual(r.newlyHeld, [{ kind: "technique" }]);
+    assert.equal(fake.rows.technique[0].revision, 1);
+    assert.equal(recordOf(storage).technique.held, true);
+    assert.equal(describeSyncStatus({ now: 9000, firstBackupDone: true, backedUpAt: 1000, waiting: 0, held: computeWaiting({ pieces: mine, technique: lib, accountRecord: recordOf(storage) }).held, failures: 0 }).text, "The technique library changed on another device");
+
+    // A change to the piece still goes up, and the held library isn't tried again.
+    const callsBefore = fake.calls.length;
+    const changed = { n1: { ...mine.n1, name: "Renamed" } };
+    const r2 = await runSync(changed, lib, fake, storage);
+    assert.equal(r2.uploaded, 1);
+    assert.deepEqual(r2.newlyHeld, []);
+    assert.equal(fake.calls.slice(callsBefore).filter((c) => c.table === "technique").length, 0, "the held library isn't touched again");
+    assert.equal(fake.rows.pieces.find((row) => row.id === "n1").revision, 2);
+  });
+});
+
 describe("timing and the status line (Pass 111)", () => {
   test("it waits a few seconds after the last change, but never keeps a change waiting more than a minute", () => {
     assert.equal(SYNC_QUIET_MS, 5000);

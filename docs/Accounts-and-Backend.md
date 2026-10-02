@@ -361,7 +361,11 @@ flow 11, has the screen-by-screen version):
 - **The result is plain words**: "Backed up and checked: 12 of 12 pieces and
   the technique library.", then which pieces were already there, which are
   different, which didn't match when read back or couldn't be sent, and when it
-  was checked. If it can't finish (no connection, signed out, anything
+  was checked. When the account already holds a copy of every piece and none
+  match (a second browser, say) it says "Nothing was added: your account
+  already has a copy of each of these pieces." rather than "Nothing was
+  backed up", which reads like a failure; names are separated by semicolons
+  (piece names contain commas) and a long list is cut after five. If it can't finish (no connection, signed out, anything
   unexpected) it says so and records nothing; pressing again is safe, because
   anything already added is found and counted as backed up. The library
   retries a failed read three times first, so a down service takes several
@@ -371,8 +375,17 @@ flow 11, has the screen-by-screen version):
   stand-in for the database: every piece, the technique library and the
   open-piece setting were byte-for-byte identical before and after the first
   press, a second press, a press with one account row changed by hand, and a
-  press with no connection. The real test project is checked on the branch's
-  preview.
+  press with no connection. **Checked on the real test project (2026-10-01,
+  the owner's account, read-only through the signed-in preview tab):** 25
+  piece rows and the technique row, all at revision 1 (so the revision rule
+  works there), none deleted, uploaded in a three-second window that falls
+  between the owner's two exports (15:01:44 and 15:02:24); every row identical
+  as data (a SHA-256 of its key-sorted JSON) to both exported files, and the
+  two exports identical to each other, so the backup round-tripped the real
+  database exactly and changed nothing on the device. A second browser that
+  imported the same file then pressed the button and correctly got "Nothing
+  was added" for all 25 pieces (see the Pass 110 follow-ups in
+  [Decisions.md](Decisions.md#open-questions), item 10, for why they differ).
 - **A running backup survives leaving Settings**, and both buttons are
   disabled while it runs. A result is shown only to the account that asked for
   it.

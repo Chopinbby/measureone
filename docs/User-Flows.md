@@ -671,6 +671,13 @@ automatic (that's Pass 111) or a restore (Pass 112). Design:
      account marks deleted). It's neither counted as backed up nor touched;
      settling those is a later update. The technique library gets its own
      sentence when it's the one that differs.
+   - **Nothing was added: your account already has a copy of each of these
+     pieces.** When none of the pieces matched because the account already
+     holds a different copy of every one (for example, it was backed up earlier
+     from another browser, and importing a backup gives each piece a new
+     created date). It's followed by the "already in your account and
+     different" line, with names separated by semicolons and a long list cut
+     after five ("...; and 20 more"). Nothing failed and nothing was changed.
    - **Didn't match when read back from your account: ...** or **Couldn't be
      sent: ...**, in red, with "Press Back up this device to try again."
    - **No connection** ("Couldn't reach the account service..."), signed out,

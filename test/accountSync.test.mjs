@@ -216,6 +216,32 @@ describe("fingerprint and words", () => {
     assert.ok(describeBackupResult(diff).some((l) => l.text.startsWith("Already in your account and different, left as it is: Sonata")));
   });
 
+  test("when the account already holds a different copy of every piece, it says nothing was added, not that it failed", () => {
+    const base = { status: "done", total: 3, backedUp: 0, added: 0, alreadyThere: 0, mismatched: [], notSent: [], technique: "different", recordSaved: true };
+    const different = ["Etude in C minor, Op. 10, No. 12", "Nocturne", "Waltz"].map((name, i) => ({ id: `p${i}`, name }));
+    const lines = describeBackupResult({ ...base, different });
+    assert.equal(lines[0].text, "Nothing was added: your account already has a copy of each of these pieces.");
+    assert.equal(lines[0].plain, true);
+    assert.equal(lines[0].problem, false);
+    // names with commas stay readable: separated by semicolons
+    assert.equal(lines[1].text, "Already in your account and different, left as it is: Etude in C minor, Op. 10, No. 12; Nocturne; Waltz.");
+    assert.equal(describeBackupResult({ ...base, total: 1, different: [different[1]] })[0].text, "Nothing was added: your account already has a copy of this piece.");
+  });
+
+  test("a long list of names is cut short, and a real failure still says nothing was backed up", () => {
+    const seven = Array.from({ length: 7 }, (_, i) => ({ id: `p${i}`, name: `Piece ${i + 1}` }));
+    const base = { status: "done", total: 7, backedUp: 0, added: 0, alreadyThere: 0, technique: "backedUp", recordSaved: true };
+    const cut = describeBackupResult({ ...base, backedUp: 0, different: seven, mismatched: [], notSent: [], technique: "different" });
+    assert.equal(cut[1].text, "Already in your account and different, left as it is: Piece 1; Piece 2; Piece 3; Piece 4; Piece 5; and 2 more.");
+    const failed = describeBackupResult({ ...base, technique: "notSent", different: [], mismatched: [], notSent: seven });
+    assert.equal(failed[0].text, "Nothing was backed up.");
+    assert.equal(failed[0].plain, undefined);
+    assert.ok(failed.some((l) => l.problem && l.text.startsWith("Couldn't be sent: Piece 1; Piece 2")));
+    // some matched: the usual headline, unchanged
+    const some = describeBackupResult({ ...base, backedUp: 5, alreadyThere: 5, different: seven.slice(0, 2), mismatched: [], notSent: [], technique: "backedUp" });
+    assert.equal(some[0].text, "Backed up and checked: 5 of 7 pieces and the technique library.");
+  });
+
   test("PIECE_SCHEMA_VERSION matches storage.js's CURRENT_SCHEMA_VERSION", () => {
     const m = readFileSync("src/lib/storage.js", "utf8").match(/const CURRENT_SCHEMA_VERSION = (\d+)/);
     assert.ok(m);

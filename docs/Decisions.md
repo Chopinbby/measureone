@@ -7503,6 +7503,23 @@ oversight to silently fix; surface it instead.
      refuse to let the person leave) and an alert shows nothing. Worth
      deciding whether to replace them with one small shared in-page
      confirmation, or to find out which browsers actually matter.
+  10. **A restore, or a second browser, will see every piece as "different",
+      because importing a backup re-stamps `createdAt`.** Found on the first
+      real run (2026-10-01). The account held 25 pieces uploaded from one
+      browser. In a second browser, importing the same backup file gave every
+      piece a new `createdAt` (`handleConfirmImport` sets `importedAt + index`
+      on each new imported piece, a deliberate existing rule: imported pieces
+      are "created now, in this browser"), so the first press there listed all
+      25 as "already in your account and different" and added nothing. The
+      only field that differed was `createdAt`; the technique library differed
+      only in its daily list and `updatedAt`. Pass 110 did the right thing (it
+      never overwrites), but a restore through the import flow (Pass 112)
+      would make every restored piece differ from its account row the same way,
+      and Pass 111's change detection would read each one as changed. Needs a
+      decision before Pass 112: restore keeps the row's `createdAt` (an
+      exception to the import rule), or the compare and fingerprint ignore
+      `createdAt`. It isn't pure noise: `createdAt` orders movements inside a
+      work.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

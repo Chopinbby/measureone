@@ -434,9 +434,16 @@ export function backupQuestion(pieceCount, email) {
 }
 
 const TRY_AGAIN = 'Press "Back up this device" to try again.';
-const names = (list) => list.map((p) => p.name).join(", ");
+// Piece names often contain commas ("Etude in C minor, Op. 10, No. 12"), so a
+// list of them is separated by semicolons, and a long one is cut short.
+const MAX_NAMES = 5;
+const names = (list) => {
+  const shown = list.slice(0, MAX_NAMES).map((p) => p.name).join("; ");
+  return list.length > MAX_NAMES ? `${shown}; and ${list.length - MAX_NAMES} more` : shown;
+};
 
-// The result as plain lines: [{ text, problem }].
+// The result as plain lines: [{ text, problem, plain? }]. `plain` marks a line that
+// shouldn't get the green "it worked" look.
 export function describeBackupResult(result) {
   if (!result) return [];
   if (result.status === "stopped") {
@@ -454,7 +461,20 @@ export function describeBackupResult(result) {
   const lines = [];
   const techniqueOk = result.technique === "backedUp";
   if (result.backedUp === 0 && !techniqueOk) {
-    lines.push({ problem: false, text: "Nothing was backed up." });
+    if (result.different.length > 0 && result.mismatched.length === 0 && result.notSent.length === 0) {
+      // Nothing failed: the account already holds a (different) copy of every
+      // piece, so there was nothing to add. "Nothing was backed up" alone reads
+      // like a failure, which is what it did the first time someone saw it.
+      lines.push({
+        problem: false,
+        plain: true,
+        text: result.different.length === 1
+          ? "Nothing was added: your account already has a copy of this piece."
+          : "Nothing was added: your account already has a copy of each of these pieces.",
+      });
+    } else {
+      lines.push({ problem: false, text: "Nothing was backed up." });
+    }
   } else {
     lines.push({
       problem: false,

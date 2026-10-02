@@ -156,7 +156,7 @@ export function SettingsTab({
                     {backupLines.map((line, i) => (
                       <p
                         key={i}
-                        className={line.problem ? "tq-error" : i === 0 && !backupLines.some((l) => l.problem) ? "tq-ok" : "wizard-hint"}
+                        className={line.problem ? "tq-error" : i === 0 && !line.plain && !backupLines.some((l) => l.problem) ? "tq-ok" : "wizard-hint"}
                         style={{ margin: 0, fontSize: 13 }}
                       >
                         {line.text}

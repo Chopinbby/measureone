@@ -64,6 +64,13 @@ export function SettingsTab({
   backupAskText = null,
   onConfirmBackUp,
   onCancelBackUp,
+  // Keeping the backup current (Pass 111). syncActive: this device's first
+  // backup has been checked, so changes now go up by themselves. syncStatus is
+  // the one quiet line ({ text, tone } from lib/accountSync.js
+  // describeSyncStatus, or null). syncRunning: an upload is in flight.
+  syncActive = false,
+  syncRunning = false,
+  syncStatus = null,
   backupRunning = false,
   backupLines = [],
   backupCheckedAt = null,
@@ -122,18 +129,28 @@ export function SettingsTab({
             ) : authEmail ? (
               <>
                 <p className="wizard-hint" style={{ marginBottom: 12 }}>
-                  Signed in as <strong>{authEmail}</strong>. Backing up copies the pieces and technique library on
-                  this device to your account. Nothing on this device changes, and anything your account already
-                  holds is left as it is. Signing out doesn't remove anything from this device.
+                  Signed in as <strong>{authEmail}</strong>.{" "}
+                  {syncActive
+                    ? "Changes on this device are backed up to your account automatically while you're signed in. Nothing on this device changes, and anything in your account that differs is left as it is. Signing out stops that, and doesn't remove anything from this device."
+                    : "Backing up copies the pieces and technique library on this device to your account. Nothing on this device changes, and anything your account already holds is left as it is. Signing out doesn't remove anything from this device."}
                 </p>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="ghost-btn" onClick={onBackUp} disabled={backupRunning || !!backupAskText}>
+                  <button className="ghost-btn" onClick={onBackUp} disabled={backupRunning || !!backupAskText || syncRunning}>
                     <CloudUpload size={14} /> {backupRunning ? "Backing up..." : "Back up this device"}
                   </button>
                   <button className="ghost-btn" onClick={onSignOut} disabled={backupRunning}>
                     <LogOut size={14} /> Sign out
                   </button>
                 </div>
+                {syncStatus && (
+                  <p
+                    role="status"
+                    className={syncStatus.tone === "ok" ? "tq-ok" : syncStatus.tone === "problem" ? "tq-error" : "wizard-hint"}
+                    style={{ margin: "12px 0 0", fontSize: 13 }}
+                  >
+                    {syncStatus.text}
+                  </p>
+                )}
                 {backupAskText && (
                   <div
                     role="group"

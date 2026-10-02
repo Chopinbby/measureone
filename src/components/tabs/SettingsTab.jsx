@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { KeyText } from "./technique/KeyText";
@@ -53,6 +53,20 @@ export function SettingsTab({
   authEmail,
   onSignIn,
   onSignOut,
+  // First backup to the account (Pass 110). The handler, and the question it
+  // asks first, are in App.jsx; backupLines is the last result as plain
+  // lines ([{ text, problem }], lib/accountSync.js describeBackupResult), and
+  // backupCheckedAt is when a finished one was checked (null otherwise).
+  onBackUp,
+  // The first backup to an account asks first. The question (backupAskText,
+  // null when it isn't showing) is part of this panel, never a browser
+  // pop-up, which some browsers block (see App.jsx handleBackUpDevice).
+  backupAskText = null,
+  onConfirmBackUp,
+  onCancelBackUp,
+  backupRunning = false,
+  backupLines = [],
+  backupCheckedAt = null,
 }) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
@@ -94,9 +108,12 @@ export function SettingsTab({
             </button>
           </div>
         </div>
-        {/* Account (Pass 109). Signing in doesn't move any data yet, so the
-            panel says so in both states. Signing out leaves this device's
-            pieces and technique data exactly as they are. */}
+        {/* Account (Pass 109, backup Pass 110). Signed out there's only Sign in.
+            Signed in, "Back up this device" copies this device's pieces and
+            technique library to the account and checks the copy by reading
+            it back (the first backup to an account asks first, in App.jsx).
+            It never changes anything on this device, and signing out leaves
+            this device's data exactly as it is. */}
         {authEnabled && (
           <div className="panel">
             <h3>Account</h3>
@@ -105,17 +122,58 @@ export function SettingsTab({
             ) : authEmail ? (
               <>
                 <p className="wizard-hint" style={{ marginBottom: 12 }}>
-                  Signed in as <strong>{authEmail}</strong>. Signing in doesn't back anything up yet. Backups come
-                  in a later update. Signing out doesn't remove anything from this device.
+                  Signed in as <strong>{authEmail}</strong>. Backing up copies the pieces and technique library on
+                  this device to your account. Nothing on this device changes, and anything your account already
+                  holds is left as it is. Signing out doesn't remove anything from this device.
                 </p>
-                <button className="ghost-btn" onClick={onSignOut}>
-                  <LogOut size={14} /> Sign out
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="ghost-btn" onClick={onBackUp} disabled={backupRunning || !!backupAskText}>
+                    <CloudUpload size={14} /> {backupRunning ? "Backing up..." : "Back up this device"}
+                  </button>
+                  <button className="ghost-btn" onClick={onSignOut} disabled={backupRunning}>
+                    <LogOut size={14} /> Sign out
+                  </button>
+                </div>
+                {backupAskText && (
+                  <div
+                    role="group"
+                    aria-label="Confirm backup"
+                    style={{ marginTop: 12, padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--white)" }}
+                  >
+                    <p style={{ margin: "0 0 10px", fontSize: 14, lineHeight: 1.5 }}>{backupAskText}</p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button className="primary-btn" onClick={onConfirmBackUp} autoFocus>
+                        Back up
+                      </button>
+                      <button className="ghost-btn" onClick={onCancelBackUp}>
+                        Not now
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {backupLines.length > 0 && (
+                  <div role="status" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                    {backupLines.map((line, i) => (
+                      <p
+                        key={i}
+                        className={line.problem ? "tq-error" : i === 0 && !line.plain && !backupLines.some((l) => l.problem) ? "tq-ok" : "wizard-hint"}
+                        style={{ margin: 0, fontSize: 13 }}
+                      >
+                        {line.text}
+                      </p>
+                    ))}
+                    {backupCheckedAt && (
+                      <p className="wizard-hint" style={{ margin: 0, fontSize: 13 }}>
+                        Checked at {new Date(backupCheckedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
+                      </p>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <>
                 <p className="wizard-hint" style={{ marginBottom: 12 }}>
-                  Signing in doesn't back anything up yet. Backups come in a later update.
+                  Sign in to back up this device's pieces and technique library to your account.
                 </p>
                 <button className="ghost-btn" onClick={onSignIn}>
                   <LogIn size={14} /> Sign in

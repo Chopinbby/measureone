@@ -37,8 +37,9 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   injected via a `<style>` tag inside the root component, using CSS custom
   properties defined on `.measureone-app`. No Tailwind, no CSS modules.
 - No backend. All persistence is client-side `localStorage`. (Since Pass 109 an
-  optional account sign-in exists on sites connected to an account service, but
-  it stores nothing yet; see "Since Pass 109" below.)
+  optional account sign-in exists on sites connected to an account service, and
+  since Pass 110 it can copy this browser's data to the account on request; see
+  "Since Pass 109" and "Since Pass 110" below.)
 - No React Router — navigation is a simple `activeTab` string in state.
 
 ## Running it locally
@@ -1950,3 +1951,52 @@ it only says who's signed in. Four things worth knowing:
   message, so the forms can't reveal who has an account. See
   [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   and [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#sign-in-behavior-pass-109).
+
+**Since Pass 110**, a signed-in person can press **Back up this device**
+(Settings → Account) to copy this browser's pieces and technique library to
+their account, checked by reading it back. Nothing is kept current
+automatically (Pass 111) and nothing is downloaded into a device (Pass 112)
+yet. Six things worth knowing:
+- **It only ever ADDS. Never make this path change or delete an account
+  row.** `backUpDevice` (`lib/accountSync.js`) inserts the rows the account
+  lacks and nothing else. A row that already exists is compared and reported
+  ("Already in your account and different, left as it is"), never overwritten:
+  that covers a piece that differs, a piece the account marks deleted, and the
+  technique row. The "save only if still at revision N" functions
+  (`changePieceRow`, `changeTechniqueRow`) are built and tested but nothing
+  calls them until Pass 111. The database keeps the revision count
+  (`supabase/migrations/0002_revision_counter.sql`, a trigger); the app only
+  states the revision it expects and never sends one.
+- **Compare as data, never as text** (`sameData`: JSON round trip, then key by
+  key). The database reorders keys; compared as text, none of the 25 real
+  pieces checked matched. `test/accountSync.test.mjs` fails if it's switched
+  to text (re-broken on purpose and confirmed).
+- **A piece that differs gets no device-record entry, on purpose.** The
+  record (`measureone-account-sync`, filed under the account's user id) holds
+  the revision this device last saw and a fingerprint of what it uploaded, only
+  for what matched the read-back. Recording the revision a differing piece has
+  now would let Pass 111 write over it. **Pass 111 must treat "a row exists but
+  this device has no entry for it" as held, never as safe to upload over**, and
+  the technique row follows the same rule.
+- **The first backup to an account asks first; later ones don't.**
+  `handleBackUpDevice` (`App.jsx`) shows the question in the Account panel
+  (`backupAsking`, with Back up / Not now) unless `hasRecordedBackup` says this
+  device already holds a checked backup for that account. **Never make a
+  required step depend on a browser pop-up (`window.confirm`/`alert`):** the
+  first version used one and did nothing on its first real try, most likely
+  because the browser blocked the pop-up (reproduced exactly by making the
+  pop-up answer "No"). The app's other pop-ups have the same weakness (logged
+  in [`docs/Decisions.md`](docs/Decisions.md#open-questions)). The asking is in the handler, not in `backUpDevice`, so a new
+  caller (Pass 111) must ask for itself (logged in
+  [`docs/Decisions.md`](docs/Decisions.md#open-questions)).
+- **What's uploaded is what the app holds**, `pieces` and `technique` from
+  state (after `validateAndMigratePiece`, never the raw stored text), read
+  once when the button is pressed. The backup writes nothing to pieces or
+  technique data; the only thing it writes on this device is the device record.
+- **The running state and the last result live in `App.jsx` (`backup`), not
+  `SettingsTab`**, so leaving Settings doesn't lose them; a result is shown
+  only to the account that asked. `lib/accountSync.js` imports only
+  `lib/backend.js`'s helpers, never the library itself (Design K still holds:
+  the main download grew by about 3.3 KB, the library file is unchanged).
+See [`docs/User-Flows.md`](docs/User-Flows.md#11-backing-up-this-device-optional-pass-110)
+and [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#first-backup-behavior-pass-110).

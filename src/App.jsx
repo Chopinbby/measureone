@@ -73,6 +73,7 @@ import {
   isConnectionProblem,
   EXPIRED_LINK_MESSAGE,
 } from "./lib/backend";
+import { backUpDevice, backupQuestion, describeBackupResult, hasRecordedBackup, readDeviceRecord } from "./lib/accountSync";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { Wizard } from "./components/Wizard";
@@ -261,6 +262,15 @@ export default function App() {
   const [choosePasswordMode, setChoosePasswordMode] = useState(null); // null | "invite" | "reset"
   const authListenerRef = useRef(false);
   const authLinkHandledRef = useRef(false);
+  // First backup to the account (Pass 110, lib/accountSync.js). Kept here, not
+  // in SettingsTab, so a backup that's running, and its result, survive
+  // leaving the Settings tab. `userId` is whose backup this is: a result is
+  // only shown to the account that asked for it. The ref stops a second press
+  // while one is running.
+  const [backup, setBackup] = useState({ running: false, userId: null, result: null, finishedAt: null });
+  const backupRunningRef = useRef(false);
+  // True while the first-backup question is showing in the Account panel.
+  const [backupAsking, setBackupAsking] = useState(false);
   // Technique data (Pass 100) — app-level, one localStorage key of its own,
   // never part of `pieces` and never touched by setPieces/updatePiece. Its
   // write failures are tracked in their own flag so the pieces save effect
@@ -440,6 +450,61 @@ export default function App() {
     // Only some other kind of failure is worth an alert.
     if (error && !isConnectionProblem(error)) window.alert("Couldn't sign out. Try again in a moment.");
   };
+
+  // Copies this device's pieces and technique library to the signed-in account
+  // and checks the copy by reading it back (Pass 110, lib/accountSync.js). It
+  // only ever adds what the account lacks: it never changes this device's data
+  // and never overwrites a row the account already holds. `pieces` and
+  // `technique` are read once, when this runs: what's uploaded and compared is
+  // what this device held at that moment, even if something changes while it
+  // runs.
+  const runBackUp = async () => {
+    if (!authEnabled || !authSession || !technique || backupRunningRef.current) return;
+    const { userId } = authSession;
+    backupRunningRef.current = true;
+    setBackup({ running: true, userId, result: null, finishedAt: null });
+    let result;
+    try {
+      result = await backUpDevice({ pieces, technique, userId });
+    } catch (e) {
+      // backUpDevice reports its own failures; this is only a last resort.
+      result = { userId, status: "stopped", reason: "other" };
+    }
+    backupRunningRef.current = false;
+    setBackup({ running: false, userId, result, finishedAt: Date.now() });
+  };
+
+  // The "Back up this device" button. Design J: the first backup to an account
+  // asks first, so one browser's pieces never land in the wrong account by
+  // surprise; once a checked backup is recorded on this device for that
+  // account, pressing again goes straight through, since all it can do is add
+  // what's missing. The question is shown in the Account panel itself, never
+  // as a browser pop-up: some browsers block or auto-dismiss pop-ups, and a
+  // blocked pop-up reads as "No", so the button silently does nothing. The
+  // first version used a pop-up and did nothing on its first real try; making
+  // the pop-up answer "No" reproduces that exactly (the real browser's
+  // behavior wasn't confirmed, but the symptom is identical).
+  const handleBackUpDevice = () => {
+    if (!authEnabled || !authSession || !technique || backupRunningRef.current) return;
+    if (!hasRecordedBackup(readDeviceRecord(), authSession.userId)) {
+      setBackupAsking(true);
+      return;
+    }
+    runBackUp();
+  };
+  const handleConfirmBackUp = () => {
+    setBackupAsking(false);
+    runBackUp();
+  };
+  const handleCancelBackUp = () => setBackupAsking(false);
+
+  // A backup result belongs to the account that asked for it: drop it when the
+  // signed-in account changes or signs out. (A backup that's still running
+  // keeps going and reports to its own account, see handleBackUpDevice.)
+  useEffect(() => {
+    setBackupAsking(false);
+    setBackup((b) => (b.running || (b.userId === null && b.result === null) ? b : { running: false, userId: null, result: null, finishedAt: null }));
+  }, [authSession ? authSession.userId : null]);
 
   // Check the export reminder once pieces are loaded — app-level (not
   // per-piece), since export already bundles every piece into one backup.
@@ -2724,6 +2789,13 @@ export default function App() {
                 authEmail={authSession ? authSession.email : null}
                 onSignIn={openSignIn}
                 onSignOut={handleSignOut}
+                onBackUp={handleBackUpDevice}
+                backupAskText={backupAsking && authSession ? backupQuestion(Object.keys(pieces).length, authSession.email) : null}
+                onConfirmBackUp={handleConfirmBackUp}
+                onCancelBackUp={handleCancelBackUp}
+                backupRunning={backup.running}
+                backupLines={authSession && backup.userId === authSession.userId && backup.result ? describeBackupResult(backup.result) : []}
+                backupCheckedAt={authSession && backup.userId === authSession.userId && backup.result && backup.result.status === "done" ? backup.finishedAt : null}
               />
             )}
           </main>

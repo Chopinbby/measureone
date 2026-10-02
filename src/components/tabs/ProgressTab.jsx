@@ -297,7 +297,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
         </div>
         <div className="chart-legend">
           <span><i className="dot" style={{ background: "var(--ink-faint)" }} />Planned</span>
-          <span><i className="dot" style={{ background: "var(--brass)" }} />Actual</span>
+          <span><i className="dot" style={{ background: "var(--accent)" }} />Actual</span>
         </div>
       </div>
 
@@ -334,7 +334,7 @@ export function ProgressTab({ piece, chunks, timeline, currentDay, onViewAllPiec
             </div>
             <div className="chart-legend">
               <span><i className="dot" style={{ background: "var(--ink-faint)" }} />Estimated</span>
-              <span><i className="dot" style={{ background: "var(--brass)" }} />Actual</span>
+              <span><i className="dot" style={{ background: "var(--accent)" }} />Actual</span>
             </div>
           </>
         )}

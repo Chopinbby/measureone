@@ -1979,9 +1979,14 @@ yet. Six things worth knowing:
   this device has no entry for it" as held, never as safe to upload over**, and
   the technique row follows the same rule.
 - **The first backup to an account asks first; later ones don't.**
-  `handleBackUpDevice` (`App.jsx`) asks (`window.confirm`) unless
-  `hasRecordedBackup` says this device already holds a checked backup for that
-  account. The asking is in the handler, not in `backUpDevice`, so a new
+  `handleBackUpDevice` (`App.jsx`) shows the question in the Account panel
+  (`backupAsking`, with Back up / Not now) unless `hasRecordedBackup` says this
+  device already holds a checked backup for that account. **Never make a
+  required step depend on a browser pop-up (`window.confirm`/`alert`):** the
+  first version used one and did nothing on its first real try, most likely
+  because the browser blocked the pop-up (reproduced exactly by making the
+  pop-up answer "No"). The app's other pop-ups have the same weakness (logged
+  in [`docs/Decisions.md`](docs/Decisions.md#open-questions)). The asking is in the handler, not in `backUpDevice`, so a new
   caller (Pass 111) must ask for itself (logged in
   [`docs/Decisions.md`](docs/Decisions.md#open-questions)).
 - **What's uploaded is what the app holds**, `pieces` and `technique` from

@@ -336,13 +336,20 @@ flow 11, has the screen-by-screen version):
   once, when the button is pressed, so what's uploaded and compared is what
   this device held at that moment, even if something changes while it runs.
 - **The first backup to an account asks first (Design J); later ones don't.**
-  The question is `window.confirm`: "Back up the 12 pieces and the technique
-  library on this device to name@example.com?" It's asked unless this
-  device's record already shows a checked backup to that account, in which
-  case pressing again goes straight through, since all it can do is add what's
-  missing. A different account signing in on this browser has no record, so
-  it's asked again. The asking lives in `handleBackUpDevice`, not in
-  `backUpDevice`.
+  The question appears in the Account panel itself, with **Back up** and
+  **Not now** buttons: "Back up the 12 pieces and the technique library on
+  this device to name@example.com?" It's asked unless this device's record
+  already shows a checked backup to that account, in which case pressing again
+  goes straight through, since all it can do is add what's missing. A
+  different account signing in on this browser has no record, so it's asked
+  again. The asking lives in `handleBackUpDevice`, not in `backUpDevice`.
+  **It is deliberately not a browser pop-up** (`window.confirm`): the first
+  version was, and on the first real try the button did nothing at all, most
+  likely because the browser blocked the pop-up (some browsers block or
+  auto-dismiss them, and a blocked pop-up reads as "No"). The symptom was
+  reproduced in the browser by making the pop-up answer "No" (which browser
+  behavior it really was wasn't confirmed). Fixed by moving the question into
+  the page, and re-checked with a page that throws if any pop-up is attempted.
 - **The device record** (`measureone-account-sync`, stays on this device,
   Design E) is filed under the signed-in account's user id: for each piece and
   for the technique row, the revision this device last saw and a fingerprint

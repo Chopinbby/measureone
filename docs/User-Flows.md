@@ -651,12 +651,14 @@ automatic (that's Pass 111) or a restore (Pass 112). Design:
 
 1. Settings → **Account** → **Back up this device** (`handleBackUpDevice`,
    `App.jsx`).
-2. **The first time for an account on this device, a question first**: "Back
-   up the 12 pieces and the technique library on this device to
-   name@example.com?" (OK or Cancel). Cancel does nothing. Once a checked
-   backup is recorded on this device for that account, pressing again skips the
-   question, since all it can do is add what's missing. A different account
-   signing in on the same browser is asked again.
+2. **The first time for an account on this device, a question first**, right
+   in the Account panel (not a browser pop-up, which some browsers block):
+   "Back up the 12 pieces and the technique library on this device to
+   name@example.com?" with **Back up** and **Not now** buttons. **Not now**
+   closes the question and does nothing. Once a checked backup is recorded on
+   this device for that account, pressing again skips the question, since all
+   it can do is add what's missing. A different account signing in on the same
+   browser is asked again.
 3. While it runs the button reads **Backing up...** and both buttons are
    disabled. Leaving Settings and coming back doesn't interrupt it.
 4. **The result**, in plain words, under the buttons:

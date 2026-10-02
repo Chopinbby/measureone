@@ -58,6 +58,12 @@ export function SettingsTab({
   // lines ([{ text, problem }], lib/accountSync.js describeBackupResult), and
   // backupCheckedAt is when a finished one was checked (null otherwise).
   onBackUp,
+  // The first backup to an account asks first. The question (backupAskText,
+  // null when it isn't showing) is part of this panel, never a browser
+  // pop-up, which some browsers block (see App.jsx handleBackUpDevice).
+  backupAskText = null,
+  onConfirmBackUp,
+  onCancelBackUp,
   backupRunning = false,
   backupLines = [],
   backupCheckedAt = null,
@@ -121,13 +127,30 @@ export function SettingsTab({
                   holds is left as it is. Signing out doesn't remove anything from this device.
                 </p>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="ghost-btn" onClick={onBackUp} disabled={backupRunning}>
+                  <button className="ghost-btn" onClick={onBackUp} disabled={backupRunning || !!backupAskText}>
                     <CloudUpload size={14} /> {backupRunning ? "Backing up..." : "Back up this device"}
                   </button>
                   <button className="ghost-btn" onClick={onSignOut} disabled={backupRunning}>
                     <LogOut size={14} /> Sign out
                   </button>
                 </div>
+                {backupAskText && (
+                  <div
+                    role="group"
+                    aria-label="Confirm backup"
+                    style={{ marginTop: 12, padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--white)" }}
+                  >
+                    <p style={{ margin: "0 0 10px", fontSize: 14, lineHeight: 1.5 }}>{backupAskText}</p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button className="primary-btn" onClick={onConfirmBackUp} autoFocus>
+                        Back up
+                      </button>
+                      <button className="ghost-btn" onClick={onCancelBackUp}>
+                        Not now
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {backupLines.length > 0 && (
                   <div role="status" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
                     {backupLines.map((line, i) => (

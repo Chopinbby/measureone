@@ -7488,6 +7488,21 @@ oversight to silently fix; surface it instead.
      already there and different, 120 pieces (three pages per read), a
      deleted row, a full device storage and a 503. Worth turning into tests
      in `test/accountSync.test.mjs` when the pass is finished.
+  9. **The app's other browser pop-ups have the same weakness.** Found when
+     the first-backup question, which was a pop-up, did nothing on its first
+     real try (reproduced by making the pop-up answer "No"; the real
+     browser's behavior wasn't confirmed). Pass 110 moved that one question
+     into the page, and left the rest. The app has 15 real
+     `window.confirm`/`window.alert` calls (12 in `App.jsx`, one each in
+     `ChecklistItem.jsx`, `SettingsTab.jsx`, `BpmZonesEditor.jsx`): End
+     revival, Split a chunk, Mark as learned elsewhere, replace BPM zones,
+     the splits-lost warning on a chunk-size edit, the two leave-before-
+     logging guards, and the import and reschedule messages. In a browser
+     that blocks or auto-dismisses pop-ups, a confirm answers "No" (the
+     action silently doesn't happen, and a leave-before-logging guard would
+     refuse to let the person leave) and an alert shows nothing. Worth
+     deciding whether to replace them with one small shared in-page
+     confirmation, or to find out which browsers actually matter.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

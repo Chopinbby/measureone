@@ -73,7 +73,25 @@ import {
   isConnectionProblem,
   EXPIRED_LINK_MESSAGE,
 } from "./lib/backend";
-import { backUpDevice, backupQuestion, describeBackupResult, hasRecordedBackup, readDeviceRecord } from "./lib/accountSync";
+import {
+  backUpDevice,
+  backupQuestion,
+  describeBackupResult,
+  hasRecordedBackup,
+  readDeviceRecord,
+  saveDeviceRecord,
+  // Keeping the backup current (Pass 111)
+  SYNC_QUIET_MS,
+  syncSnapshot,
+  syncWaitingChanges,
+  reconcileLocalDeletions,
+  quietDelayMs,
+  retryGapMs,
+  nextFailureCount,
+  syncOutcome,
+  describeSyncStatus,
+  describeHeldBanner,
+} from "./lib/accountSync";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { Wizard } from "./components/Wizard";
@@ -139,6 +157,22 @@ function PieceStatusBadge({ status }) {
   if (!status || status === "active") return null;
   return <span className={`badge ${status}`}>{PIECE_STATUS_LABEL[status]}</span>;
 }
+
+// What the automatic upload (Pass 111) knows, for the status line and the
+// "changed on another device" banner. Worked out from the device record by
+// syncSnapshot; `failures` is how many attempts in a row have failed.
+const NO_SYNC_INFO = { firstBackupDone: false, waiting: 0, held: { pieces: [], technique: false }, backedUpAt: null, failures: 0, running: false };
+const heldKey = (held) => held.pieces.map((p) => `${p.id}:${p.name}:${p.deletedHere ? 1 : 0}`).join("|") + (held.technique ? "|T" : "");
+const sameSyncInfo = (a, b) =>
+  a === b ||
+  (a.firstBackupDone === b.firstBackupDone &&
+    a.waiting === b.waiting &&
+    a.backedUpAt === b.backedUpAt &&
+    a.failures === b.failures &&
+    a.running === b.running &&
+    heldKey(a.held) === heldKey(b.held));
+// How long after startup (or signing in) before the first look at what's waiting.
+const SYNC_STARTUP_DELAY_MS = 2000;
 
 export default function App() {
   const [pieces, setPieces] = useState({});
@@ -271,6 +305,23 @@ export default function App() {
   const backupRunningRef = useRef(false);
   // True while the first-backup question is showing in the Account panel.
   const [backupAsking, setBackupAsking] = useState(false);
+  // Keeping the backup current (Pass 111, lib/accountSync.js). The deciding is
+  // all in the library; this file only schedules it. Everything the timers and
+  // listeners need is in refs, so a callback that fires later never sees stale
+  // state: `syncLatestRef` is the newest pieces/technique/account, and
+  // `syncGenRef` is bumped whenever the account changes or signs out, which
+  // makes a run still in flight stop at its next item.
+  const [syncInfo, setSyncInfo] = useState(NO_SYNC_INFO);
+  const [syncClock, setSyncClock] = useState(() => Date.now());
+  const syncTimerRef = useRef(null);
+  const syncRunningRef = useRef(false);
+  const syncRerunRef = useRef(false);
+  const syncFailuresRef = useRef(0);
+  const syncNextAttemptRef = useRef(0);
+  const syncPendingSinceRef = useRef(null);
+  const syncGenRef = useRef(0);
+  const syncLatestRef = useRef({ pieces: {}, technique: null, userId: null, loaded: false });
+  const prevPiecesForSyncRef = useRef(null);
   // Technique data (Pass 100) — app-level, one localStorage key of its own,
   // never part of `pieces` and never touched by setPieces/updatePiece. Its
   // write failures are tracked in their own flag so the pieces save effect
@@ -346,6 +397,205 @@ export default function App() {
     if (!loaded || !technique) return;
     setTechniqueStorageError(!saveTechniqueToStorage(technique).ok);
   }, [technique, loaded]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Keeping the backup current (Pass 111).                           */
+  /*  Everything here only SCHEDULES lib/accountSync.js: what's        */
+  /*  waiting, how it's uploaded, what a refusal means and the wording */
+  /*  are all decided there, and tested. Nothing here runs, and the    */
+  /*  account library isn't loaded, unless this device is signed in    */
+  /*  AND its first backup has been checked (Pass 110).                */
+  /* ---------------------------------------------------------------- */
+
+  // What's waiting, from the device record as it is now, published for the
+  // status line and the banner. No network. Returns the snapshot, or null when
+  // signed out.
+  const refreshSyncInfo = () => {
+    const { pieces: latestPieces, technique: latestTechnique, userId } = syncLatestRef.current;
+    if (!authEnabled || !userId) {
+      setSyncInfo((prev) => (prev === NO_SYNC_INFO ? prev : NO_SYNC_INFO));
+      return null;
+    }
+    const snap = syncSnapshot({ pieces: latestPieces, technique: latestTechnique, userId });
+    const next = { ...snap, failures: syncFailuresRef.current, running: syncRunningRef.current };
+    setSyncInfo((prev) => (sameSyncInfo(prev, next) ? prev : next));
+    return snap;
+  };
+
+  const scheduleSync = (delayMs) => {
+    if (!authEnabled) return;
+    clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      syncTimerRef.current = null;
+      runSync();
+    }, Math.max(0, delayMs));
+  };
+
+  // One upload run: send what's waiting (the library does it, one item at a
+  // time, each "only if still at revision N"), then decide what happens next.
+  // A refusal is not a failure (that piece is held and left alone); no
+  // connection, a server that isn't answering, or something the database
+  // objected to is, and waits for the next retry gap (30 seconds, 2 minutes,
+  // then every 10 minutes) or the browser's online event.
+  const runSync = async () => {
+    const { pieces: latestPieces, technique: latestTechnique, userId, loaded: isLoaded } = syncLatestRef.current;
+    if (!authEnabled || !userId || !isLoaded || !latestTechnique) return;
+    if (backupRunningRef.current) {
+      // a manual backup is running: don't overlap it
+      scheduleSync(2000);
+      return;
+    }
+    if (syncRunningRef.current) {
+      syncRerunRef.current = true; // go again when this one ends
+      return;
+    }
+    const snap = syncSnapshot({ pieces: latestPieces, technique: latestTechnique, userId });
+    if (!snap.firstBackupDone || snap.waiting === 0) {
+      syncPendingSinceRef.current = null;
+      refreshSyncInfo();
+      return;
+    }
+    const generation = syncGenRef.current;
+    syncRunningRef.current = true;
+    refreshSyncInfo();
+    let result;
+    try {
+      result = await syncWaitingChanges({
+        pieces: latestPieces,
+        technique: latestTechnique,
+        userId,
+        isCancelled: () => syncGenRef.current !== generation,
+      });
+    } catch (e) {
+      // syncWaitingChanges reports its own failures; this is only a last resort.
+      result = { status: "stopped", reason: "other" };
+    }
+    syncRunningRef.current = false;
+    if (syncGenRef.current !== generation) {
+      // signed out, or into another account, while it ran
+      refreshSyncInfo();
+      if (syncLatestRef.current.userId) scheduleSync(SYNC_STARTUP_DELAY_MS);
+      return;
+    }
+    const outcome = syncOutcome(result);
+    syncFailuresRef.current = nextFailureCount(syncFailuresRef.current, outcome);
+    if (outcome === "failure") {
+      const gap = retryGapMs(syncFailuresRef.current);
+      syncNextAttemptRef.current = Date.now() + gap;
+      scheduleSync(gap);
+    } else {
+      syncNextAttemptRef.current = 0;
+      if (syncRerunRef.current) {
+        syncRerunRef.current = false;
+        scheduleSync(SYNC_QUIET_MS);
+      }
+    }
+    const after = refreshSyncInfo();
+    syncPendingSinceRef.current = after && after.waiting > 0 ? Date.now() : null;
+  };
+
+  // Deleting a piece is noticed here, not inferred later. A piece this
+  // session saw leave `pieces` is marked "deleted here" in the device record
+  // (so the deletion survives a reload and goes up once signed in), and a stale
+  // mark on a piece that exists again is cleared. A piece that's merely
+  // missing from `pieces` (a failed load, say) is NOT a deletion: treating it
+  // as one would mark the account's copy of everything deleted.
+  const noteLocalDeletions = (current) => {
+    const previous = prevPiecesForSyncRef.current;
+    prevPiecesForSyncRef.current = current;
+    const removedIds = previous ? Object.keys(previous).filter((id) => !Object.prototype.hasOwnProperty.call(current, id)) : [];
+    const { record, changed } = reconcileLocalDeletions(readDeviceRecord(), { removedIds, presentIds: Object.keys(current) });
+    if (changed) saveDeviceRecord(record);
+  };
+
+  // THE HOOK AFTER BOTH SAVE EFFECTS above (so what it looks at is already
+  // saved on this device): after every change to pieces or technique, work
+  // out what's waiting and (re)start the quiet-period timer. A run waits a few
+  // seconds after the last change, so logging several things in a row is one
+  // upload, and never more than a minute after the first of them. After a
+  // failure it waits for the retry gap instead, so saving more can't hammer a
+  // service that isn't answering.
+  useEffect(() => {
+    if (!loaded) return;
+    syncLatestRef.current = { pieces, technique, userId: authSession ? authSession.userId : null, loaded: true };
+    if (!authEnabled) return;
+    noteLocalDeletions(pieces);
+    if (!authSession) return;
+    const snap = refreshSyncInfo();
+    if (snap && snap.firstBackupDone && snap.waiting > 0) {
+      const now = Date.now();
+      if (syncPendingSinceRef.current == null) syncPendingSinceRef.current = now;
+      scheduleSync(Math.max(quietDelayMs(now, syncPendingSinceRef.current), syncNextAttemptRef.current - now));
+    }
+  }, [pieces, technique, loaded]);
+
+  // Signing in, or the app starting with a saved sign-in: work out what's
+  // waiting and look at it soon. Signing out, or another account: stop (a run
+  // still going stops at its next item), forget this session's retry state and
+  // clear the status. The device record is left alone, so signing back in as
+  // the same account simply compares and finds what's waiting; a different
+  // account has no record here and starts at Pass 110's question.
+  useEffect(() => {
+    syncLatestRef.current = { ...syncLatestRef.current, userId: authSession ? authSession.userId : null };
+    syncGenRef.current += 1;
+    clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = null;
+    syncRerunRef.current = false;
+    syncFailuresRef.current = 0;
+    syncNextAttemptRef.current = 0;
+    syncPendingSinceRef.current = null;
+    if (!authEnabled || !authSession) {
+      setSyncInfo((prev) => (prev === NO_SYNC_INFO ? prev : NO_SYNC_INFO));
+      return;
+    }
+    if (!loaded) return;
+    const snap = refreshSyncInfo();
+    if (snap && snap.firstBackupDone && snap.waiting > 0) scheduleSync(SYNC_STARTUP_DELAY_MS);
+  }, [loaded, authSession ? authSession.userId : null]);
+
+  // The connection coming back is an immediate retry (and forgets the
+  // backoff). The window regaining focus works out what's waiting again and
+  // tries if the retry gap is over: a timer that was throttled while the window
+  // sat in the background may not have fired.
+  useEffect(() => {
+    if (!authEnabled) return;
+    const onOnline = () => {
+      if (!syncLatestRef.current.userId) return;
+      syncFailuresRef.current = 0;
+      syncNextAttemptRef.current = 0;
+      const snap = refreshSyncInfo();
+      if (snap && snap.firstBackupDone && snap.waiting > 0) scheduleSync(0);
+    };
+    const onFocus = () => {
+      if (!syncLatestRef.current.userId) return;
+      setSyncClock(Date.now());
+      const snap = refreshSyncInfo();
+      if (snap && snap.firstBackupDone && snap.waiting > 0 && !syncRunningRef.current && Date.now() >= syncNextAttemptRef.current) {
+        scheduleSync(1000);
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") onFocus();
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearTimeout(syncTimerRef.current);
+    };
+  }, []);
+
+  // The status line says "Backed up 3 minutes ago", so while the Settings page
+  // is showing and someone is signed in, re-read the clock every half minute.
+  useEffect(() => {
+    if (!authSession || activeTab !== "settings") return;
+    setSyncClock(Date.now());
+    const id = setInterval(() => setSyncClock(Date.now()), 30 * 1000);
+    return () => clearInterval(id);
+  }, [authSession ? authSession.userId : null, activeTab]);
 
   // Re-read the date when the window regains focus or becomes visible, and
   // once a minute — setting the same date string is a no-op re-render-wise,
@@ -459,7 +709,7 @@ export default function App() {
   // what this device held at that moment, even if something changes while it
   // runs.
   const runBackUp = async () => {
-    if (!authEnabled || !authSession || !technique || backupRunningRef.current) return;
+    if (!authEnabled || !authSession || !technique || backupRunningRef.current || syncRunningRef.current) return;
     const { userId } = authSession;
     backupRunningRef.current = true;
     setBackup({ running: true, userId, result: null, finishedAt: null });
@@ -472,6 +722,10 @@ export default function App() {
     }
     backupRunningRef.current = false;
     setBackup({ running: false, userId, result, finishedAt: Date.now() });
+    // A first backup that checked out is what switches automatic uploading on
+    // (Pass 111): work out what's waiting now, and send it after the quiet period.
+    const snap = refreshSyncInfo();
+    if (snap && snap.firstBackupDone && snap.waiting > 0) scheduleSync(SYNC_QUIET_MS);
   };
 
   // The "Back up this device" button. Design J: the first backup to an account
@@ -2453,6 +2707,20 @@ export default function App() {
         </div>
       )}
 
+      {authSession && (syncInfo.held.pieces.length > 0 || syncInfo.held.technique) && (
+        // The one case waiting won't fix (Pass 111): something in the account was
+        // changed by another device, so this device's copy hasn't been uploaded
+        // over it. Same look as the storage-error banner. No button: settling
+        // it is a later pass. Ordinary cases (waiting, retrying) never get one.
+        <div className="storage-error-banner">
+          <AlertTriangle size={18} />
+          <div>
+            <p className="storage-error-title">{describeHeldBanner(syncInfo.held).title}</p>
+            <p className="storage-error-sub">{describeHeldBanner(syncInfo.held).sub}</p>
+          </div>
+        </div>
+      )}
+
       {exportReminderDue && !exportReminderDismissed && pieceList.length > 0 && (
         <div className="export-reminder-banner">
           <Download size={18} />
@@ -2793,6 +3061,9 @@ export default function App() {
                 backupAskText={backupAsking && authSession ? backupQuestion(Object.keys(pieces).length, authSession.email) : null}
                 onConfirmBackUp={handleConfirmBackUp}
                 onCancelBackUp={handleCancelBackUp}
+                syncActive={syncInfo.firstBackupDone}
+                syncRunning={syncInfo.running}
+                syncStatus={authSession ? describeSyncStatus({ now: syncClock, ...syncInfo }) : null}
                 backupRunning={backup.running}
                 backupLines={authSession && backup.userId === authSession.userId && backup.result ? describeBackupResult(backup.result) : []}
                 backupCheckedAt={authSession && backup.userId === authSession.userId && backup.result && backup.result.status === "done" ? backup.finishedAt : null}

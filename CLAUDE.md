@@ -2000,3 +2000,74 @@ yet. Six things worth knowing:
   the main download grew by about 3.3 KB, the library file is unchanged).
 See [`docs/User-Flows.md`](docs/User-Flows.md#11-backing-up-this-device-optional-pass-110)
 and [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#first-backup-behavior-pass-110).
+
+**Since Pass 111**, once a device's first backup to an account has been
+checked (Pass 110), **every later change is sent to the account by itself**
+while signed in, with a quiet status line in the Account panel and one banner
+only when a piece is held. Nothing is downloaded into a device yet (Pass 112).
+Eight things worth knowing:
+- **Where the upload hooks into the save effects.** In `App.jsx`, one
+  `useEffect` on `[pieces, technique, loaded]` **declared after both save
+  effects** (the `pieces` one via `savePieceChanges`, and the technique one),
+  in the block headed "Keeping the backup current (Pass 111)", so what it
+  looks at is already saved on this device. It only *schedules*: it works out
+  what's waiting (`syncSnapshot`, no network), notes a deleted piece
+  (`noteLocalDeletions`) and restarts a 5-second quiet timer (never more than
+  a minute after the first unsent change). `lib/accountSync.js` decides
+  everything else and is tested; timers and listeners read refs
+  (`syncLatestRef`), never state captured when they were set up. Nothing in it
+  goes through `setPieces`/`updatePiece`, and it never changes pieces or
+  technique on this device: the only thing it writes here is the device record.
+- **It changes an account row only through "save only if still at revision N"**
+  (`changePieceRow`, `changeTechniqueRow`, the new `deletePieceRow`), never an
+  overwrite and never a revision of the app's own. A deleted piece is sent as
+  `deleted_at` set and stays (Design D). **A refusal is not a failure and is
+  never retried:** the row is read again and judged (`judgeRefusal`): the same
+  as this device's copy (another tab, or this device's own earlier upload whose
+  note didn't land) adopts the row's revision; gone is put back; different (or
+  marked deleted) HOLDS the piece, marked in the device record, never uploaded
+  again by this pass, this device's copy untouched, the others keep going. The
+  technique library can be held too. Don't "fix" a held piece by retrying: that
+  is exactly the overwrite the whole design exists to prevent. Settling is
+  Pass 112.
+- **A deletion counts only if this session SAW the piece leave `pieces`**
+  (`reconcileLocalDeletions`, flag `deletedHere` in the record), never merely
+  "in the record but not in `pieces`". A failed load would otherwise mark the
+  account's copy of everything deleted.
+- **"The same" means the same after a reload** (found in the browser): the app
+  builds a chunk's first practice record without `tier1Done`/`troubleSpots`, and
+  a technique task without `tempo`, and loading adds them, so as-is a reloaded
+  piece looked changed and went up again (an extra revision after most days of
+  practice). `fingerprint`s and comparisons therefore use `canonicalPiece` /
+  `canonicalTechnique` (the load's own `validateAndMigratePiece` /
+  `validateAndMigrateTechnique`, after a JSON round trip), through
+  `pieceFingerprint`/`techniqueFingerprint`/`samePiece`/`sameTechnique`.
+  **Never fingerprint or compare a piece or technique raw in this file.**
+  What's sent is still the app's own copy, and the first backup's read-back of a
+  row it just wrote stays strict (`exact`); a row already there only has to
+  match. Several tests fail if this is switched off (re-broken on purpose and
+  confirmed, for pieces, for the technique library and for the strict read-back). One known blind spot: a field loading would *drop* from the
+  technique library isn't noticed as a change.
+- **Retrying:** a failed attempt leaves things waiting and the next try is 30
+  seconds later, then 2 minutes, then every 10 (`RETRY_GAPS_MS`); the browser's
+  online event retries at once. After two failures in a row the status says the
+  account service isn't answering. The HTTP status of each answer is kept
+  (`status`), because Supabase's errors carry none: 5xx/408/429/no answer count
+  as "not answering", anything else that isn't a refusal leaves that one item
+  waiting while the others go. Signing out stops a run (`syncGenRef`) and leaves
+  the record alone, so signing back in finds what's waiting by comparing.
+- **Nothing here may run, and the library may not be loaded, unless the device
+  is signed in AND its first backup is checked** (`computeWaiting` returns
+  nothing before then; the first backup stays a deliberate, asked-first step).
+  A new caller of the upload must keep that gate. The live site and `npm test`
+  have no connection settings, so `authEnabled` is false and nothing renders.
+- **Status wording is one line, first match wins** (`describeSyncStatus`): not
+  answering, else the held message, else "N changes waiting to back up", else
+  "Backed up just now". A held piece's line replaces the backed-up one, a
+  choice to revisit, not a settled design. The banner is `.storage-error-banner`
+  reused, shown on every screen while anything is held.
+- **Found, not fixed, for Pass 112:** importing a backup re-stamps each piece's
+  `createdAt`, so a second browser that imports the same file reads every piece
+  as different from the account's. Settling must decide whether that field
+  counts, and should reuse `samePiece`/`sameTechnique`. See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#keeping-the-backup-current-pass-111).

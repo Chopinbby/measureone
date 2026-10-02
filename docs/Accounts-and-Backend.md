@@ -382,10 +382,21 @@ flow 11, has the screen-by-screen version):
   between the owner's two exports (15:01:44 and 15:02:24); every row identical
   as data (a SHA-256 of its key-sorted JSON) to both exported files, and the
   two exports identical to each other, so the backup round-tripped the real
-  database exactly and changed nothing on the device. A second browser that
-  imported the same file then pressed the button and correctly got "Nothing
-  was added" for all 25 pieces (see the Pass 110 follow-ups in
-  [Decisions.md](Decisions.md#open-questions), item 10, for why they differ).
+  database exactly and changed nothing on the device. A second browser (the
+  built-in one in the Claude app) that imported the same file then pressed the
+  button: the app left all 25 pieces alone, listing each as "already in your
+  account and different". The result then began "Nothing was backed up.",
+  which read like a failure, so it was reworded to "Nothing was added..." (see
+  the Pass 110 follow-ups in [Decisions.md](Decisions.md#open-questions), item
+  10, for why those copies differ). **Hand-edit check (2026-10-02):** changing
+  one account row in the SQL editor took it from revision 1 to 2 (the rule
+  works there). Pressing the button afterwards in that second browser left it
+  exactly as edited: revision 2, the edited text still in the account, no
+  row's change time later than the hand edit, the other 24 rows still at
+  revision 1 (nothing uploaded twice) and the technique row untouched, while
+  the device's own copy was unchanged. Not yet seen on the real project: the
+  "24 of 25 backed up" display for that case in a browser whose copy matches
+  the account (covered by the unit tests and the local browser run).
 - **A running backup survives leaving Settings**, and both buttons are
   disabled while it runs. A result is shown only to the account that asked for
   it.

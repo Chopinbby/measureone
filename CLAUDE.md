@@ -2063,11 +2063,22 @@ Eight things worth knowing:
   have no connection settings, so `authEnabled` is false and nothing renders.
 - **Status wording is one line, first match wins** (`describeSyncStatus`): not
   answering, else the held message, else "N changes waiting to back up", else
-  "Backed up just now". A held piece's line replaces the backed-up one, a
-  choice to revisit, not a settled design. The banner is `.storage-error-banner`
+  "Backed up just now". A held piece's line replaces the backed-up one and
+  hides "N changes waiting"; showing both is left for Pass 112 on purpose
+  (decided 2026-10-03). The banner is `.storage-error-banner`
   reused, shown on every screen while anything is held.
-- **Found, not fixed, for Pass 112:** importing a backup re-stamps each piece's
-  `createdAt`, so a second browser that imports the same file reads every piece
-  as different from the account's. Settling must decide whether that field
-  counts, and should reuse `samePiece`/`sameTechnique`. See
+- **Found, not fixed, for Pass 112:** (1) importing a backup re-stamps each
+  piece's `createdAt`, so a second browser that imports the same file reads
+  every piece as different from the account's. Settling must decide whether
+  that field counts, and should reuse `samePiece`/`sameTechnique`. (2) **A false
+  hold:** if an upload lands but its confirmation is lost, and more is logged
+  before the next attempt, the refusal judge (`judgeRefusal`) sees the account's
+  row (this device's own older version) as different from the current copy and
+  holds the piece as "changed on another device" by mistake. Confirmed with a
+  scratch test; if nothing changed since the lost confirmation it adopts the
+  row correctly (tested). Settling needs "the row is an earlier version of this
+  device's own data" anyway, so build that detection there (for example, keep a
+  fingerprint of what each attempt sent since the last confirmed revision and
+  adopt a row that matches one). Left on purpose, decided 2026-10-03: nobody can
+  reach accounts until Pass 114. (3) The one-line status, above. See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#keeping-the-backup-current-pass-111).

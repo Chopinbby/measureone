@@ -565,6 +565,29 @@ What was built, and the small choices made building it:
   compare raw. (5) Two other things stay as they were: about fifteen native
   `window.confirm`/`alert` pop-ups elsewhere share the weakness described under
   Pass 110, and the first backup's "ask first" still lives in the handler.
+  (6) **A false hold** (found after the browser checks and confirmed with a
+  test; **left for this pass on purpose, decided by the user on 2026-10-03**,
+  because nobody can reach accounts until Pass 114 and only the owner on test
+  sites until then). If an upload reaches the account but its confirmation is
+  lost (the connection drops, the laptop sleeps or the tab closes at that
+  moment), this device's record still says the old revision and the next
+  attempt is refused. If nothing changed on this device since, the row equals
+  this device's copy and the revision is adopted (built and tested). **If more
+  was logged in between, the row is this device's own earlier version, which
+  differs from the current copy, so the piece is held as "changed on another
+  device" by mistake.** Nothing is lost (the account keeps the earlier version,
+  this device keeps everything), but the piece stops backing up until it's
+  settled. Settling needs "the account's copy is an earlier version of this
+  device's own data" anyway, to settle some held pieces without asking, so the
+  same detection should prevent this false hold, for example by remembering a
+  fingerprint of what each attempt sent since the last confirmed revision and
+  adopting a row that matches one. (7) **The Account status line shows one
+  message at a time** (not answering, else held, else waiting, else backed up),
+  so while a piece or the technique library is held it hides both "N changes
+  waiting" and "Backed up just now". It got in the owner's way three times in
+  the preview checks. Also left for this pass on purpose (2026-10-03): show the
+  held message and the normal line together when the Account panel is reworked
+  for settling.
 
 ## Setup (test project)
 

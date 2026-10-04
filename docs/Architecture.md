@@ -22,10 +22,15 @@
   injected via a `<style>` tag inside the root component. All colors go
   through CSS custom properties defined on `.measureone-app` (see
   "Design tokens" below). There is no Tailwind and no CSS modules.
-- No backend. All persistence is client-side `localStorage`. (Designed,
-  not built: persistence will gain an optional account copy on Supabase,
-  with this browser's copy staying the working copy — see
-  [Accounts-and-Backend.md](Accounts-and-Backend.md).)
+- No backend of our own. All persistence is client-side `localStorage`,
+  and that copy stays the working copy. **On sites connected to an account
+  service (Supabase; never the live site until Pass 114) a person can
+  optionally sign in, and the app then also keeps a copy of every piece and
+  the technique library in their account**: sign-in (Pass 109), a checked
+  first backup (Pass 110), and every later change sent by itself (Pass 111).
+  Signed out, or with no connection settings, the app is exactly the
+  `localStorage`-only app and makes no account request. See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md).
 - No React Router — navigation is a simple `activeTab` string in state,
   switched via a sidebar.
 
@@ -162,8 +167,26 @@ MeasureOne.jsx/
     │   │                                  # (scales/arpeggios): day list, walk,
     │   │                                  # pace, methods. Pure, no clock — see
     │   │                                  # Algorithms.md#technique-practice-engine-pass-99
-    │   └── storage.js                     # localStorage load/save/export/import;
-    │                                      # also the app-level technique key (Pass 100)
+    │   ├── storage.js                     # localStorage load/save/export/import;
+    │   │                                  # also the app-level technique key (Pass 100)
+    │   ├── backend.js                     # Pass 108/109: the ONLY file that touches
+    │   │                                  # the Supabase library, and never through a
+    │   │                                  # top-level import: loadBackend() fetches the
+    │   │                                  # ~59 KB library on demand (Accounts-and-
+    │   │                                  # Backend.md, Design K). isBackendConfigured()
+    │   │                                  # is false when the connection settings are
+    │   │                                  # missing (the live site, tests)
+    │   └── accountSync.js                 # Pass 110/111: copying this device to the
+    │                                      # account. No React; takes the client as an
+    │                                      # argument so a test can fake it. The first
+    │                                      # backup (adds only, checked by reading it
+    │                                      # back), then what's waiting (computeWaiting),
+    │                                      # uploading it "only if still at revision N",
+    │                                      # refusals, retry timing and the status
+    │                                      # wording. Pieces and the technique library
+    │                                      # are fingerprinted and compared in the form
+    │                                      # a reload would give them (canonicalPiece/
+    │                                      # canonicalTechnique, via storage.js)
     └── components/
         ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
         │   ScheduleBanner.jsx, Sparkline.jsx,
@@ -285,7 +308,8 @@ library.
   each, ~20MB), that full re-save took ~48ms — see
   [Decisions.md](Decisions.md#open-questions) for the benchmark. Pass 106
   wasn't about speed locally; it's the groundwork for sending only changed
-  pieces to an account copy — see
+  pieces to an account copy, which Pass 111 now does — see "Account sign-in
+  and the automatic backup" below and
   [Accounts-and-Backend.md](Accounts-and-Backend.md).
 - `handleSavePiece` (`SettingsTab`'s "Save changes") additionally runs
   `migrateOrphanedProgress(piece, updated)` (`lib/chunking.js`, a later
@@ -365,6 +389,36 @@ library.
     `storageError`, because the pieces save effect resets `storageError` on
     every run and would otherwise clear a technique failure (and vice
     versa). The existing storage banner shows while either is set.
+- **Account sign-in and the automatic backup (Passes 109-111): all
+  optional, all behind `authEnabled`** (`isBackendConfigured()`; false on the
+  live site, in tests and in a fresh checkout, and then none of what follows
+  renders or runs). `authSession` is only `{ email, userId }` (the library
+  holds the real session), kept current by one `onAuthStateChange` listener.
+  The account library is downloaded only when something needs it. The
+  persistence path is unchanged: pieces and technique are still written to
+  `localStorage` by their own save effects, and **the upload is a separate
+  step that only watches**:
+  - **Where it hooks in.** A single `useEffect` on `[pieces, technique,
+    loaded]`, **declared after both save effects** (so what it looks at is
+    already saved on this device), in the block headed "Keeping the backup
+    current (Pass 111)" in `App.jsx`. It works out what's waiting
+    (`syncSnapshot`, no network), notes a piece that left `pieces` as deleted
+    (`noteLocalDeletions`, so a deletion is something this session *saw*,
+    never inferred from a piece being absent) and restarts a quiet-period timer
+    (5 seconds, at most 60 after the first unsent change). Three more effects:
+    sign-in / sign-out / account change (bumps `syncGenRef` so a run in flight
+    stops, clears the timers and failure count, schedules a startup look);
+    `online` / `focus` / `visibilitychange` listeners; and a 30-second clock
+    while Settings is showing (for "Backed up 3 minutes ago").
+  - **It only schedules.** What's waiting, how it's sent, what a refusal
+    means, the retry gaps and every word shown are in `lib/accountSync.js` and
+    tested there. Timers and listeners read refs (`syncLatestRef`), never
+    state captured when they were set up.
+  - **It never changes what this device holds.** The only thing it writes on
+    this device is the device record (`measureone-account-sync`, filed under
+    the account's user id). The held-piece banner reuses
+    `.storage-error-banner`; the Account panel's status line is
+    `describeSyncStatus`. Nothing goes through `setPieces`/`updatePiece`.
 - `storageError` (a failed `localStorage` write) and `exportReminderDue` /
   `exportReminderDismissed` (**Pass 12** — a day-plus since the last export,
   or since first use if never exported; `isExportReminderDue`,

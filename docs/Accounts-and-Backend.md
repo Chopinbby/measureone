@@ -33,10 +33,12 @@ person can sign in and out** (see [Sign-in behavior](#sign-in-behavior-pass-109)
 but signing in alone moves no data. **Since Pass 110 a signed-in person can
 press "Back up this device"** to copy this browser's pieces and technique
 library to their account, checked by reading it back (see
-[First backup behavior](#first-backup-behavior-pass-110)). Nothing is kept
-current automatically until Pass 111, and nothing is downloaded into a device
-until Pass 112. The live site has no backend at all: it saves everything to
-the browser only, as it always has.
+[First backup behavior](#first-backup-behavior-pass-110)). **Since Pass 111,
+once that first backup has been checked, every later change is sent to the
+account by itself** (see
+[Keeping the backup current](#keeping-the-backup-current-pass-111)). Nothing
+is downloaded into a device until Pass 112. The live site has no backend at
+all: it saves everything to the browser only, as it always has.
 
 ## Decided
 
@@ -204,7 +206,8 @@ docs).
   project, like the first, and on production at go-live. Built; see
   [First backup behavior](#first-backup-behavior-pass-110).
 - **111** Keep the backup current after every change, with a quiet status
-  line and automatic retry.
+  line and automatic retry. Built; see
+  [Keeping the backup current](#keeping-the-backup-current-pass-111).
 - **112** Restore onto a new device.
 - **113** Account settings (change email or password, sign out). **No
   in-app "delete my account" in Phase 1** (decided by the user,
@@ -405,6 +408,186 @@ flow 11, has the screen-by-screen version):
   110)"): a paused project reads as a generic failure, "ask first" isn't
   enforced inside `backUpDevice`, the result's detail line counts pieces only,
   and the failure-path checks aren't committed as tests.
+
+## Keeping the backup current (Pass 111)
+
+What was built, and the small choices made building it:
+
+- **When it runs.** Only while signed in, and only once this device's first
+  backup to that account has been checked (Pass 110), because the first backup
+  asks first (Design J) and nothing automatic may skip that question. Signed
+  out, on the live site, or before the first backup, nothing here runs: no
+  timer is started, the account library isn't downloaded and no request is
+  made (checked on a production build, with and without the connection
+  settings).
+- **What counts as waiting** (`computeWaiting`, `lib/accountSync.js`, pure and
+  tested): a piece whose fingerprint differs from the one in this device's
+  record; a piece the record has but this device no longer holds, **if this
+  session saw it deleted**; the technique library if its fingerprint differs;
+  and a piece with no entry at all (a new piece, or one the first backup left as
+  "different"), which goes up as an *add*. It's worked out at startup (once the
+  sign-in is known), after every save, when the browser comes back online and
+  when the window regains focus.
+- **App.jsx only schedules.** The block after the technique save effect
+  ("Keeping the backup current (Pass 111)", `App.jsx`): `refreshSyncInfo`
+  (reads what's waiting, no network), `scheduleSync`, `runSync` and
+  `noteLocalDeletions`, plus four effects. **The hook that watches for changes
+  is declared after both save effects** (the `pieces` one and the technique
+  one), so what it looks at has already been written to this device; it runs on
+  `[pieces, technique, loaded]`. Everything a timer or listener needs lives in
+  refs (`syncLatestRef` holds the newest pieces, technique and account), so a
+  callback that fires later never sees stale state. `syncGenRef` is bumped
+  whenever the account changes or signs out, which makes a run still in flight
+  stop at its next item.
+- **A quiet period, then each item "only if still at revision N".** A run
+  starts 5 seconds after the last change, and never more than a minute after the
+  first unsent one (so logging several things in a row is one upload). Each item
+  goes through Pass 110's `changePieceRow`/`changeTechniqueRow`, or
+  `addPieceRow` for an add (which now also returns the new row's revision), or
+  the new `deletePieceRow`. The revision the database returns goes into the
+  device record along with the new fingerprint. The app still never sends a
+  revision of its own.
+- **A deleted piece is sent as deleted, never removed** (Design D): the row gets
+  `deleted_at` and stays, at the next revision. **Only a deletion this session
+  saw counts** (`noteLocalDeletions` marks `deletedHere` in the record when a
+  piece leaves `pieces`). A piece that is merely missing from `pieces`, because
+  a load failed, say, is never treated as deleted: the first version of this
+  rule would have marked the account's copy of everything deleted after one bad
+  load. A deleted piece that comes back (an import, an undo) clears the mark.
+- **Retrying.** A failed attempt (no connection, a server that isn't answering
+  or is busy, a 5xx, a timeout, or something else the database objected to)
+  leaves the item waiting. The next attempt is 30 seconds later, then 2 minutes,
+  then every 10 minutes (`RETRY_GAPS_MS`), and the browser's online event retries
+  at once and forgets the backoff. After two failed attempts in a row the status
+  says "The account service isn't answering. Everything is still saved on this
+  device." (a paused project looks exactly like no connection). Any success
+  starts the count again. **A refusal is not a failure**: it never counts toward
+  that and is never retried. The status code of each answer is kept
+  (`status`), because Supabase's errors carry none of their own: a 5xx, 408, 429
+  or no answer at all counts as "the service isn't answering"; anything else
+  that isn't a refusal leaves that one item waiting while the others still go.
+- **A refusal is checked before it is believed.** "Save only if still at
+  revision N" being refused doesn't always mean another device changed
+  something. The row is read again and judged (`judgeRefusal`): if it is
+  **the same** as this device's copy (another tab of this browser got there
+  first, or this device's own earlier upload landed but its note of it didn't),
+  the row's revision is adopted and nothing is held; if the row is **gone** (a
+  table wiped in the dashboard) it's put back, or for a deletion there's
+  nothing left to delete; if it **differs**, or the account marks it deleted,
+  the piece is **held**: marked "changed on another device" in the device
+  record, never uploaded again (by this pass), this device's own copy left
+  exactly as it is. The other pieces keep uploading. **The technique library can
+  be held the same way.** Settling a held piece is Pass 112.
+- **One banner, only for a held piece**, in the storage-error banner's style
+  (`.storage-error-banner`): "1 piece changed on another device", the name(s),
+  and "This device's copy is unchanged and hasn't been uploaded over the
+  account's. Everything else keeps backing up. Settling this comes in a later
+  update." It shows on every screen until Pass 112 can settle it. Nothing else
+  shows in the sidebar or as a banner; the storage-error banner, manual export
+  and the export reminder are untouched.
+- **A quiet status line in the Account panel** (`describeSyncStatus`, first
+  match wins): "The account service isn't answering...", else the held message
+  ("1 piece changed on another device: Ballade No. 1"), else "N changes waiting
+  to back up", else "Backed up just now" / "Backed up 3 hours ago". **While a
+  piece is held its line replaces the backed-up one**, so "Backed up just now"
+  isn't shown beside a piece that wasn't; to confirm other pieces are still
+  going up, look at their revision in the account. Hidden before the first
+  backup. The main button is disabled while an automatic run is going, and an
+  automatic run waits for a manual backup instead of overlapping it.
+- **Signing out stops uploads** (a run in flight stops at its next item, the
+  timer is cleared, the status is hidden) and **leaves the device record alone**,
+  so signing back in as the same account compares and finds what's waiting; a
+  different account has no record on this browser and starts at Pass 110's
+  question. Sign out is still this device only, and still leaves every piece
+  and the technique library where they are.
+- **"The same" means the same after a reload** (found in the browser, not
+  planned). The app doesn't always hold a piece in the exact shape a reload
+  gives it. A chunk's first practice record is created without `tier1Done` and
+  `troubleSpots` (loading adds them as false and null), and a technique task is
+  built without a `tempo` (loading adds null); the real technique block in the
+  owner's own backups shows the second one. Compared as they stand, a piece
+  uploaded and then simply reloaded looked changed and went up again: the next
+  open of the app after most days of practice cost an extra revision with
+  nothing changed (reproduced in the browser: revision 8 became 9 on a reload).
+  Once a second device exists that would also have shown up as a false
+  "changed on another device". So pieces and the technique library are
+  **fingerprinted and compared in the form loading would give them**
+  (`canonicalPiece`, `canonicalTechnique`: the same `validateAndMigratePiece`
+  and `validateAndMigrateTechnique` the load uses, after the same trip through
+  JSON), in "what's waiting", after an upload, when judging a refusal and in
+  Pass 110's comparison with the account. **What is sent is unchanged: the app's
+  own copy.** The first backup's read-back check stays strict for a row it has
+  just written (it must be identical as stored, so a field quietly dropped on
+  the way still counts as a mismatch, `exact` in `compareWithAccount`), while a
+  row that was already there only has to match. Cost: about a tenth of a
+  millisecond per piece (25 real pieces: 2.3 ms), worked out once per object.
+  One difference this can't see: a field that loading would *drop* from the
+  technique library (its own migration keeps only the fields it knows) isn't
+  noticed as a change. Re-checked in the browser after the fix: a first log on
+  a never-logged chunk uploads once and a reload uploads nothing; adding a scale
+  uploads the technique once and a reload uploads nothing.
+- **Size.** The main download grew by about 4.1 KB compressed (150,936 bytes
+  here against 146,859 for `main` at the time, both built the same way); the
+  library's own file is byte-identical (same name, 59,211 bytes) and is still
+  downloaded only when needed. A signed-out visitor still downloads no library,
+  but does download the sync code (it can't be left out of the main file
+  without a second on-demand file; see the pull request).
+- **Checked in the browser** (the real app and library against a local
+  stand-in for the database, which behaves like it: the revision rule, the
+  refusal on a stale revision and the "already exists" answer; rows the test
+  could change by hand): nothing uploads before the first backup is checked;
+  after it, a logged session goes up about 5 seconds later "only if still at
+  revision N" and the row's revision rises by one; a pretend-paused service
+  (every request answers 503) shows "isn't answering" after the second failed
+  attempt, the attempts come at 30 seconds and 2 minutes, and the browser's
+  online event uploads at once; changes made while the service is down survive
+  closing and reopening the page and go up by themselves at the next retry; a
+  deleted piece's row gets `deleted_at` and stays; a row changed by hand then a
+  change to the same piece in the app is refused, read again, held, the banner
+  names it, the account's row and this device's copy are untouched and the
+  other pieces keep uploading (and the held one isn't tried again, also after a
+  reload); signing out stops a run that was about to start, signing back in
+  uploads what was waiting; a different account on this browser makes no
+  request and sees Pass 110's panel. **Not yet seen on the real test project**:
+  that needs the owner's sign-in (the checks are listed in the pass's pull
+  request).
+- **For Pass 112** (found here, not decided): (1) **Importing a backup
+  re-stamps each piece's `createdAt`** (`handleConfirmImport`: `importedAt +
+  index`), so a second browser that imports the same file holds pieces that
+  differ from the account's copies by that field alone, and every one reads
+  "different". Settling needs to decide whether that field counts. (2) The
+  held list is only in the device record and the status/banner; settling needs
+  the account's copy of a held piece, which this pass reads only to compare.
+  (3) A held piece's `deletedHere` mark can be held too ("a piece deleted
+  here"), and the status says so without a name. (4) The refusal judge and the
+  "same after a reload" rule are the only places that decide two copies are
+  the same; settling should reuse `samePiece`/`sameTechnique` rather than
+  compare raw. (5) Two other things stay as they were: about fifteen native
+  `window.confirm`/`alert` pop-ups elsewhere share the weakness described under
+  Pass 110, and the first backup's "ask first" still lives in the handler.
+  (6) **A false hold** (found after the browser checks and confirmed with a
+  test; **left for this pass on purpose, decided by the user on 2026-10-03**,
+  because nobody can reach accounts until Pass 114 and only the owner on test
+  sites until then). If an upload reaches the account but its confirmation is
+  lost (the connection drops, the laptop sleeps or the tab closes at that
+  moment), this device's record still says the old revision and the next
+  attempt is refused. If nothing changed on this device since, the row equals
+  this device's copy and the revision is adopted (built and tested). **If more
+  was logged in between, the row is this device's own earlier version, which
+  differs from the current copy, so the piece is held as "changed on another
+  device" by mistake.** Nothing is lost (the account keeps the earlier version,
+  this device keeps everything), but the piece stops backing up until it's
+  settled. Settling needs "the account's copy is an earlier version of this
+  device's own data" anyway, to settle some held pieces without asking, so the
+  same detection should prevent this false hold, for example by remembering a
+  fingerprint of what each attempt sent since the last confirmed revision and
+  adopting a row that matches one. (7) **The Account status line shows one
+  message at a time** (not answering, else held, else waiting, else backed up),
+  so while a piece or the technique library is held it hides both "N changes
+  waiting" and "Backed up just now". It got in the owner's way three times in
+  the preview checks. Also left for this pass on purpose (2026-10-03): show the
+  held message and the normal line together when the Account panel is reworked
+  for settling.
 
 ## Setup (test project)
 

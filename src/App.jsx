@@ -17,6 +17,7 @@ import {
   X,
   AlertTriangle,
   Piano,
+  CloudDownload,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange, newId } from "./lib/utils";
@@ -91,6 +92,21 @@ import {
   syncOutcome,
   describeSyncStatus,
   describeHeldBanner,
+  // Getting things from the account (Pass 112)
+  accountRecordFor,
+  fetchAccountCopy,
+  countLiveAccountPieces,
+  describeFetchProblem,
+  describeRestoreButton,
+  accountRowsToCandidates,
+  restrictCandidatesToHeld,
+  planAccountMerge,
+  planNeedsQuestion,
+  applyAccountMerge,
+  withAccountCopyRecorded,
+  withPieceDropped,
+  markOtherCopiesDeleted,
+  describeAccountMergeResult,
 } from "./lib/accountSync";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
@@ -281,6 +297,20 @@ export default function App() {
   // What reading that block reported: { unreadable, skippedItems } — shown in
   // the import modal and the final message rather than skipped silently.
   const [importTechniqueInfo, setImportTechniqueInfo] = useState({ unreadable: false, skippedItems: 0 });
+  // Getting things from the account (Pass 112, lib/accountSync.js). Restore,
+  // "Get changes" and Review are one flow that hands the account's rows to this
+  // same import modal. `importSource` says where the modal's pieces came from;
+  // for the account, `importAccount` holds what the flow worked out (which row
+  // each listed piece is, its kind, pieces deleted elsewhere). `accountNotice`
+  // is the flow's last result as plain lines, shown in the page (never a
+  // browser pop-up, which some browsers block).
+  const [importSource, setImportSource] = useState("file");
+  const [importAccount, setImportAccount] = useState(null);
+  const [accountFlowBusy, setAccountFlowBusy] = useState(false);
+  const accountFlowBusyRef = useRef(false);
+  const [accountNotice, setAccountNotice] = useState(null);
+  const [welcomeAccountCount, setWelcomeAccountCount] = useState(null);
+  const accountDeletedHereRef = useRef([]);
   const [storageError, setStorageError] = useState(false);
   // Account sign-in (Pass 109). Optional: when the backend isn't configured
   // (the live site, a fresh checkout, tests) authEnabled is false and none of
@@ -440,8 +470,9 @@ export default function App() {
   const runSync = async () => {
     const { pieces: latestPieces, technique: latestTechnique, userId, loaded: isLoaded } = syncLatestRef.current;
     if (!authEnabled || !userId || !isLoaded || !latestTechnique) return;
-    if (backupRunningRef.current) {
-      // a manual backup is running: don't overlap it
+    if (backupRunningRef.current || accountFlowBusyRef.current) {
+      // a manual backup, or the account being read or merged (Pass 112), is
+      // running: don't overlap it
       scheduleSync(2000);
       return;
     }
@@ -597,6 +628,24 @@ export default function App() {
     return () => clearInterval(id);
   }, [authSession ? authSession.userId : null, activeTab]);
 
+  // The welcome screen's "Restore 12 pieces from your account" button: when
+  // someone is signed in on a device with no piece open, count the pieces the
+  // account holds (ids only, no piece data). No button when it holds none, or
+  // can't be reached.
+  useEffect(() => {
+    if (!authEnabled || !authSession || !loaded || piece) {
+      setWelcomeAccountCount(null);
+      return;
+    }
+    let cancelled = false;
+    countLiveAccountPieces({ userId: authSession.userId }).then((r) => {
+      if (!cancelled) setWelcomeAccountCount(r.status === "ok" ? r.count : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authSession ? authSession.userId : null, loaded, !!piece]);
+
   // Re-read the date when the window regains focus or becomes visible, and
   // once a minute — setting the same date string is a no-op re-render-wise,
   // so this only does anything when the day actually changed.
@@ -709,7 +758,7 @@ export default function App() {
   // what this device held at that moment, even if something changes while it
   // runs.
   const runBackUp = async () => {
-    if (!authEnabled || !authSession || !technique || backupRunningRef.current || syncRunningRef.current) return;
+    if (!authEnabled || !authSession || !technique || backupRunningRef.current || syncRunningRef.current || accountFlowBusyRef.current) return;
     const { userId } = authSession;
     backupRunningRef.current = true;
     setBackup({ running: true, userId, result: null, finishedAt: null });
@@ -758,6 +807,17 @@ export default function App() {
   useEffect(() => {
     setBackupAsking(false);
     setBackup((b) => (b.running || (b.userId === null && b.result === null) ? b : { running: false, userId: null, result: null, finishedAt: null }));
+    // The account flow belongs to the account that opened it too.
+    setAccountNotice(null);
+    setWelcomeAccountCount(null);
+    accountDeletedHereRef.current = [];
+    if (importSource === "account") {
+      setImportCandidates(null);
+      setImportTechnique(null);
+      setImportTechniqueInfo({ unreadable: false, skippedItems: 0 });
+      setImportSource("file");
+      setImportAccount(null);
+    }
   }, [authSession ? authSession.userId : null]);
 
   // Check the export reminder once pieces are loaded — app-level (not
@@ -1190,6 +1250,237 @@ export default function App() {
     }
     if (techniqueUnreadable) parts.push("the technique library in the file couldn't be read, so it wasn't imported");
     window.alert(parts.length ? `Import complete: ${parts.join(", ")}.` : "Nothing selected. Import cancelled.");
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Getting things from the account (Pass 112).                      */
+  /*  Restore from the welcome screen, "Get changes" in the Account    */
+  /*  panel, and Review on a piece held as changed on another device   */
+  /*  are one flow. lib/accountSync.js reads the account's rows, works */
+  /*  out what each one is and merges them with the import path's own  */
+  /*  functions; this file only runs it, shows the import modal when a */
+  /*  person needs to decide something, and applies the result. It     */
+  /*  never removes anything from this device unless "Delete it here   */
+  /*  too" is clicked, and the only thing it writes to the account is  */
+  /*  marking a duplicate copy deleted.                                */
+  /* ---------------------------------------------------------------- */
+
+  const closeImportModal = () => {
+    setImportCandidates(null);
+    setImportTechnique(null);
+    setImportTechniqueInfo({ unreadable: false, skippedItems: 0 });
+    if (importSource === "account") {
+      const gone = accountDeletedHereRef.current;
+      accountDeletedHereRef.current = [];
+      if (gone.length) setAccountNotice({ lines: gone.map((n) => ({ text: `Deleted "${n}" here too.` })) });
+    }
+    setImportSource("file");
+    setImportAccount(null);
+  };
+
+  // Does the merge and everything that goes with it. The device record is saved
+  // BEFORE any state changes, so the automatic upload (Pass 111) never sees
+  // merged pieces without their entries and mistakes them for new ones.
+  const applyAccountFlow = async ({ mode, userId, candidates, selectedIds, ladderChoices, orderChoice, includeTechnique }) => {
+    const { pieces: localPieces, technique: localTechnique } = syncLatestRef.current;
+    const record = accountRecordFor(readDeviceRecord(), userId);
+    const out = applyAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record, selectedIds, ladderChoices, orderChoice, includeTechnique });
+    saveDeviceRecord(
+      withAccountCopyRecorded(readDeviceRecord(), userId, {
+        entries: out.entries,
+        technique: out.technique ? out.technique.entry : null,
+        checkedAt: out.becomesChecked ? Date.now() : null,
+      })
+    );
+    const changedIds = Object.keys(out.pieces).filter((id) => out.pieces[id] !== localPieces[id]);
+    if (changedIds.length > 0) {
+      setPieces((prev) => {
+        const next = { ...prev };
+        changedIds.forEach((id) => {
+          next[id] = out.pieces[id];
+        });
+        return next;
+      });
+      // Restoring onto an empty device opens a piece, which brings up the
+      // regular app (sidebar included) in place of the welcome screen.
+      if (out.firstNewId) setActivePieceId((prev) => prev || out.firstNewId);
+    }
+    if (out.technique && out.technique.changed) {
+      const accountTechnique = candidates.technique.technique;
+      updateTechnique((t) => withTopUp(mergeImportedTechnique(t, accountTechnique).technique));
+    }
+    refreshSyncInfo();
+    // Whatever this device holds beyond the account's copy is now an ordinary
+    // change waiting: send it after the usual quiet period. (Nothing in state may
+    // have changed, so the effect that normally schedules this might not run.)
+    if (accountRecordFor(readDeviceRecord(), userId).checkedAt != null) scheduleSync(SYNC_QUIET_MS);
+    // The other copy of a combined piece is marked deleted only once this device
+    // has made its first backup: until then the combined piece can't go up to
+    // replace it, and marking it would leave the account with no live copy.
+    let marked = null;
+    let notMarked = [];
+    if (out.markDeleted.length > 0) {
+      if (accountRecordFor(readDeviceRecord(), userId).checkedAt != null) {
+        marked = await markOtherCopiesDeleted({ items: out.markDeleted, userId });
+      } else {
+        notMarked = out.markDeleted.map((m) => m.name);
+      }
+    }
+    const deletedHere = accountDeletedHereRef.current;
+    accountDeletedHereRef.current = [];
+    let lines = describeAccountMergeResult({
+      mode,
+      applied: out.counts,
+      technique: out.technique && out.technique.changed ? out.technique : null,
+      unreadable: candidates.unreadable.length,
+      skippedItems: candidates.technique.skippedItems,
+      techniqueUnreadable: candidates.technique.unreadable,
+      marked,
+      notMarked,
+    });
+    if (deletedHere.length > 0) {
+      lines = lines.filter((l) => l.text !== "Everything here already matches your account.");
+      deletedHere.forEach((n) => lines.push({ text: `Deleted "${n}" here too.` }));
+    }
+    setAccountNotice({ lines });
+  };
+
+  // mode: "restore" (the welcome screen), "changes" (the Account panel's "Get
+  // changes from your account"), or "review" (a piece held as changed on another
+  // device: only what's held). Reads the account, then either applies it at once
+  // (when nothing needs a decision: a clean newer copy, or what already matches)
+  // or opens the import modal for the person to decide.
+  const openAccountFlow = async (mode) => {
+    if (!authEnabled || !authSession || accountFlowBusyRef.current || backupRunningRef.current || importCandidates) return;
+    const userId = authSession.userId;
+    accountFlowBusyRef.current = true;
+    setAccountFlowBusy(true);
+    setAccountNotice(null);
+    try {
+      const got = await fetchAccountCopy({ userId });
+      if (syncLatestRef.current.userId !== userId) return; // signed out, or another account, meanwhile
+      if (got.status !== "ok") {
+        setAccountNotice({ lines: [{ text: describeFetchProblem(got.reason), problem: true }] });
+        return;
+      }
+      const { pieces: localPieces, technique: localTechnique } = syncLatestRef.current;
+      if (!localTechnique) return;
+      const record = accountRecordFor(readDeviceRecord(), userId);
+      const all = accountRowsToCandidates(got.rows);
+      if (mode !== "review" && all.pieces.length === 0 && all.deleted.length === 0 && !all.technique.technique) {
+        setAccountNotice({ lines: [{ text: "Your account has nothing yet. Press Back up this device to copy this device's pieces to it." }] });
+        return;
+      }
+      const candidates = mode === "review" ? restrictCandidatesToHeld(all, record) : all;
+      const plan = planAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record });
+      const visible = plan.items.filter((i) => i.kind !== "same");
+      const ask = mode === "restore" ? visible.length > 0 || plan.deletedElsewhere.length > 0 : planNeedsQuestion(plan);
+      if (!ask) {
+        await applyAccountFlow({ mode, userId, candidates, selectedIds: null, ladderChoices: {}, orderChoice: "existing", includeTechnique: true });
+        return;
+      }
+      const matchName = (i) =>
+        i.matchId ? (localPieces[i.matchId] || (candidates.pieces.find((c) => c.id === i.matchId) || {}).piece || {}).name || "this piece" : null;
+      // The technique library gets a row in the modal only when merging it would
+      // change something here. Otherwise it's merged quietly with the rest (its
+      // only effect is recording the account's copy), so "0 new, 0 newer tempos"
+      // never asks for a decision that isn't one.
+      let techniqueOffered = false;
+      if (plan.technique.available && !plan.technique.same) {
+        const st = mergeImportedTechnique(localTechnique, candidates.technique.technique).stats;
+        techniqueOffered = st.itemsAdded + st.temposUpdated + st.methodsAdded + st.methodStatesAdded > 0;
+      }
+      setImportSource("account");
+      setImportAccount({
+        mode,
+        userId,
+        candidates,
+        visibleIds: visible.map((i) => i.id),
+        rowMeta: visible.map((i) => ({ kind: i.kind, held: i.held, matchName: matchName(i) })),
+        deletedElsewhere: plan.deletedElsewhere,
+        unreadable: plan.unreadable.length,
+        techniqueQuiet: plan.technique.available && !techniqueOffered,
+      });
+      setImportTechnique(techniqueOffered ? candidates.technique.technique : null);
+      setImportTechniqueInfo({ unreadable: candidates.technique.unreadable, skippedItems: candidates.technique.skippedItems });
+      setImportCandidates(visible.map((i) => i.piece));
+    } finally {
+      accountFlowBusyRef.current = false;
+      setAccountFlowBusy(false);
+    }
+  };
+
+  // The modal's confirm button when its pieces came from the account. Indexes
+  // are positions in the list the modal showed; the flow keys everything by the
+  // account row's id. What the modal didn't list ("already the same") is always
+  // applied: it only records the account's copy.
+  const handleConfirmAccountImport = async (selectedIndices, ladderChoicesByIndex = {}, orderChoice = "existing", includeTechnique = false) => {
+    const flow = importAccount;
+    if (!flow || accountFlowBusyRef.current) return;
+    if (!authSession || flow.userId !== authSession.userId) {
+      closeImportModal();
+      setAccountNotice({ lines: [{ text: "You signed out, so nothing was changed." }] });
+      return;
+    }
+    const selected = new Set(selectedIndices.map((i) => flow.visibleIds[i]).filter(Boolean));
+    flow.candidates.pieces.forEach((c) => {
+      if (!flow.visibleIds.includes(c.id)) selected.add(c.id);
+    });
+    const ladderChoices = {};
+    selectedIndices.forEach((i) => {
+      const id = flow.visibleIds[i];
+      if (id) ladderChoices[id] = ladderChoicesByIndex[i] === "imported" ? "imported" : "existing";
+    });
+    accountFlowBusyRef.current = true;
+    setAccountFlowBusy(true);
+    setImportCandidates(null);
+    setImportTechnique(null);
+    setImportTechniqueInfo({ unreadable: false, skippedItems: 0 });
+    setImportSource("file");
+    setImportAccount(null);
+    try {
+      await applyAccountFlow({
+        mode: flow.mode,
+        userId: flow.userId,
+        candidates: flow.candidates,
+        selectedIds: [...selected],
+        ladderChoices,
+        orderChoice,
+        includeTechnique: includeTechnique || !!flow.techniqueQuiet,
+      });
+    } finally {
+      accountFlowBusyRef.current = false;
+      setAccountFlowBusy(false);
+    }
+  };
+
+  // "Delete it here too": a piece the account marks deleted (deleted on another
+  // device) but that's still here. Only this click removes it. The device forgets
+  // it first (without counting it as an upload), so no second "deleted" is sent
+  // for a row that's already marked.
+  const handleDeleteHereToo = (id) => {
+    const target = pieces[id];
+    if (!target) return;
+    // Deleting the open piece switches pieces and tabs, so it goes through the
+    // same guard as every other way of leaving unfinished work (an unconfirmed
+    // Interleaved attempt, a running assessment timer).
+    if (activePieceId === id && !guardLeavingActiveWork()) return;
+    if (authSession) saveDeviceRecord(withPieceDropped(readDeviceRecord(), authSession.userId, id));
+    accountDeletedHereRef.current = [...accountDeletedHereRef.current, target.name || "Untitled piece"];
+    const remainingIds = Object.keys(pieces).filter((x) => x !== id);
+    setPieces((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (activePieceId === id) {
+      setActivePieceId(remainingIds[0] || null);
+      setEditDraftState(null);
+      setSettingsEditing(false);
+      setActiveTab("overview");
+      setDayOverride(null);
+    }
+    setImportAccount((prev) => (prev ? { ...prev, deletedElsewhere: prev.deletedElsewhere.filter((d) => d.id !== id) } : prev));
   };
 
   // Editing state lives here, not inside SettingsTab, so switching tabs
@@ -2710,14 +3001,36 @@ export default function App() {
       {authSession && (syncInfo.held.pieces.length > 0 || syncInfo.held.technique) && (
         // The one case waiting won't fix (Pass 111): something in the account was
         // changed by another device, so this device's copy hasn't been uploaded
-        // over it. Same look as the storage-error banner. No button: settling
-        // it is a later pass. Ordinary cases (waiting, retrying) never get one.
+        // over it. Same look as the storage-error banner. Review (Pass 112) opens
+        // the account flow for what's held, so the person can settle it. Ordinary
+        // cases (waiting, retrying) never get a banner.
         <div className="storage-error-banner">
           <AlertTriangle size={18} />
           <div>
             <p className="storage-error-title">{describeHeldBanner(syncInfo.held).title}</p>
             <p className="storage-error-sub">{describeHeldBanner(syncInfo.held).sub}</p>
           </div>
+          <button className="ghost-btn" onClick={() => openAccountFlow("review")} disabled={accountFlowBusy || backup.running}>
+            Review
+          </button>
+        </div>
+      )}
+
+      {authSession && accountNotice && accountNotice.lines.length > 0 && !(piece && activeTab === "settings") && (
+        // The last result of restoring, getting changes or reviewing, in the
+        // page (the Account panel shows it itself on Settings). Dismissible.
+        <div className={accountNotice.lines.some((l) => l.problem) ? "storage-error-banner" : "export-reminder-banner"} role="status">
+          <CloudDownload size={18} />
+          <div>
+            {accountNotice.lines.map((line, i) => (
+              <p key={i} className={i === 0 ? "export-reminder-title" : "export-reminder-sub"} style={line.problem ? { color: "var(--brick)" } : undefined}>
+                {line.text}
+              </p>
+            ))}
+          </div>
+          <button className="export-reminder-dismiss" aria-label="Dismiss" onClick={() => setAccountNotice(null)}>
+            <X size={16} />
+          </button>
         </div>
       )}
 
@@ -2770,6 +3083,13 @@ export default function App() {
               <button className="ghost-btn" style={{ marginTop: 16 }} onClick={handleImportClick}>
                 <Upload size={14} /> Import a backup
               </button>
+              {/* Signed in, and the account holds pieces (Pass 112): bring them onto
+                  this device. Shown only once the count has come back. */}
+              {authEnabled && authSession && welcomeAccountCount > 0 && (
+                <button className="ghost-btn" style={{ marginTop: 16 }} onClick={() => openAccountFlow("restore")} disabled={accountFlowBusy}>
+                  <CloudDownload size={14} /> {accountFlowBusy ? "Reading your account..." : describeRestoreButton(welcomeAccountCount)}
+                </button>
+              )}
               {/* Only when an account backend is configured (Pass 109): a new
                   device has no sidebar until a piece exists, so this is the way
                   in to sign-in there (docs/Accounts-and-Backend.md, Design I). */}
@@ -3067,6 +3387,12 @@ export default function App() {
                 backupRunning={backup.running}
                 backupLines={authSession && backup.userId === authSession.userId && backup.result ? describeBackupResult(backup.result) : []}
                 backupCheckedAt={authSession && backup.userId === authSession.userId && backup.result && backup.result.status === "done" ? backup.finishedAt : null}
+                onGetChanges={() => openAccountFlow("changes")}
+                onReviewHeld={() => openAccountFlow("review")}
+                heldCount={authSession ? syncInfo.held.pieces.length + (syncInfo.held.technique ? 1 : 0) : 0}
+                accountBusy={accountFlowBusy}
+                accountNotice={authSession ? accountNotice : null}
+                onDismissAccountNotice={() => setAccountNotice(null)}
               />
             )}
           </main>
@@ -3104,8 +3430,14 @@ export default function App() {
           techniqueUnreadable={importTechniqueInfo.unreadable}
           techniqueSkippedItems={importTechniqueInfo.skippedItems}
           existingTechnique={technique}
-          onCancel={() => { setImportCandidates(null); setImportTechnique(null); setImportTechniqueInfo({ unreadable: false, skippedItems: 0 }); }}
-          onImport={handleConfirmImport}
+          onCancel={closeImportModal}
+          onImport={importSource === "account" ? handleConfirmAccountImport : handleConfirmImport}
+          source={importSource}
+          mode={importAccount ? importAccount.mode : "changes"}
+          rowMeta={importAccount ? importAccount.rowMeta : null}
+          deletedElsewhere={importAccount ? importAccount.deletedElsewhere : []}
+          onDeleteHere={handleDeleteHereToo}
+          unreadableCount={importAccount ? importAccount.unreadable : 0}
         />
       )}
       {rescheduleModalOpen && (

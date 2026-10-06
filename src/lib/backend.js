@@ -189,3 +189,70 @@ export function setPasswordErrorMessage(error) {
   }
   return "Couldn't save your password. Try again in a moment.";
 }
+
+/* ------------------------------------------------------------------ */
+/*  Account settings (Pass 113): change password, sign out everywhere  */
+/* ------------------------------------------------------------------ */
+
+export const REAUTHENTICATION_MESSAGE = "For your security, sign in again before changing your password.";
+export const NOT_SIGNED_IN_MESSAGE = "You're not signed in any more. Sign in again to change your password.";
+// Shown in the sign-in window when "Sign in again" is chosen from the change
+// password window.
+export const SIGN_IN_AGAIN_NOTICE = "Sign in again to change your password. Then choose Change password once more.";
+
+// Supabase's "secure password change" setting (a dashboard setting) makes the
+// service ask for a recent sign-in before it changes a password. It answers
+// with the code `reauthentication_needed` ("Password update requires
+// reauthentication"); matching the wording too covers a server that sends no
+// code.
+export function isReauthenticationNeeded(error) {
+  if (!error) return false;
+  if (error.code === "reauthentication_needed") return true;
+  return /reauthenticat/i.test(String(error.message || ""));
+}
+
+// What went wrong saving a changed password, in plain words, and whether
+// signing in again would put it right. The other problems (too short, the same
+// as the current one, a failed connection) use the same words as choosing a
+// password after an invitation or reset link; only the two that mean "not
+// recently signed in" differ, because there is no link to ask for here.
+export function changePasswordProblem(error) {
+  if (isConnectionProblem(error)) return { message: NO_CONNECTION_MESSAGE, signInAgain: false };
+  if (isReauthenticationNeeded(error)) return { message: REAUTHENTICATION_MESSAGE, signInAgain: true };
+  if (error && (error.name === "AuthSessionMissingError" || error.code === "session_not_found")) {
+    return { message: NOT_SIGNED_IN_MESSAGE, signInAgain: true };
+  }
+  return { message: setPasswordErrorMessage(error), signInAgain: false };
+}
+
+// What to tell someone after "Sign out of all devices" was tried. The library
+// (in the version used here) signs this device out even when the service
+// couldn't be told, and only reports an error then, so the words depend on two
+// things: did the service take the request (`error`), and is this device signed
+// out now (`signedOutHere`, read back from the library so this doesn't rely on
+// that detail staying true). Other devices keep their sign-in until their
+// current session runs out, up to an hour at Supabase's default. Always says
+// nothing was deleted: signing out never touches a device's data.
+export function describeSignOutAll({ error, signedOutHere }) {
+  const noDelete = "Nothing was deleted from any device.";
+  if (!error) {
+    return {
+      text: `You're signed out of all devices. Other devices can stay signed in for up to an hour. ${noDelete}`,
+      problem: false,
+    };
+  }
+  if (!signedOutHere) {
+    return {
+      text: isConnectionProblem(error)
+        ? "Couldn't reach the account service, so nothing was changed. You're still signed in. Try again when you're connected."
+        : "Couldn't sign out of all devices, so nothing was changed. You're still signed in. Try again in a moment.",
+      problem: true,
+    };
+  }
+  return {
+    text: isConnectionProblem(error)
+      ? `You're signed out on this device, but the account service couldn't be reached, so your other devices may still be signed in. Sign in and try again when you're connected. ${noDelete}`
+      : `You're signed out on this device, but the account service didn't confirm signing out your other devices, so they may still be signed in. Sign in and try again. ${noDelete}`,
+    problem: true,
+  };
+}

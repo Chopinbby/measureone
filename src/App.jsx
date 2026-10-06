@@ -72,7 +72,9 @@ import {
   loadBackend,
   authLink,
   isConnectionProblem,
+  describeSignOutAll,
   EXPIRED_LINK_MESSAGE,
+  SIGN_IN_AGAIN_NOTICE,
 } from "./lib/backend";
 import {
   backUpDevice,
@@ -323,7 +325,15 @@ export default function App() {
   const [authChecking, setAuthChecking] = useState(() => needsBackendAtStartup());
   const [signInOpen, setSignInOpen] = useState(false);
   const [signInNotice, setSignInNotice] = useState("");
-  const [choosePasswordMode, setChoosePasswordMode] = useState(null); // null | "invite" | "reset"
+  const [choosePasswordMode, setChoosePasswordMode] = useState(null); // null | "invite" | "reset" | "change"
+  // Account settings (Pass 113): signing out of every device. The question is
+  // asked in the Account panel (never a browser pop-up), `signOutNotice` is the
+  // last result as { text, problem } (shown in the Account panel, signed in or
+  // out), and the ref stops a second press while one is running.
+  const [signOutAllAsking, setSignOutAllAsking] = useState(false);
+  const [signOutAllBusy, setSignOutAllBusy] = useState(false);
+  const signOutAllBusyRef = useRef(false);
+  const [signOutNotice, setSignOutNotice] = useState(null);
   const authListenerRef = useRef(false);
   const authLinkHandledRef = useRef(false);
   // First backup to the account (Pass 110, lib/accountSync.js). Kept here, not
@@ -749,6 +759,68 @@ export default function App() {
     // Only some other kind of failure is worth an alert.
     if (error && !isConnectionProblem(error)) window.alert("Couldn't sign out. Try again in a moment.");
   };
+
+  // Account settings (Pass 113). "Change password" opens the same window an
+  // invitation or reset link does, in its "change" mode. If the service asks
+  // for a recent sign-in first, that window offers "Sign in again", which
+  // closes it and opens the sign-in window with a note; the person then
+  // chooses Change password once more.
+  const openChangePassword = () => {
+    if (!authEnabled || !authSession) return;
+    setChoosePasswordMode("change");
+  };
+  const handleSignInAgainToChangePassword = () => {
+    setChoosePasswordMode(null);
+    setSignInNotice(SIGN_IN_AGAIN_NOTICE);
+    setSignInOpen(true);
+  };
+
+  // "Sign out of all devices": the library's global scope ends every session
+  // the account has, this device's included. Like the ordinary sign-out it
+  // leaves this device's pieces, technique data and device record exactly as
+  // they are. Unlike it, a failed connection matters here: the library still
+  // signs this device out, but the other devices were not told, so the result
+  // (describeSignOutAll) says what actually happened, read back from the
+  // library rather than assumed. Shown in the Account panel, never as a pop-up.
+  const handleSignOutAll = async () => {
+    setSignOutAllAsking(false);
+    if (!authEnabled || !authSession || signOutAllBusyRef.current) return;
+    signOutAllBusyRef.current = true;
+    setSignOutAllBusy(true);
+    setSignOutNotice(null);
+    let error = null;
+    let signedOutHere = false;
+    try {
+      const client = await loadBackend();
+      if (!client) {
+        error = { name: "AuthRetryableFetchError" };
+      } else {
+        try {
+          const result = await client.auth.signOut({ scope: "global" });
+          error = result.error || null;
+        } catch (e) {
+          error = e || { name: "Error" };
+        }
+        try {
+          const { data } = await client.auth.getSession();
+          signedOutHere = !(data && data.session);
+        } catch (e) {
+          signedOutHere = false;
+        }
+      }
+    } finally {
+      signOutAllBusyRef.current = false;
+      setSignOutAllBusy(false);
+    }
+    setSignOutNotice(describeSignOutAll({ error, signedOutHere }));
+  };
+
+  // Signing out, any way, closes the "sign out of all devices" question; signing
+  // in clears the last result.
+  useEffect(() => {
+    setSignOutAllAsking(false);
+    if (authSession) setSignOutNotice(null);
+  }, [authSession ? authSession.userId : null]);
 
   // Copies this device's pieces and technique library to the signed-in account
   // and checks the copy by reading it back (Pass 110, lib/accountSync.js). It
@@ -3393,6 +3465,14 @@ export default function App() {
                 accountBusy={accountFlowBusy}
                 accountNotice={authSession ? accountNotice : null}
                 onDismissAccountNotice={() => setAccountNotice(null)}
+                onChangePassword={openChangePassword}
+                signOutAllAsking={signOutAllAsking && !!authSession}
+                onAskSignOutAll={() => setSignOutAllAsking(true)}
+                onConfirmSignOutAll={handleSignOutAll}
+                onCancelSignOutAll={() => setSignOutAllAsking(false)}
+                signOutAllBusy={signOutAllBusy}
+                signOutNotice={signOutNotice}
+                onDismissSignOutNotice={() => setSignOutNotice(null)}
               />
             )}
           </main>
@@ -3409,7 +3489,11 @@ export default function App() {
         <SignInModal notice={signInNotice} onClose={() => { setSignInOpen(false); setSignInNotice(""); }} />
       )}
       {authEnabled && choosePasswordMode && (
-        <ChoosePasswordModal mode={choosePasswordMode} onClose={() => setChoosePasswordMode(null)} />
+        <ChoosePasswordModal
+          mode={choosePasswordMode}
+          onClose={() => setChoosePasswordMode(null)}
+          onSignInAgain={handleSignInAgainToChangePassword}
+        />
       )}
       {deleteModalOpen && piece && (
         <DeletePieceModal piece={piece} onCancel={() => setDeleteModalOpen(false)} onConfirm={handleDeletePiece} />

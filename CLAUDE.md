@@ -2004,7 +2004,8 @@ and [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#first-backup-b
 **Since Pass 111**, once a device's first backup to an account has been
 checked (Pass 110), **every later change is sent to the account by itself**
 while signed in, with a quiet status line in the Account panel and one banner
-only when a piece is held. Nothing is downloaded into a device yet (Pass 112).
+only when a piece is held. (Getting things back from the account is Pass 112,
+below.)
 Eight things worth knowing:
 - **Where the upload hooks into the save effects.** In `App.jsx`, one
   `useEffect` on `[pieces, technique, loaded]` **declared after both save
@@ -2082,3 +2083,64 @@ Eight things worth knowing:
   adopt a row that matches one). Left on purpose, decided 2026-10-03: nobody can
   reach accounts until Pass 114. (3) The one-line status, above. See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#keeping-the-backup-current-pass-111).
+
+**Since Pass 112**, a signed-in person can **bring things back from the account**:
+**Restore N pieces** on the welcome screen, **Get changes from your account** in
+the Account panel, and **Review** (banner and Account panel) for a piece held as
+"changed on another device". It's one flow, and it adds nothing to the account
+except marking a duplicate copy deleted. Nothing arrives by itself (Phase 2).
+Ten things worth knowing:
+- **One flow, decided in `lib/accountSync.js`, run by `App.jsx`.**
+  `fetchAccountCopy` reads the rows; `accountRowsToCandidates` skips deleted rows
+  and validates the rest; `planAccountMerge` says what each piece is (new / same /
+  take / ask / combine); `applyAccountMerge` does the merge purely, with the
+  import path's own `findMatchingPiece` / `mergeImportedPiece` /
+  `mergeImportedTechnique`. `openAccountFlow` / `applyAccountFlow` /
+  `handleConfirmAccountImport` / `handleDeleteHereToo` (App.jsx) run it, and the
+  same `ImportPiecesModal` shows it (`source="account"`). A decision rule belongs
+  in the library with a test, never in the component.
+- **The no-ask rule is `canTakeAccountCopyWithoutAsking`: nothing waiting here AND
+  the account changed it since this device last synced it, by the account's
+  revision, never by a clock** (confirmed 2026-10-03). Weakening it (letting it
+  apply with a change waiting) would replace work that was never uploaded, and a
+  test fails eight tests if you do. Anything changed on both sides gets the
+  picker even where import would have settled it by `updatedAt`.
+- **`applyAccountFlow` saves the device record BEFORE any state changes.** The
+  record gets each merged piece at the revision read, with the fingerprint of
+  the account's copy (`withAccountCopyRecorded`); the pieces change after. Reverse
+  it and Pass 111's hook sees merged pieces with no record, takes them for new,
+  and holds each one.
+- **`mergeImportedPiece` dedups sessions by JSON text, so key order matters, and
+  the database returns keys reordered**: without `withComparableSessions` every
+  session in an account merge is kept twice (the first test caught it). The real
+  fix is in `mergeSessionArrays` (`lib/storage.js`, not touched here). Anything
+  else that merges data that has been through the database has the same trap.
+- **A piece from the account keeps the account's created date** (confirmed
+  2026-10-03); a piece that matches except for it is "same", with its date set
+  quietly. A file import still re-stamps. A "take" replaces the piece outright
+  (reschedule marker and all); "ask" and "combine" go through the import merge,
+  which clears the reschedule marker.
+- **Restoring onto an EMPTY device is that device's first, checked backup**
+  (`becomesChecked`, an exception to Design J decided 2026-10-03); a device that
+  already holds pieces is not marked.
+- **Combining marks the account's other row deleted (`markOtherCopiesDeleted`,
+  only `deleted_at`, only if still at the revision read), never erases it**, and
+  only once this device has made its first backup. **A piece here that the account
+  marks deleted is never a combine target** (`walkAccountCandidates` leaves it out
+  of the matching): otherwise the surviving copy would be combined into the stale
+  one and marked deleted too (found in the browser).
+- **"Delete it here too" is the only way this flow removes anything.** The device
+  forgets the piece first (`withPieceDropped`), so no second "deleted" is sent;
+  deleting the open piece goes through `guardLeavingActiveWork`.
+- **Results are shown in the page** (`accountNotice`: the Account panel, or a
+  dismissible banner), never a browser pop-up. `accountFlowBusyRef` makes the
+  automatic upload and a manual backup wait while the flow reads and applies.
+- **Not built, on purpose:** the two items left from Pass 111 (a false hold is
+  still possible; the status line still shows one message), an "undelete", and
+  anything arriving by itself. Found, not fixed: two devices that both use the app
+  will often hold each other's technique library (its per-device parts are in the
+  shared row); a name match with a blank composer can combine two different
+  pieces, and a combine the person declines is offered again on every Get changes
+  (nothing remembers "these are different"). See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112)
+  and [`docs/User-Flows.md`](docs/User-Flows.md#12-getting-things-from-your-account-optional-pass-112).

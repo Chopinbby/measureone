@@ -14,11 +14,21 @@
 /*  through changePieceRow / changeTechniqueRow, "save only if still   */
 /*  at revision N" (Design C), and a piece deleted here is marked      */
 /*  deleted, never erased (Design D). A refusal is never retried: the  */
-/*  piece is held until a later pass settles it.                       */
+/*  piece is held until the person settles it (Pass 112, the last      */
+/*  section: restore, "Get changes", and Review, all one flow that     */
+/*  hands the account's rows to the import path's own merge functions).*/
 /* ------------------------------------------------------------------ */
 
 import { loadBackend, isConnectionProblem, NO_CONNECTION_MESSAGE } from "./backend";
-import { validateAndMigratePiece, validateAndMigrateTechnique } from "./storage";
+import {
+  validateAndMigratePiece,
+  validateAndMigrateTechnique,
+  findMatchingPiece,
+  mergeImportedPiece,
+  mergeImportedTechnique,
+  readBackupTechnique,
+} from "./storage";
+import { ensureWorkId } from "./works";
 
 // Mirrors CURRENT_SCHEMA_VERSION in storage.js, which doesn't export it.
 // test/accountSync.test.mjs fails if the two ever disagree.
@@ -113,7 +123,14 @@ export function fingerprint(value) {
 export function canonicalPiece(piece) {
   const plain = toJsonValue(piece);
   try {
-    const loaded = validateAndMigratePiece(plain);
+    // validateAndMigratePiece stamps "now" on a piece with no updatedAt and
+    // "today" on one with no startDate, which would make the same piece read
+    // differently from one call to the next. A piece in this app always has
+    // both; a hand-edited row might not, so give those a fixed stand-in.
+    const steady = isObject(plain)
+      ? { ...plain, ...(plain.updatedAt ? {} : { updatedAt: -1 }), ...(plain.startDate ? {} : { startDate: "1970-01-01" }) }
+      : plain;
+    const loaded = validateAndMigratePiece(steady);
     return loaded ? toJsonValue(loaded) : plain;
   } catch (e) {
     return plain;
@@ -1035,7 +1052,7 @@ export function describeHeldBanner(held) {
   const names = held.pieces.length > 0 ? `${heldNames(held)}. ` : "";
   return {
     title: heldTitle(held),
-    sub: `${names}This device's copy is unchanged and hasn't been uploaded over the account's. Everything else keeps backing up. Settling this comes in a later update.`,
+    sub: `${names}This device's copy is unchanged and hasn't been uploaded over the account's. Everything else keeps backing up. Press Review to settle it.`,
   };
 }
 
@@ -1053,4 +1070,505 @@ export function describeSyncStatus({ now, firstBackupDone, backedUpAt, waiting, 
   if (waiting > 0) return { tone: "quiet", text: `${waiting} ${plural(waiting, "change", "changes")} waiting to back up` };
   if (backedUpAt != null) return { tone: "ok", text: `Backed up ${describeAgo(now - backedUpAt)}` };
   return null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Getting things from the account (Pass 112)                         */
+/*                                                                     */
+/*  Restore onto a device, "Get changes", and Review (settling a piece */
+/*  held as "changed on another device") are ONE flow. It reads the    */
+/*  account's rows, turns them into the same kind of candidates a      */
+/*  backup file gives the import path, and merges them with the        */
+/*  import's own functions (findMatchingPiece, mergeImportedPiece,     */
+/*  mergeImportedTechnique), so what a merge does is already known and */
+/*  tested. Nothing here removes anything from this device, and the    */
+/*  only thing it writes to the account is marking a duplicate copy    */
+/*  deleted (Design D: marked, never erased).                          */
+/*                                                                     */
+/*  Everything below the two network readers is pure.                  */
+/* ------------------------------------------------------------------ */
+
+// Reads the account's rows for a restore / get-changes / review. Never throws.
+//   { status: "ok", rows: { pieces, technique } }   (rows as readAccountRows gives them)
+//   { status: "stopped", reason: "connection" | "signed-out" | "other" }
+export async function fetchAccountCopy({ userId, getClient = loadBackend }) {
+  const client = await getClient();
+  if (!client) return { status: "stopped", reason: "connection" };
+  const session = await client.auth.getSession();
+  const sessionUser = session && session.data && session.data.session && session.data.session.user;
+  if (!sessionUser || sessionUser.id !== userId) {
+    return { status: "stopped", reason: session && session.error && isConnectionProblem(session.error) ? "connection" : "signed-out" };
+  }
+  const read = await readAccountRows(client, userId);
+  if (!read.ok) return { status: "stopped", reason: reasonFor(read.error) };
+  return { status: "ok", rows: { pieces: read.pieces, technique: read.technique } };
+}
+
+// How many live (not marked deleted) pieces the account holds, without
+// downloading any piece data: the welcome screen's "Restore 12 pieces" button.
+//   { status: "ok", count } or { status: "stopped", reason }
+export async function countLiveAccountPieces({ userId, getClient = loadBackend }) {
+  const client = await getClient();
+  if (!client) return { status: "stopped", reason: "connection" };
+  const session = await client.auth.getSession();
+  const sessionUser = session && session.data && session.data.session && session.data.session.user;
+  if (!sessionUser || sessionUser.id !== userId) {
+    return { status: "stopped", reason: session && session.error && isConnectionProblem(session.error) ? "connection" : "signed-out" };
+  }
+  let count = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const from = page * PAGE_SIZE;
+    const { data, error } = await client
+      .from("pieces")
+      .select("id, deleted_at")
+      .eq("user_id", userId)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) return { status: "stopped", reason: reasonFor(error) };
+    const got = data || [];
+    count += got.filter((r) => r.deleted_at == null).length;
+    if (got.length < PAGE_SIZE) break;
+  }
+  return { status: "ok", count };
+}
+
+export function describeFetchProblem(reason) {
+  if (reason === "connection") return NO_CONNECTION_MESSAGE;
+  if (reason === "signed-out") return "You're signed out. Sign in and try again.";
+  return "Couldn't read your account. Try again in a moment.";
+}
+
+export function describeRestoreButton(count) {
+  return `Restore ${count} ${plural(count, "piece", "pieces")} from your account`;
+}
+
+// The account's rows as import candidates:
+//   pieces:     [{ id, revision, piece }]   live rows, each run through
+//               validateAndMigratePiece (the same as a local load), the row's
+//               id being the piece's id
+//   deleted:    [{ id, revision, name }]    rows marked deleted: never candidates
+//   unreadable: [{ id, revision }]          live rows that couldn't be read
+//   technique:  { technique, revision, unreadable, skippedItems }  the technique
+//               row read the way a backup's technique block is (so an
+//               unreadable block, or unreadable scales, are reported, not
+//               skipped silently)
+export function accountRowsToCandidates(accountRows) {
+  const rows = accountRows || {};
+  const out = { pieces: [], deleted: [], unreadable: [], technique: { technique: null, revision: null, unreadable: false, skippedItems: 0 } };
+  (rows.pieces || []).forEach((row) => {
+    if (!row || row.id == null) return;
+    if (row.deleted_at != null) {
+      out.deleted.push({ id: row.id, revision: row.revision, name: row.data && typeof row.data.name === "string" ? row.data.name : null });
+      return;
+    }
+    let piece = null;
+    try {
+      piece = isObject(row.data) ? validateAndMigratePiece({ ...row.data, id: row.id }) : null;
+    } catch (e) {
+      piece = null;
+    }
+    if (piece) out.pieces.push({ id: row.id, revision: row.revision, piece });
+    else out.unreadable.push({ id: row.id, revision: row.revision });
+  });
+  const trow = rows.technique;
+  if (trow && trow.data !== undefined) {
+    const read = readBackupTechnique(JSON.stringify({ technique: trow.data }));
+    out.technique = { technique: read.technique, revision: trow.revision, unreadable: read.unreadable, skippedItems: read.skippedItems };
+  }
+  return out;
+}
+
+/* ---- the no-ask rule ----------------------------------------------- */
+
+// Does this device have nothing waiting to upload for this piece? Its
+// fingerprint is what the device record says was last synced with the account.
+export function nothingWaitingHere(localPiece, entry) {
+  return !!entry && entry.revision !== undefined && typeof entry.fingerprint === "string" && pieceFingerprint(localPiece) === entry.fingerprint;
+}
+
+// Has the account changed this piece since this device last synced it? By the
+// account's revision, not by either device's clock.
+export function accountHasNewerCopy(row, entry) {
+  return !!entry && entry.revision !== undefined && Number.isFinite(row.revision) && row.revision > entry.revision;
+}
+
+// THE no-ask rule: a piece matched by id, with nothing waiting here, that the
+// account has changed since: take the account's copy without asking. Nothing
+// on this device can be lost, because nothing here was waiting to upload. Any
+// piece changed on both sides (or one this device can't vouch for) gets the
+// picker instead.
+export function canTakeAccountCopyWithoutAsking({ localPiece, entry, row }) {
+  return nothingWaitingHere(localPiece, entry) && accountHasNewerCopy(row, entry);
+}
+
+// Review settles what's held, and only that: the account's rows for the pieces
+// this device holds as "changed on another device" (and its technique row, if
+// that's held). Rows marked deleted are kept only for held pieces, so a held
+// piece whose row was deleted elsewhere is still offered "Delete it here too".
+export function restrictCandidatesToHeld(candidates, accountRecord) {
+  const entries = (accountRecord && accountRecord.pieces) || {};
+  const isHeld = (id) => !!(entries[id] && entries[id].held);
+  const techniqueHeld = !!(accountRecord && accountRecord.technique && accountRecord.technique.held);
+  return {
+    pieces: candidates.pieces.filter((c) => isHeld(c.id)),
+    deleted: candidates.deleted.filter((d) => isHeld(d.id)),
+    unreadable: candidates.unreadable.filter((u) => isHeld(u.id)),
+    technique: techniqueHeld ? candidates.technique : { technique: null, revision: null, unreadable: false, skippedItems: 0 },
+  };
+}
+
+// A piece this device deletes because the account already has it deleted: the
+// device forgets the piece without it counting as an upload (syncedAt stays),
+// so no second "deleted" is ever sent for a row that's already marked.
+export function withPieceDropped(deviceRecord, userId, id) {
+  return changeAccount(deviceRecord, userId, (a) => {
+    delete a.pieces[id];
+  });
+}
+
+/* ---- planning ------------------------------------------------------ */
+
+// Walks the account's pieces in order against this device's, the way the
+// import path does, so two account rows with the same name collapse into one
+// piece here (the second is a "combine" with the first).
+//   kind "new"     : not on this device
+//   kind "same"    : already matches (alignCreatedAt: matches except for its
+//                    created date, which a file import re-stamps)
+//   kind "take"    : the no-ask rule: replace with the account's copy
+//   kind "ask"     : changed on both sides, or this device can't vouch for its
+//                    copy: the picker
+//   kind "combine" : the same piece under a different id (matched by name):
+//                    merged into this device's piece, the other row to be marked
+//                    deleted (otherRow)
+// A piece this device deleted whose deletion hasn't gone up yet is skipped
+// (listed in skippedDeletedHere), never brought back.
+function walkAccountCandidates({ candidates, localPieces, accountRecord, only = null }) {
+  const entries = (accountRecord && accountRecord.pieces) || {};
+  // A piece here that the account marks deleted is never what another copy is
+  // combined into: it's the extra copy that was marked deleted when two were
+  // combined elsewhere, so the surviving copy comes in as a new piece instead
+  // (and this one is offered "Delete it here too").
+  const markedDeleted = new Set(((candidates && candidates.deleted) || []).map((d) => d.id));
+  const working = {};
+  Object.keys(localPieces || {}).forEach((id) => {
+    if (!markedDeleted.has(id)) working[id] = localPieces[id];
+  });
+  const items = [];
+  const skippedDeletedHere = [];
+  ((candidates && candidates.pieces) || []).forEach((c) => {
+    if (only && !only.has(c.id)) return;
+    const entry = entries[c.id];
+    const name = pieceName(c.piece);
+    if (entry && entry.deletedHere) {
+      skippedDeletedHere.push({ id: c.id, name });
+      return;
+    }
+    const base = { id: c.id, revision: c.revision, name, piece: c.piece, held: !!(entry && entry.held), matchId: null, alignCreatedAt: false, otherRow: null };
+    const match = findMatchingPiece(working, c.piece);
+    if (!match) {
+      items.push({ ...base, kind: "new" });
+      working[c.id] = c.piece;
+      return;
+    }
+    if (match.id === c.id) {
+      const sameOnceDatesMatch = Number.isFinite(c.piece.createdAt) && samePiece({ ...match, createdAt: c.piece.createdAt }, c.piece);
+      if (samePiece(match, c.piece)) items.push({ ...base, kind: "same", matchId: match.id });
+      else if (sameOnceDatesMatch) items.push({ ...base, kind: "same", matchId: match.id, alignCreatedAt: true });
+      else if (canTakeAccountCopyWithoutAsking({ localPiece: match, entry, row: c })) items.push({ ...base, kind: "take", matchId: match.id });
+      else items.push({ ...base, kind: "ask", matchId: match.id });
+      return;
+    }
+    items.push({ ...base, kind: "combine", matchId: match.id, otherRow: { id: c.id, revision: c.revision } });
+  });
+  return { items, skippedDeletedHere };
+}
+
+// What the flow would do, without doing it: per account piece, a kind (above);
+// the pieces still here that the account marks deleted ("Deleted on another
+// device"); the rows that couldn't be read; and the technique row.
+export function planAccountMerge({ candidates, localPieces, localTechnique = null, accountRecord }) {
+  const local = localPieces || {};
+  const entries = (accountRecord && accountRecord.pieces) || {};
+  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord });
+  const deletedElsewhere = ((candidates && candidates.deleted) || [])
+    .filter((d) => hasOwn(local, d.id))
+    .map((d) => ({ id: d.id, revision: d.revision, name: pieceName(local[d.id]), hasUnsyncedChanges: !nothingWaitingHere(local[d.id], entries[d.id]) }));
+  const t = (candidates && candidates.technique) || { technique: null, unreadable: false, skippedItems: 0 };
+  const technique = {
+    available: !!t.technique,
+    same: !!t.technique && !!localTechnique && sameTechnique(localTechnique, t.technique),
+    revision: t.revision == null ? null : t.revision,
+    unreadable: !!t.unreadable,
+    skippedItems: t.skippedItems || 0,
+  };
+  return { items, skippedDeletedHere, deletedElsewhere, unreadable: (candidates && candidates.unreadable) || [], technique };
+}
+
+// Does anything in the plan need a person to look at it? New pieces, pieces
+// changed on both sides, copies to combine, and pieces deleted elsewhere do.
+// Taking a clean newer copy, and matching what's already the same, don't.
+export function planNeedsQuestion(plan) {
+  return plan.items.some((i) => i.kind === "new" || i.kind === "ask" || i.kind === "combine") || plan.deletedElsewhere.length > 0;
+}
+
+/* ---- applying ------------------------------------------------------ */
+
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (isObject(value)) return Object.fromEntries(Object.keys(value).sort().map((k) => [k, sortKeysDeep(value[k])]));
+  return value;
+}
+
+// mergeImportedPiece (lib/storage.js) drops a session that both sides hold by
+// comparing its JSON TEXT, which depends on the order of its keys. A backup file
+// and this device were both written by this app, so the order agrees; the
+// account's rows come back from the database with their keys reordered, so
+// without this every session would be kept twice. Putting both sides' sessions
+// in one key order first makes the same session read as the same. (The fix
+// belongs in mergeSessionArrays itself; see the Pass 112 notes in
+// docs/Accounts-and-Backend.md.)
+function withComparableSessions(piece) {
+  if (!piece || !isObject(piece.progress)) return piece;
+  const progress = {};
+  Object.keys(piece.progress).forEach((chunkId) => {
+    const entry = piece.progress[chunkId];
+    if (!isObject(entry)) {
+      progress[chunkId] = entry;
+      return;
+    }
+    const out = { ...entry };
+    if (Array.isArray(entry.sessions)) out.sessions = entry.sessions.map(sortKeysDeep);
+    if (Array.isArray(entry.troubleSpots)) {
+      out.troubleSpots = entry.troubleSpots.map((spot) => (isObject(spot) && Array.isArray(spot.sessions) ? { ...spot, sessions: spot.sessions.map(sortKeysDeep) } : spot));
+    }
+    progress[chunkId] = out;
+  });
+  return { ...piece, progress };
+}
+
+// Does the merge, purely: this device's pieces (and technique) in, the merged
+// ones out. It re-works the plan from what it's given (never trusting an
+// earlier look), over only the pieces in `selectedIds` (null: all).
+//   ladderChoices: { [rowId]: "existing" | "imported" } for pieces that were asked
+//   orderChoice:   "existing" | "imported", for the switcher order of merged pieces
+// Per kind: new pieces are added keeping the account's created date; a clean
+// newer copy ("take") replaces this device's piece outright; a "same" piece
+// only gets its created date matched; "ask" and "combine" pieces go through
+// mergeImportedPiece (practice history is merged, never replaced). Returns
+//   pieces        : the new pieces map (nothing removed)
+//   firstNewId    : the first piece added, or null
+//   entries       : { [pieceId]: { revision, fingerprint } } for the device
+//                   record: the account's copy as read, so whatever this device
+//                   holds on top of it goes up as an ordinary change
+//   markDeleted   : [{ id, revision, name, intoId }] account rows to mark deleted
+//                   (the other copy of a combined piece)
+//   technique     : { value, changed, stats, entry } or null
+//   counts, skippedDeletedHere, becomesChecked (restoring onto an empty device
+//   counts as this device's first, checked backup: everything on it came from
+//   this account)
+export function applyAccountMerge({
+  candidates,
+  localPieces,
+  localTechnique = null,
+  accountRecord,
+  selectedIds = null,
+  ladderChoices = {},
+  orderChoice = "existing",
+  includeTechnique = true,
+  now = Date.now(),
+}) {
+  const local = localPieces || {};
+  const prior = (accountRecord && accountRecord.pieces) || {};
+  const only = selectedIds ? new Set(selectedIds) : null;
+  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, only });
+  const next = { ...local };
+  const entries = {};
+  const markDeleted = [];
+  const counts = { added: 0, took: [], merged: [], combined: [], same: 0, aligned: 0, clearedHeld: 0 };
+  let firstNewId = null;
+
+  const mergeInto = (existing, d) => {
+    const ladderChoice = ladderChoices[d.id] === "imported" ? "imported" : "existing";
+    // Same as the import path: re-derive everything a stored piece gets on
+    // load, and let the schedule re-derive itself (rescheduleMarker cleared).
+    return validateAndMigratePiece(
+      ensureWorkId({
+        ...mergeImportedPiece(withComparableSessions(existing), withComparableSessions(d.piece), ladderChoice, orderChoice),
+        rescheduleMarker: null,
+      })
+    );
+  };
+
+  items.forEach((d, index) => {
+    const rowEntry = { revision: d.revision, fingerprint: pieceFingerprint(d.piece) };
+    if (d.kind === "new") {
+      const createdAt = Number.isFinite(d.piece.createdAt) ? d.piece.createdAt : now + index;
+      next[d.id] = validateAndMigratePiece({ ...d.piece, createdAt });
+      entries[d.id] = rowEntry;
+      if (!firstNewId) firstNewId = d.id;
+      counts.added += 1;
+    } else if (d.kind === "same") {
+      if (d.alignCreatedAt) {
+        next[d.id] = { ...next[d.id], createdAt: d.piece.createdAt };
+        counts.aligned += 1;
+      }
+      entries[d.id] = rowEntry;
+      counts.same += 1;
+    } else if (d.kind === "take") {
+      next[d.id] = { ...d.piece };
+      entries[d.id] = rowEntry;
+      counts.took.push(d.name);
+    } else if (d.kind === "ask") {
+      const merged = mergeInto(next[d.id], d);
+      // A piece that comes from the account keeps the account's created date.
+      next[d.id] = Number.isFinite(d.piece.createdAt) ? { ...merged, createdAt: d.piece.createdAt } : merged;
+      entries[d.id] = rowEntry;
+      counts.merged.push(d.name);
+    } else if (d.kind === "combine" && next[d.matchId]) {
+      next[d.matchId] = mergeInto(next[d.matchId], d);
+      markDeleted.push({ id: d.otherRow.id, revision: d.otherRow.revision, name: d.name, intoId: d.matchId });
+      counts.combined.push(d.name);
+    }
+  });
+  Object.keys(entries).forEach((id) => {
+    if (prior[id] && prior[id].held) counts.clearedHeld += 1;
+  });
+
+  let technique = null;
+  const t = candidates && candidates.technique;
+  if (includeTechnique && t && t.technique && localTechnique) {
+    const merged = mergeImportedTechnique(localTechnique, t.technique);
+    technique = {
+      value: merged.technique,
+      // Only a merge that actually changed something is written back: writing
+      // an identical library would still bump its updatedAt and go up again.
+      changed: !sameTechnique(localTechnique, merged.technique),
+      stats: merged.stats,
+      entry: { revision: t.revision, fingerprint: techniqueFingerprint(t.technique) },
+      clearedHeld: !!(accountRecord && accountRecord.technique && accountRecord.technique.held),
+    };
+    if (technique.clearedHeld) counts.clearedHeld += 1;
+  }
+
+  return {
+    pieces: next,
+    firstNewId,
+    entries,
+    markDeleted,
+    technique,
+    counts,
+    skippedDeletedHere,
+    becomesChecked: Object.keys(local).length === 0 && counts.added > 0,
+  };
+}
+
+// The device record after a merge: each merged piece (and the technique library)
+// recorded at the revision the account was read at, with the fingerprint of the
+// account's copy. That clears a "changed on another device" mark, and whatever
+// this device holds beyond the account's copy is simply a change waiting, sent
+// "only if still at revision N" like any other. `checkedAt` is set only when
+// given and not already set (restoring onto an empty device).
+export function withAccountCopyRecorded(deviceRecord, userId, { entries = {}, technique = null, checkedAt = null }) {
+  return changeAccount(deviceRecord, userId, (a) => {
+    Object.keys(entries).forEach((id) => {
+      a.pieces[id] = { revision: entries[id].revision, fingerprint: entries[id].fingerprint };
+    });
+    if (technique) a.technique = { revision: technique.revision, fingerprint: technique.fingerprint };
+    if (checkedAt != null && a.checkedAt == null) a.checkedAt = checkedAt;
+  });
+}
+
+// Marks the account's other copy of a combined piece deleted: only deleted_at
+// is sent, "only if still at the revision it was read at" (deletePieceRow), so
+// nothing is erased and a copy someone changed meanwhile is left alone.
+//   { marked: [{ id, name }], failed: [{ id, name, reason: "refused" | "connection" | "other" }] }
+export async function markOtherCopiesDeleted({ items, userId, getClient = loadBackend, now = Date.now }) {
+  const out = { marked: [], failed: [] };
+  if (!items || items.length === 0) return out;
+  const client = await getClient();
+  const fail = (item, reason) => out.failed.push({ id: item.id, name: item.name, reason });
+  if (!client) {
+    items.forEach((item) => fail(item, "connection"));
+    return out;
+  }
+  const session = await client.auth.getSession();
+  const sessionUser = session && session.data && session.data.session && session.data.session.user;
+  if (!sessionUser || sessionUser.id !== userId) {
+    items.forEach((item) => fail(item, "other"));
+    return out;
+  }
+  for (const item of items) {
+    try {
+      const r = await deletePieceRow(client, userId, item.id, item.revision, new Date(now()).toISOString());
+      if (r.ok) out.marked.push({ id: item.id, name: item.name });
+      else if (r.conflict) fail(item, "refused");
+      else fail(item, failureKind(r));
+    } catch (e) {
+      fail(item, "other");
+    }
+  }
+  return out;
+}
+
+/* ---- words --------------------------------------------------------- */
+
+function nameList(names, cap = 5) {
+  const shown = names.slice(0, cap).join("; ");
+  return names.length > cap ? `${shown}; and ${names.length - cap} more` : shown;
+}
+
+// The result of a restore / get-changes / review, in plain words, as lines
+// ({ text, problem? }) for the page (never a browser pop-up). `applied` is
+// applyAccountMerge's counts; `technique` its technique part (or null);
+// `marked` is markOtherCopiesDeleted's answer (null if none were due);
+// `notMarked` says the other copies were left because this device hasn't done
+// its first backup yet (so the combined piece can't go up to replace them).
+export function describeAccountMergeResult({ mode = "changes", applied, technique = null, unreadable = 0, skippedItems = 0, techniqueUnreadable = false, marked = null, notMarked = [] }) {
+  const lines = [];
+  const c = applied;
+  if (c.added > 0) {
+    lines.push({
+      text: mode === "restore" ? `Restored ${c.added} ${plural(c.added, "piece", "pieces")} from your account.` : `Added ${c.added} new ${plural(c.added, "piece", "pieces")} from your account.`,
+    });
+  }
+  if (c.took.length > 0) {
+    lines.push({ text: `Took your account's newer ${plural(c.took.length, "copy", "copies")} of ${c.took.length} ${plural(c.took.length, "piece", "pieces")}: ${nameList(c.took)}.` });
+  }
+  if (c.merged.length > 0) {
+    lines.push({
+      text: `Merged ${c.merged.length} ${plural(c.merged.length, "piece", "pieces")} changed in both places: ${nameList(c.merged)}. What's here beyond your account's copy goes up as an ordinary change.`,
+    });
+  }
+  c.combined.forEach((name) => {
+    const failed = marked && marked.failed.find((f) => f.name === name);
+    const left = notMarked.includes(name);
+    if (left) {
+      lines.push({ text: `Combined the two copies of ${name} here. Your account's other copy is left as it is until this device has made its first backup; press Get changes from your account again afterwards to tidy it.` });
+    } else if (failed) {
+      lines.push({
+        text: `Combined the two copies of ${name} here, but the other copy in your account couldn't be marked deleted${failed.reason === "refused" ? " (it changed meanwhile)" : ""}. Press Get changes from your account again to retry.`,
+        problem: true,
+      });
+    } else {
+      lines.push({ text: `Combined the two copies of ${name}. The extra copy in your account is marked deleted, not erased.` });
+    }
+  });
+  if (c.aligned > 0) lines.push({ text: `Matched the created date of ${c.aligned} ${plural(c.aligned, "piece", "pieces")} to your account.` });
+  if (c.clearedHeld > 0) lines.push({ text: `Cleared "changed on another device" on ${c.clearedHeld} ${plural(c.clearedHeld, "item", "items")}.` });
+  if (technique && technique.stats) {
+    const t = technique.stats;
+    lines.push({
+      text:
+        `Technique library merged (${t.itemsAdded} ${plural(t.itemsAdded, "scale", "scales")} added, ` +
+        `${t.temposUpdated} newer ${plural(t.temposUpdated, "tempo", "tempos")}, ${t.methodsAdded} ${plural(t.methodsAdded, "method", "methods")} added` +
+        (skippedItems > 0 ? `, ${skippedItems} unreadable ${plural(skippedItems, "scale", "scales")} skipped` : "") +
+        "). Nothing was removed.",
+    });
+  }
+  if (techniqueUnreadable) lines.push({ text: "The technique library in your account couldn't be read, so it wasn't merged.", problem: true });
+  if (unreadable > 0) {
+    lines.push({ text: `${unreadable} ${plural(unreadable, "piece", "pieces")} in your account couldn't be read and ${plural(unreadable, "was", "were")} skipped.`, problem: true });
+  }
+  if (lines.length === 0) lines.push({ text: "Everything here already matches your account." });
+  return lines;
 }

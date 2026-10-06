@@ -36,9 +36,13 @@ library to their account, checked by reading it back (see
 [First backup behavior](#first-backup-behavior-pass-110)). **Since Pass 111,
 once that first backup has been checked, every later change is sent to the
 account by itself** (see
-[Keeping the backup current](#keeping-the-backup-current-pass-111)). Nothing
-is downloaded into a device until Pass 112. The live site has no backend at
-all: it saves everything to the browser only, as it always has.
+[Keeping the backup current](#keeping-the-backup-current-pass-111)). **Since
+Pass 112 a signed-in person can bring things back from the account**: restore
+onto a new device, "Get changes from your account", and Review for a piece
+held as "changed on another device" (see
+[Restore, get changes and settle](#restore-get-changes-and-settle-pass-112)).
+Changes still don't arrive by themselves (Phase 2). The live site has no
+backend at all: it saves everything to the browser only, as it always has.
 
 ## Decided
 
@@ -208,7 +212,9 @@ docs).
 - **111** Keep the backup current after every change, with a quiet status
   line and automatic retry. Built; see
   [Keeping the backup current](#keeping-the-backup-current-pass-111).
-- **112** Restore onto a new device.
+- **112** Restore from your account, get changes from it, and settle a
+  piece changed on another device. Built; see
+  [Restore, get changes and settle](#restore-get-changes-and-settle-pass-112).
 - **113** Account settings (change email or password, sign out). **No
   in-app "delete my account" in Phase 1** (decided by the user,
   2026-09-29): the app's public key can't delete a sign-in account, and
@@ -588,6 +594,164 @@ What was built, and the small choices made building it:
   the preview checks. Also left for this pass on purpose (2026-10-03): show the
   held message and the normal line together when the Account panel is reworked
   for settling.
+  **After Pass 112:** (1) was decided and built (a piece that comes from the
+  account keeps the account's created date). (2) and (4) are built: Review reads
+  the account's copy of a held piece, and comparing uses `samePiece` /
+  `sameTechnique`. (3), (5), (6) and (7) were not part of Pass 112's card and are
+  unchanged: a held piece's false hold is still possible (Review settles it, with
+  a picker that isn't really needed), and the status line still shows one message
+  at a time.
+
+## Restore, get changes and settle (Pass 112)
+
+What was built, and the small choices made building it. It's one flow with
+three ways in, and it adds nothing to the account except marking a duplicate
+copy deleted.
+
+- **Three ways in** (`openAccountFlow`, `App.jsx`): (1) the welcome screen,
+  when signed in and the account holds pieces, shows **Restore 12 pieces from
+  your account** (the count comes from a light read that downloads no piece
+  data, `countLiveAccountPieces`); (2) the Account panel, any time, has **Get
+  changes from your account**; (3) the held banner and the Account panel show
+  **Review** while anything is held as "changed on another device", and it looks
+  only at what's held.
+- **The flow.** It reads the account's rows (`fetchAccountCopy`), skips rows
+  marked deleted, runs every other row through `validateAndMigratePiece`
+  (`accountRowsToCandidates`), and hands them to the import path's own functions:
+  `findMatchingPiece`, `mergeImportedPiece` and, for the technique row,
+  `mergeImportedTechnique`. The same import modal shows what needs a decision,
+  with the wording saying "your account" instead of "this file" where it has to.
+  The decisions are made in `lib/accountSync.js` (`planAccountMerge`,
+  `applyAccountMerge`, both pure and tested); `App.jsx` only runs it.
+- **What each piece is** (the kinds, `walkAccountCandidates`): **new** (not here),
+  **same** (already matches; also "same except for its created date", see
+  below), **take** (the no-ask rule), **ask** (changed on both sides, or this
+  device can't vouch for its copy) and **combine** (the same piece under a
+  different id, matched by name).
+- **The no-ask rule** (`canTakeAccountCopyWithoutAsking`; confirmed by the
+  user 2026-10-03). A piece matched by id is replaced by the account's copy
+  without a question only when **both** hold: this device has nothing waiting to
+  upload for it (its fingerprint matches the device record) **and** the account
+  has changed it since this device last synced it, **judged by the account's
+  revision, not by either device's clock**. Nothing here can be lost, because
+  nothing here was waiting. Everything else that differs gets the picker, even
+  where the import path would have settled it by last-changed time: a piece that
+  changed on both sides is always asked about. A re-break test (let the rule
+  apply even with a change waiting) fails eight tests.
+- **When there's no modal.** If nothing needs a decision (clean takes, pieces
+  that already match, the technique library), "Get changes" and Review just
+  apply it and say what happened in the page. A new piece, a piece changed on
+  both sides, two copies to combine, or a piece deleted elsewhere opens the
+  modal. Restore always opens it. The technique library gets a row in the modal
+  only when merging it would change something here; otherwise it's merged
+  quietly.
+- **Created date** (confirmed by the user 2026-10-03). A piece that comes from or
+  matches the account **keeps the account's created date**, so a restore matches
+  the account exactly and nothing goes back up. A piece that matches the account
+  except for its created date (what a file import leaves behind, since import
+  re-stamps it) counts as the same: its date is set to the account's, quietly,
+  and the result says so ("Matched the created date of 25 pieces to your
+  account"). Importing from a file is unchanged: it still re-stamps.
+- **After merging** (`applyAccountFlow`): the device record is saved FIRST, with
+  each merged piece (and the technique library) at the revision the account was
+  read at and the fingerprint of the account's copy (`withAccountCopyRecorded`);
+  only then do pieces change. Whatever this device holds beyond the account's
+  copy is therefore an ordinary change waiting, sent "only if still at revision
+  N" by Pass 111, and a "changed on another device" mark is gone. **The order is
+  load-bearing**: with state first, the automatic upload would see the merged
+  pieces with no record, take them for new pieces, and hold each one.
+- **The held mark clears when the merge is done**, not after the merged result
+  has uploaded (the card's wording was "once its merged result has uploaded").
+  The result uploads a few seconds later through the ordinary path, and a refusal
+  then simply holds it again. Waiting for the upload would leave the mark on a
+  piece with nothing to upload (one that already matched the account).
+- **Restoring onto an empty device** opens a piece and brings up the regular app
+  (sidebar included), and **counts as this device's first, checked backup**
+  (decided by the user 2026-10-03, an exception to Design J's question, because
+  everything on the device just came from that account), so what's changed there
+  uploads by itself. A device that already holds pieces is not marked: the
+  first-backup question still comes first.
+- **Two copies of one piece** (a name match with a different id, `findMatchingPiece`):
+  merged into this device's piece, which keeps its own id; the account's other
+  row is then **marked deleted, never erased** (`markOtherCopiesDeleted`: only
+  `deleted_at` is sent, only if the row is still at the revision it was read at).
+  The result says "Combined the two copies of Ballade No. 1." Two safeguards
+  beyond the card: the other row is **not** marked until this device has made its
+  first backup (until then the combined piece can't go up to replace it; the
+  result says so and a later "Get changes" tidies it), and **a piece here that the
+  account marks deleted is never what another copy is combined into** (it is the
+  extra copy that was marked deleted when two were combined elsewhere, so the
+  surviving copy comes in as a new piece and the stale one is offered "Delete it
+  here too"; found in the browser, the first version would have marked the
+  surviving row deleted too).
+- **Deleted on another device**: a piece the account marks deleted that's still
+  here is listed in the modal with a **Delete it here too** button (and a note when
+  it has changes the account never got). Nothing is removed unless that's
+  clicked. The device forgets the piece first (`withPieceDropped`, without
+  counting it as an upload), so no second "deleted" is sent. Deleting the open
+  piece goes through `guardLeavingActiveWork` like every other way of leaving
+  unfinished work. A piece this device deleted whose deletion hasn't gone up yet
+  is never brought back by a restore.
+- **Results show in the page**, never as a browser pop-up: the Account panel on
+  Settings, and a dismissible banner elsewhere (including the welcome screen). The
+  file import's `window.alert` is unchanged. A restore, "Get changes" and Review
+  also pause the automatic upload and a manual backup while they read and apply.
+- **Sessions would have been doubled.** `mergeImportedPiece` drops a session both
+  sides hold by comparing its JSON text, which depends on key order; the
+  database returns its rows with keys reordered, so every session in a merge was
+  kept twice (caught by the first test). `withComparableSessions`
+  (`lib/accountSync.js`) puts both sides' sessions in one key order before
+  merging. The real fix is in `mergeSessionArrays` (`lib/storage.js`), which this
+  pass's file list doesn't include; see "For later passes" below.
+- **Checked** (my own runs; the owner's checks are in the pull request): unit
+  tests for each rule above; the five breakages (the no-ask rule with a change
+  waiting, the no-ask rule without the account having changed, no mark-deleted
+  step for a name match, sessions not made comparable, deleted rows becoming
+  candidates), each caught; and in the browser, against a local stand-in for the
+  database and two separate browser origins as two devices: a restore onto an empty device
+  (regular app, created dates kept, nothing re-uploaded, automatic backup on);
+  a session logged on one device arrives on the other without a question; the
+  same piece changed on both sides before either uploaded, the second upload
+  refused and held, Review showing the picker, the merged piece (three sessions,
+  no duplicates) uploading and the mark clearing; a piece with the same name made
+  separately on each, combined, the extra row marked deleted and kept; a piece
+  deleted on one device (and one marked deleted by a combine) listed on the other
+  as "Deleted on another device" and removed only by the click; the technique
+  library merged quietly and a held one settled by Review; imported-and-held
+  pieces settled in one click; every piece's stored data identical on both
+  devices (compared in the browser as data, key order aside, not through an
+  export file; the technique library differed only in its own last-changed time);
+  signed out, and a build with no account service configured (the live site's
+  configuration): nothing changes.
+- **For later passes** (found here, not decided): (1) **the two items left from
+  Pass 111**: a false hold is still possible, and the status line still shows one
+  message at a time. (2) **`mergeSessionArrays` should compare sessions by
+  content, not by JSON text** (`lib/storage.js`). (3) **Two devices that both
+  use the app will often hold each other's technique library**: its last-changed
+  time and today's list are per device but are part of the shared row, so each
+  device's upload can be refused by the other's. Review settles it with no
+  question, since the merge never removes anything, but the banner will appear
+  often; the real fix is to leave the per-device parts out of the comparison.
+  (4) **A merge clears the piece's reschedule marker** (the import path does, for
+  every merged piece), so a piece that was rescheduled on one device re-derives
+  its schedule from scratch after "ask" or "combine" merges; "take" keeps it.
+  (5) **A name match with a blank composer combines two different pieces that
+  share a name** and marks one row deleted; the modal shows "Same piece, other
+  copy" and the box can be unticked, but it's easy to miss. (6) **There's no way
+  to keep a piece the account marks deleted** (an "undelete"); Review offers only
+  "Delete it here too". (7) **The other row is marked deleted before the combined
+  piece has uploaded** (a few seconds, once the first backup is done); the row's
+  data stays, so it can be put back by hand. (8) The account code is now about
+  13 KB compressed (Passes 110 to 112) in everyone's download, signed in or not.
+  (9) **A combine that's declined (box unticked) comes back on every "Get
+  changes".** Nothing remembers that two same-named rows are different pieces, so
+  the window opens each time until the extra copy is combined (or marked deleted by
+  hand), and the quiet path (no window) can't happen meanwhile. On a restore,
+  unticking leaves that copy out of the new device altogether, so two genuinely
+  different pieces that share a name (and share a composer, or have none) can't
+  both be restored. Found in the owner's own checks of this pass (2026-10-05),
+  where it made a step that expected no window open one. A "these are different
+  pieces" answer, remembered on the device, would fix both.
 
 ## Setup (test project)
 

@@ -645,8 +645,11 @@ account library keeps the session, never the password).
 (preview sites and local development for now; on the live site nothing below
 appears anywhere). It **copies** this browser's pieces and technique library
 to the account and checks the copy. It never changes anything on this device,
-never replaces or deletes anything the account already holds, and isn't
-automatic (that's Pass 111) or a restore (Pass 112). Design:
+never replaces or deletes anything the account already holds. Once that first
+backup has been checked, every later change goes up by itself (Pass 111, see
+[Keeping the backup current](Accounts-and-Backend.md#keeping-the-backup-current-pass-111)),
+and getting things back is [flow 12](#12-getting-things-from-your-account-optional-pass-112).
+Design:
 [Accounts-and-Backend.md](Accounts-and-Backend.md#first-backup-behavior-pass-110).
 
 1. Settings → **Account** → **Back up this device** (`handleBackUpDevice`,
@@ -690,3 +693,80 @@ automatic (that's Pass 111) or a restore (Pass 112). Design:
 
 Nothing on this device changes in any of these cases. Manual export and the
 export reminder are unaffected.
+
+## 12. Getting things from your account (optional, Pass 112)
+
+**Only when signed in, and only on sites connected to an account service**
+(nothing below appears on the live site). One flow, three ways in. It reads
+your account and **adds to or updates what's on this device; it never removes
+anything from this device** unless you click "Delete it here too". The only
+thing it ever writes to the account is marking a duplicate copy deleted (the
+row stays). Design:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112).
+
+**Three ways in**
+
+1. **Restore, on a new device.** On the welcome screen, signed in, when your
+   account holds pieces: **Restore 12 pieces from your account** (only appears
+   once the count has come back; none if the account is empty or can't be
+   reached). It opens the modal below.
+2. **Get changes, any time.** Settings → **Account** → **Get changes from your
+   account**.
+3. **Review, for a piece held as "changed on another device".** The red banner
+   and the Account panel show **Review** while anything is held. It looks only at
+   what's held.
+
+**What happens**
+
+- The button reads **Reading your account...** while it works (and the other
+  account buttons are disabled). No connection, signed out, or an unexpected
+  failure is said in the page and nothing changes.
+- **Nothing to decide:** when your account only has newer copies of pieces you
+  haven't changed here, or things that already match, it's applied at once and
+  the result says what happened, for example "Took your account's newer copy of 1
+  piece: Etude No. 3." You press nothing else. "Everything here already matches
+  your account." when there's nothing to do. An account with nothing in it says
+  "Your account has nothing yet. Press Back up this device...".
+- **Something to decide:** the **import window** opens ("Restore from your
+  account", "Get changes from your account" or "Review changes from your
+  account"), with each piece ticked and tagged:
+  - **New here**: not on this device.
+  - **Newer in your account**: nothing here was waiting, so it's taken as it is.
+  - **Changed in both places** (and **(held)** if it was held): you've changed it
+    here and the account changed it too. A picker asks which practice progress
+    should count ("Keep what's here" or "Use my account's version"); practice
+    logged on either side is kept either way.
+  - **Same piece, other copy**: the same piece under a different id (matched by
+    name), shown with the piece it will be combined with. Combining merges the
+    other copy into the one here, and the extra copy in your account is then
+    **marked deleted, not erased**. Unticking it leaves that copy out, and it's
+    offered again the next time you press Get changes (nothing remembers that you
+    said no), so the window keeps opening until it's combined.
+  - A **Piece order** question appears when any piece is merged.
+  - The **Technique library** row appears when merging it would add something.
+    Nothing here is ever removed from it.
+  - **Deleted on another device**: pieces your account has marked deleted that are
+    still here, each with **Delete it here too**. Nothing is removed unless you
+    click it. A note says when the piece has changes your account never got.
+  The button reads **Restore N pieces**, or **Bring in N pieces**.
+- **The result**, in plain words in the page (never a browser pop-up): on Settings,
+  under the Account buttons; elsewhere (including the welcome screen) as a
+  dismissible banner. For example "Restored 12 pieces from your account.",
+  "Merged 1 piece changed in both places: ...", "Combined the two copies of
+  Ballade No. 1. The extra copy in your account is marked deleted, not erased.",
+  "Matched the created date of 25 pieces to your account.", 'Cleared "changed on
+  another device" on 3 items.', "Technique library merged (1 scale added, ...).
+  Nothing was removed."
+- **After it**, whatever this device holds beyond your account's copy goes up by
+  itself as an ordinary change, a few seconds later. A held piece that was
+  merged is no longer held.
+- **Restoring onto an empty device** opens a piece and shows the regular app
+  (sidebar included), and starts automatic backup without the first-backup
+  question, since everything on it came from this account. On a device that
+  already holds pieces, the first-backup question still comes first, and the
+  other copy of a combined piece isn't marked deleted until that backup is made.
+
+Importing a backup **file** is unchanged (flow 7): a file's pieces still get a
+new created date. That's why a piece imported from a file shows as held, once it
+meets its copy in your account, until you press **Get changes**, which matches the
+created date and clears the mark.

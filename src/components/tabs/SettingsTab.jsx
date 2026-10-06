@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload, CloudDownload } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { KeyText } from "./technique/KeyText";
@@ -74,6 +74,18 @@ export function SettingsTab({
   backupRunning = false,
   backupLines = [],
   backupCheckedAt = null,
+  // Getting things from the account (Pass 112). "Get changes from your
+  // account" and Review (for pieces held as changed on another device) both
+  // open one flow, in App.jsx. accountBusy: the account is being read or the
+  // result applied. accountNotice is that flow's last result, as plain lines
+  // ([{ text, problem }]) or null; it's shown in the page, never as a browser
+  // pop-up.
+  onGetChanges,
+  onReviewHeld,
+  heldCount = 0,
+  accountBusy = false,
+  accountNotice = null,
+  onDismissAccountNotice,
 }) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
@@ -135,10 +147,13 @@ export function SettingsTab({
                     : "Backing up copies the pieces and technique library on this device to your account. Nothing on this device changes, and anything your account already holds is left as it is. Signing out doesn't remove anything from this device."}
                 </p>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="ghost-btn" onClick={onBackUp} disabled={backupRunning || !!backupAskText || syncRunning}>
+                  <button className="ghost-btn" onClick={onBackUp} disabled={backupRunning || !!backupAskText || syncRunning || accountBusy}>
                     <CloudUpload size={14} /> {backupRunning ? "Backing up..." : "Back up this device"}
                   </button>
-                  <button className="ghost-btn" onClick={onSignOut} disabled={backupRunning}>
+                  <button className="ghost-btn" onClick={onGetChanges} disabled={backupRunning || !!backupAskText || syncRunning || accountBusy}>
+                    <CloudDownload size={14} /> {accountBusy ? "Reading your account..." : "Get changes from your account"}
+                  </button>
+                  <button className="ghost-btn" onClick={onSignOut} disabled={backupRunning || accountBusy}>
                     <LogOut size={14} /> Sign out
                   </button>
                 </div>
@@ -150,6 +165,33 @@ export function SettingsTab({
                   >
                     {syncStatus.text}
                   </p>
+                )}
+                {heldCount > 0 && (
+                  <div style={{ margin: "10px 0 0" }}>
+                    <button className="ghost-btn" onClick={onReviewHeld} disabled={accountBusy || backupRunning}>
+                      Review
+                    </button>
+                  </div>
+                )}
+                {accountNotice && accountNotice.lines.length > 0 && (
+                  <div role="status" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                    {accountNotice.lines.map((line, i) => (
+                      <p
+                        key={i}
+                        className={line.problem ? "tq-error" : i === 0 && !accountNotice.lines.some((l) => l.problem) ? "tq-ok" : "wizard-hint"}
+                        style={{ margin: 0, fontSize: 13 }}
+                      >
+                        {line.text}
+                      </p>
+                    ))}
+                    {onDismissAccountNotice && (
+                      <div>
+                        <button type="button" className="link-btn" onClick={onDismissAccountNotice}>
+                          Dismiss
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {backupAskText && (
                   <div

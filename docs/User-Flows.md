@@ -739,7 +739,9 @@ row stays). Design:
   - **Same piece, other copy**: the same piece under a different id (matched by
     name), shown with the piece it will be combined with. Combining merges the
     other copy into the one here, and the extra copy in your account is then
-    **marked deleted, not erased**.
+    **marked deleted, not erased**. Unticking it leaves that copy out, and it's
+    offered again the next time you press Get changes (nothing remembers that you
+    said no), so the window keeps opening until it's combined.
   - A **Piece order** question appears when any piece is merged.
   - The **Technique library** row appears when merging it would add something.
     Nothing here is ever removed from it.

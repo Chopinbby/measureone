@@ -743,6 +743,15 @@ copy deleted.
   piece has uploaded** (a few seconds, once the first backup is done); the row's
   data stays, so it can be put back by hand. (8) The account code is now about
   13 KB compressed (Passes 110 to 112) in everyone's download, signed in or not.
+  (9) **A combine that's declined (box unticked) comes back on every "Get
+  changes".** Nothing remembers that two same-named rows are different pieces, so
+  the window opens each time until the extra copy is combined (or marked deleted by
+  hand), and the quiet path (no window) can't happen meanwhile. On a restore,
+  unticking leaves that copy out of the new device altogether, so two genuinely
+  different pieces that share a name (and share a composer, or have none) can't
+  both be restored. Found in the owner's own checks of this pass (2026-10-05),
+  where it made a step that expected no window open one. A "these are different
+  pieces" answer, remembered on the device, would fix both.
 
 ## Setup (test project)
 

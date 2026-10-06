@@ -2140,6 +2140,7 @@ Ten things worth knowing:
   anything arriving by itself. Found, not fixed: two devices that both use the app
   will often hold each other's technique library (its per-device parts are in the
   shared row); a name match with a blank composer can combine two different
-  pieces. See
+  pieces, and a combine the person declines is offered again on every Get changes
+  (nothing remembers "these are different"). See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112)
   and [`docs/User-Flows.md`](docs/User-Flows.md#12-getting-things-from-your-account-optional-pass-112).

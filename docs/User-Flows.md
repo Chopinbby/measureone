@@ -637,7 +637,8 @@ device** ([flow 11](#11-backing-up-this-device-optional-pass-110)) and
 **Sign out**. **Sign out**
 signs out this device only, and leaves this device's pieces and technique
 data exactly as they are. The person stays signed in across reloads (the
-account library keeps the session, never the password).
+account library keeps the session, never the password). **Change password** and
+**Sign out of all devices** are in [flow 13](#13-account-settings-optional-pass-113).
 
 ## 11. Backing up this device (optional, Pass 110)
 
@@ -770,3 +771,54 @@ Importing a backup **file** is unchanged (flow 7): a file's pieces still get a
 new created date. That's why a piece imported from a file shows as held, once it
 meets its copy in your account, until you press **Get changes**, which matches the
 created date and clears the mark.
+
+## 13. Account settings (optional, Pass 113)
+
+**Only on sites connected to an account service, and only signed in** (signed out,
+Settings → Account still shows only the sign-in prompt, exactly as before). Two
+buttons sit in a group of their own at the bottom of the Account panel, under a
+thin line: **Change password** and **Sign out of all devices**, then one plain line:
+"Changing your email or deleting your account isn't available in the app yet."
+Neither button touches a piece, the technique library or anything else stored on
+this device. See [Accounts-and-Backend.md](Accounts-and-Backend.md#account-settings-pass-113)
+for the dashboard steps to change an email or delete an account by hand.
+
+**Change password**
+1. **Change password** opens the **Change password** window: "Choose a new password
+   for your account. You'll stay signed in on this device." The new password twice,
+   at least 6 characters, with the same messages as the invitation and reset windows
+   ("That's too short...", "The two passwords don't match.", the service's own
+   message if its minimum is higher, "Choose a different password from your current
+   one."). No current password is asked for. **Cancel** closes it.
+2. **Save password.** The window says "Your password is changed. You're still signed
+   in on this device." and **Done** closes it. The old password stops working, the new
+   one signs in, and this device stays signed in. (The invitation and reset windows,
+   which close at once, are unchanged.)
+3. If the service wants a recent sign-in first (its "secure password change"
+   setting), the window says "For your security, sign in again before changing your
+   password." with a **Sign in again** button. That closes the window and opens the
+   sign-in window with the note "Sign in again to change your password. Then choose
+   Change password once more." Sign in, then choose **Change password** again. The
+   same button appears if this sign-in has already ended elsewhere ("You're not
+   signed in any more. Sign in again to change your password.").
+4. With no connection: "Couldn't reach the account service. Check your connection
+   and try again." The window stays open, with what was typed.
+
+**Sign out of all devices**
+1. The button asks first, right there in the panel (never a browser pop-up): "This
+   signs you out on every device, including this one. Nothing is deleted from any
+   device." with **Sign out of all devices** and **Cancel**. Cancel sends nothing.
+2. Confirmed, this device signs out at once. The panel shows "You're signed out of all
+   devices. Other devices can stay signed in for up to an hour. Nothing was deleted
+   from any device." with **Dismiss**, above the usual Sign in prompt. Signing in
+   again clears it.
+3. **Other devices** keep working until their current sign-in runs out (up to an hour
+   at Supabase's default), then show signed out. Every piece and the technique
+   library on them is still there.
+4. If the service can't be reached, the app says what actually happened rather than
+   "done": "You're signed out on this device, but the account service couldn't be
+   reached, so your other devices may still be signed in. Sign in and try again when
+   you're connected. Nothing was deleted from any device." (This device is always
+   signed out by then: the library does that even when it couldn't tell the
+   service.) If this device somehow stayed signed in, it says nothing was changed and
+   to try again.

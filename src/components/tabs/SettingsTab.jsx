@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload, CloudDownload } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload, CloudDownload, KeyRound, MonitorSmartphone } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { KeyText } from "./technique/KeyText";
@@ -86,6 +86,18 @@ export function SettingsTab({
   accountBusy = false,
   accountNotice = null,
   onDismissAccountNotice,
+  // Account settings (Pass 113). "Change password" opens a window (App.jsx).
+  // "Sign out of all devices" asks first, here in the panel (signOutAllAsking),
+  // never as a browser pop-up. signOutNotice is the last result ({ text,
+  // problem }), shown whether the person is still signed in or not.
+  onChangePassword,
+  signOutAllAsking = false,
+  onAskSignOutAll,
+  onConfirmSignOutAll,
+  onCancelSignOutAll,
+  signOutAllBusy = false,
+  signOutNotice = null,
+  onDismissSignOutNotice,
 }) {
   // Mirrors BasicsFields' own local "multiple movements" toggle state, the
   // same way Wizard.jsx does — needed here too so Save can be blocked when
@@ -99,6 +111,23 @@ export function SettingsTab({
   useEffect(() => {
     if (editing) setMultiPart(!!(editDraft?.workId || editDraft?.workName));
   }, [editing]);
+
+  // The last "Sign out of all devices" result, in plain words (Pass 113).
+  const signOutNoticeBlock = (marginTop) =>
+    signOutNotice && signOutNotice.text ? (
+      <div role="status" style={{ marginTop, display: "flex", flexDirection: "column", gap: 4 }}>
+        <p className={signOutNotice.problem ? "tq-error" : "tq-ok"} style={{ margin: 0, fontSize: 13 }}>
+          {signOutNotice.text}
+        </p>
+        {onDismissSignOutNotice && (
+          <div>
+            <button type="button" className="link-btn" onClick={onDismissSignOutNotice}>
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
+    ) : null;
 
   if (!editing || !editDraft) {
     return (
@@ -228,10 +257,53 @@ export function SettingsTab({
                     )}
                   </div>
                 )}
+                {/* Account settings (Pass 113). Change password opens its own window.
+                    Sign out of all devices asks first, right here, then ends every
+                    session the account has (this device's too) and leaves this
+                    device's data exactly as it is. The last line says plainly what
+                    the app doesn't do yet. */}
+                <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="ghost-btn" onClick={onChangePassword} disabled={signOutAllBusy}>
+                      <KeyRound size={14} /> Change password
+                    </button>
+                    <button
+                      className="ghost-btn"
+                      onClick={onAskSignOutAll}
+                      disabled={backupRunning || accountBusy || signOutAllBusy || signOutAllAsking}
+                    >
+                      <MonitorSmartphone size={14} /> {signOutAllBusy ? "Signing out..." : "Sign out of all devices"}
+                    </button>
+                  </div>
+                  {signOutAllAsking && (
+                    <div
+                      role="group"
+                      aria-label="Confirm sign out of all devices"
+                      style={{ marginTop: 12, padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--white)" }}
+                    >
+                      <p style={{ margin: "0 0 10px", fontSize: 14, lineHeight: 1.5 }}>
+                        This signs you out on every device, including this one. Nothing is deleted from any device.
+                      </p>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button className="primary-btn" onClick={onConfirmSignOutAll} autoFocus>
+                          Sign out of all devices
+                        </button>
+                        <button className="ghost-btn" onClick={onCancelSignOutAll}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {signOutNoticeBlock(12)}
+                  <p className="wizard-hint" style={{ margin: "12px 0 0", fontSize: 13 }}>
+                    Changing your email or deleting your account isn't available in the app yet.
+                  </p>
+                </div>
               </>
             ) : (
               <>
-                <p className="wizard-hint" style={{ marginBottom: 12 }}>
+                {signOutNoticeBlock(0)}
+                <p className="wizard-hint" style={signOutNotice && signOutNotice.text ? { marginBottom: 12, marginTop: 12 } : { marginBottom: 12 }}>
                   Sign in to back up this device's pieces and technique library to your account.
                 </p>
                 <button className="ghost-btn" onClick={onSignIn}>

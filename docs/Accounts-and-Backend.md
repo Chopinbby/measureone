@@ -215,13 +215,18 @@ docs).
 - **112** Restore from your account, get changes from it, and settle a
   piece changed on another device. Built; see
   [Restore, get changes and settle](#restore-get-changes-and-settle-pass-112).
-- **113** Account settings (change email or password, sign out). **No
-  in-app "delete my account" in Phase 1** (decided by the user,
-  2026-09-29): the app's public key can't delete a sign-in account, and
-  that needs code running inside Supabase with its admin powers. Until
-  then, anyone who wants their account deleted asks, and the project owner
-  deletes it in the Supabase dashboard (Authentication → Users). Their rows
-  go with it automatically (checked in Pass 108).
+- **113** Account settings: **change password** and **sign out of all
+  devices**, both in the Account panel. Built; see
+  [Account settings](#account-settings-pass-113). **No in-app "delete my
+  account" and no in-app change of email in Phase 1.** The delete was
+  decided by the user, 2026-09-29: the app's public key can't delete a
+  sign-in account, and that needs code running inside Supabase with its
+  admin powers. The email change was moved to Phase 3 when the card for this
+  pass was written: it needs a real email provider (Supabase's built-in
+  sender allows only a couple of messages an hour). Until then, anyone who
+  wants either asks, and the project owner does it in the Supabase dashboard
+  (Authentication → Users), as described under Account settings. A deleted
+  account's rows go with it automatically (checked in Pass 108).
 - **114** Go-live (added in Pass 108): create the production project, apply
   the same migration files to it (see the notes under
   [Setup](#setup-test-project) on the deadlock and "destructive operations"
@@ -288,12 +293,15 @@ flow 10, has the screen-by-screen version):
   device out (the library removes the saved sign-in first, then reports that
   the service couldn't be told), so the app treats a connection problem there
   as a normal sign-out, not a failure; the service's own copy of the session
-  simply expires later.
+  simply expires later. (Pass 113 adds a separate "Sign out of all devices",
+  where a connection problem is not a normal sign-out: see
+  [Account settings](#account-settings-pass-113).)
 - **Choose a password.** Twice, at least 6 characters (Supabase's default
   minimum, a dashboard setting); if the dashboard's minimum is higher, the
   service's own message is shown. "Not now" closes the window and leaves the
   person signed in without a new password (they can use "Forgot password?"
-  later).
+  later). (Pass 113 adds a third, "change" mode of the same window, reached
+  from the Account panel.)
 - **The password is never logged or stored by the app.** It lives in the
   window's state only while the form is open and is cleared on success or
   close; the library keeps its session, never the password.
@@ -752,6 +760,199 @@ copy deleted.
   both be restored. Found in the owner's own checks of this pass (2026-10-05),
   where it made a step that expected no window open one. A "these are different
   pieces" answer, remembered on the device, would fix both.
+
+## Account settings (Pass 113)
+
+What was built, and the small choices made building it (docs/User-Flows.md,
+flow 13, has the screen-by-screen version):
+
+- **Where it lives.** Signed in, the Account panel (Settings) has a group of its
+  own at the bottom, under a thin line: **Change password** and **Sign out of all
+  devices**, then one plain line: "Changing your email or deleting your account
+  isn't available in the app yet." Nothing else in the panel changed (compared as
+  rendered structure against the previous version: the same except for that group;
+  signed out, identical). The handlers are in `App.jsx` (`openChangePassword`,
+  `handleSignOutAll`), the window is `ChoosePasswordModal.jsx` in a third mode,
+  and the words are in `lib/backend.js`. Nothing here touches a piece, the
+  technique library or the device record.
+- **Change password** is the choose-a-password window with `mode="change"`: the
+  new password twice, at least 6 characters (Supabase's minimum on the test
+  project is 6), the same "too short" and "don't match" messages, the service's own
+  message if its minimum is higher, and "Choose a different password from your
+  current one." for the same password. **No current password is asked for.** Two
+  differences from the other modes, both because there is no link to arrive from:
+  the button says **Cancel**, not "Not now", and saving doesn't just close the
+  window. It says "Your password is changed. You're still signed in on this
+  device." and waits for **Done**. Saving changes only this account's password; this
+  device stays signed in.
+- **"Secure password change".** The Email provider has a setting by that name
+  (Authentication → Sign In / Providers → Email). When it's on, Supabase refuses a
+  password change unless the session was created within the last 24 hours, and
+  answers `reauthentication_needed` ("Password update requires reauthentication").
+  The app then says "For your security, sign in again before changing your
+  password." with a **Sign in again** button, which closes the window and opens the
+  ordinary sign-in window with the note "Sign in again to change your password. Then
+  choose Change password once more." (the sign-in window itself is unchanged).
+  Signing in creates a fresh session, so the second try goes through. Supabase's
+  other route (a code sent by email, `reauthenticate()`) isn't used: it needs an
+  email every time, and the built-in sender allows only a couple an hour. **The
+  setting is off on the test project** (read 2026-10-05), so the owner's own check
+  goes straight through; the prompt was checked against a stand-in only. The same
+  button appears when the session has already ended elsewhere ("You're not signed in
+  any more. Sign in again to change your password."), and a lost connection gets the
+  usual "Couldn't reach the account service..." with no sign-in button.
+- **Sign out of all devices** asks first, in the panel (never a pop-up): "This signs
+  you out on every device, including this one. Nothing is deleted from any
+  device." with **Sign out of all devices** and **Cancel**. Confirmed, it calls the
+  library's `signOut({ scope: "global" })`. Like the ordinary sign-out it leaves this
+  device's pieces, technique data and device record exactly as they are, and stops
+  the automatic backup here (the account changed to signed out).
+- **A lost connection is not a normal sign-out here.** The ordinary sign-out treats
+  one as success (the library signs this device out first). For "all devices" that
+  would be a lie: the library (the installed version) removes this device's sign-in
+  even when it couldn't tell the service, so the other devices were never signed out.
+  `handleSignOutAll` reads back from the library whether this device is still signed
+  in and `describeSignOutAll` (`lib/backend.js`) says which case it is: done; signed
+  out here but the service couldn't be reached or didn't confirm, so other devices may
+  still be signed in; or nothing changed and this device is still signed in. The
+  result shows in the Account panel, signed in or out, with a Dismiss link, and is
+  cleared by signing in again.
+- **It isn't instant on the other devices.** The service ends every session at once,
+  but a device that's already signed in keeps working on its current access token
+  (valid for an hour at Supabase's default, a project setting) until that runs out.
+  The installed library keeps a session whose refresh was refused for as long as
+  the access token is still valid, and signs the device out at the next refresh
+  after it expires. Seen against the stand-in with a 100-second token: the other
+  device stayed signed in until its token ran out, then showed signed out with all
+  its pieces still there. **Until then it can probably still read and write the
+  account's rows**, including Pass 111's automatic upload: Supabase's database rules
+  go by the token's signature and expiry, not by whether its session still exists
+  (a general property of these tokens; not tested here, since the stand-in doesn't
+  check them). The notice says "Other devices can stay signed in for up to an
+  hour." For anything quicker (a lost device), shorten the project's JWT expiry or
+  ban or delete the user in the dashboard.
+- **The email and delete line** is the proposed wording, used as given.
+
+### Doing both by hand in the dashboard (Phase 1)
+
+Whoever runs the project does these, in the Supabase dashboard (the test project
+today, the production project after go-live), under **Authentication → Users**.
+
+**Deleting an account and its rows**
+1. Authentication → Users. Click the person's row. A panel opens on the right, headed
+   by their address, with their **User UID**.
+2. At the bottom of that panel, under **Danger zone**, press **Delete user** and
+   confirm. It can't be undone.
+3. Their rows go with it automatically: `pieces` and `technique` both reference the
+   account with `on delete cascade` (checked in Pass 108), and the cascade runs inside
+   the database, so the "nobody can delete a row" rules don't block it. This is the
+   only way rows are ever really removed: the app only marks a piece deleted.
+4. To check, in the SQL Editor: `select count(*) from pieces where user_id = '<the
+   User UID>';` should say 0, and the same for `technique`.
+5. Nothing on the person's own devices is touched. A device that's still signed in
+   keeps working until its current sign-in runs out (up to an hour), then shows signed
+   out, with its pieces still there.
+
+**Changing an account's email.** The dashboard has no button for this (checked
+2026-10-05 on the test project: the panel offers Reset password → Send password
+recovery, Send magic link and, under Danger zone, Remove MFA factors, Ban user and
+Delete user). Editing the address by hand in the database's `auth` tables isn't
+described here: it isn't tested, and Supabase's own tools don't offer it. So an email
+change is a **replacement of the account**, which loses nothing because the person's
+pieces and technique library already live on their devices (the account is the
+backup):
+1. On the person's device, signed in to the old account, press **Get changes from
+   your account** (Settings → Account), so anything only the account holds is on the
+   device first.
+2. Authentication → Users → **Add user** → **Send invitation**, to the new address.
+3. The person opens the invitation and chooses a password. That signs them in to the
+   new account on that device, replacing the old sign-in there. Nothing is moved.
+4. On that device: Settings → Account → **Back up this device**. It's the first
+   backup to this account, so it asks first, then copies the device's pieces and
+   technique library to the new account. On each of their other devices: sign out of
+   the old account, sign in to the new one, then Back up this device.
+5. When the new account holds everything (**Get changes from your account** on a
+   device says everything matches), delete the old account as above.
+
+**Not yet rehearsed: test this before relying on it.** These five steps are written
+from how each part behaves (an invitation, the first backup, deleting a user), but the
+whole sequence has never been run start to finish. The invitation also opens the
+project's Site URL, so the warning under [Setup (test project)](#setup-test-project)
+applies (if that preview address is ever removed, change the Site URL before inviting).
+**To rehearse it, on the test project, use two throwaway addresses and never your own
+account:** step 5 deletes the old account and everything in it. A plus address
+(`yourname+old@gmail.com`, `yourname+new@gmail.com`) reaches the same inbox. The
+built-in email sender allows only a couple of messages an hour, so space the
+invitations out. In a private window, with a small piece on the device: sign in to the
+"old" address and back the device up, then run the five steps with the "new" address.
+Then check that (a) the Account panel says "Signed in as" the new address; (b) **Get
+changes from your account** says everything matches; (c) in the Table Editor, `pieces`
+holds one row per piece for the new User UID; and (d) once the old account is deleted,
+`select count(*) from pieces where user_id = '<the old User UID>';` says 0 while the new
+account's rows are untouched. Delete the second throwaway account afterwards.
+
+- **Checked** (my own runs; the owner's checks are in the pull request): against a
+  local stand-in for the account service that answers sign-in, token refresh,
+  password change and sign-out the way Supabase does, with the real app in the
+  browser and two separate addresses as two devices: the new group and line appear;
+  Change password with a too-short password, with the current password (refused,
+  same words as the other modes), and with a new one (saved, still signed in, the old
+  password refused at sign-in and the new one accepted); the "sign in again" route
+  (the service asked for a recent sign-in, the window said so, Sign in again opened
+  the sign-in window with the note, and the second try saved); a session the service
+  no longer knew; no connection (usual message, no sign-in button); the sign-out
+  question (Cancel sent nothing; confirming ended every session, the notice showed,
+  and signing in cleared it); the other device staying signed in until its token ran
+  out and then showing signed out with its pieces; no connection during "all devices"
+  (this device signed out, the other sessions not, and the notice said so); the
+  invitation window unchanged (same title, words, buttons and closing). The three new
+  helpers in `lib/backend.js` were also checked with a scratch script, and broken
+  seven ways on purpose, each caught. Signed in, the Account panel's rendered
+  structure matches the previous version's apart from the new group; signed out it is
+  identical. A build with no account service configured (the live site's
+  configuration): no Account panel anywhere, no request to the account service, the
+  library file never fetched. **There is no test file for this pass** (none is on its
+  card, and `lib/backend.js` has none today), so these checks are not in `npm test`.
+  `npm test` 1020/1020; `npm run build` succeeds; the main download is about 1.5 KB
+  larger compressed (158.2 KB against 156.7 KB), the library file is unchanged.
+- **For later passes** (found here, not decided): (1) **Changing an email and deleting
+  an account in the app** stay Phase 3 (a real email provider; a "delete my
+  account" database function). (2) **"Require current password when updating"** is a
+  second setting on the Email provider (off on the test project, read 2026-10-05):
+  when on, Supabase wants the current password with every change, so Change password
+  would need a "current password" field (`updateUser` with `current_password`) and
+  wording for its errors, and would fail with the generic "Couldn't save your
+  password" until then. Decide before go-live whether to turn it on. (3) **Not
+  checked on the real service:** whether Supabase ends other devices' sessions when a
+  password is changed (the app says nothing about other devices on a password change);
+  the stand-in doesn't model it. (4) After "Sign out of all devices" other devices work
+  for up to the token's remaining life (above); a shorter JWT expiry is a project
+  setting, not done. (5) **`lib/backend.js` has no tests**; a `test/backend.test.mjs`
+  would cover these helpers and the older ones (`signInErrorMessage`,
+  `setPasswordErrorMessage`, `parseAuthLink`). (6) `CLAUDE.md` has no "Since Pass 113"
+  note (it isn't on the card's file list). (7) The ordinary sign-out still uses a
+  browser pop-up for an unexpected failure (`handleSignOut`); the new handler never
+  does. (8) The leaked-password check is Pro-plan only (read 2026-10-05), so it can't
+  be turned on while the project is on the Free plan. (9) **To test later: the
+  email-change "replace the account" steps** have never been run start to finish; see
+  "Not yet rehearsed" above for how (two throwaway addresses, never your own account).
+  Do it once on the test project before relying on them, and before go-live. From the
+  review before this pass was merged, three smaller things, logged and not fixed:
+  (10) **"Signed out of all devices" can be reported wrongly** if the service rejects
+  this device's own sign-in: the library counts the service's "I don't recognise this
+  sign-in" answers (401, 403, 404) as "already signed out" and reports success, so
+  nothing was ended elsewhere. Needs this device's own sign-in to be rejected (for
+  example a clock that is badly wrong), so it is unlikely. A fix would ask the service
+  to confirm the sign-in (`getUser`) before ending everything. (11) **The "sign in
+  again first" prompt has only been seen against a stand-in.** The setting is off on
+  the test project and Supabase counts a sign-in as recent for 24 hours. To see it for
+  real: switch on "Secure password change", use a Pass 113 window signed in more than a
+  day earlier, press Change password, then switch the setting off again. If the wording
+  differed from what the app looks for, the person would get the generic "Couldn't
+  save your password" instead. (12) **The new buttons aren't on the welcome screen** (a
+  device with no pieces can only do the plain Sign out, since Settings isn't reachable
+  there), and a very long password (Supabase caps the length) probably gets the same
+  generic message.
 
 ## Setup (test project)
 

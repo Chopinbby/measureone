@@ -874,6 +874,23 @@ backup):
 5. When the new account holds everything (**Get changes from your account** on a
    device says everything matches), delete the old account as above.
 
+**Not yet rehearsed: test this before relying on it.** These five steps are written
+from how each part behaves (an invitation, the first backup, deleting a user), but the
+whole sequence has never been run start to finish. The invitation also opens the
+project's Site URL, so the warning under [Setup (test project)](#setup-test-project)
+applies (if that preview address is ever removed, change the Site URL before inviting).
+**To rehearse it, on the test project, use two throwaway addresses and never your own
+account:** step 5 deletes the old account and everything in it. A plus address
+(`yourname+old@gmail.com`, `yourname+new@gmail.com`) reaches the same inbox. The
+built-in email sender allows only a couple of messages an hour, so space the
+invitations out. In a private window, with a small piece on the device: sign in to the
+"old" address and back the device up, then run the five steps with the "new" address.
+Then check that (a) the Account panel says "Signed in as" the new address; (b) **Get
+changes from your account** says everything matches; (c) in the Table Editor, `pieces`
+holds one row per piece for the new User UID; and (d) once the old account is deleted,
+`select count(*) from pieces where user_id = '<the old User UID>';` says 0 while the new
+account's rows are untouched. Delete the second throwaway account afterwards.
+
 - **Checked** (my own runs; the owner's checks are in the pull request): against a
   local stand-in for the account service that answers sign-in, token refresh,
   password change and sign-out the way Supabase does, with the real app in the
@@ -916,7 +933,26 @@ backup):
   note (it isn't on the card's file list). (7) The ordinary sign-out still uses a
   browser pop-up for an unexpected failure (`handleSignOut`); the new handler never
   does. (8) The leaked-password check is Pro-plan only (read 2026-10-05), so it can't
-  be turned on while the project is on the Free plan.
+  be turned on while the project is on the Free plan. (9) **To test later: the
+  email-change "replace the account" steps** have never been run start to finish; see
+  "Not yet rehearsed" above for how (two throwaway addresses, never your own account).
+  Do it once on the test project before relying on them, and before go-live. From the
+  review before this pass was merged, three smaller things, logged and not fixed:
+  (10) **"Signed out of all devices" can be reported wrongly** if the service rejects
+  this device's own sign-in: the library counts the service's "I don't recognise this
+  sign-in" answers (401, 403, 404) as "already signed out" and reports success, so
+  nothing was ended elsewhere. Needs this device's own sign-in to be rejected (for
+  example a clock that is badly wrong), so it is unlikely. A fix would ask the service
+  to confirm the sign-in (`getUser`) before ending everything. (11) **The "sign in
+  again first" prompt has only been seen against a stand-in.** The setting is off on
+  the test project and Supabase counts a sign-in as recent for 24 hours. To see it for
+  real: switch on "Secure password change", use a Pass 113 window signed in more than a
+  day earlier, press Change password, then switch the setting off again. If the wording
+  differed from what the app looks for, the person would get the generic "Couldn't
+  save your password" instead. (12) **The new buttons aren't on the welcome screen** (a
+  device with no pieces can only do the plain Sign out, since Settings isn't reachable
+  there), and a very long password (Supabase caps the length) probably gets the same
+  generic message.
 
 ## Setup (test project)
 

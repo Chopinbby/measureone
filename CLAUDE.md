@@ -37,9 +37,10 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   injected via a `<style>` tag inside the root component, using CSS custom
   properties defined on `.measureone-app`. No Tailwind, no CSS modules.
 - No backend. All persistence is client-side `localStorage`. (Since Pass 109 an
-  optional account sign-in exists on sites connected to an account service, and
-  since Pass 110 it can copy this browser's data to the account on request; see
-  "Since Pass 109" and "Since Pass 110" below.)
+  optional account sign-in exists on sites connected to an account service (the
+  live site too, since Pass 114), and since Pass 110 it can copy this browser's
+  data to the account on request; see "Since Pass 109", "Since Pass 110" and
+  "Since Pass 114" below.)
 - No React Router — navigation is a simple `activeTab` string in state.
 
 ## Running it locally
@@ -2060,8 +2061,9 @@ Eight things worth knowing:
 - **Nothing here may run, and the library may not be loaded, unless the device
   is signed in AND its first backup is checked** (`computeWaiting` returns
   nothing before then; the first backup stays a deliberate, asked-first step).
-  A new caller of the upload must keep that gate. The live site and `npm test`
-  have no connection settings, so `authEnabled` is false and nothing renders.
+  A new caller of the upload must keep that gate. A build with no connection
+  settings (`npm test`, a fresh checkout) has `authEnabled` false and nothing
+  renders; the live site has had them since Pass 114.
 - **Status wording is one line, first match wins** (`describeSyncStatus`): not
   answering, else the held message, else "N changes waiting to back up", else
   "Backed up just now". A held piece's line replaces the backed-up one and

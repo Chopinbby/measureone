@@ -270,7 +270,8 @@ flow 10, has the screen-by-screen version):
   two windows; the Account panel is in `SettingsTab.jsx` (after "Backup &
   restore"); the welcome screen has a quiet "Sign in" link (Design I).
 - **Off unless connected.** `isBackendConfigured()` gates everything: with the
-  two settings missing (the live site, a fresh checkout, `npm test`) no panel,
+  two settings missing (a fresh checkout, `npm test`, the live site before
+  Pass 114) no panel,
   link or window renders anywhere and the library is never loaded.
 - **Design K, built.** The library is a separate download (about 59 KB
   compressed), fetched only when needed: at startup if this device already
@@ -438,7 +439,8 @@ What was built, and the small choices made building it:
 - **When it runs.** Only while signed in, and only once this device's first
   backup to that account has been checked (Pass 110), because the first backup
   asks first (Design J) and nothing automatic may skip that question. Signed
-  out, on the live site, or before the first backup, nothing here runs: no
+  out, on a site with no account service (the live site until Pass 114), or
+  before the first backup, nothing here runs: no
   timer is started, the account library isn't downloaded and no request is
   made (checked on a production build, with and without the connection
   settings).
@@ -738,7 +740,7 @@ copy deleted.
   devices (compared in the browser as data, key order aside, not through an
   export file; the technique library differed only in its own last-changed time);
   signed out, and a build with no account service configured (the live site's
-  configuration): nothing changes.
+  configuration before go-live): nothing changes.
 - **For later passes** (found here, not decided): (1) **the two items left from
   Pass 111**: a false hold is still possible, and the status line still shows one
   message at a time. (2) **`mergeSessionArrays` should compare sessions by
@@ -918,7 +920,7 @@ account's rows are untouched. Delete the second throwaway account afterwards.
   seven ways on purpose, each caught. Signed in, the Account panel's rendered
   structure matches the previous version's apart from the new group; signed out it is
   identical. A build with no account service configured (the live site's
-  configuration): no Account panel anywhere, no request to the account service, the
+  configuration before go-live): no Account panel anywhere, no request to the account service, the
   library file never fetched. **There is no test file for this pass** (none is on its
   card, and `lib/backend.js` has none today), so these checks are not in `npm test`.
   `npm test` 1020/1020; `npm run build` succeeds; the main download is about 1.5 KB
@@ -1164,6 +1166,28 @@ The [Free-plan consequences](#free-plan-consequences) above apply to this
 project too: an idle project pauses after a week (restore it from the
 dashboard; practice on any device is unaffected) and there are no automatic
 backups, so the manual export and the export reminder stay.
+
+**Found in the review before the merge, left as they are (P2):**
+1. The script's key prompt is hidden, so a stray space or line break pasted
+   along with the key is refused as "doesn't look like the public key" instead
+   of being trimmed (the visible prompt used to trim it). Harmless, since
+   nothing is checked, but confusing. The fix is one line: trim the key after
+   reading it.
+2. The script's own tests (a stand-in database that follows the rules, thirteen
+   deliberately broken versions, a terminal test of the hidden prompts) were
+   run from a scratch folder and are **not committed**, and the script is not
+   part of `npm test`. A later edit to it has nothing to catch a mistake.
+3. The script knows only the two tables. **A migration that adds a table needs
+   that table's checks added to the script**, or "run it after any migration"
+   would pass without testing the new table.
+4. In "Changing it later" above, "nothing else in Vercel changes" means the two
+   settings. The domain itself is still added under Vercel → Domains.
+5. Not verified before the merge: the two Vercel Production values themselves
+   (reported done by the owner; the Preview side is verified by the preview
+   build, the Production side by the first live build), how Vercel's Instant
+   Rollback and Redeploy treat the branch address (DEPLOYMENT.md says how to
+   check), and that an invitation lands on the Site URL on this project (seen
+   when the owner is invited).
 
 ## Where this differs from the SOW
 

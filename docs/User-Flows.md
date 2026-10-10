@@ -498,7 +498,7 @@ survives clearing browser storage or moving to a new browser/device.
 account ([flow 10](#10-signing-in-optional-pass-109),
 [flow 11](#11-backing-up-this-device-optional-pass-110)) add a second copy but
 don't change any of this:** export and the export reminder work exactly as
-before, and the live site has no account service yet.
+before, and a site with no account service shows none of it.
 
 **Since Pass 32a**, importing a backup that matches existing pieces also
 offers a "keep what's here" / "use the imported order" choice for switcher
@@ -647,8 +647,8 @@ account library keeps the session, never the password). **Change password** and
 ## 11. Backing up this device (optional, Pass 110)
 
 **Only when signed in, and only on sites connected to an account service**
-(preview sites and local development for now; on the live site nothing below
-appears anywhere). It **copies** this browser's pieces and technique library
+(preview sites, local development and, since go-live (Pass 114), the live site;
+on a site with no account service nothing below appears anywhere). It **copies** this browser's pieces and technique library
 to the account and checks the copy. It never changes anything on this device,
 never replaces or deletes anything the account already holds. Once that first
 backup has been checked, every later change goes up by itself (Pass 111, see
@@ -702,7 +702,8 @@ export reminder are unaffected.
 ## 12. Getting things from your account (optional, Pass 112)
 
 **Only when signed in, and only on sites connected to an account service**
-(nothing below appears on the live site). One flow, three ways in. It reads
+(on a site with no account service nothing below appears). One flow, three
+ways in. It reads
 your account and **adds to or updates what's on this device; it never removes
 anything from this device** unless you click "Delete it here too". The only
 thing it ever writes to the account is marking a duplicate copy deleted (the

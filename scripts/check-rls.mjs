@@ -408,7 +408,7 @@ Usage:  node scripts/check-rls.mjs [--yes]
 It asks for, in order: the project's URL, the project's PUBLIC key, then the
 email and password of two THROWAWAY accounts (A and B), created in the project's
 dashboard (Authentication > Users > Add user, with "Auto Confirm User" ticked).
-Passwords are typed hidden. Nothing is saved.
+The key and the passwords are typed hidden. Nothing is saved.
 
 Instead of being asked, it reads these environment variables if they are set:
   CHECK_URL (or VITE_SUPABASE_URL), CHECK_KEY (or VITE_SUPABASE_ANON_KEY),
@@ -471,7 +471,10 @@ async function main() {
   const url = (await need(env.CHECK_URL || env.VITE_SUPABASE_URL, "Project URL (https://<project>.supabase.co): ")).replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
   const ref = projectRefFromUrl(url);
   if (!ref) return fail("That isn't a hosted Supabase project address (https://<project>.supabase.co). Nothing was checked.");
-  const key = await need(env.CHECK_KEY || env.VITE_SUPABASE_ANON_KEY, "Project PUBLIC key (sb_publishable_...): ");
+  // Typed hidden like a password: the public key is not a secret, but the dashboard
+  // shows the secret key right beside it, and one pasted by mistake must not end up
+  // on the screen (the check below refuses it, but only after it was typed).
+  const key = await need(env.CHECK_KEY || env.VITE_SUPABASE_ANON_KEY, "Project PUBLIC key (sb_publishable_..., hidden as you paste it): ", { hidden: true });
   const problem = keyProblem(key);
   if (problem) return fail(`Not using that key: ${problem}. Nothing was checked.`);
 

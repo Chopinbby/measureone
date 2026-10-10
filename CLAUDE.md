@@ -1926,8 +1926,8 @@ it only says who's signed in. Four things worth knowing:
 - **The app must keep working with the backend unconfigured, and nothing
   account-related may render then.** `isBackendConfigured()`
   (`lib/backend.js`) is false when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
-  are missing, which is the live site (its Production environment has no
-  Supabase settings until go-live, Pass 114), a fresh checkout and `npm test`.
+  are missing, which was the live site until go-live (Pass 114, see "Since
+  Pass 114" below), and is still a fresh checkout and `npm test`.
   `authEnabled` in `App.jsx` gates every account surface: the Account panel,
   the welcome-screen link, both windows. A new account surface must check it.
 - **Auth state lives in `App.jsx`** (`authSession`, only `{ email, userId }`;
@@ -2144,3 +2144,44 @@ Ten things worth knowing:
   (nothing remembers "these are different"). See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112)
   and [`docs/User-Flows.md`](docs/User-Flows.md#12-getting-things-from-your-account-optional-pass-112).
+
+**Since Pass 114 (2026-10-10), the live site is connected to accounts.** Its
+Vercel **Production** environment has the production Supabase project's two
+settings (`measureone-prod`); Preview and local development keep the test
+project's. The app code didn't change: accounts appear on a site only while
+`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` were present when it was built.
+Six things worth knowing:
+- **A merge to `main` now ships to real accounts.** Anything touching
+  `lib/accountSync.js`, `lib/backend.js` or the database must be tried on a
+  preview (the test project) first, and a new migration file goes to the test
+  project, then to production by hand in its SQL Editor (the app can't run
+  it). **Never tick Preview on a production setting, and never put the secret
+  key anywhere** (Vercel, `.env.local`, the repo). Deleting the two Production
+  settings and redeploying takes accounts off the live site again.
+- **One build, three addresses, separate pieces.** `measureone.vercel.app`,
+  `measureone-git-main-measure-one.vercel.app` and
+  `measureone-measure-one.vercel.app` serve the same deployment, but the
+  browser keeps pieces per address and per browser. **The owner's real pieces
+  are at `measureone-git-main-measure-one.vercel.app`**; the clean address
+  opens empty (found 2026-10-08). That address is also the production
+  project's Site URL and its only redirect URL. A verification must not write
+  to, or clear, storage at that address in the owner's browser, and "the live
+  site looks empty" usually means another address or another browser.
+- **`scripts/check-rls.mjs` is the security check** (37 checks, two throwaway
+  accounts created and deleted in the dashboard; it refuses a secret key or an
+  account that already holds data, and takes the key and passwords hidden).
+  Run it against the test project and then production after any migration or
+  sign-in setting change, and delete the accounts afterwards (production
+  should read 0 accounts, 0 pieces, 0 technique rows until real accounts
+  exist). It is not part of the app or of `npm test`.
+- **Invitation and reset links die after one hour** (production's Email OTP
+  expiration is 3600 seconds), so an invitation is sent only when its person
+  can open it at once.
+- **The way back is in `DEPLOYMENT.md` ("Rolling back")**, with the go-live
+  rollback point (the deployment of `8636cfa`). A change to a Vercel setting
+  only takes effect with a new deployment.
+- **The Free plan applies to both projects:** an idle project pauses after a
+  week (practice is unaffected; restore it in the dashboard) and there are no
+  automatic backups, so the manual export and the export reminder stay. See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
+  and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).

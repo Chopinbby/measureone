@@ -595,10 +595,11 @@ Since Passes 101–104. App-level, not tied to the open piece. Design:
 
 ## 10. Signing in (optional, Pass 109)
 
-**Only on sites connected to an account service.** That's preview sites and
-local development for now; the live site has no account service until
-go-live, so there nothing below appears anywhere and the app is exactly as
-it was. Signing in itself **moves no data** (nothing is uploaded or downloaded,
+**Only on sites connected to an account service.** That's preview sites,
+local development and, since go-live (Pass 114, 2026-10-10), the live site.
+A site that isn't connected (a fresh checkout, the test suite) shows nothing
+below and is exactly as it was before accounts. Signing in itself **moves no
+data** (nothing is uploaded or downloaded,
 and no piece, technique data or banner changes); it only says who's signed
 in. Copying this device's data to the account is a separate, explicit step
 ([flow 11](#11-backing-up-this-device-optional-pass-110)).
@@ -623,14 +624,17 @@ Accounts are **by invitation for now**: there's no sign-up form. See
 **Arriving from a link in an email** (an invitation from the Supabase
 dashboard, or a reset link):
 1. The link opens the app and signs the person in. An invitation opens the
-   project's Site URL (currently the Pass 109 preview address); a reset link
-   returns to whichever site asked for it.
+   project's Site URL (on the live site, the address where the owner's pieces
+   live; on the test project, a preview address); a reset link returns to
+   whichever site asked for it.
 2. The **Choose a password** window opens: the new password twice (at least
    6 characters; the service's own minimum is the real rule), then **Save
    password**. **Not now** closes it and leaves the person signed in,
    without a new password.
 3. A link that has expired or was already used opens the sign-in window with
-   a plain note saying so, where a fresh reset link can be asked for.
+   a plain note saying so, where a fresh reset link can be asked for. On the
+   live site a link lasts one hour, so an invitation should be opened as soon
+   as it arrives; a late one needs a fresh invitation from the project owner.
 
 **Signed in:** Settings → Account shows the email address, **Back up this
 device** ([flow 11](#11-backing-up-this-device-optional-pass-110)) and

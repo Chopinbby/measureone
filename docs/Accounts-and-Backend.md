@@ -24,13 +24,16 @@
 > revisited, or Supabase's terms change in a way [Known limits](#known-limits)
 > depends on.
 
-**Status: designed (Pass 105, 2026-09-27); Phase 1 being built.** Passes
-106–113 build it and Pass 114 puts it live — see [Pass plan](#pass-plan).
-Since Pass 108 a **test** Supabase project exists with the tables and
-security rules, connected to preview sites and local development only (see
-[Setup](#setup-test-project)). **Since Pass 109, on those sites only, a
-person can sign in and out** (see [Sign-in behavior](#sign-in-behavior-pass-109)),
-but signing in alone moves no data. **Since Pass 110 a signed-in person can
+**Status: designed (Pass 105, 2026-09-27); Phase 1 built, and live since
+Pass 114 (2026-10-10).** Passes 106–113 built it and Pass 114 put it live, see
+[Pass plan](#pass-plan). Since Pass 108 a **test** Supabase project exists with
+the tables and security rules, connected to preview sites and local
+development (see [Setup](#setup-test-project)), and since Pass 114 a separate
+**production** project is connected to the live site (see
+[Setup (production project)](#setup-production-project)). **Since Pass 109, on
+sites connected to a project, a person can sign in and out** (see
+[Sign-in behavior](#sign-in-behavior-pass-109)), but signing in alone moves no
+data. **Since Pass 110 a signed-in person can
 press "Back up this device"** to copy this browser's pieces and technique
 library to their account, checked by reading it back (see
 [First backup behavior](#first-backup-behavior-pass-110)). **Since Pass 111,
@@ -41,8 +44,10 @@ Pass 112 a signed-in person can bring things back from the account**: restore
 onto a new device, "Get changes from your account", and Review for a piece
 held as "changed on another device" (see
 [Restore, get changes and settle](#restore-get-changes-and-settle-pass-112)).
-Changes still don't arrive by themselves (Phase 2). The live site has no
-backend at all: it saves everything to the browser only, as it always has.
+Changes still don't arrive by themselves (Phase 2). **Since Pass 114
+(2026-10-10) the live site is connected to the production project**: a person
+with an account (invitation only, so far just the owner) gets everything
+above there, and a signed-out visitor sees the app exactly as before.
 
 ## Decided
 
@@ -129,10 +134,10 @@ with no sign-in offered, so tests and a fresh checkout need no account.
 **Two projects, not one** (changed in Pass 108, on the user's decision): a
 **test** project for Vercel's **Preview** environment and local development,
 and a separate **production** project for the live site, created and
-connected only at go-live (Pass 114). Until then Vercel's Production
-environment has no Supabase settings. So testing never touches the account
-copy of anyone's real data, and accounts reach the live site in one
-deliberate step rather than as soon as sign-in code is merged. (The design
+connected only at go-live (Pass 114, 2026-10-10); until then Vercel's
+Production environment had no Supabase settings. So testing never touches
+the account copy of anyone's real data, and accounts reached the live site in
+one deliberate step rather than as soon as sign-in code was merged. (The design
 as first written had one project, connected to the live site too.)
 
 **H. New records get ids with a random part** (Pass 107); existing ids are
@@ -230,11 +235,14 @@ docs).
 - **114** Go-live (added in Pass 108): create the production project, apply
   the same migration files to it (see the notes under
   [Setup](#setup-test-project) on the deadlock and "destructive operations"
-  messages), and give Vercel's Production environment
-  its two settings. Until this pass the live site has no backend. **The
-  production project stays on Supabase's Free plan** (decided by the user,
-  2026-09-29). That means it pauses after a week without use, and there are
-  no automatic backups; see [Free-plan consequences](#free-plan-consequences).
+  messages), and give Vercel's Production environment its two settings.
+  Before this pass the live site had no backend. Built 2026-10-10; see
+  [Setup (production project)](#setup-production-project). The security
+  checks of Pass 108 became a script, `scripts/check-rls.mjs`, run against
+  the test project and then production. **The production project stays on
+  Supabase's Free plan** (decided by the user, 2026-09-29). That means it
+  pauses after a week without use, and there are no automatic backups; see
+  [Free-plan consequences](#free-plan-consequences).
 
 Manual export and the export reminder stay throughout Phase 1
 ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
@@ -262,7 +270,8 @@ flow 10, has the screen-by-screen version):
   two windows; the Account panel is in `SettingsTab.jsx` (after "Backup &
   restore"); the welcome screen has a quiet "Sign in" link (Design I).
 - **Off unless connected.** `isBackendConfigured()` gates everything: with the
-  two settings missing (the live site, a fresh checkout, `npm test`) no panel,
+  two settings missing (a fresh checkout, `npm test`, the live site before
+  Pass 114) no panel,
   link or window renders anywhere and the library is never loaded.
 - **Design K, built.** The library is a separate download (about 59 KB
   compressed), fetched only when needed: at startup if this device already
@@ -324,7 +333,7 @@ flow 11, has the screen-by-screen version):
   both tables: revision is 1 on insert and the old revision plus one on every
   update, and updated-at is set, whatever the app sent (Design C). Run it once
   on the test project, after the first file; running it twice is harmless.
-  Production gets it at go-live (Pass 114). It was checked in a real Postgres
+  Applied to production at go-live (Pass 114, 2026-10-10). It was checked in a real Postgres
   engine: the app's own value is overridden, a save "only if still at revision
   N" at a stale N changes nothing, the first migration's security rules still
   hold, and nobody can call the rule by hand.
@@ -430,7 +439,8 @@ What was built, and the small choices made building it:
 - **When it runs.** Only while signed in, and only once this device's first
   backup to that account has been checked (Pass 110), because the first backup
   asks first (Design J) and nothing automatic may skip that question. Signed
-  out, on the live site, or before the first backup, nothing here runs: no
+  out, on a site with no account service (the live site until Pass 114), or
+  before the first backup, nothing here runs: no
   timer is started, the account library isn't downloaded and no request is
   made (checked on a production build, with and without the connection
   settings).
@@ -730,7 +740,7 @@ copy deleted.
   devices (compared in the browser as data, key order aside, not through an
   export file; the technique library differed only in its own last-changed time);
   signed out, and a build with no account service configured (the live site's
-  configuration): nothing changes.
+  configuration before go-live): nothing changes.
 - **For later passes** (found here, not decided): (1) **the two items left from
   Pass 111**: a false hold is still possible, and the status line still shows one
   message at a time. (2) **`mergeSessionArrays` should compare sessions by
@@ -835,8 +845,8 @@ flow 13, has the screen-by-screen version):
 
 ### Doing both by hand in the dashboard (Phase 1)
 
-Whoever runs the project does these, in the Supabase dashboard (the test project
-today, the production project after go-live), under **Authentication → Users**.
+Whoever runs the project does these, in the Supabase dashboard (the test project,
+and the production project since go-live), under **Authentication → Users**.
 
 **Deleting an account and its rows**
 1. Authentication → Users. Click the person's row. A panel opens on the right, headed
@@ -910,7 +920,7 @@ account's rows are untouched. Delete the second throwaway account afterwards.
   seven ways on purpose, each caught. Signed in, the Account panel's rendered
   structure matches the previous version's apart from the new group; signed out it is
   identical. A build with no account service configured (the live site's
-  configuration): no Account panel anywhere, no request to the account service, the
+  configuration before go-live): no Account panel anywhere, no request to the account service, the
   library file never fetched. **There is no test file for this pass** (none is on its
   card, and `lib/backend.js` has none today), so these checks are not in `npm test`.
   `npm test` 1020/1020; `npm run build` succeeds; the main download is about 1.5 KB
@@ -922,21 +932,22 @@ account's rows are untouched. Delete the second throwaway account afterwards.
   when on, Supabase wants the current password with every change, so Change password
   would need a "current password" field (`updateUser` with `current_password`) and
   wording for its errors, and would fail with the generic "Couldn't save your
-  password" until then. Decide before go-live whether to turn it on. (3) **Not
+  password" until then. Left **off** on both projects at go-live (production read 2026-10-10), since the app sends no current password. (3) **Not
   checked on the real service:** whether Supabase ends other devices' sessions when a
   password is changed (the app says nothing about other devices on a password change);
   the stand-in doesn't model it. (4) After "Sign out of all devices" other devices work
   for up to the token's remaining life (above); a shorter JWT expiry is a project
   setting, not done. (5) **`lib/backend.js` has no tests**; a `test/backend.test.mjs`
   would cover these helpers and the older ones (`signInErrorMessage`,
-  `setPasswordErrorMessage`, `parseAuthLink`). (6) `CLAUDE.md` has no "Since Pass 113"
-  note (it isn't on the card's file list). (7) The ordinary sign-out still uses a
+  `setPasswordErrorMessage`, `parseAuthLink`). (6) `CLAUDE.md` had no "Since Pass 113"
+  note when this pass was written (it wasn't on the card's file list); added
+  with the Pass 114 docs. (7) The ordinary sign-out still uses a
   browser pop-up for an unexpected failure (`handleSignOut`); the new handler never
   does. (8) The leaked-password check is Pro-plan only (read 2026-10-05), so it can't
   be turned on while the project is on the Free plan. (9) **To test later: the
   email-change "replace the account" steps** have never been run start to finish; see
   "Not yet rehearsed" above for how (two throwaway addresses, never your own account).
-  Do it once on the test project before relying on them, and before go-live. From the
+  Do it once on the test project before relying on them; still not done at go-live (2026-10-10). From the
   review before this pass was merged, three smaller things, logged and not fixed:
   (10) **"Signed out of all devices" can be reported wrongly** if the service rejects
   this device's own sign-in: the library counts the service's "I don't recognise this
@@ -984,12 +995,12 @@ checks were run against the project itself, not read off the settings pages.
   table, column or row is touched); and the first attempt on the test project
   failed with a deadlock error (`40P01`), a collision with another process
   using the same two tables, because the file changes both in one go. It
-  succeeded on a later attempt. **If the dashboard reports a deadlock (at
-  go-live too), run the file again; if it keeps happening, run it in three
+  succeeded on a later attempt. **If the dashboard reports a deadlock (on
+  production too), run the file again; if it keeps happening, run it in three
   parts, each on its own: the function, then the `pieces` trigger, then the
   `technique` trigger.** Each part touches one table, so it can't collide.
   Future changes go in new numbered files, applied to the test project first
-  and to production at go-live.
+  and then to production, by hand in its SQL Editor (the app can't).
 - **Where the two settings come from:** Project Settings → **Data API** (the
   project URL; the page shows the address ending `/rest/v1/`, and the setting
   is the address without that ending) and → **API Keys** (the
@@ -1001,8 +1012,10 @@ checks were run against the project itself, not read off the settings pages.
 
 **Vercel:** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` added under the
 project's Settings → Environment Variables as type **Config** (neither is a
-secret), **Preview only**. Production and Development have none. Vercel
-applies them from the next build, so a branch pushed after that picks them up.
+secret), **Preview only**. Production and Development had none then;
+Production got its own two at go-live (see
+[Setup (production project)](#setup-production-project)). Vercel applies them
+from the next build, so a branch pushed after that picks them up.
 
 **Local development:** the same two settings in `.env.local` (git ignores it;
 `.env.example` shows the shape). It lives in each checkout, so a second
@@ -1048,6 +1061,134 @@ them):
   storage.
 - **No automatic backups** on the Free plan.
 - Built-in email: see [Known limits](#known-limits).
+
+## Setup (production project)
+
+Done in Pass 114 (the go-live, 2026-10-10). The dashboard steps were done by
+the user. The security checks were run against the project itself, with
+`scripts/check-rls.mjs`, not read off the settings pages.
+
+**Supabase: one project, `measureone-prod`**, Free plan, at
+`https://tqamtwdraqsvejvhiptz.supabase.co` (the test project is
+`devbzzbtinzxspmiatba`). It started empty and has no accounts until the
+owner's own is invited.
+- **Tables and security rules:** `supabase/migrations/0001_accounts_backend.sql`
+  and then `0002_revision_counter.sql`, each run once in the SQL Editor on
+  2026-10-10. Both ended with "Success. No rows returned." (no deadlock; the
+  notes under [Setup (test project)](#setup-test-project) apply if one ever
+  appears).
+- **Authentication → Sign In / Providers:** "Allow new users to sign up"
+  **off** (invitation only, Decided 4), "Allow anonymous sign-ins" off,
+  "Allow manual linking" off, "Confirm email" on. The Email provider's own
+  settings, read from the dashboard on 2026-10-10, match the test project:
+  secure email change on, secure password change off, "require current
+  password when updating" off, leaked-password check off (Pro plan only),
+  minimum length 6, no character requirements. **Email OTP expiration is 3600
+  seconds, so an invitation link or a reset link stops working after one
+  hour.** Send an invitation only when its person can open the email at once;
+  a late link opens the sign-in window with the plain "expired" note, and a
+  fresh one is sent. The sign-up and anonymous settings were also tested
+  directly: the script's checks 36 and 37 tried both against this project and
+  were refused.
+- **Authentication → URL Configuration:** Site URL
+  `https://measureone-git-main-measure-one.vercel.app`, and one Redirect URL,
+  `https://measureone-git-main-measure-one.vercel.app/**`, nothing else. That
+  is the address where the owner's pieces live (see **Addresses** below). An
+  invitation always opens the Site URL, so it opens where the pieces are; a
+  reset link returns to the address that asked (the app sends
+  `window.location.origin`), which has to be on the list, and any other
+  address falls back to the Site URL. **Changing it later (for example a
+  domain of your own) is one setting, and nothing else in the app or in Vercel
+  changes:** set the new address as the Site URL and add `https://<new
+  address>/**` to the list, keeping the old one while both are used. The app
+  has no address built in, and the two Vercel settings name the project, not
+  the address. A new address opens as an empty copy of the app (the browser
+  keeps pieces per address), so sign in there and press Restore.
+- **Where the two settings come from:** the same two pages as the test project
+  (Project Settings → Data API and → API Keys, the **publishable** key). The
+  secret key was never copied; the script asks for the key hidden for the same
+  reason.
+
+**Vercel:** `VITE_SUPABASE_URL` (this project's address) and
+`VITE_SUPABASE_ANON_KEY` (its publishable key) added under the project's
+Settings → Environment Variables as type **Config**, **Production only**.
+Preview keeps the test project's two, and local development its `.env.local`.
+Vercel applies a setting from the next build, so the merge of Pass 114 was the
+build that picked them up. How to see which project a deployed site talks to,
+and the way back, are in [DEPLOYMENT.md](../DEPLOYMENT.md#rolling-back).
+
+**Addresses.** The live site is served at three addresses, all assigned to the
+same deployment: `measureone.vercel.app`,
+`measureone-git-main-measure-one.vercel.app` and
+`measureone-measure-one.vercel.app` (the same page and app file, compared
+2026-10-08 and 2026-10-10). **The browser keeps pieces per address and per
+browser**, so each address is its own copy. Found on 2026-10-08, when the
+owner opened `measureone.vercel.app` and saw an empty app: **the owner's real
+pieces are at `measureone-git-main-measure-one.vercel.app`**, so that is the
+live address for every setting above, and the one to open on a phone (the owner
+has not used the app on a phone yet, so it starts empty and restores from the
+account). Signing in works at any of the three, since the build is the same,
+but an invitation lands on the Site URL.
+
+**The rollback point** (noted 2026-10-07, before anything changed): the
+deployment of commit `8636cfa`, created 2026-10-07 05:51 UTC, app file
+`index-B11FjqLP.js`, no account backend. The two ways back, and how to check
+the result, are in [DEPLOYMENT.md](../DEPLOYMENT.md#rolling-back).
+
+**Re-running the security checks.** `node scripts/check-rls.mjs` (for the test
+project, `node --env-file=.env.local scripts/check-rls.mjs`). It asks for the
+project's address, its **public** key (typed hidden; it refuses a secret key)
+and two **throwaway** accounts: create them in the dashboard (Authentication →
+Users → Add user → Create new user, with "Auto Confirm User" ticked) and
+**delete them afterwards** (their rows go with them). It refuses any account
+that already holds data, so it can't write into a real account. Run it after
+any new migration and after any change to the project's sign-in settings. Its
+37 checks, in six groups: your own rows work (8), nobody else's rows (9),
+nobody can delete a row (4), signed out nothing at all (8), the database keeps
+the revision count (6), sign-ups and anonymous sign-ins refused (2). It is not
+part of the app or of `npm test`.
+
+**Checked for real (Pass 114):**
+- 37 of 37 passed on the test project and 37 of 37 on this project, both on
+  2026-10-10, each with two throwaway accounts. They are Pass 108's by-hand
+  checks rebuilt as a script, plus the revision rule (migration 0002) and the
+  two sign-in settings. (That deleting an account removes its rows, the
+  cascade, is not in the script; Pass 108 checked it by hand, and the counts
+  below show it again.)
+- Both pairs of throwaway accounts were deleted afterwards and the counts read
+  in each project's SQL Editor: the test project had 1 account (the owner's)
+  and 0 leftover `rls-check-` rows; this project had 0 accounts, 0 pieces and
+  0 technique rows.
+- Accounts on this project at go-live: none. The owner's own is invited right
+  after (Authentication → Users → Add user → Send invitation), then backed up
+  from the owner's real address.
+
+The [Free-plan consequences](#free-plan-consequences) above apply to this
+project too: an idle project pauses after a week (restore it from the
+dashboard; practice on any device is unaffected) and there are no automatic
+backups, so the manual export and the export reminder stay.
+
+**Found in the review before the merge, left as they are (P2):**
+1. The script's key prompt is hidden, so a stray space or line break pasted
+   along with the key is refused as "doesn't look like the public key" instead
+   of being trimmed (the visible prompt used to trim it). Harmless, since
+   nothing is checked, but confusing. The fix is one line: trim the key after
+   reading it.
+2. The script's own tests (a stand-in database that follows the rules, thirteen
+   deliberately broken versions, a terminal test of the hidden prompts) were
+   run from a scratch folder and are **not committed**, and the script is not
+   part of `npm test`. A later edit to it has nothing to catch a mistake.
+3. The script knows only the two tables. **A migration that adds a table needs
+   that table's checks added to the script**, or "run it after any migration"
+   would pass without testing the new table.
+4. In "Changing it later" above, "nothing else in Vercel changes" means the two
+   settings. The domain itself is still added under Vercel → Domains.
+5. Not verified before the merge: the two Vercel Production values themselves
+   (reported done by the owner; the Preview side is verified by the preview
+   build, the Production side by the first live build), how Vercel's Instant
+   Rollback and Redeploy treat the branch address (DEPLOYMENT.md says how to
+   check), and that an invitation lands on the Site URL on this project (seen
+   when the owner is invited).
 
 ## Where this differs from the SOW
 

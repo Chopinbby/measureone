@@ -338,6 +338,21 @@ data, never part of a piece. See [Technique-Practice.md](Technique-Practice.md)
 (including what shipped differently from the brief) and
 [Decisions.md](Decisions.md#technique-practice).
 
+**Accounts and backend, Phase 1 (Passes 105–114)** — an optional,
+invitation-only account (Supabase) that keeps a checked copy of every piece and
+the technique library, so losing a browser no longer means losing everything.
+This browser's copy stays the working copy; signed out, the app is exactly as
+before. Built: sign-in and invite and reset links (109), a first backup checked
+by reading it back (110), every later change sent by itself (111), restore on a
+new device, "Get changes" and settling a piece changed elsewhere (112), change
+password and sign out of all devices (113), and go-live (114): a separate
+production project, a security script (`scripts/check-rls.mjs`, 37 checks, run
+on both projects) and the two Vercel Production settings. Live since
+2026-10-10; the owner's own is the only account planned for now. See
+[Accounts-and-Backend.md](Accounts-and-Backend.md) (including
+[Setup (production project)](Accounts-and-Backend.md#setup-production-project))
+and [Decisions.md](Decisions.md#accounts-and-backend).
+
 ## Immediate next action
 
 Nothing is currently singled out here. The previous occupant — "fold
@@ -435,42 +450,20 @@ assuming this section is stale.
 4. A genuinely *learned* (not hand-tuned) confidence/interval model — see
    [Research.md](Research.md) for what groundwork this needs first. Gated on
    having enough session history to tune against.
-5. **Accounts and backend** — an optional account (Supabase) that keeps a
-   copy of every piece and the technique library, so losing a browser no
-   longer means losing everything. Designed in Pass 105 (2026-09-27), not
-   built; everything is still `localStorage`, single browser only, today.
-   See [Accounts-and-Backend.md](Accounts-and-Backend.md) for the design
-   and [SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md) for the
-   plain-language case. Pass plan:
-   - **Phase 0:** 105, recording the design in the docs.
-   - **Phase 1:** 106 save only what changed; 107 ids that can't collide;
-     108 the **test** Supabase project, tables, security rules, and its
-     connection to preview sites and local development; 109 sign in, sign
-     out, invite and reset links; 110 first backup, verified by reading it
-     back (plus the database rule that keeps each row's revision count);
-     111 keep the backup current after every change, with a quiet
-     status line and automatic retry; 112 restore onto a new device; 113
-     account settings (change email or password, sign out; deleting an
-     account stays a by-request dashboard job during Phase 1).
-     Manual export and the export reminder stay throughout Phase 1
-     ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
-     risk 1).
-   - **Go-live:** 114, added in Pass 108 — create the production project,
-     apply the same migration files, and give Vercel's Production
-     environment its settings. Until then the live site has no backend, so
-     each Phase 1 pass can be merged as it's finished without anything
-     appearing on the live site (see
-     [Decisions.md](Decisions.md#accounts-and-backend)).
-   - **Phase 2:** multi-device sync, and what happens offline.
-   - **Phase 3:** open sign-up, privacy policy and terms, a real email
-     provider, monitoring, and an in-app "delete my account" (probably a
-     database function) before strangers can sign up.
-
-   **Settled before Pass 109:** Supabase's built-in email sender can't
-   deliver invitations to anyone outside the Supabase project's own team,
-   so during Phase 1 the only account is the owner's own; other people get
-   accounts once email is sorted out — see
-   [Accounts-and-Backend.md](Accounts-and-Backend.md#open-questions).
+5. **Accounts and backend, Phases 2 and 3** — Phase 1 (an optional account
+   that keeps a checked copy of every piece and the technique library, restore,
+   account settings, live since Pass 114) is Done above. Still to build:
+   **Phase 2**, changes arriving on other devices by themselves, and what
+   happens offline; **Phase 3**, open sign-up, a privacy policy and terms, a
+   real email provider (Supabase's built-in sender reaches only the project's
+   own team and only a couple of messages an hour, which is why the owner's is
+   the only account for now), monitoring, and an in-app change of email and
+   "delete my account" (probably a database function) before strangers can sign
+   up. Phase 1's loose ends are in
+   [Decisions.md](Decisions.md#open-questions). Manual export and the export
+   reminder stay throughout. See
+   [Accounts-and-Backend.md](Accounts-and-Backend.md) and
+   [SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md).
 6. **Merge two split chunks back into one** — explicitly wanted, deliberately
    deferred from Pass 97 (no undo exists for a split). The representation
    leaves the door open (a split is one boundary measure in

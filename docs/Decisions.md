@@ -7403,6 +7403,126 @@ what it rules out.
   (works, but a wrong number would silently undermine "never overwrite
   silently"). See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#design).
+- **Pass 111 — a deletion is sent to the account only if this session saw the
+  piece leave `pieces` (confirmed by the user, 2026-10-03).** The automatic
+  backup marks a piece deleted in the account when it disappears from the
+  device, but "in the device record and not in `pieces`" is not proof of a
+  deletion: a failed or partial load looks the same, and would mark the
+  account's copy of everything deleted. So a deletion counts only if this
+  session watched the piece go (`noteLocalDeletions`, the `deletedHere` flag
+  in the record). Alternative ruled out: inferring deletions from absence
+  (simpler, and wrong exactly when something has already gone wrong). See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#keeping-the-backup-current-pass-111).
+- **Pass 111 — a false hold and the one-line status were left for Pass 112 on
+  purpose (decided by the user, 2026-10-03).** Nobody but the owner could
+  reach accounts before go-live, so a mistaken "changed on another device"
+  hold (an upload lands, its confirmation is lost, more is logged) and a status
+  line that shows one message at a time stayed as they were. Both are still
+  open; see Open questions.
+- **Pass 112 — "Get changes" takes the account's copy without asking only when
+  nothing here was waiting AND the account's revision moved, never by a clock
+  (confirmed by the user, 2026-10-03).** Anything changed on both sides gets
+  the picker, even where the file-import path would have settled it by
+  last-changed time: two devices' clocks can disagree, and a wrong guess would
+  replace work that was never uploaded. Alternative ruled out: reusing the
+  import path's last-changed rule (simpler, but loses work when clocks
+  differ). A test that lets the rule apply with a change waiting fails eight
+  tests. See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112).
+- **Pass 112 — a piece from the account keeps the account's created date
+  (confirmed by the user, 2026-10-03).** A restore then matches the account
+  exactly and nothing goes back up; a piece that differs only by created date
+  (what a file import leaves behind, since import re-stamps it) counts as the
+  same. File import is unchanged. Alternative ruled out: re-stamping on
+  restore too (every restored piece would read as changed and upload again).
+- **Pass 112 — restoring onto an empty device counts as that device's first,
+  checked backup (decided by the user, 2026-10-03; an exception to Design J's
+  question).** Everything on the device just came from that account, so
+  asking "back up this device?" first would be a question with one answer;
+  what's changed there uploads by itself. A device that already holds pieces
+  is not marked: the question still comes first.
+- **Pass 112 — three choices confirmed after the owner's own checks
+  (2026-10-05, "yes to all 3").** The "changed on another device" mark clears
+  when the merge is done, not when the merged result has uploaded (the card
+  said the latter; waiting would leave the mark on a piece with nothing to
+  upload). The account's spare row of a combined piece is marked deleted only
+  after this device has made its first backup (until then the combined piece
+  can't go up to replace it). A piece here that the account marks deleted is
+  never a combine target (otherwise the surviving copy would be combined into
+  the stale one and marked deleted too). The spare row is only ever marked
+  deleted, never erased (Design D).
+- **Pass 113 — "Sign out of all devices" reports honestly and asks in the page,
+  and "Require current password when updating" stays off.** The installed
+  library removes this device's sign-in even when it couldn't tell the
+  service, so after a lost connection other devices were never signed out;
+  the handler reads back whether this device is still signed in and says which
+  of three things happened (done; signed out here only; nothing changed).
+  Other devices keep working until their access token's hour is up.
+  Alternative ruled out: treating a lost connection as success, as the
+  ordinary sign-out does. The question is asked in the panel, never a
+  pop-up (the Pass 110 lesson). With "Require current password" on, Change
+  password would need a current-password field the app doesn't have, so it
+  stays off, as does "Secure password change" (when on, a sign-in older than
+  24 hours is sent to sign in again; Supabase's emailed-code route was not
+  used, since it needs an email every time and the built-in sender allows
+  only a couple an hour). See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#account-settings-pass-113).
+- **Pass 113 — the email-change "replace the account" steps were left
+  unrehearsed (the user, before the merge on 2026-10-06: document it as
+  something to test later, then merge).** See Open questions.
+- **Pass 114 — the account Site URL and redirect list name the address where
+  the owner's pieces live, not the shorter one (decided by the user,
+  2026-10-10, by setting it).** The live site is served at three addresses
+  (`measureone.vercel.app`, `measureone-git-main-measure-one.vercel.app`,
+  `measureone-measure-one.vercel.app`) that show the same build, but the
+  browser keeps pieces per address, so each is its own copy, and the owner's
+  real pieces are at the branch address (found 2026-10-08, when the shorter
+  address opened empty). An invitation always opens the Site URL, so it has
+  to be the address where the pieces are; the redirect list holds only that
+  address (a reset link asked for from another address falls back to the Site
+  URL). Alternatives ruled out: the shorter address (cleaner, but empty: the
+  pieces would first have to be moved there with an export and an import, and
+  the owner's habit changed) and both addresses on the redirect list (the
+  card said the live address only, and the fallback already lands on the
+  right one). Cost accepted: the branch address is long and tied to Vercel's
+  naming; moving to a domain later is one setting plus a Restore (the app has
+  no address built in). See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#setup-production-project).
+- **Pass 114 — the security checks are a script, run against the test project
+  and then production, with the key and passwords typed hidden (2026-10-10).**
+  Pass 108's 27 checks were run by hand once and never saved, so go-live could
+  only have repeated them from a description. `scripts/check-rls.mjs` (37
+  checks: those, plus the revision rule and the two sign-in settings) can be
+  re-run after any migration or sign-in setting change; it refuses a secret
+  key and any account that already holds data, and passes a "must be refused"
+  check only on a real permission error. 37 of 37 on both projects on
+  2026-10-10. Alternatives ruled out: repeating the checks by hand (not
+  repeatable, no record) and a test inside `npm test` (it needs a real project
+  and accounts and must never run on every build). The key prompt is hidden
+  because the dashboard shows the secret key beside the public one.
+- **Pass 114 — production's sign-in settings match the test project's
+  (2026-10-10).** "Require current password when updating" and "Secure
+  password change" are off (see Pass 113 above), minimum length 6, sign-ups
+  and anonymous sign-ins off. Invitation and reset links last one hour (the
+  project's default, 3600 seconds), so an invitation is sent only when its
+  person can open it at once.
+- **Pass 114 — the docs were written before the merge, with a small
+  follow-up after (proposed by Claude, 2026-10-10; the owner asked for the
+  docs update before merging).** Merging is the moment accounts turn on, so
+  the docs for a live state belong in the same merge; what is only known
+  afterwards (the owner's first account, backup and phone restore, and the
+  go-live date if it isn't the merge day) goes in a docs-only follow-up.
+  Alternative ruled out: docs after the merge (the live state would be
+  undocumented for a stretch, and a cold start in between would read a wrong
+  "no backend" picture).
+- **Pass 114 — the way back is "delete the two Production settings, then
+  redeploy", not a code revert (2026-10-10).** The merge of Pass 114 contains
+  no app code: the account code has been on `main` since Pass 113 and appears
+  on a site only while the two settings were present when it was built, so a
+  revert would not turn accounts off. A faster Instant Rollback to the
+  deployment of `8636cfa` exists but must be followed by deleting the settings,
+  and whether it moves the owner's branch address was never tested. See
+  [DEPLOYMENT.md](../DEPLOYMENT.md#rolling-back).
 
 ## Open questions
 
@@ -7507,6 +7627,8 @@ oversight to silently fix; surface it instead.
      write over it), so Pass 111 must treat "a row exists but this device has
      no entry for it" as held, never as safe to upload over. The technique
      row follows the same rule.
+     **Built in Pass 111:** a row with no device-record entry is held (see
+     [Accounts-and-Backend.md](Accounts-and-Backend.md#keeping-the-backup-current-pass-111)).
   8. **The failure-path checks aren't committed as tests** (named in the
      review's "not verified" line, not one of its P2s). The committed tests
      cover insert-only, recording only what matched, a read-back mismatch
@@ -7548,6 +7670,41 @@ oversight to silently fix; surface it instead.
       exception to the import rule), or the compare and fingerprint ignore
       `createdAt`. It isn't pure noise: `createdAt` orders movements inside a
       work.
+      **Resolved in Pass 112 (confirmed 2026-10-03):** a piece from the account keeps
+      the account's created date, and one that differs only by it counts as the
+      same; importing from a file still re-stamps.
+- **Accounts at go-live (Pass 114, 2026-10-10) — what is still open.**
+  Logged, not fixed; the owner is the only account, which keeps all of it
+  low-risk. Each item's detail lives in
+  [Accounts-and-Backend.md](Accounts-and-Backend.md) ("Found in the review
+  before the merge" under Setup (production project), and "For later passes"
+  under Passes 111, 112 and 113).
+  1. **From the Pass 114 review:** the hidden key prompt no longer trims a
+     stray space (a visible but confusing refusal; a one-line fix); the
+     script's own tests (a stand-in database, 13 deliberately broken versions,
+     a terminal test of the hidden prompts) ran from a scratch folder, are not
+     committed, and the script is not in `npm test`; the script knows only the
+     two tables, so a migration that adds one needs its checks added; and
+     some things could not be verified before the merge (the two Vercel
+     Production values, how Instant Rollback and Redeploy treat the branch
+     address, that an invitation lands on the Site URL on production), to be
+     closed in the follow-up docs commit.
+  2. **From Pass 111:** a false hold is still possible, and the status line
+     still shows one message at a time (both left on purpose, see above).
+  3. **From Pass 112:** a combine the person declines is offered again on
+     every Get changes; two devices that both use the app often hold each
+     other's technique library (its per-device parts are in the shared row); a
+     name match with a blank composer can combine two different pieces; there is
+     no "undelete"; a merge clears the piece's reschedule marker; and
+     `mergeSessionArrays` compares sessions as text, so key order matters (worked
+     around in `lib/accountSync.js`).
+  4. **From Pass 113:** the email-change "replace the account" steps have never
+     been rehearsed; "Sign out of all devices" can be reported wrongly if the
+     service rejects this device's own sign-in (and other devices keep working
+     until their access token's hour is up); the "sign in again first" prompt has
+     only been seen against a stand-in; `lib/backend.js` has no tests; the
+     leaked-password check is Pro-plan only.
+  5. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

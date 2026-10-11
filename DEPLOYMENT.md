@@ -101,14 +101,20 @@ Vercel should auto-detect these, but verify:
   **Where to find them:** Supabase dashboard → the project → **Project
   Settings**: the URL under **Data API**, the public key under **API Keys**.
 
-  **Which environment gets which project** (Vercel → Project Settings →
-  Environment Variables, choosing the environment for each variable):
+  **Which environment gets which project** (Vercel → the project → Settings →
+  Environment Variables, choosing the environment for each variable, so each
+  name is listed twice, once per project):
   - **Preview** (every branch's preview site) and **local development**
     (`.env.local`, copied from `.env.example`, never committed): the **test**
     project, `measureone-test`.
-  - **Production** (the live site): **leave empty until go-live** (Pass 114),
-    when a separate production project is created. Until then the live site
-    has no account backend at all.
+  - **Production** (the live site): the **production** project,
+    `measureone-prod` (`https://tqamtwdraqsvejvhiptz.supabase.co`), since
+    go-live (Pass 114, 2026-10-10). Both settings are ticked for **Production
+    only** (type Config): one ticked for Preview as well would point every
+    preview site at real accounts. Before go-live this environment had none
+    and the live site had no account backend at all; deleting both Production
+    settings and redeploying brings that state back (see "Rolling back"
+    below).
 
   The public key is safe in the browser: the database's row-level security
   rules decide what each signed-in account can read and write (see
@@ -171,6 +177,79 @@ breaks something, Vercel's dashboard can switch the live site back to the
 previous deployment in one click (Deployments → the previous one → Promote
 to Production / Instant Rollback) while the fix is made.
 
+With accounts on (since Pass 114, below) the live site also talks to real
+accounts, so read "The live addresses" and "Rolling back" below before relying
+on that one click.
+
+### The live addresses (Pass 114)
+
+**Three addresses serve the live site**, all assigned to the same deployment
+(compared 2026-10-08 and again 2026-10-10: the same page and the same app
+file):
+- `https://measureone.vercel.app`
+- `https://measureone-git-main-measure-one.vercel.app` (Vercel's branch
+  address for `main`). **This is where the owner's real pieces are**, and it
+  is the address set as the account Site URL in the production project.
+- `https://measureone-measure-one.vercel.app`
+
+The browser keeps the pieces **per address and per browser**, so the same app
+at another address, or in another browser, starts empty. Nothing is lost:
+open the address where the pieces are, or restore them from the account.
+Which address to use is a choice, not a rule, but the account's Site URL
+(where an invitation lands) should be the address where the pieces are; see
+[Setup (production project)](docs/Accounts-and-Backend.md#setup-production-project).
+
+### Rolling back
+
+**The go-live rollback point**, noted 2026-10-07 before anything changed: the
+deployment of commit `8636cfa` (the Pass 113 merge),
+`https://measureone-jjwajut3k-measure-one.vercel.app`, created
+2026-10-07 05:51 UTC (the evening of 6 October in the owner's time zone),
+serving the app file `index-B11FjqLP.js`. It has no account backend. The
+owner confirmed on 2026-10-10 that its **Domains** list includes
+`measureone-git-main-measure-one.vercel.app`.
+
+Two ways back from accounts being on, in order of preference. Nothing on any
+device is lost either way: practice is saved on the device first, and the
+account copy stays in Supabase.
+1. **The sure way:** Settings → Environment Variables: delete the two
+   **Production** settings (leave Preview alone). Then Deployments → the
+   latest Production deployment → ⋯ → **Redeploy**. It rebuilds `main` as it
+   is, without the settings, so there is no account backend again, and as a
+   new Production deployment it should move all three live addresses (check
+   afterwards that all three serve the new file and print no Supabase address,
+   as below). (The account
+   code is in `main` already: accounts exist on a site only while the two
+   settings do, so no revert is needed.)
+2. **The fast way:** Deployments → the `8636cfa` deployment → ⋯ → **Instant
+   Rollback**, then delete the two Production settings so the next build
+   doesn't turn accounts back on. Vercel may stop moving the live addresses
+   to new deployments after an instant rollback until one is promoted (the
+   Deployments page says so). **Check afterwards** that
+   `measureone-git-main-measure-one.vercel.app` serves `index-B11FjqLP.js`
+   (below): it is a branch address, and whether an instant rollback moves it
+   was never tested.
+
+### Checking which project a site talks to
+
+The project's address is built into the app file, so a deployed site can be
+checked from outside:
+
+```bash
+curl -s https://measureone-git-main-measure-one.vercel.app/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'
+```
+
+then, with that file name in place of `index-XXXX.js`:
+
+```bash
+curl -s https://measureone-git-main-measure-one.vercel.app/assets/index-XXXX.js | grep -o 'https://[a-z0-9]*\.supabase\.co' | sort -u
+```
+
+The live addresses should print the production project's address
+(`https://tqamtwdraqsvejvhiptz.supabase.co`), a preview site the test
+project's (`https://devbzzbtinzxspmiatba.supabase.co`), and a site with no
+account backend nothing at all.
+
 ### Monitoring
 
 - Check deployments at [vercel.com/dashboard](https://vercel.com/dashboard)
@@ -203,6 +282,10 @@ In Vercel project settings:
 
 ### localStorage Data Not Persisting
 - This is normal and expected — each user's data is isolated to their own browser
+- **It is isolated per web address too:** the same app at another address
+  (`measureone.vercel.app` and `measureone-git-main-measure-one.vercel.app`
+  serve the same build) is a separate, empty copy. Nothing is lost: open the
+  address where the pieces are, or restore them from the account.
 - Users can export/import backups manually if switching devices
 - This is not a Vercel issue; it's how browser localStorage works
 
@@ -216,7 +299,13 @@ Before going live:
 3. ✅ All external data properly validated
 4. ✅ Ready for public access (if deployed as public)
 
-Your app stores everything client-side, so there are no backend security concerns.
+Your pieces are stored in the browser first. Since go-live (Pass 114) an
+optional, invitation-only account holds a second copy in a Supabase project,
+protected by row-level security: nobody can read or change another account's
+rows, and nobody can delete a row. `scripts/check-rls.mjs` checks that against
+a project (37 checks, two throwaway accounts); run it after any change to the
+database's rules or sign-in settings. Only the project's **public** key is ever
+in the app or in a setting, never the secret key.
 
 ---
 

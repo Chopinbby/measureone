@@ -37,9 +37,10 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   injected via a `<style>` tag inside the root component, using CSS custom
   properties defined on `.measureone-app`. No Tailwind, no CSS modules.
 - No backend. All persistence is client-side `localStorage`. (Since Pass 109 an
-  optional account sign-in exists on sites connected to an account service, and
-  since Pass 110 it can copy this browser's data to the account on request; see
-  "Since Pass 109" and "Since Pass 110" below.)
+  optional account sign-in exists on sites connected to an account service (the
+  live site too, since Pass 114), and since Pass 110 it can copy this browser's
+  data to the account on request; see "Since Pass 109", "Since Pass 110" and
+  "Since Pass 114" below.)
 - No React Router — navigation is a simple `activeTab` string in state.
 
 ## Running it locally
@@ -1926,8 +1927,8 @@ it only says who's signed in. Four things worth knowing:
 - **The app must keep working with the backend unconfigured, and nothing
   account-related may render then.** `isBackendConfigured()`
   (`lib/backend.js`) is false when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
-  are missing, which is the live site (its Production environment has no
-  Supabase settings until go-live, Pass 114), a fresh checkout and `npm test`.
+  are missing, which was the live site until go-live (Pass 114, see "Since
+  Pass 114" below), and is still a fresh checkout and `npm test`.
   `authEnabled` in `App.jsx` gates every account surface: the Account panel,
   the welcome-screen link, both windows. A new account surface must check it.
 - **Auth state lives in `App.jsx`** (`authSession`, only `{ email, userId }`;
@@ -2060,8 +2061,9 @@ Eight things worth knowing:
 - **Nothing here may run, and the library may not be loaded, unless the device
   is signed in AND its first backup is checked** (`computeWaiting` returns
   nothing before then; the first backup stays a deliberate, asked-first step).
-  A new caller of the upload must keep that gate. The live site and `npm test`
-  have no connection settings, so `authEnabled` is false and nothing renders.
+  A new caller of the upload must keep that gate. A build with no connection
+  settings (`npm test`, a fresh checkout) has `authEnabled` false and nothing
+  renders; the live site has had them since Pass 114.
 - **Status wording is one line, first match wins** (`describeSyncStatus`): not
   answering, else the held message, else "N changes waiting to back up", else
   "Backed up just now". A held piece's line replaces the backed-up one and
@@ -2144,3 +2146,68 @@ Ten things worth knowing:
   (nothing remembers "these are different"). See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112)
   and [`docs/User-Flows.md`](docs/User-Flows.md#12-getting-things-from-your-account-optional-pass-112).
+
+**Since Pass 113**, a signed-in person can **change their password** and
+**sign out of all devices** (Settings → Account, a group of its own at the
+bottom of the panel). Neither touches a piece, the technique library or the
+device record. Four things worth knowing:
+- **`ChoosePasswordModal` has a third mode, `mode="change"`**, opened by
+  `openChangePassword` (`App.jsx`); the words and helpers (`describeSignOutAll`
+  and friends) are in `lib/backend.js`, which has no tests.
+- **"Require current password when updating" must stay OFF** in the Supabase
+  Email provider (it is, on both projects): the app sends no current password,
+  so with it on Change password fails with the generic "Couldn't save your
+  password". "Secure password change" is off too; if it's ever on, a sign-in
+  older than 24 hours gets "For your security, sign in again" and a **Sign in
+  again** button.
+- **Sign out of all devices asks in the panel (never a pop-up) and reports
+  honestly** (`handleSignOutAll`): the installed library removes this device's
+  sign-in even when the service couldn't be told, so the result is read back
+  and `describeSignOutAll` says done / signed out here only / still signed in.
+  Other devices keep working until their access token's hour is up.
+- **No in-app email change or account deletion** (Phase 3): the project owner
+  does them in the dashboard, and the "replace the account" steps for an email
+  change have never been rehearsed. See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#account-settings-pass-113)
+  and [`docs/User-Flows.md`](docs/User-Flows.md#13-account-settings-optional-pass-113).
+
+**Since Pass 114 (2026-10-10), the live site is connected to accounts.** Its
+Vercel **Production** environment has the production Supabase project's two
+settings (`measureone-prod`); Preview and local development keep the test
+project's. The app code didn't change: accounts appear on a site only while
+`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` were present when it was built.
+Six things worth knowing:
+- **A merge to `main` now ships to real accounts.** Anything touching
+  `lib/accountSync.js`, `lib/backend.js` or the database must be tried on a
+  preview (the test project) first, and a new migration file goes to the test
+  project, then to production by hand in its SQL Editor (the app can't run
+  it). **Never tick Preview on a production setting, and never put the secret
+  key anywhere** (Vercel, `.env.local`, the repo). Deleting the two Production
+  settings and redeploying takes accounts off the live site again.
+- **One build, three addresses, separate pieces.** `measureone.vercel.app`,
+  `measureone-git-main-measure-one.vercel.app` and
+  `measureone-measure-one.vercel.app` serve the same deployment, but the
+  browser keeps pieces per address and per browser. **The owner's real pieces
+  are at `measureone-git-main-measure-one.vercel.app`**; the clean address
+  opens empty (found 2026-10-08). That address is also the production
+  project's Site URL and its only redirect URL. A verification must not write
+  to, or clear, storage at that address in the owner's browser, and "the live
+  site looks empty" usually means another address or another browser.
+- **`scripts/check-rls.mjs` is the security check** (37 checks, two throwaway
+  accounts created and deleted in the dashboard; it refuses a secret key or an
+  account that already holds data, and takes the key and passwords hidden).
+  Run it against the test project and then production after any migration or
+  sign-in setting change, and delete the accounts afterwards (production
+  should read 0 accounts, 0 pieces, 0 technique rows until real accounts
+  exist). It is not part of the app or of `npm test`.
+- **Invitation and reset links die after one hour** (production's Email OTP
+  expiration is 3600 seconds), so an invitation is sent only when its person
+  can open it at once.
+- **The way back is in `DEPLOYMENT.md` ("Rolling back")**, with the go-live
+  rollback point (the deployment of `8636cfa`). A change to a Vercel setting
+  only takes effect with a new deployment.
+- **The Free plan applies to both projects:** an idle project pauses after a
+  week (practice is unaffected; restore it in the dashboard) and there are no
+  automatic backups, so the manual export and the export reminder stay. See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
+  and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).

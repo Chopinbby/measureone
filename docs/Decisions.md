@@ -7687,10 +7687,25 @@ oversight to silently fix; surface it instead.
   no dashboard backup; its advice is to export regularly with `supabase db
   dump` and keep copies off-site). Options, none chosen: (1) **Supabase Pro**,
   from $25 a month: daily backups kept 7 days, no pausing. (2) **Stay on Free
-  and add a scheduled dump:** a weekly `supabase db dump` (or `pg_dump`) of the
-  production database to a folder outside Supabase (for example iCloud Drive).
-  It needs a tool installed, the database password kept in the Mac's Keychain
-  and the Mac awake, and would be its own small pass. (3) **Exported files
+  and add a scheduled copy in the cloud** (researched 2026-10-11, a better
+  version of the first idea of a dump on the owner's Mac): a free GitHub
+  Actions job, run daily, saves a dated copy of the production data to a
+  **private** GitHub repository (this repository is public, and Supabase's
+  guide says never to back up to a public one). Two ways: Supabase's own
+  `supabase db dump` recipe (needs the database password as a GitHub secret,
+  and the *session pooler* connection string, since GitHub's runners can't
+  reach Supabase's IPv6-only direct host; restoring means running SQL and
+  re-pointing the rows at the new account's internal id), or a small script
+  in `scripts/` that signs in as the owner and writes a file in the app's own
+  backup format (needs the owner's login as a secret; restoring is the
+  existing Import button). GitHub emails the owner when a scheduled run fails.
+  Either would be its own small pass, with a restore rehearsed on the test
+  project, and changes nothing in the app, Supabase or Vercel. Other free
+  platforms checked (2026-10-11): none gives long free history together with
+  sign-in and per-person security (Cloudflare D1 keeps 30 days of restore
+  points free but is a bare database, Turso 24 hours, Neon about 6 hours,
+  Firebase needs its paid plan), so switching would be a rebuild and is not
+  recommended. (3) **Exported files
   only:** free and immediate, but they depend on the owner exporting (the
   export reminder nags after a day). Until one is chosen, (3) is the safety
   net.

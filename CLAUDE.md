@@ -2147,6 +2147,30 @@ Ten things worth knowing:
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112)
   and [`docs/User-Flows.md`](docs/User-Flows.md#12-getting-things-from-your-account-optional-pass-112).
 
+**Since Pass 113**, a signed-in person can **change their password** and
+**sign out of all devices** (Settings → Account, a group of its own at the
+bottom of the panel). Neither touches a piece, the technique library or the
+device record. Four things worth knowing:
+- **`ChoosePasswordModal` has a third mode, `mode="change"`**, opened by
+  `openChangePassword` (`App.jsx`); the words and helpers (`describeSignOutAll`
+  and friends) are in `lib/backend.js`, which has no tests.
+- **"Require current password when updating" must stay OFF** in the Supabase
+  Email provider (it is, on both projects): the app sends no current password,
+  so with it on Change password fails with the generic "Couldn't save your
+  password". "Secure password change" is off too; if it's ever on, a sign-in
+  older than 24 hours gets "For your security, sign in again" and a **Sign in
+  again** button.
+- **Sign out of all devices asks in the panel (never a pop-up) and reports
+  honestly** (`handleSignOutAll`): the installed library removes this device's
+  sign-in even when the service couldn't be told, so the result is read back
+  and `describeSignOutAll` says done / signed out here only / still signed in.
+  Other devices keep working until their access token's hour is up.
+- **No in-app email change or account deletion** (Phase 3): the project owner
+  does them in the dashboard, and the "replace the account" steps for an email
+  change have never been rehearsed. See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#account-settings-pass-113)
+  and [`docs/User-Flows.md`](docs/User-Flows.md#13-account-settings-optional-pass-113).
+
 **Since Pass 114 (2026-10-10), the live site is connected to accounts.** Its
 Vercel **Production** environment has the production Supabase project's two
 settings (`measureone-prod`); Preview and local development keep the test

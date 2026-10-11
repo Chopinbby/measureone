@@ -939,8 +939,9 @@ account's rows are untouched. Delete the second throwaway account afterwards.
   for up to the token's remaining life (above); a shorter JWT expiry is a project
   setting, not done. (5) **`lib/backend.js` has no tests**; a `test/backend.test.mjs`
   would cover these helpers and the older ones (`signInErrorMessage`,
-  `setPasswordErrorMessage`, `parseAuthLink`). (6) `CLAUDE.md` has no "Since Pass 113"
-  note (it isn't on the card's file list). (7) The ordinary sign-out still uses a
+  `setPasswordErrorMessage`, `parseAuthLink`). (6) `CLAUDE.md` had no "Since Pass 113"
+  note when this pass was written (it wasn't on the card's file list); added
+  with the Pass 114 docs. (7) The ordinary sign-out still uses a
   browser pop-up for an unexpected failure (`handleSignOut`); the new handler never
   does. (8) The leaked-password check is Pro-plan only (read 2026-10-05), so it can't
   be turned on while the project is on the Free plan. (9) **To test later: the

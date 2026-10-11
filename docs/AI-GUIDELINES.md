@@ -1045,6 +1045,30 @@ had been the day before. `first_use_at` was 4 seconds after the new dev
 server started, so the pane had new storage and no delete had ever run. The
 checks then used a test piece made through the Wizard instead.
 
+## When a statement stops being true, search for its subject, not for the pass that changed it
+
+Pass 114 switched accounts on for the live site. The first docs pass searched
+for "go-live", "Pass 114" and "production" and called itself done; a review
+then found nine more statements, written by earlier passes, saying the live
+site has no account service (in the user flows, the accounts doc and
+CLAUDE.md), because none of them mentioned the pass that would flip them.
+When a pass changes what is true about something (the live site, a default, a
+limit), grep the docs for the *thing* ("live site", "no backend", "preview
+sites and local development") and read every hit, not only for the pass's own
+name. Do it before the review, not because of it.
+
+## Where the owner's real data lives is a fact to ask for, not to infer from your own notes
+
+Pass 114's backup and go-live plan assumed the owner's pieces were on the live
+site, and the first correction guessed `localhost:5173` from notes about a
+testing copy that held the same pieces. They were at
+`measureone-git-main-measure-one.vercel.app`, one of three addresses serving
+the same build; the shorter address the owner was sent to opened empty. The
+browser keeps pieces per address and per browser, so "the live site" can be
+several different copies. Before any plan depends on where the owner's data is
+(a backup, a restore, which address an invitation should open), ask for the
+address from the owner's own address bar, and say which one the plan rests on.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

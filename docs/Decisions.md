@@ -7687,8 +7687,9 @@ oversight to silently fix; surface it instead.
      two tables, so a migration that adds one needs its checks added; and
      some things could not be verified before the merge (the two Vercel
      Production values, how Instant Rollback and Redeploy treat the branch
-     address, that an invitation lands on the Site URL on production), to be
-     closed in the follow-up docs commit.
+     address, that an invitation lands on the Site URL on production). All but
+     the Instant Rollback and Redeploy question were checked after the merge
+     (2026-10-10); how those two treat the branch address is still untested.
   2. **From Pass 111:** a false hold is still possible, and the status line
      still shows one message at a time (both left on purpose, see above).
   3. **From Pass 112:** a combine the person declines is offered again on

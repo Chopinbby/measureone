@@ -1159,9 +1159,22 @@ part of the app or of `npm test`.
   in each project's SQL Editor: the test project had 1 account (the owner's)
   and 0 leftover `rls-check-` rows; this project had 0 accounts, 0 pieces and
   0 technique rows.
-- Accounts on this project at go-live: none. The owner's own is invited right
-  after (Authentication → Users → Add user → Send invitation), then backed up
-  from the owner's real address.
+- **After the merge (2026-10-10, 9:23 pm in the owner's time zone):** the live
+  build was checked from outside. All four addresses (the three above and the
+  deployment's own) serve the same new app file. It holds the production
+  project's address and not the test one, no secret key, and a public key that
+  production's auth service accepts (it answers that sign-ups are disabled). It
+  is byte-identical to a clean build of the merged code with only that address
+  and key. A signed-out visitor downloads only the page and the app file and
+  makes no request to the account service (and sees one new thing, a quiet
+  "Sign in" link). A preview built after the Production settings were added
+  still holds the test project's address.
+- **The owner's own account (reported by the owner, 2026-10-10):** invited from
+  the dashboard, then **Back up this device** on the real address. The SQL
+  Editor then read 1 account, 25 pieces, 0 deleted, 1 technique row, and, after
+  one logged session, a highest revision of 2 (the automatic upload works). On
+  the owner's phone (Safari, the same address) the pieces came from the account
+  and the owner opened one. It is the only account.
 
 The [Free-plan consequences](#free-plan-consequences) above apply to this
 project too: an idle project pauses after a week (restore it from the
@@ -1183,12 +1196,13 @@ backups, so the manual export and the export reminder stay.
    would pass without testing the new table.
 4. In "Changing it later" above, "nothing else in Vercel changes" means the two
    settings. The domain itself is still added under Vercel → Domains.
-5. Not verified before the merge: the two Vercel Production values themselves
-   (reported done by the owner; the Preview side is verified by the preview
-   build, the Production side by the first live build), how Vercel's Instant
-   Rollback and Redeploy treat the branch address (DEPLOYMENT.md says how to
-   check), and that an invitation lands on the Site URL on this project (seen
-   when the owner is invited).
+5. Not verified before the merge, checked after it (2026-10-10): the two
+   Vercel Production values (the live build holds production's address and a
+   key its auth service accepts) and that an invitation works on this project
+   (the owner's did). **Still untested:** how Vercel's Instant Rollback and
+   Redeploy treat the branch address. An ordinary new deployment, the Pass 114
+   merge, moved it together with the other addresses; DEPLOYMENT.md says how
+   to check after a rollback.
 
 ## Where this differs from the SOW
 

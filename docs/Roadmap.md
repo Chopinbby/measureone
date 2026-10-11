@@ -348,7 +348,8 @@ new device, "Get changes" and settling a piece changed elsewhere (112), change
 password and sign out of all devices (113), and go-live (114): a separate
 production project, a security script (`scripts/check-rls.mjs`, 37 checks, run
 on both projects) and the two Vercel Production settings. Live since
-2026-10-10; the owner's own is the only account planned for now. See
+2026-10-10, with the owner's own account (backed up, and restored on a phone)
+as the only one for now. See
 [Accounts-and-Backend.md](Accounts-and-Backend.md) (including
 [Setup (production project)](Accounts-and-Backend.md#setup-production-project))
 and [Decisions.md](Decisions.md#accounts-and-backend).

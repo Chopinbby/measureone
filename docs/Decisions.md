@@ -7359,8 +7359,10 @@ what it rules out.
   this browser's copy first), and there are no automatic backups (the
   account copy is one copy among this browser's copy and exported files,
   and nothing would restore it if Supabase lost the database). Alternative
-  ruled out for now: the paid Pro plan (no pausing, daily backups, a
-  monthly cost; check its current price and terms if it's ever revisited).
+  ruled out for now: the paid Pro plan (no pausing, daily backups kept 7
+  days, from $25 a month as read on supabase.com/pricing on 2026-10-10).
+  **Revisited 2026-10-10:** the owner pointed out that the missing backups
+  undercut the point of accounts; see Open questions.
   See [Accounts-and-Backend.md](Accounts-and-Backend.md#free-plan-consequences).
 - **Design K — the account code is downloaded only when it's needed
   (decided by the user, 2026-09-29, for Pass 109).** The Supabase library
@@ -7673,6 +7675,40 @@ oversight to silently fix; surface it instead.
       **Resolved in Pass 112 (confirmed 2026-10-03):** a piece from the account keeps
       the account's created date, and one that differs only by it counts as the
       same; importing from a file still re-stamps.
+- **The account copy has no backups of its own on the Free plan: revisit
+  (raised by the owner, 2026-10-10; undecided).** The owner pointed out that
+  this undercuts the point of accounts. Covered today: losing a device or a
+  browser (every other device and the account hold a copy, and exported files
+  are independent of all of them). Not covered: a bad change that gets copied
+  everywhere (a bug, a wrong edit, an overwrite), or Supabase losing or
+  deleting the project, because the account keeps only each row's latest
+  version and the Free plan keeps no daily snapshots (checked on Supabase's
+  backups page and pricing page, 2026-10-10: Free has no automatic backups and
+  no dashboard backup; its advice is to export regularly with `supabase db
+  dump` and keep copies off-site). Options, none chosen: (1) **Supabase Pro**,
+  from $25 a month: daily backups kept 7 days, no pausing. (2) **Stay on Free
+  and add a scheduled copy in the cloud** (researched 2026-10-11, a better
+  version of the first idea of a dump on the owner's Mac): a free GitHub
+  Actions job, run daily, saves a dated copy of the production data to a
+  **private** GitHub repository (this repository is public, and Supabase's
+  guide says never to back up to a public one). Two ways: Supabase's own
+  `supabase db dump` recipe (needs the database password as a GitHub secret,
+  and the *session pooler* connection string, since GitHub's runners can't
+  reach Supabase's IPv6-only direct host; restoring means running SQL and
+  re-pointing the rows at the new account's internal id), or a small script
+  in `scripts/` that signs in as the owner and writes a file in the app's own
+  backup format (needs the owner's login as a secret; restoring is the
+  existing Import button). GitHub emails the owner when a scheduled run fails.
+  Either would be its own small pass, with a restore rehearsed on the test
+  project, and changes nothing in the app, Supabase or Vercel. Other free
+  platforms checked (2026-10-11): none gives long free history together with
+  sign-in and per-person security (Cloudflare D1 keeps 30 days of restore
+  points free but is a bare database, Turso 24 hours, Neon about 6 hours,
+  Firebase needs its paid plan), so switching would be a rebuild and is not
+  recommended. (3) **Exported files
+  only:** free and immediate, but they depend on the owner exporting (the
+  export reminder nags after a day). Until one is chosen, (3) is the safety
+  net.
 - **Accounts at go-live (Pass 114, 2026-10-10) — what is still open.**
   Logged, not fixed; the owner is the only account, which keeps all of it
   low-risk. Each item's detail lives in
@@ -7687,8 +7723,9 @@ oversight to silently fix; surface it instead.
      two tables, so a migration that adds one needs its checks added; and
      some things could not be verified before the merge (the two Vercel
      Production values, how Instant Rollback and Redeploy treat the branch
-     address, that an invitation lands on the Site URL on production), to be
-     closed in the follow-up docs commit.
+     address, that an invitation lands on the Site URL on production). All but
+     the Instant Rollback and Redeploy question were checked after the merge
+     (2026-10-10); how those two treat the branch address is still untested.
   2. **From Pass 111:** a false hold is still possible, and the status line
      still shows one message at a time (both left on purpose, see above).
   3. **From Pass 112:** a combine the person declines is offered again on

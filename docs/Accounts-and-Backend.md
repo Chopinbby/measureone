@@ -180,6 +180,9 @@ them (Pass 108 sets up the project).
   low activity ([pricing](https://supabase.com/pricing)), and a paused
   project can be restored from the dashboard for up to a year after it was
   paused ([project pausing](https://supabase.com/docs/guides/platform/free-project-pausing)).
+  *Re-read 2026-10-10:* an older Supabase changelog and troubleshooting page
+  still say 90 days, so treat the deadline the dashboard shows for the paused
+  project as the truth.
 - **The built-in email sender is for testing only.** The brief: Supabase's
   built-in email sender is rate-limited and meant for testing; fine for
   invitations and the odd password reset; Phase 3 needs a real email
@@ -1043,12 +1046,20 @@ current price and terms then):
 - **A pause stops the account copy updating, not practice.** The app always
   works from this browser's copy first (Design A), so a paused project only
   means changes wait to be uploaded until someone restores it from the
-  dashboard (up to a year after the pause).
+  dashboard (Supabase's current guide says up to a year after the pause, an
+  older page says 90 days; the dashboard shows the real deadline).
 - **No automatic backups.** The account copy is a second copy of the data,
   next to this browser's copy and any exported backup files. If Supabase lost
   the database, nothing would restore the account copies. The manual export
-  and the export reminder stay for that reason. Take a manual export of the
-  database before each release (Supabase dashboard).
+  and the export reminder stay for that reason. **The Free plan has no
+  dashboard backup or download either** (an earlier version of this page said
+  to export from the dashboard; that was wrong). Supabase's own advice for
+  free projects is to export regularly with its command-line tool
+  (`supabase db dump`) and keep copies off-site (read 2026-10-10). **The owner
+  raised on 2026-10-10 that this undercuts the point of accounts; it is open,
+  see [Decisions.md](Decisions.md#open-questions).** Pro (from $25 a month,
+  read 2026-10-10 on [pricing](https://supabase.com/pricing)) keeps daily
+  backups for 7 days and never pauses a project.
 
 **Free-plan limits, checked 2026-09-29** on Supabase's
 [pricing](https://supabase.com/pricing) page (check again before relying on
@@ -1159,9 +1170,22 @@ part of the app or of `npm test`.
   in each project's SQL Editor: the test project had 1 account (the owner's)
   and 0 leftover `rls-check-` rows; this project had 0 accounts, 0 pieces and
   0 technique rows.
-- Accounts on this project at go-live: none. The owner's own is invited right
-  after (Authentication → Users → Add user → Send invitation), then backed up
-  from the owner's real address.
+- **After the merge (2026-10-10, 9:23 pm in the owner's time zone):** the live
+  build was checked from outside. All four addresses (the three above and the
+  deployment's own) serve the same new app file. It holds the production
+  project's address and not the test one, no secret key, and a public key that
+  production's auth service accepts (it answers that sign-ups are disabled). It
+  is byte-identical to a clean build of the merged code with only that address
+  and key. A signed-out visitor downloads only the page and the app file and
+  makes no request to the account service (and sees one new thing, a quiet
+  "Sign in" link). A preview built after the Production settings were added
+  still holds the test project's address.
+- **The owner's own account (reported by the owner, 2026-10-10):** invited from
+  the dashboard, then **Back up this device** on the real address. The SQL
+  Editor then read 1 account, 25 pieces, 0 deleted, 1 technique row, and, after
+  one logged session, a highest revision of 2 (the automatic upload works). On
+  the owner's phone (Safari, the same address) the pieces came from the account
+  and the owner opened one. It is the only account.
 
 The [Free-plan consequences](#free-plan-consequences) above apply to this
 project too: an idle project pauses after a week (restore it from the
@@ -1183,12 +1207,13 @@ backups, so the manual export and the export reminder stay.
    would pass without testing the new table.
 4. In "Changing it later" above, "nothing else in Vercel changes" means the two
    settings. The domain itself is still added under Vercel → Domains.
-5. Not verified before the merge: the two Vercel Production values themselves
-   (reported done by the owner; the Preview side is verified by the preview
-   build, the Production side by the first live build), how Vercel's Instant
-   Rollback and Redeploy treat the branch address (DEPLOYMENT.md says how to
-   check), and that an invitation lands on the Site URL on this project (seen
-   when the owner is invited).
+5. Not verified before the merge, checked after it (2026-10-10): the two
+   Vercel Production values (the live build holds production's address and a
+   key its auth service accepts) and that an invitation works on this project
+   (the owner's did). **Still untested:** how Vercel's Instant Rollback and
+   Redeploy treat the branch address. An ordinary new deployment, the Pass 114
+   merge, moved it together with the other addresses; DEPLOYMENT.md says how
+   to check after a rollback.
 
 ## Where this differs from the SOW
 

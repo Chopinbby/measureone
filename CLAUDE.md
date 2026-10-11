@@ -2176,7 +2176,8 @@ Vercel **Production** environment has the production Supabase project's two
 settings (`measureone-prod`); Preview and local development keep the test
 project's. The app code didn't change: accounts appear on a site only while
 `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` were present when it was built.
-Six things worth knowing:
+The owner's own account exists (invited, backed up and restored on a phone on
+2026-10-10) and is the only one. Six things worth knowing:
 - **A merge to `main` now ships to real accounts.** Anything touching
   `lib/accountSync.js`, `lib/backend.js` or the database must be tried on a
   preview (the test project) first, and a new migration file goes to the test
@@ -2208,6 +2209,8 @@ Six things worth knowing:
   only takes effect with a new deployment.
 - **The Free plan applies to both projects:** an idle project pauses after a
   week (practice is unaffected; restore it in the dashboard) and there are no
-  automatic backups, so the manual export and the export reminder stay. See
+  automatic backups (the owner raised this on 2026-10-10, undecided: see Open
+  questions in `docs/Decisions.md`), so the manual export and the export
+  reminder stay. See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
   and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).

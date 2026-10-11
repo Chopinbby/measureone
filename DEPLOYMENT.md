@@ -216,9 +216,10 @@ account copy stays in Supabase.
    **Production** settings (leave Preview alone). Then Deployments → the
    latest Production deployment → ⋯ → **Redeploy**. It rebuilds `main` as it
    is, without the settings, so there is no account backend again, and as a
-   new Production deployment it should move all three live addresses (check
-   afterwards that all three serve the new file and print no Supabase address,
-   as below). (The account
+   new Production deployment it should move all three live addresses (the
+   Pass 114 merge, an ordinary new deployment, moved all of them together;
+   whether a Redeploy does is untested, so check afterwards that all three
+   serve the new file and print no Supabase address, as below). (The account
    code is in `main` already: accounts exist on a site only while the two
    settings do, so no revert is needed.)
 2. **The fast way:** Deployments → the `8636cfa` deployment → ⋯ → **Instant

@@ -2209,6 +2209,8 @@ The owner's own account exists (invited, backed up and restored on a phone on
   only takes effect with a new deployment.
 - **The Free plan applies to both projects:** an idle project pauses after a
   week (practice is unaffected; restore it in the dashboard) and there are no
-  automatic backups, so the manual export and the export reminder stay. See
+  automatic backups (the owner raised this on 2026-10-10, undecided: see Open
+  questions in `docs/Decisions.md`), so the manual export and the export
+  reminder stay. See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
   and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).

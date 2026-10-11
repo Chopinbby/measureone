@@ -7359,8 +7359,10 @@ what it rules out.
   this browser's copy first), and there are no automatic backups (the
   account copy is one copy among this browser's copy and exported files,
   and nothing would restore it if Supabase lost the database). Alternative
-  ruled out for now: the paid Pro plan (no pausing, daily backups, a
-  monthly cost; check its current price and terms if it's ever revisited).
+  ruled out for now: the paid Pro plan (no pausing, daily backups kept 7
+  days, from $25 a month as read on supabase.com/pricing on 2026-10-10).
+  **Revisited 2026-10-10:** the owner pointed out that the missing backups
+  undercut the point of accounts; see Open questions.
   See [Accounts-and-Backend.md](Accounts-and-Backend.md#free-plan-consequences).
 - **Design K — the account code is downloaded only when it's needed
   (decided by the user, 2026-09-29, for Pass 109).** The Supabase library
@@ -7673,6 +7675,25 @@ oversight to silently fix; surface it instead.
       **Resolved in Pass 112 (confirmed 2026-10-03):** a piece from the account keeps
       the account's created date, and one that differs only by it counts as the
       same; importing from a file still re-stamps.
+- **The account copy has no backups of its own on the Free plan: revisit
+  (raised by the owner, 2026-10-10; undecided).** The owner pointed out that
+  this undercuts the point of accounts. Covered today: losing a device or a
+  browser (every other device and the account hold a copy, and exported files
+  are independent of all of them). Not covered: a bad change that gets copied
+  everywhere (a bug, a wrong edit, an overwrite), or Supabase losing or
+  deleting the project, because the account keeps only each row's latest
+  version and the Free plan keeps no daily snapshots (checked on Supabase's
+  backups page and pricing page, 2026-10-10: Free has no automatic backups and
+  no dashboard backup; its advice is to export regularly with `supabase db
+  dump` and keep copies off-site). Options, none chosen: (1) **Supabase Pro**,
+  from $25 a month: daily backups kept 7 days, no pausing. (2) **Stay on Free
+  and add a scheduled dump:** a weekly `supabase db dump` (or `pg_dump`) of the
+  production database to a folder outside Supabase (for example iCloud Drive).
+  It needs a tool installed, the database password kept in the Mac's Keychain
+  and the Mac awake, and would be its own small pass. (3) **Exported files
+  only:** free and immediate, but they depend on the owner exporting (the
+  export reminder nags after a day). Until one is chosen, (3) is the safety
+  net.
 - **Accounts at go-live (Pass 114, 2026-10-10) — what is still open.**
   Logged, not fixed; the owner is the only account, which keeps all of it
   low-risk. Each item's detail lives in

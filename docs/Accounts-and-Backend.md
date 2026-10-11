@@ -180,6 +180,9 @@ them (Pass 108 sets up the project).
   low activity ([pricing](https://supabase.com/pricing)), and a paused
   project can be restored from the dashboard for up to a year after it was
   paused ([project pausing](https://supabase.com/docs/guides/platform/free-project-pausing)).
+  *Re-read 2026-10-10:* an older Supabase changelog and troubleshooting page
+  still say 90 days, so treat the deadline the dashboard shows for the paused
+  project as the truth.
 - **The built-in email sender is for testing only.** The brief: Supabase's
   built-in email sender is rate-limited and meant for testing; fine for
   invitations and the odd password reset; Phase 3 needs a real email
@@ -1043,12 +1046,20 @@ current price and terms then):
 - **A pause stops the account copy updating, not practice.** The app always
   works from this browser's copy first (Design A), so a paused project only
   means changes wait to be uploaded until someone restores it from the
-  dashboard (up to a year after the pause).
+  dashboard (Supabase's current guide says up to a year after the pause, an
+  older page says 90 days; the dashboard shows the real deadline).
 - **No automatic backups.** The account copy is a second copy of the data,
   next to this browser's copy and any exported backup files. If Supabase lost
   the database, nothing would restore the account copies. The manual export
-  and the export reminder stay for that reason. Take a manual export of the
-  database before each release (Supabase dashboard).
+  and the export reminder stay for that reason. **The Free plan has no
+  dashboard backup or download either** (an earlier version of this page said
+  to export from the dashboard; that was wrong). Supabase's own advice for
+  free projects is to export regularly with its command-line tool
+  (`supabase db dump`) and keep copies off-site (read 2026-10-10). **The owner
+  raised on 2026-10-10 that this undercuts the point of accounts; it is open,
+  see [Decisions.md](Decisions.md#open-questions).** Pro (from $25 a month,
+  read 2026-10-10 on [pricing](https://supabase.com/pricing)) keeps daily
+  backups for 7 days and never pauses a project.
 
 **Free-plan limits, checked 2026-09-29** on Supabase's
 [pricing](https://supabase.com/pricing) page (check again before relying on

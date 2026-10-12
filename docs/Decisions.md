@@ -7526,6 +7526,32 @@ what it rules out.
   and whether it moves the owner's branch address was never tested. See
   [DEPLOYMENT.md](../DEPLOYMENT.md#rolling-back).
 
+- **The account copy is backed up daily by a free GitHub job into a private repository (decided by the user, 2026-10-12).**
+  Why: the Free plan keeps no backups, which the owner rightly said undercuts the
+  point of accounts, and the owner can't justify paying until the app earns money.
+  The job (`Chopinbby/measureone-backups`, see
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12))
+  saves a dated full copy of the app's tables plus one importable file per person.
+  Alternatives ruled out: **Supabase Pro** (from $25 a month: daily backups kept 7
+  days, never pauses; nothing to maintain, but a recurring cost and only 7 days of
+  history; deferred until the app earns, and the natural upgrade once real people
+  depend on it); **exported files only** (free but manual; stays as the independent
+  extra layer); a **dump run on the owner's Mac** (needs the Mac awake and a tool
+  installed); **switching platform** (none of the free ones checked on 2026-10-11
+  combine long free history with sign-in and per-person security; Cloudflare D1
+  keeps 30 days of restore points free but is a bare database; a rebuild). Why this
+  shape: the whole-database dump is the only way that also covers other people when
+  they get accounts (a script that signs in as the owner would see only the
+  owner's data and needs a stored login), and it is Supabase's own documented recipe.
+  Costs accepted: the database password sits in a GitHub secret (full access to the
+  database; resettable at no cost to the app), GitHub becomes another place that holds
+  the data (private repository, two-factor on), restoring a whole project is harder
+  than pressing Import (rehearsed, and the importable file covers the common case),
+  and the free GitHub allowance is used (about a minute a day). Safeguards: only the
+  app's two tables are saved (never sign-in tables, with a guard), the run fails if
+  row counts go down, and the tests and a restore fire drill live in the backups
+  repository.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -7675,8 +7701,11 @@ oversight to silently fix; surface it instead.
       **Resolved in Pass 112 (confirmed 2026-10-03):** a piece from the account keeps
       the account's created date, and one that differs only by it counts as the
       same; importing from a file still re-stamps.
-- **The account copy has no backups of its own on the Free plan: revisit
-  (raised by the owner, 2026-10-10; undecided).** The owner pointed out that
+- ~~**The account copy has no backups of its own on the Free plan: revisit
+  (raised by the owner, 2026-10-10; undecided).**~~ **Resolved 2026-10-12:
+  option 2 (a free scheduled copy in the cloud) was chosen and built; see the
+  decision above. Pro is deferred until the app earns.** The original note,
+  kept for the record: The owner pointed out that
   this undercuts the point of accounts. Covered today: losing a device or a
   browser (every other device and the account hold a copy, and exported files
   are independent of all of them). Not covered: a bad change that gets copied
@@ -7709,6 +7738,18 @@ oversight to silently fix; surface it instead.
   only:** free and immediate, but they depend on the owner exporting (the
   export reminder nags after a day). Until one is chosen, (3) is the safety
   net.
+- **Backups of the account copy (2026-10-12) — what is still open.** Logged, not
+  fixed. (1) **The first backup commit** in the private repository, made before
+  the fix, contains Supabase's sign-in tables (a password scramble, live session
+  tokens); the job now saves only the app's tables. Signing out of all devices
+  invalidates the tokens; rewriting that history was left unasked. (2) **A restore
+  inside a real Supabase project has not been tried** (the SQL Editor's handling of a
+  200 KB paste and of the `SET session_replication_role` line); the drill uses a
+  scratch copy of the same engine. (3) **The secret is the database password**
+  (full access): rotate it if it is ever exposed. (4) **Phase 3:** the privacy
+  policy has to cover this copy, and an exact rebuild with many accounts means
+  inviting each person again (their passwords are not saved). (5) **The drill is
+  manual** (suggested monthly); nothing reminds anyone to run it.
 - **Accounts at go-live (Pass 114, 2026-10-10) — what is still open.**
   Logged, not fixed; the owner is the only account, which keeps all of it
   low-risk. Each item's detail lives in

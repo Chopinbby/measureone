@@ -2208,9 +2208,15 @@ The owner's own account exists (invited, backed up and restored on a phone on
   rollback point (the deployment of `8636cfa`). A change to a Vercel setting
   only takes effect with a new deployment.
 - **The Free plan applies to both projects:** an idle project pauses after a
-  week (practice is unaffected; restore it in the dashboard) and there are no
-  automatic backups (the owner raised this on 2026-10-10, undecided: see Open
-  questions in `docs/Decisions.md`), so the manual export and the export
-  reminder stay. See
+  week (practice is unaffected; restore it in the dashboard) and Supabase keeps
+  no backups of it, **so since 2026-10-12 a free GitHub job copies the production
+  database every day into a separate PRIVATE repository,
+  `Chopinbby/measureone-backups`** (this repository is public: never put data
+  here). Check it by opening that repository's `LAST_BACKUP.txt` (today or
+  yesterday, counts as expected) and its Actions tab; GitHub emails the owner if a
+  run fails or the row counts go down. It saves only the app's two tables, never
+  Supabase's sign-in tables. Re-run its restore fire drill now and then
+  (`tests/restore-drill.mjs` there). Manual export and the export reminder stay.
+  See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
   and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).

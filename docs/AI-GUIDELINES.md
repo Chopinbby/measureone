@@ -1069,6 +1069,27 @@ several different copies. Before any plan depends on where the owner's data is
 (a backup, a restore, which address an invitation should open), ask for the
 address from the owner's own address bar, and say which one the plan rests on.
 
+## A tool's default output may hold more than you asked for: read what is in it before you save it somewhere
+
+The first real run of the daily backup committed the database dump to a private
+repository without anyone having looked inside it. Supabase's data-only dump, by
+default, also includes its own `auth` tables: the owner's password scramble and live
+session tokens. It was caught by listing which tables the dump inserts into (a one-line
+check) straight after the first run, then fixed (only the app's schema, plus a guard that
+fails the job if sign-in tables ever appear), but that first commit stays in the
+repository's history. When a job writes real data to a new place, inspect its first
+output (table names and counts, never the content) before it is allowed to run unattended.
+
+## A value written with "..." in an example will be copied literally
+
+Setting up the backup secret failed because the connection string contained a "..." from
+an example in a message that abbreviated the middle of an address. To someone who doesn't
+code, a template and a real value look the same. When you show a value to be copied, give
+the real, complete value (or a clearly marked placeholder such as `<region>`), say where the
+real one is (a Copy button), and make anything that checks it explain what it found (it
+may print only parts that can never be a secret: the check here named the username form,
+the port and the byte values of odd characters, never the password).
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

@@ -1059,7 +1059,9 @@ current price and terms then):
   raised on 2026-10-10 that this undercuts the point of accounts; it is open,
   see [Decisions.md](Decisions.md#open-questions).** Pro (from $25 a month,
   read 2026-10-10 on [pricing](https://supabase.com/pricing)) keeps daily
-  backups for 7 days and never pauses a project.
+  backups for 7 days and never pauses a project. **Since 2026-10-12 a free daily
+  copy exists** (see [Backups of the account copy](#backups-of-the-account-copy-2026-10-12)),
+  so this is no longer the only protection; Pro is deferred until the app earns.
 
 **Free-plan limits, checked 2026-09-29** on Supabase's
 [pricing](https://supabase.com/pricing) page (check again before relying on
@@ -1214,6 +1216,76 @@ backups, so the manual export and the export reminder stay.
    Redeploy treat the branch address. An ordinary new deployment, the Pass 114
    merge, moved it together with the other addresses; DEPLOYMENT.md says how
    to check after a rollback.
+
+## Backups of the account copy (2026-10-12)
+
+The Free plan keeps no backups of the production project (see
+[Free-plan consequences](#free-plan-consequences)), so a free scheduled job
+makes them. **Where:** a separate **private** GitHub repository,
+`Chopinbby/measureone-backups`. **It must never be this repository's:** this
+one is public, and Supabase's own guide says never to back up data to a public
+repository.
+
+- **What runs.** A GitHub Actions workflow (`.github/workflows/backup.yml` in the
+  backups repository) runs every day at 09:17 UTC (3:17 am Mountain time) and by
+  hand from the Actions tab. It uses Supabase's own command-line `db dump`
+  (pinned, with GitHub's checkout, to exact versions). Cost: nothing (a private
+  repository and about a minute a day of GitHub's free allowance).
+- **What it saves** (folder `backup/`, a commit per day, so every day stays in the
+  history): `data.sql` (every row of **only the app's two tables**, `pieces` and
+  `technique`, as INSERT statements), `schema.sql` and `roles.sql`, `users.csv`
+  (account id, email, joined, last sign-in: **no passwords**), `counts.csv`, and
+  one **importable file per person**, `app-files/<account id>.json`, in the app's
+  own backup format (what **Import a backup** reads). `LAST_BACKUP.txt` says when
+  it last ran and the counts.
+- **What it deliberately does not save: Supabase's own sign-in tables.** Found on
+  the first real run: a data-only dump also includes the `auth` tables (password
+  scrambles, live session tokens). The job now dumps only the `public` schema, and
+  a guard fails the run (and removes `data.sql`) if sign-in or storage tables ever
+  appear. **The first backup commit, made before that fix, still contains them in
+  the private repository's history**; signing out of all devices (Pass 113)
+  invalidates the saved session tokens.
+- **The one secret.** `SUPABASE_DB_URL`, a GitHub secret in the backups repository:
+  the **session pooler** connection string (it must be that one: GitHub's runners
+  can't reach Supabase's IPv6-only direct address) with the database password in it.
+  That password opens the whole database, so it is the most sensitive secret in the
+  project; it can't be read back, and resetting it (Database, Settings, Reset
+  database password) changes nothing for the app, which doesn't use it. The job's
+  first step checks the string's shape and says what is wrong **without ever
+  printing the password** (tested for eight kinds of wrong string). The string must
+  be copied with Supabase's Copy button: the first attempt contained a "..." from an
+  example in a message, and the check named exactly that.
+- **How failure shows.** GitHub emails the owner when a run fails. It fails on
+  purpose if the number of pieces, technique libraries or accounts **goes down**
+  (the app never deletes rows, so that would mean something is wrong; the new copy
+  is saved first, so yesterday's stays in the history), if an importable file isn't
+  valid, if there isn't one per account, or if a dump file is empty. A project the
+  Free plan has **paused** also fails the run until it is restored.
+- **Getting things back** (`RESTORE.md` in the backups repository): a lost device
+  needs no backup (sign in and press Restore); to look at an earlier day, download
+  that day's importable file from the history and import it in a private window
+  (import merges, it never wipes); a lost project is rebuilt from the importable
+  file or exactly from `data.sql` (new project, both migration files, invite the
+  person again, **swap their old account id for the new one in a copy of
+  `data.sql`**, run it in the SQL Editor). Skipping the swap gives no error: the
+  rows load but nobody can see them.
+- **Checked for real (2026-10-12).** First run in GitHub: 25 pieces, 1 technique
+  library, 1 account, as the owner's SQL check had said; all 25 pieces in the
+  importable file are identical to the owner's own export; `data.sql` holds exactly
+  the 25 + 1 rows. The job's shell logic (35 checks), the SQL that writes the
+  importable file (run on made-up awkward pieces in a real Postgres engine, with four
+  deliberately broken copies that are each caught) and a **restore fire drill** (the
+  latest real backup restored into a clean database built from this repository's
+  migration files: every piece identical, the new account sees them all) are kept
+  in the backups repository's `tests/` folder; the drill is meant to be re-run now
+  and then.
+- **Not checked.** A restore inside a real Supabase project (whether the SQL Editor
+  takes a 200 KB paste and the `SET session_replication_role` line the dump starts
+  with); the drill uses a scratch copy of the same database engine.
+- **Things to remember.** The backups repository holds real people's practice data
+  and emails: keep it private, keep two-factor sign-in on for the GitHub account,
+  and when other people get accounts (Phase 3) the privacy policy has to cover this
+  copy. The Free plan's pause also stops the job's reads, not the app.
 
 ## Where this differs from the SOW
 

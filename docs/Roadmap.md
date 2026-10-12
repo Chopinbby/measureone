@@ -352,7 +352,9 @@ on both projects) and the two Vercel Production settings. Live since
 as the only one for now. See
 [Accounts-and-Backend.md](Accounts-and-Backend.md) (including
 [Setup (production project)](Accounts-and-Backend.md#setup-production-project))
-and [Decisions.md](Decisions.md#accounts-and-backend).
+and [Decisions.md](Decisions.md#accounts-and-backend). Since 2026-10-12 a free
+daily backup of the account database runs into a private repository (see
+[Backups of the account copy](Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12)).
 
 ## Immediate next action
 

@@ -1281,8 +1281,10 @@ repository.
   **fails (so an email follows, if the notifications are on) when the newest backup
   is over 36 hours old or its date can't be read**. A backup that is only a few
   hours late doesn't trip it; a day that never arrives does, within a day or two.
-  Run by hand with a limit of 1 it fails on purpose, which is also how the email is
-  tested. It uses the same GitHub timer, so it can't warn of GitHub itself being down
+  Run by hand with a limit of **0** it always fails on purpose, which is also how the
+  email is tested (a limit of 1 fails only if the newest backup is over an hour old,
+  so it passes right after a backup: the owner's own first try said "successful").
+  It uses the same GitHub timer, so it can't warn of GitHub itself being down
   for days. One skipped day costs little (each backup is a complete copy, and the
   browser and the account still hold the pieces); the danger is backups stopping
   unnoticed for weeks.
@@ -1306,12 +1308,13 @@ repository.
   and then. The second check has its own 70 tests (the checker case by case with a
   fixed clock, the workflow file, and 11 deliberately broken copies of the checker
   and 7 of the workflow, each caught); on GitHub it passed with the default limit and
-  failed on purpose, with the plain-English message, when run with a limit of 1.
+  failed on purpose, with the plain-English message, when run with a limit of 1 (and
+  later with 0, the reliable form: 1 passes within an hour of a backup).
 - **Not checked (as of 2026-10-12).** (1) **That a failure email reaches the
   owner.** The setting appears to be off (GitHub held no web notification for the
   failures, the deliberate one included; email can't be seen from here); it is
   confirmed only once the owner switches it on, runs the second check by hand with a
-  limit of 1, and the email arrives. (2) A restore inside
+  limit of 0, and the email arrives. (2) A restore inside
   a real Supabase project (whether the SQL Editor takes a 200 KB paste and the
   `SET session_replication_role` line the dump starts with); the drill uses a scratch
   copy of the same database engine.

@@ -7771,7 +7771,8 @@ oversight to silently fix; surface it instead.
   notification for any of five failed test runs, or for the deliberate failure. Every
   statement that "GitHub emails the owner" was therefore unverified. The backups README now says so and gives the
   steps; **it is confirmed only when the owner switches it on, runs the second check by
-  hand with a limit of 1, and the email arrives.** (7) **The timer is best effort, and a
+  hand with a limit of 0 (a limit of 1 passes right after a backup), and the email
+  arrives.** (7) **The timer is best effort, and a
   late or skipped day sends no email.** The first scheduled run started about 9 hours 40
   minutes after its slot; GitHub says some runs may be dropped when it is busy. Covered
   by the second check (over 36 hours old, or unreadable, fails), which uses the same timer

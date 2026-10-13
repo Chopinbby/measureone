@@ -1100,7 +1100,9 @@ scheduled run also started about 9 hours 40 minutes after its stated time, and a
 skips fails nothing, so no alert could fire. When a safety net rests on a notification,
 trigger it once on purpose and have the owner confirm it arrived; write a schedule as
 "about"; and ask what the alarm does when the thing never starts, not only when it breaks
-(here: a second check that fails if the newest backup is too old).
+(here: a second check that fails if the newest backup is too old). Give the owner an
+alarm test that fails whatever the timing: "limit 1" passed when run within an hour of
+a backup (the owner saw "successful"), so the instruction became "limit 0".
 
 ## When you're not sure
 

@@ -7754,8 +7754,9 @@ oversight to silently fix; surface it instead.
   GitHub Support cleans up, and Support helps with sensitive data only when changing
   the credential can't fix it), that once keys are cancelled a rewrite may not be
   warranted, and a rewrite renumbers every later backup. What is left is the
-  scrambled password: **changing the account password retires it** (recommended; the
-  owner's step). The repository is private with no other collaborator, no forks and
+  scrambled password: **changing the account password retires it**, and the owner
+  reports having done so the same evening (not verifiable from outside). The
+  repository is private with no other collaborator, no forks and
   no pull requests. Revisit for a clean slate: it is days old, but a fresh repository
   means adding the secret again. (2) **A restore
   inside a real Supabase project has not been tried** (the SQL Editor's handling of a
@@ -7776,11 +7777,14 @@ oversight to silently fix; surface it instead.
   by the second check (over 36 hours old, or unreadable, fails), which uses the same timer
   and so can't see GitHub itself being down; an outside alarm service could, at the price
   of another company in the loop (not added). (8) **GitHub's notices (2026-10-12):** the
-  pinned `actions/checkout` and `supabase/setup-cli` target Node.js 20, which GitHub is
-  retiring (forced onto 24 for now), and the `ubuntu-latest` label moves to Ubuntu 26
-  from 2026-10-19. Nothing has broken. Recommended, not done (it changes the working
-  job; the owner's call): pin `runs-on` to `ubuntu-24.04` in both workflows and update
-  the pinned actions on purpose, then re-run the tests and the job once by hand.
+  `ubuntu-latest` label moves to Ubuntu 26 from 2026-10-19, and the pinned
+  `actions/checkout` and `supabase/setup-cli` target Node.js 20, which GitHub is
+  retiring (forced onto 24 for now). **Done the same evening, on the owner's yes:** both
+  workflows pinned to `ubuntu-24.04` (the system the job had been passing on), tests
+  added that fail on `ubuntu-latest`, both jobs run green by hand, and the "latest is
+  moving" notice gone. **Still open:** updating the two pinned actions to versions that
+  run on Node 24, on purpose, with the tests and a by-hand run after (nothing has broken;
+  GitHub forces them onto 24 meanwhile).
 - **Accounts at go-live (Pass 114, 2026-10-10) — what is still open.**
   Logged, not fixed; the owner is the only account, which keeps all of it
   low-risk. Each item's detail lives in

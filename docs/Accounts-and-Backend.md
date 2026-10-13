@@ -1227,10 +1227,13 @@ one is public, and Supabase's own guide says never to back up data to a public
 repository.
 
 - **What runs.** A GitHub Actions workflow (`.github/workflows/backup.yml` in the
-  backups repository) runs every day at 09:17 UTC (3:17 am Mountain time) and by
-  hand from the Actions tab. It uses Supabase's own command-line `db dump`
-  (pinned, with GitHub's checkout, to exact versions). Cost: nothing (a private
-  repository and about a minute a day of GitHub's free allowance).
+  backups repository) is set to run every day at about 09:17 UTC (3:17 am Mountain
+  time, 2:17 in winter) and can be run by hand from the Actions tab. **GitHub's
+  timer is best effort:** the first run it started by itself (2026-10-12) began
+  about 9 hours 40 minutes late, and GitHub says some runs can be dropped when it
+  is busy. It uses Supabase's own command-line `db dump` (pinned, with GitHub's
+  checkout, to exact versions). Cost: nothing (a private repository and about a
+  minute a day of GitHub's free allowance).
 - **What it saves** (folder `backup/`, a commit per day, so every day stays in the
   history): `data.sql` (every row of **only the app's two tables**, `pieces` and
   `technique`, as INSERT statements), `schema.sql` and `roles.sql`, `users.csv`
@@ -1243,8 +1246,12 @@ repository.
   scrambles, live session tokens). The job now dumps only the `public` schema, and
   a guard fails the run (and removes `data.sql`) if sign-in or storage tables ever
   appear. **The first backup commit, made before that fix, still contains them in
-  the private repository's history**; signing out of all devices (Pass 113)
-  invalidates the saved session tokens.
+  the private repository's history.** The owner signed out of all devices on
+  2026-10-12 (which cancels the saved session tokens) and, on Claude's
+  recommendation, decided **not** to rewrite the history: GitHub's own guide says a
+  rewrite alone is not a full erase, and that once keys are cancelled it may not be
+  warranted. What sign-out can't cancel is the scrambled password in that commit;
+  changing the account password retires it (recommended; the owner's step).
 - **The one secret.** `SUPABASE_DB_URL`, a GitHub secret in the backups repository:
   the **session pooler** connection string (it must be that one: GitHub's runners
   can't reach Supabase's IPv6-only direct address) with the database password in it.
@@ -1255,12 +1262,29 @@ repository.
   printing the password** (tested for eight kinds of wrong string). The string must
   be copied with Supabase's Copy button: the first attempt contained a "..." from an
   example in a message, and the check named exactly that.
-- **How failure shows.** GitHub emails the owner when a run fails. It fails on
-  purpose if the number of pieces, technique libraries or accounts **goes down**
-  (the app never deletes rows, so that would mean something is wrong; the new copy
-  is saved first, so yesterday's stays in the history), if an importable file isn't
-  valid, if there isn't one per account, or if a dump file is empty. A project the
-  Free plan has **paused** also fails the run until it is restored.
+- **How failure shows.** A failed run emails the owner **only once the owner has
+  switched on GitHub's Actions notifications** (Settings, Notifications, System,
+  Actions: GitHub's own page shows it as "Don't notify"). **Found 2026-10-12: it
+  appears to be off:** GitHub held no web notification for any of the five failed
+  test runs, so the earlier statement that "GitHub emails the owner" was unverified
+  (see Not checked). A run
+  fails on purpose if the number of pieces, technique libraries or accounts **goes
+  down** (the app never deletes rows, so that would mean something is wrong; the new
+  copy is saved first, so yesterday's stays in the history), if an importable file
+  isn't valid, if there isn't one per account, or if a dump file is empty. A project
+  the Free plan has **paused** also fails the run until it is restored.
+- **A day GitHub skips sends no email, so a second check watches for it.** If the
+  timer skips a day nothing runs and nothing fails. A separate workflow in the
+  backups repository (`check-backup-is-recent.yml`, "Check the backup is recent":
+  read-only, no secrets, once a day at about 21:43 UTC) reads `LAST_BACKUP.txt` and
+  **fails (so an email follows, if the notifications are on) when the newest backup
+  is over 36 hours old or its date can't be read**. A backup that is only a few
+  hours late doesn't trip it; a day that never arrives does, within a day or two.
+  Run by hand with a limit of 1 it fails on purpose, which is also how the email is
+  tested. It uses the same GitHub timer, so it can't warn of GitHub itself being down
+  for days. One skipped day costs little (each backup is a complete copy, and the
+  browser and the account still hold the pieces); the danger is backups stopping
+  unnoticed for weeks.
 - **Getting things back** (`RESTORE.md` in the backups repository): a lost device
   needs no backup (sign in and press Restore); to look at an earlier day, download
   that day's importable file from the history and import it in a private window
@@ -1278,10 +1302,25 @@ repository.
   latest real backup restored into a clean database built from this repository's
   migration files: every piece identical, the new account sees them all) are kept
   in the backups repository's `tests/` folder; the drill is meant to be re-run now
-  and then.
-- **Not checked.** A restore inside a real Supabase project (whether the SQL Editor
-  takes a 200 KB paste and the `SET session_replication_role` line the dump starts
-  with); the drill uses a scratch copy of the same database engine.
+  and then. The second check has its own 65 tests (the checker case by case with a
+  fixed clock, the workflow file, and 11 deliberately broken copies of the checker
+  and 5 of the workflow, each caught); on GitHub it passed with the default limit and
+  failed on purpose, with the plain-English message, when run with a limit of 1.
+- **Not checked (as of 2026-10-12).** (1) **That a failure email reaches the
+  owner.** The setting appears to be off (GitHub held no web notification for the
+  failures, the deliberate one included; email can't be seen from here); it is
+  confirmed only once the owner switches it on, runs the second check by hand with a
+  limit of 1, and the email arrives. (2) A restore inside
+  a real Supabase project (whether the SQL Editor takes a 200 KB paste and the
+  `SET session_replication_role` line the dump starts with); the drill uses a scratch
+  copy of the same database engine.
+- **Upkeep.** GitHub's notices on the runs (2026-10-12): the pinned
+  `actions/checkout` and `supabase/setup-cli` target Node.js 20, which GitHub is
+  retiring (they are being forced onto 24 for now), and the `ubuntu-latest` label
+  moves to Ubuntu 26 from 2026-10-19. Nothing has broken. The tidy responses (pin
+  the runner to `ubuntu-24.04`, update the pinned actions on purpose) are logged in
+  [Decisions.md](Decisions.md#open-questions) and not done; after any such change,
+  run the tests there and the job once by hand.
 - **Things to remember.** The backups repository holds real people's practice data
   and emails: keep it private, keep two-factor sign-in on for the GitHub account,
   and when other people get accounts (Phase 3) the privacy policy has to cover this

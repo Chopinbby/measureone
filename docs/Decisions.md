@@ -7549,8 +7549,10 @@ what it rules out.
   than pressing Import (rehearsed, and the importable file covers the common case),
   and the free GitHub allowance is used (about a minute a day). Safeguards: only the
   app's two tables are saved (never sign-in tables, with a guard), the run fails if
-  row counts go down, and the tests and a restore fire drill live in the backups
-  repository.
+  row counts go down, a second check fails if the newest backup is over 36 hours old
+  (suggested and accepted the same day: GitHub only emails about failed runs, and a
+  day its timer skips fails nothing), and the tests and a restore fire drill live in
+  the backups repository.
 
 ## Open questions
 
@@ -7727,7 +7729,10 @@ oversight to silently fix; surface it instead.
   re-pointing the rows at the new account's internal id), or a small script
   in `scripts/` that signs in as the owner and writes a file in the app's own
   backup format (needs the owner's login as a secret; restoring is the
-  existing Import button). GitHub emails the owner when a scheduled run fails.
+  existing Import button). GitHub emails the owner when a scheduled run fails
+  [corrected 2026-10-12: only once the owner has switched on Actions
+  notifications, which appears to have been off; see the open entry on backups,
+  item 6].
   Either would be its own small pass, with a restore rehearsed on the test
   project, and changes nothing in the app, Supabase or Vercel. Other free
   platforms checked (2026-10-11): none gives long free history together with
@@ -7739,17 +7744,43 @@ oversight to silently fix; surface it instead.
   export reminder nags after a day). Until one is chosen, (3) is the safety
   net.
 - **Backups of the account copy (2026-10-12) — what is still open.** Logged, not
-  fixed. (1) **The first backup commit** in the private repository, made before
-  the fix, contains Supabase's sign-in tables (a password scramble, live session
-  tokens); the job now saves only the app's tables. Signing out of all devices
-  invalidates the tokens; rewriting that history was left unasked. (2) **A restore
+  fixed. (1) **The first backup commit** in the private repository (the only
+  one; checked 2026-10-12: five sign-in tables, one INSERT each, none in any later
+  copy), made before the fix, holds Supabase's sign-in tables: an email, a password
+  scramble, the devices and network addresses of sign-ins, and the session keys. The
+  owner signed out of all devices on 2026-10-12 (cancels the keys) and, on Claude's
+  recommendation, **chose not to rewrite the history**: GitHub's guide says a rewrite
+  alone is not a full erase (the old commit stays reachable by its address until
+  GitHub Support cleans up, and Support helps with sensitive data only when changing
+  the credential can't fix it), that once keys are cancelled a rewrite may not be
+  warranted, and a rewrite renumbers every later backup. What is left is the
+  scrambled password: **changing the account password retires it** (recommended; the
+  owner's step). The repository is private with no other collaborator, no forks and
+  no pull requests. Revisit for a clean slate: it is days old, but a fresh repository
+  means adding the secret again. (2) **A restore
   inside a real Supabase project has not been tried** (the SQL Editor's handling of a
   200 KB paste and of the `SET session_replication_role` line); the drill uses a
   scratch copy of the same engine. (3) **The secret is the database password**
   (full access): rotate it if it is ever exposed. (4) **Phase 3:** the privacy
   policy has to cover this copy, and an exact rebuild with many accounts means
   inviting each person again (their passwords are not saved). (5) **The drill is
-  manual** (suggested monthly); nothing reminds anyone to run it.
+  manual** (suggested monthly); nothing reminds anyone to run it. (6) **Failure
+  emails appear to have been off (found 2026-10-12).** GitHub's own page shows the
+  Actions notification setting as "Don't notify" until changed, and GitHub held no web
+  notification for any of five failed test runs, or for the deliberate failure. Every
+  statement that "GitHub emails the owner" was therefore unverified. The backups README now says so and gives the
+  steps; **it is confirmed only when the owner switches it on, runs the second check by
+  hand with a limit of 1, and the email arrives.** (7) **The timer is best effort, and a
+  late or skipped day sends no email.** The first scheduled run started about 9 hours 40
+  minutes after its slot; GitHub says some runs may be dropped when it is busy. Covered
+  by the second check (over 36 hours old, or unreadable, fails), which uses the same timer
+  and so can't see GitHub itself being down; an outside alarm service could, at the price
+  of another company in the loop (not added). (8) **GitHub's notices (2026-10-12):** the
+  pinned `actions/checkout` and `supabase/setup-cli` target Node.js 20, which GitHub is
+  retiring (forced onto 24 for now), and the `ubuntu-latest` label moves to Ubuntu 26
+  from 2026-10-19. Nothing has broken. Recommended, not done (it changes the working
+  job; the owner's call): pin `runs-on` to `ubuntu-24.04` in both workflows and update
+  the pinned actions on purpose, then re-run the tests and the job once by hand.
 - **Accounts at go-live (Pass 114, 2026-10-10) — what is still open.**
   Logged, not fixed; the owner is the only account, which keeps all of it
   low-risk. Each item's detail lives in

@@ -1090,6 +1090,18 @@ real one is (a Copy button), and make anything that checks it explain what it fo
 may print only parts that can never be a secret: the check here named the username form,
 the port and the byte values of odd characters, never the password).
 
+## An alert you have not seen arrive is not an alert, and a timer is a request, not a promise
+
+The backup docs, and the owner, were told "GitHub emails you if a run fails" for a day
+before anyone checked. It is true only once the owner switches on Actions notifications
+(GitHub's own page shows them as "Don't notify" until then), and GitHub held no
+notification for any of five failed runs. The first
+scheduled run also started about 9 hours 40 minutes after its stated time, and a day GitHub
+skips fails nothing, so no alert could fire. When a safety net rests on a notification,
+trigger it once on purpose and have the owner confirm it arrived; write a schedule as
+"about"; and ask what the alarm does when the thing never starts, not only when it breaks
+(here: a second check that fails if the newest backup is too old).
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

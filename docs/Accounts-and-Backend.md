@@ -1266,9 +1266,11 @@ repository.
 - **How failure shows.** A failed run emails the owner **only once the owner has
   switched on GitHub's Actions notifications** (Settings, Notifications, System,
   Actions: GitHub's own page shows it as "Don't notify"). **Found 2026-10-12: it
-  appears to be off:** GitHub held no web notification for any of the five failed
-  test runs, so the earlier statement that "GitHub emails the owner" was unverified
-  (see Not checked). A run
+  appeared to be off:** GitHub held no web notification for any of the five failed
+  test runs, so "GitHub emails the owner" was unverified. **Confirmed the same
+  evening:** after the owner switched it on, a deliberate failure (the second check run
+  by hand with a limit of 0) raised a GitHub notification and an email, which landed in
+  the **Updates** tab of the owner's Gmail, not the main inbox. A run
   fails on purpose if the number of pieces, technique libraries or accounts **goes
   down** (the app never deletes rows, so that would mean something is wrong; the new
   copy is saved first, so yesterday's stays in the history), if an importable file
@@ -1305,19 +1307,15 @@ repository.
   latest real backup restored into a clean database built from this repository's
   migration files: every piece identical, the new account sees them all) are kept
   in the backups repository's `tests/` folder; the drill is meant to be re-run now
-  and then. The second check has its own 70 tests (the checker case by case with a
+  and then. The second check has its own 74 tests (the checker case by case with a
   fixed clock, the workflow file, and 11 deliberately broken copies of the checker
   and 7 of the workflow, each caught); on GitHub it passed with the default limit and
   failed on purpose, with the plain-English message, when run with a limit of 1 (and
   later with 0, the reliable form: 1 passes within an hour of a backup).
-- **Not checked (as of 2026-10-12).** (1) **That a failure email reaches the
-  owner.** The setting appears to be off (GitHub held no web notification for the
-  failures, the deliberate one included; email can't be seen from here); it is
-  confirmed only once the owner switches it on, runs the second check by hand with a
-  limit of 0, and the email arrives. (2) A restore inside
-  a real Supabase project (whether the SQL Editor takes a 200 KB paste and the
-  `SET session_replication_role` line the dump starts with); the drill uses a scratch
-  copy of the same database engine.
+- **Not checked (as of 2026-10-12).** A restore inside a real Supabase project
+  (whether the SQL Editor takes a 200 KB paste and the `SET session_replication_role`
+  line the dump starts with); the drill uses a scratch copy of the same database
+  engine.
 - **Upkeep.** GitHub's notices on the runs (2026-10-12): the `ubuntu-latest` label
   moves to Ubuntu 26 from 2026-10-19, so **both workflows are now pinned to
   `ubuntu-24.04`**, the system the job had been passing on (tests fail if either goes

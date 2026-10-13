@@ -1102,7 +1102,9 @@ trigger it once on purpose and have the owner confirm it arrived; write a schedu
 "about"; and ask what the alarm does when the thing never starts, not only when it breaks
 (here: a second check that fails if the newest backup is too old). Give the owner an
 alarm test that fails whatever the timing: "limit 1" passed when run within an hour of
-a backup (the owner saw "successful"), so the instruction became "limit 0".
+a backup (the owner saw "successful"), so the instruction became "limit 0". The alert
+then arrived, but in the Updates tab of the owner's mail rather than the inbox: say where an
+alert may land.
 
 ## When you're not sure
 

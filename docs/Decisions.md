@@ -7731,8 +7731,8 @@ oversight to silently fix; surface it instead.
   backup format (needs the owner's login as a secret; restoring is the
   existing Import button). GitHub emails the owner when a scheduled run fails
   [corrected 2026-10-12: only once the owner has switched on Actions
-  notifications, which appears to have been off; see the open entry on backups,
-  item 6].
+  notifications, which she did that evening and confirmed with a deliberate failure;
+  see the open entry on backups, item 6].
   Either would be its own small pass, with a restore rehearsed on the test
   project, and changes nothing in the app, Supabase or Vercel. Other free
   platforms checked (2026-10-11): none gives long free history together with
@@ -7766,13 +7766,14 @@ oversight to silently fix; surface it instead.
   policy has to cover this copy, and an exact rebuild with many accounts means
   inviting each person again (their passwords are not saved). (5) **The drill is
   manual** (suggested monthly); nothing reminds anyone to run it. (6) **Failure
-  emails appear to have been off (found 2026-10-12).** GitHub's own page shows the
-  Actions notification setting as "Don't notify" until changed, and GitHub held no web
-  notification for any of five failed test runs, or for the deliberate failure. Every
-  statement that "GitHub emails the owner" was therefore unverified. The backups README now says so and gives the
-  steps; **it is confirmed only when the owner switches it on, runs the second check by
-  hand with a limit of 0 (a limit of 1 passes right after a backup), and the email
-  arrives.** (7) **The timer is best effort, and a
+  emails were unconfirmed and appeared to be off (found 2026-10-12); now confirmed.**
+  GitHub's own page shows the Actions notification setting as "Don't notify" until
+  changed, and GitHub held no web notification for any of five failed test runs, so
+  every statement that "GitHub emails the owner" was unverified. The backups README now
+  says so and gives the steps. **Confirmed the same evening:** after the owner switched
+  it on, a deliberate failure (the second check by hand with a limit of 0; a limit of 1
+  passes right after a backup) raised a GitHub notification and an email, which landed in
+  the Updates tab of the owner's Gmail. No longer open; repeat that test now and then. (7) **The timer is best effort, and a
   late or skipped day sends no email.** The first scheduled run started about 9 hours 40
   minutes after its slot; GitHub says some runs may be dropped when it is busy. Covered
   by the second check (over 36 hours old, or unreadable, fails), which uses the same timer

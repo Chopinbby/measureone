@@ -2216,8 +2216,9 @@ The owner's own account exists (invited, backed up and restored on a phone on
   yesterday, counts as expected) and its Actions tab. A failed run, a drop in the
   row counts, or a newest backup over 36 hours old (a second check there) fails a
   run, and **GitHub emails the owner about failed runs only once the owner has
-  switched on Settings, Notifications, Actions (it appeared off on 2026-10-12; confirm
-  with the by-hand alarm test in that README)**. GitHub's timer is best effort: the job can
+  switched on Settings, Notifications, Actions (it appeared off on 2026-10-12; switched
+  on and confirmed that evening by a deliberate failure, whose email landed in Gmail's
+  Updates tab; repeat with limit 0, see that README)**. GitHub's timer is best effort: the job can
   start hours late, and a skipped day sends no email by itself. It saves only the
   app's two tables, never Supabase's sign-in tables. Re-run its restore fire drill
   now and then (`tests/restore-drill.mjs` there). Manual export and the export

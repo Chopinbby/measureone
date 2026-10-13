@@ -7526,6 +7526,34 @@ what it rules out.
   and whether it moves the owner's branch address was never tested. See
   [DEPLOYMENT.md](../DEPLOYMENT.md#rolling-back).
 
+- **The account copy is backed up daily by a free GitHub job into a private repository (decided by the user, 2026-10-12).**
+  Why: the Free plan keeps no backups, which the owner rightly said undercuts the
+  point of accounts, and the owner can't justify paying until the app earns money.
+  The job (`Chopinbby/measureone-backups`, see
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12))
+  saves a dated full copy of the app's tables plus one importable file per person.
+  Alternatives ruled out: **Supabase Pro** (from $25 a month: daily backups kept 7
+  days, never pauses; nothing to maintain, but a recurring cost and only 7 days of
+  history; deferred until the app earns, and the natural upgrade once real people
+  depend on it); **exported files only** (free but manual; stays as the independent
+  extra layer); a **dump run on the owner's Mac** (needs the Mac awake and a tool
+  installed); **switching platform** (none of the free ones checked on 2026-10-11
+  combine long free history with sign-in and per-person security; Cloudflare D1
+  keeps 30 days of restore points free but is a bare database; a rebuild). Why this
+  shape: the whole-database dump is the only way that also covers other people when
+  they get accounts (a script that signs in as the owner would see only the
+  owner's data and needs a stored login), and it is Supabase's own documented recipe.
+  Costs accepted: the database password sits in a GitHub secret (full access to the
+  database; resettable at no cost to the app), GitHub becomes another place that holds
+  the data (private repository, two-factor on), restoring a whole project is harder
+  than pressing Import (rehearsed, and the importable file covers the common case),
+  and the free GitHub allowance is used (about a minute a day). Safeguards: only the
+  app's two tables are saved (never sign-in tables, with a guard), the run fails if
+  row counts go down, a second check fails if the newest backup is over 36 hours old
+  (suggested and accepted the same day: GitHub only emails about failed runs, and a
+  day its timer skips fails nothing), and the tests and a restore fire drill live in
+  the backups repository.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -7675,8 +7703,11 @@ oversight to silently fix; surface it instead.
       **Resolved in Pass 112 (confirmed 2026-10-03):** a piece from the account keeps
       the account's created date, and one that differs only by it counts as the
       same; importing from a file still re-stamps.
-- **The account copy has no backups of its own on the Free plan: revisit
-  (raised by the owner, 2026-10-10; undecided).** The owner pointed out that
+- ~~**The account copy has no backups of its own on the Free plan: revisit
+  (raised by the owner, 2026-10-10; undecided).**~~ **Resolved 2026-10-12:
+  option 2 (a free scheduled copy in the cloud) was chosen and built; see the
+  decision above. Pro is deferred until the app earns.** The original note,
+  kept for the record: The owner pointed out that
   this undercuts the point of accounts. Covered today: losing a device or a
   browser (every other device and the account hold a copy, and exported files
   are independent of all of them). Not covered: a bad change that gets copied
@@ -7698,7 +7729,10 @@ oversight to silently fix; surface it instead.
   re-pointing the rows at the new account's internal id), or a small script
   in `scripts/` that signs in as the owner and writes a file in the app's own
   backup format (needs the owner's login as a secret; restoring is the
-  existing Import button). GitHub emails the owner when a scheduled run fails.
+  existing Import button). GitHub emails the owner when a scheduled run fails
+  [corrected 2026-10-12: only once the owner has switched on Actions
+  notifications, which she did that evening and confirmed with a deliberate failure;
+  see the open entry on backups, item 6].
   Either would be its own small pass, with a restore rehearsed on the test
   project, and changes nothing in the app, Supabase or Vercel. Other free
   platforms checked (2026-10-11): none gives long free history together with
@@ -7709,6 +7743,50 @@ oversight to silently fix; surface it instead.
   only:** free and immediate, but they depend on the owner exporting (the
   export reminder nags after a day). Until one is chosen, (3) is the safety
   net.
+- **Backups of the account copy (2026-10-12) — what is still open.** Logged, not
+  fixed. (1) **The first backup commit** in the private repository (the only
+  one; checked 2026-10-12: five sign-in tables, one INSERT each, none in any later
+  copy), made before the fix, holds Supabase's sign-in tables: an email, a password
+  scramble, the devices and network addresses of sign-ins, and the session keys. The
+  owner signed out of all devices on 2026-10-12 (cancels the keys) and, on Claude's
+  recommendation, **chose not to rewrite the history**: GitHub's guide says a rewrite
+  alone is not a full erase (the old commit stays reachable by its address until
+  GitHub Support cleans up, and Support helps with sensitive data only when changing
+  the credential can't fix it), that once keys are cancelled a rewrite may not be
+  warranted, and a rewrite renumbers every later backup. What is left is the
+  scrambled password: **changing the account password retires it**, and the owner
+  reports having done so the same evening (not verifiable from outside). The
+  repository is private with no other collaborator, no forks and
+  no pull requests. Revisit for a clean slate: it is days old, but a fresh repository
+  means adding the secret again. (2) **A restore
+  inside a real Supabase project has not been tried** (the SQL Editor's handling of a
+  200 KB paste and of the `SET session_replication_role` line); the drill uses a
+  scratch copy of the same engine. (3) **The secret is the database password**
+  (full access): rotate it if it is ever exposed. (4) **Phase 3:** the privacy
+  policy has to cover this copy, and an exact rebuild with many accounts means
+  inviting each person again (their passwords are not saved). (5) **The drill is
+  manual** (suggested monthly); nothing reminds anyone to run it. (6) **Failure
+  emails were unconfirmed and appeared to be off (found 2026-10-12); now confirmed.**
+  GitHub's own page shows the Actions notification setting as "Don't notify" until
+  changed, and GitHub held no web notification for any of five failed test runs, so
+  every statement that "GitHub emails the owner" was unverified. The backups README now
+  says so and gives the steps. **Confirmed the same evening:** after the owner switched
+  it on, a deliberate failure (the second check by hand with a limit of 0; a limit of 1
+  passes right after a backup) raised a GitHub notification and an email, which landed in
+  the Updates tab of the owner's Gmail. No longer open; repeat that test now and then. (7) **The timer is best effort, and a
+  late or skipped day sends no email.** The first scheduled run started about 9 hours 40
+  minutes after its slot; GitHub says some runs may be dropped when it is busy. Covered
+  by the second check (over 36 hours old, or unreadable, fails), which uses the same timer
+  and so can't see GitHub itself being down; an outside alarm service could, at the price
+  of another company in the loop (not added). (8) **GitHub's notices (2026-10-12):** the
+  `ubuntu-latest` label moves to Ubuntu 26 from 2026-10-19, and the pinned
+  `actions/checkout` and `supabase/setup-cli` target Node.js 20, which GitHub is
+  retiring (forced onto 24 for now). **Done the same evening, on the owner's yes:** both
+  workflows pinned to `ubuntu-24.04` (the system the job had been passing on), tests
+  added that fail on `ubuntu-latest`, both jobs run green by hand, and the "latest is
+  moving" notice gone. **Still open:** updating the two pinned actions to versions that
+  run on Node 24, on purpose, with the tests and a by-hand run after (nothing has broken;
+  GitHub forces them onto 24 meanwhile).
 - **Accounts at go-live (Pass 114, 2026-10-10) — what is still open.**
   Logged, not fixed; the owner is the only account, which keeps all of it
   low-risk. Each item's detail lives in

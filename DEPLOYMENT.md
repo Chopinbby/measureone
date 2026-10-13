@@ -306,7 +306,10 @@ protected by row-level security: nobody can read or change another account's
 rows, and nobody can delete a row. `scripts/check-rls.mjs` checks that against
 a project (37 checks, two throwaway accounts); run it after any change to the
 database's rules or sign-in settings. Only the project's **public** key is ever
-in the app or in a setting, never the secret key.
+in the app or in a setting, never the secret key. A daily copy of the account
+database is saved by a scheduled job into a separate **private** repository
+(`Chopinbby/measureone-backups`; this repository is public, so backups never go
+here): see [Accounts-and-Backend.md](docs/Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12).
 
 ---
 

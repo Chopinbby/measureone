@@ -2226,3 +2226,26 @@ The owner's own account exists (invited, backed up and restored on a phone on
   See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
   and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).
+
+**Since Pass 115**, "same" and "changed" are trustworthy before devices talk by
+themselves. Nothing fetches or applies the account's changes yet (Passes 116,
+120). Four things worth knowing:
+- **An upload attempt first writes the fingerprint of what it's about to send
+  into that item's device-record entry** (`sent`, the last 5; `withSentRecorded`,
+  `lib/accountSync.js`), cleared when the account confirms a revision (the
+  `with...Uploaded` functions replace the whole entry). `judgeRefusal` adopts a
+  refused row that matches the current copy OR anything in `sent`, recording the
+  ROW's fingerprint so the piece stays waiting; anything else is held. This
+  closes the false hold. `cleanEntry` drops fields it doesn't know, so a new
+  entry field must be added there too.
+- **`mergeSessionArrays` (`lib/storage.js`) compares sessions by content, key
+  order ignored.** `withComparableSessions` is gone. File import got the same
+  fix (an identical-but-reordered session is no longer kept twice).
+- **The technique library's `updatedAt` is left out of `sameTechnique` and
+  `techniqueFingerprint` only** (`techniqueForComparison`). `dayList` and
+  `walkPosition` stay in. The fingerprint changed once, so every device uploads
+  its library once after this ships. Don't compare technique through
+  `canonicalTechnique` directly.
+- **The Account status line shows held and the normal line together**; "not
+  answering" still replaces both. See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115).

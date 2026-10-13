@@ -615,6 +615,8 @@ What was built, and the small choices made building it:
   the preview checks. Also left for this pass on purpose (2026-10-03): show the
   held message and the normal line together when the Account panel is reworked
   for settling.
+  **Pass 115 settled (6) and (7)**, see
+  [Same and changed you can trust](#same-and-changed-you-can-trust-pass-115).
   **After Pass 112:** (1) was decided and built (a piece that comes from the
   account keeps the account's created date). (2) and (4) are built: Review reads
   the account's copy of a held piece, and comparing uses `samePiece` /
@@ -967,6 +969,50 @@ account's rows are untouched. Delete the second throwaway account afterwards.
   device with no pieces can only do the plain Sign out, since Settings isn't reachable
   there), and a very long password (Supabase caps the length) probably gets the same
   generic message.
+
+## Same and changed you can trust (Pass 115)
+
+Three fixes to what "the same" and "changed" mean, made before any device
+fetches changes by itself. Nothing here fetches or applies the account's
+changes.
+
+- **The false hold is fixed.** Before each upload attempt, the device record
+  entry for that item (a piece or the technique library) gets the fingerprint
+  of what's about to be sent, in a short list `sent` (the last 5, oldest
+  dropped, no duplicates). A confirmed revision (`withPieceUploaded`,
+  `withTechniqueUploaded`) replaces the whole entry, which clears it.
+  `cleanEntry` (`lib/accountSync.js`) was taught `sent` and nothing else. When
+  a refusal is read back (`judgeRefusal`), a row that matches this device's
+  current copy OR any fingerprint in `sent` is this device's own earlier
+  upload: its revision is adopted. If it matches only an earlier send, the
+  record is written with the ROW's content fingerprint, so the piece stays
+  waiting at that revision and what was logged since goes up. A row matching
+  none of them is held, as before. Same rule for the technique row. One
+  addition beyond the card: after adopting an earlier send, that one item is
+  tried again straight away (once), because App.jsx doesn't reschedule a run
+  that ended without a failure, so it would otherwise wait for the next change.
+- **Sessions are compared by content.** `mergeSessionArrays` (`lib/storage.js`,
+  now exported) compares sessions with key order ignored. The workaround
+  `withComparableSessions` in `lib/accountSync.js` is deleted; the account-merge
+  tests pass without it. **File import gets the same fix, so one thing changes:**
+  two sessions that are identical except for key order used to both be kept and
+  are now merged into one. A backup written by this app has a consistent key
+  order, so this should be rare in practice.
+- **The technique library's `updatedAt` is not a change** (`techniqueForComparison`,
+  used by `sameTechnique` and `techniqueFingerprint` only). It stays in the row
+  and in the app (`updateTechnique` stamps it on every change). **Nothing reads
+  it to decide which side is newer** (grepped `lib/` and `App.jsx`: it's written
+  in `updateTechnique`, passed through `validateAndMigrateTechnique`, and that's
+  all). Today's list (`dayList`) and the walk position still count as changes,
+  on purpose: Pass 118 decides how those merge. Piece fingerprints are
+  unchanged, so no piece re-uploads. **The technique fingerprint changes once,
+  so each device uploads its library once after this ships** (the library's
+  revision rises by one), then stays still (tested, including a new stamp).
+- **The Account status line shows the held message and the normal line
+  together** (`describeSyncStatus`): "1 piece changed on another device:
+  Ballade No. 1. Everything else backed up 3 hours ago." With changes waiting:
+  "... Ballade No. 1. 2 changes waiting to back up." "The account service isn't
+  answering" still replaces both.
 
 ## Setup (test project)
 

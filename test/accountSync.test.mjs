@@ -53,6 +53,10 @@ import {
   describeSyncStatus,
   describeHeld,
   describeHeldBanner,
+  // Pass 115
+  MAX_SENT,
+  withSentRecorded,
+  techniqueForComparison,
   // Pass 112
   fetchAccountCopy,
   countLiveAccountPieces,
@@ -876,13 +880,17 @@ describe("refusals and failures (Pass 111)", () => {
     afterFirstBackup(pieces, technique, storage);
     const fake = syncFake({ ...accountHolding(pieces, technique), inject: (call) => (call.op === "update" ? noConnection() : null) });
     const changed = { ...pieces, p1: { ...pieces.p1, name: "A" }, p2: { ...pieces.p2, name: "B" } };
-    const before = JSON.stringify(readDeviceRecord(storage));
+    // Since Pass 115 an attempt notes what it's about to send (`sent`); nothing else changes.
+    const snapshot = () => JSON.stringify(readDeviceRecord(storage), (k, v) => (k === "sent" ? undefined : v));
+    const before = snapshot();
     const r = await runSync(changed, technique, fake, storage);
     assert.equal(r.status, "stopped");
     assert.equal(r.reason, "connection");
     assert.equal(r.remaining, 2);
     assert.deepEqual(r.newlyHeld, []);
-    assert.equal(JSON.stringify(readDeviceRecord(storage)), before);
+    assert.equal(snapshot(), before);
+    assert.deepEqual(recordOf(storage).pieces.p1.sent, [pieceFingerprint(changed.p1)], "the one attempt was noted");
+    assert.equal(recordOf(storage).pieces.p2.sent, undefined, "the one that wasn't tried wasn't");
     assert.equal(fake.calls.filter((c) => c.op === "update").length, 1, "it stopped at the first one");
     assert.equal(syncOutcome(r), "failure");
   });
@@ -991,7 +999,7 @@ describe("a second browser (Pass 111)", () => {
     assert.deepEqual(r.newlyHeld, [{ kind: "technique" }]);
     assert.equal(fake.rows.technique[0].revision, 1);
     assert.equal(recordOf(storage).technique.held, true);
-    assert.equal(describeSyncStatus({ now: 9000, firstBackupDone: true, backedUpAt: 1000, waiting: 0, held: computeWaiting({ pieces: mine, technique: lib, accountRecord: recordOf(storage) }).held, failures: 0 }).text, "The technique library changed on another device");
+    assert.equal(describeSyncStatus({ now: 9000, firstBackupDone: true, backedUpAt: 1000, waiting: 0, held: computeWaiting({ pieces: mine, technique: lib, accountRecord: recordOf(storage) }).held, failures: 0 }).text, "The technique library changed on another device. Everything else backed up just now.");
 
     // A change to the piece still goes up, and the held library isn't tried again.
     const callsBefore = fake.calls.length;
@@ -1070,15 +1078,15 @@ describe("timing and the status line (Pass 111)", () => {
 
   test("a piece held as changed on another device is named", () => {
     const one = { pieces: [{ id: "b", name: "Ballade No. 1", deletedHere: false }], technique: false };
-    assert.deepEqual(status({ held: one }), { tone: "problem", text: "1 piece changed on another device: Ballade No. 1" });
+    assert.deepEqual(status({ held: one }), { tone: "problem", text: "1 piece changed on another device: Ballade No. 1. Everything else backed up just now." });
     const two = { pieces: [{ id: "a", name: "Etude" }, { id: "b", name: "Waltz" }], technique: false };
-    assert.equal(status({ held: two }).text, "2 pieces changed on another device: Etude; Waltz");
+    assert.equal(status({ held: two }).text, "2 pieces changed on another device: Etude; Waltz. Everything else backed up just now.");
     const many = { pieces: ["A", "B", "C", "D", "E"].map((name, i) => ({ id: `p${i}`, name })), technique: false };
-    assert.equal(status({ held: many }).text, "5 pieces changed on another device: A; B; C; and 2 more");
-    assert.equal(status({ held: { pieces: [], technique: true } }).text, "The technique library changed on another device");
-    assert.equal(status({ held: { pieces: one.pieces, technique: true } }).text, "1 piece and the technique library changed on another device: Ballade No. 1");
+    assert.equal(status({ held: many }).text, "5 pieces changed on another device: A; B; C; and 2 more. Everything else backed up just now.");
+    assert.equal(status({ held: { pieces: [], technique: true } }).text, "The technique library changed on another device. Everything else backed up just now.");
+    assert.equal(status({ held: { pieces: one.pieces, technique: true } }).text, "1 piece and the technique library changed on another device: Ballade No. 1. Everything else backed up just now.");
     const gone = { pieces: [{ id: "x", name: null, deletedHere: true }], technique: false };
-    assert.equal(status({ held: gone }).text, "1 piece changed on another device: a piece deleted here");
+    assert.equal(status({ held: gone }).text, "1 piece changed on another device: a piece deleted here. Everything else backed up just now.");
   });
 
   test("which line wins when more than one is true", () => {
@@ -1627,5 +1635,204 @@ describe("the result in plain words (Pass 112)", () => {
   test("the technique library line says what was added and that nothing was removed", () => {
     const lines = text(describeAccountMergeResult({ applied: counts(), technique: { stats: { itemsAdded: 3, temposUpdated: 1, methodsAdded: 0, methodStatesAdded: 0 } }, skippedItems: 2 }));
     assert.equal(lines[0], "Technique library merged (3 scales added, 1 newer tempo, 0 methods added, 2 unreadable scales skipped). Nothing was removed.");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Pass 115: "same" and "changed" you can trust                       */
+/* ------------------------------------------------------------------ */
+
+describe("a refusal that is this device's own earlier upload (Pass 115)", () => {
+  // The account accepts an update but the answer never arrives.
+  const lostConfirmation = (id) => {
+    let done = false;
+    return (call, rows) => {
+      if (done || call.op !== "update" || call.id !== id) return null;
+      done = true;
+      const row = rows.pieces.find((x) => x.id === id);
+      Object.assign(row, viaJson(call.values), { data: reorder(viaJson(call.values.data)) });
+      row.revision += 1;
+      return noConnection();
+    };
+  };
+
+  test("the false hold: an upload lands, its confirmation is lost, more is logged, and the next attempt goes up instead of holding", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake({ ...accountHolding(pieces, technique), inject: lostConfirmation("p2") });
+    const v2 = { ...pieces.p2, name: "Version 2" };
+    const first = await runSync({ ...pieces, p2: v2 }, technique, fake, storage);
+    assert.equal(first.reason, "connection");
+    assert.equal(fake.rows.pieces.find((x) => x.id === "p2").revision, 2, "it did land");
+    assert.equal(recordOf(storage).pieces.p2.revision, 1, "but the device never heard");
+
+    const v3 = { ...v2, name: "Version 3" };
+    const r = await runSync({ ...pieces, p2: v3 }, technique, fake, storage);
+    assert.deepEqual(r.newlyHeld, [], "not held");
+    assert.equal(r.resolved, 1);
+    assert.equal(r.uploaded, 1);
+    const row = fake.rows.pieces.find((x) => x.id === "p2");
+    assert.equal(row.revision, 3);
+    assert.equal(row.data.name, "Version 3");
+    assert.deepEqual(recordOf(storage).pieces.p2, { revision: 3, fingerprint: pieceFingerprint(v3) }, "confirmed: the sent list is cleared");
+    assert.equal(computeWaiting({ pieces: { ...pieces, p2: v3 }, technique, accountRecord: recordOf(storage) }).count, 0);
+  });
+
+  test("the row adopted is left waiting at that revision (the record holds the row's content, not the newer copy)", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const v2 = { ...pieces.p2, name: "Version 2" };
+    const fake = syncFake({ ...accountHolding(pieces, technique), inject: lostConfirmation("p2") });
+    await runSync({ ...pieces, p2: v2 }, technique, fake, storage);
+    const v3 = { ...v2, name: "Version 3" };
+    // stop after the adoption: the retry's update is also lost
+    const stopAfterAdopt = syncFake({ pieceRows: fake.rows.pieces, techniqueRows: fake.rows.technique, inject: (c) => (c.op === "update" && c.filters.some(([k, v]) => k === "revision" && v === 2) ? noConnection() : null) });
+    await runSync({ ...pieces, p2: v3 }, technique, stopAfterAdopt, storage);
+    assert.equal(recordOf(storage).pieces.p2.revision, 2, "adopted the row's revision");
+    assert.equal(recordOf(storage).pieces.p2.fingerprint, pieceFingerprint(v2), "recorded as what the row holds, so v3 is still waiting");
+    assert.deepEqual(computeWaiting({ pieces: { ...pieces, p2: v3 }, technique, accountRecord: recordOf(storage) }).items.map((i) => [i.id, i.expectedRevision]), [["p2", 2]]);
+  });
+
+  test("a refused row equal to neither the current copy nor anything sent is held, as before", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    const row = fake.rows.pieces.find((x) => x.id === "p2");
+    row.revision = 2;
+    row.data = { ...row.data, name: "Another device" };
+    const r = await runSync({ ...pieces, p2: { ...pieces.p2, name: "Mine" } }, technique, fake, storage);
+    assert.deepEqual(r.newlyHeld.map((h) => h.id), ["p2"]);
+    assert.equal(recordOf(storage).pieces.p2.held, true);
+    assert.equal(row.data.name, "Another device");
+  });
+
+  test("a row that matches something sent, but not within the last five, is held", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const old = { ...pieces.p2, name: "Sent long ago" };
+    let record = readDeviceRecord(storage);
+    record = withSentRecorded(record, USER, { kind: "piece", id: "p2" }, pieceFingerprint(old));
+    for (let i = 0; i < MAX_SENT; i++) record = withSentRecorded(record, USER, { kind: "piece", id: "p2" }, `later-${i}`);
+    saveDeviceRecord(record, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    const row = fake.rows.pieces.find((x) => x.id === "p2");
+    row.revision = 2;
+    row.data = reorder(viaJson(old));
+    const r = await runSync({ ...pieces, p2: { ...pieces.p2, name: "Now" } }, technique, fake, storage);
+    assert.deepEqual(r.newlyHeld.map((h) => h.id), ["p2"]);
+  });
+
+  test("the sent list keeps the last five, without duplicates, and survives a reload of the record", () => {
+    let record = readDeviceRecord(memoryStorage());
+    for (let i = 1; i <= 7; i++) record = withSentRecorded(record, USER, { kind: "piece", id: "p1" }, `f${i}`);
+    record = withSentRecorded(record, USER, { kind: "piece", id: "p1" }, "f5");
+    assert.deepEqual(accountRecordFor(record, USER).pieces.p1.sent, ["f3", "f4", "f6", "f7", "f5"], "f5 re-sent moves to the end, not twice");
+    const storage = memoryStorage();
+    saveDeviceRecord(record, storage);
+    assert.deepEqual(recordOf(storage).pieces.p1.sent, ["f3", "f4", "f6", "f7", "f5"]);
+    assert.equal(recordOf(storage).pieces.p1.sent.length, MAX_SENT);
+  });
+
+  test("a confirmed revision clears the list, for a piece and for the technique library", () => {
+    let record = readDeviceRecord(memoryStorage());
+    record = withSentRecorded(record, USER, { kind: "piece", id: "p1" }, "a");
+    record = withSentRecorded(record, USER, { kind: "technique" }, "t");
+    assert.deepEqual(accountRecordFor(record, USER).technique.sent, ["t"]);
+    record = withPieceUploaded(record, USER, "p1", { revision: 2, fingerprint: "x" }, 1);
+    record = withTechniqueUploaded(record, USER, { revision: 2, fingerprint: "y" }, 1);
+    assert.deepEqual(accountRecordFor(record, USER).pieces.p1, { revision: 2, fingerprint: "x" });
+    assert.deepEqual(accountRecordFor(record, USER).technique, { revision: 2, fingerprint: "y" });
+  });
+
+  test("the technique row follows the same rule: its own earlier upload is adopted, someone else's is held", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const t2 = { ...technique, walkPosition: 4 };
+    // lost confirmation for the technique row
+    let done = false;
+    const fake = syncFake({
+      ...accountHolding(pieces, technique),
+      inject: (call, rows) => {
+        if (done || call.table !== "technique" || call.op !== "update") return null;
+        done = true;
+        Object.assign(rows.technique[0], viaJson(call.values), { data: reorder(viaJson(call.values.data)) });
+        rows.technique[0].revision += 1;
+        return noConnection();
+      },
+    });
+    await runSync(pieces, t2, fake, storage);
+    assert.equal(fake.rows.technique[0].revision, 2);
+    const t3 = { ...t2, walkPosition: 6 };
+    const r = await runSync(pieces, t3, fake, storage);
+    assert.deepEqual(r.newlyHeld, []);
+    assert.equal(fake.rows.technique[0].revision, 3);
+    assert.deepEqual(recordOf(storage).technique, { revision: 3, fingerprint: techniqueFingerprint(t3) });
+
+    // a row nobody here sent
+    fake.rows.technique[0].revision = 5;
+    fake.rows.technique[0].data = { ...fake.rows.technique[0].data, walkPosition: 11 };
+    const r2 = await runSync(pieces, { ...t3, walkPosition: 8 }, fake, storage);
+    assert.deepEqual(r2.newlyHeld, [{ kind: "technique" }]);
+  });
+});
+
+describe("the technique library's updatedAt is not a change (Pass 115)", () => {
+  const base = { ...technique, items: [], walkPosition: 3, dayList: { date: "2026-10-01", tasks: [] } };
+
+  test("two libraries that differ only in updatedAt are the same, with the same fingerprint", () => {
+    const a = { ...base, updatedAt: 1000 }, b = { ...base, updatedAt: 99999 }, c = { ...base };
+    assert.equal(sameTechnique(a, b), true);
+    assert.equal(sameTechnique(a, c), true);
+    assert.equal(techniqueFingerprint(a), techniqueFingerprint(b));
+    assert.equal(techniqueFingerprint(a), techniqueFingerprint(c));
+    assert.equal("updatedAt" in techniqueForComparison(a), false);
+    assert.equal(canonicalTechnique(a).updatedAt, 1000, "it stays in the data itself");
+  });
+
+  test("today's list, the walk position and an item still count as changes", () => {
+    const a = { ...base, updatedAt: 1 };
+    assert.equal(sameTechnique(a, { ...a, dayList: { date: "2026-10-02", tasks: [] } }), false);
+    assert.equal(sameTechnique(a, { ...a, walkPosition: 4 }), false);
+    const item = { id: "i1", form: "scale", tonic: "C", quality: "major", octaves: 2, hands: "together", evenTempo: 60 };
+    assert.equal(sameTechnique({ ...a, items: [item] }, { ...a, items: [{ ...item, evenTempo: 66 }] }), false);
+    assert.notEqual(techniqueFingerprint(a), techniqueFingerprint({ ...a, walkPosition: 4 }));
+  });
+
+  test("the first time after this ships the library goes up once, then stays still", async () => {
+    const storage = memoryStorage(), pieces = three();
+    const tech = { ...base, updatedAt: 1234 };
+    // a record written before Pass 115: the fingerprint included updatedAt
+    const oldPrint = fingerprint(canonicalTechnique(tech));
+    assert.notEqual(oldPrint, techniqueFingerprint(tech));
+    const entries = Object.fromEntries(Object.entries(pieces).map(([id, p]) => [id, { revision: 1, fingerprint: pieceFingerprint(p) }]));
+    saveDeviceRecord(withBackupRecorded(readDeviceRecord(storage), USER, { pieces: entries, technique: { revision: 1, fingerprint: oldPrint }, checkedAt: 1000 }), storage);
+    const fake = syncFake(accountHolding(pieces, tech));
+    assert.deepEqual(computeWaiting({ pieces, technique: tech, accountRecord: recordOf(storage) }).items.map((i) => `${i.kind}:${i.action}`), ["technique:change"]);
+    const first = await runSync(pieces, tech, fake, storage);
+    assert.equal(first.uploaded, 1);
+    assert.equal(fake.rows.technique[0].revision, 2, "exactly one extra revision");
+    assert.equal(fake.rows.pieces.every((r) => r.revision === 1), true, "no piece re-uploads");
+    const calls = fake.calls.length;
+    await runSync(pieces, tech, fake, storage);
+    await runSync(pieces, { ...tech, updatedAt: 777 }, fake, storage);
+    assert.equal(fake.calls.length, calls, "then nothing more, even with a new stamp");
+    assert.equal(fake.rows.technique[0].revision, 2);
+  });
+});
+
+describe("the status line with held and normal together (Pass 115)", () => {
+  const one = { pieces: [{ id: "b", name: "Ballade No. 1", deletedHere: false }], technique: false };
+  const none = { pieces: [], technique: false };
+  const st = (over) => describeSyncStatus({ now: 10 * 3600000, firstBackupDone: true, backedUpAt: 7 * 3600000, waiting: 0, held: none, failures: 0, ...over });
+
+  test("held only, waiting only, held and waiting, held and backed up, not answering", () => {
+    assert.equal(st({ held: one }).text, "1 piece changed on another device: Ballade No. 1. Everything else backed up 3 hours ago.");
+    assert.equal(st({ held: one }).tone, "problem");
+    assert.equal(st({ waiting: 2 }).text, "2 changes waiting to back up");
+    assert.equal(st({ held: one, waiting: 2 }).text, "1 piece changed on another device: Ballade No. 1. 2 changes waiting to back up.");
+    assert.equal(st({ held: one, waiting: 1 }).tone, "problem");
+    assert.equal(st({ held: one, backedUpAt: null }).text, "1 piece changed on another device: Ballade No. 1.", "held with nothing else to say");
+    assert.equal(st({}).text, "Backed up 3 hours ago");
+    assert.equal(st({ held: one, waiting: 2, failures: NOT_ANSWERING_AFTER }).text, "The account service isn't answering. Everything is still saved on this device.");
   });
 });

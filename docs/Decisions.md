@@ -7804,15 +7804,22 @@ oversight to silently fix; surface it instead.
      address, that an invitation lands on the Site URL on production). All but
      the Instant Rollback and Redeploy question were checked after the merge
      (2026-10-10); how those two treat the branch address is still untested.
-  2. **From Pass 111:** a false hold is still possible, and the status line
-     still shows one message at a time (both left on purpose, see above).
+  2. ~~**From Pass 111:** a false hold is still possible, and the status line
+     still shows one message at a time (both left on purpose, see above).~~
+     **Resolved in Pass 115:** an upload attempt notes what it's about to send
+     (`sent`), and a refused row equal to a recent send is adopted instead of
+     held; the status line shows the held message and the normal line together.
+     See [Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115).
   3. **From Pass 112:** a combine the person declines is offered again on
-     every Get changes; two devices that both use the app often hold each
-     other's technique library (its per-device parts are in the shared row); a
-     name match with a blank composer can combine two different pieces; there is
-     no "undelete"; a merge clears the piece's reschedule marker; and
-     `mergeSessionArrays` compares sessions as text, so key order matters (worked
-     around in `lib/accountSync.js`).
+     every Get changes (Pass 122); ~~two devices that both use the app often hold
+     each other's technique library (its per-device parts are in the shared
+     row)~~ **the `updatedAt` part is resolved in Pass 115** (it no longer counts
+     as a change; today's list and the walk position still do, Pass 118 decides
+     how those merge); a name match with a blank composer can combine two
+     different pieces; there is no "undelete" (Pass 122); a merge clears the
+     piece's reschedule marker; and ~~`mergeSessionArrays` compares sessions as
+     text, so key order matters~~ **resolved in Pass 115** (compares content;
+     the workaround in `lib/accountSync.js` is deleted).
   4. **From Pass 113:** the email-change "replace the account" steps have never
      been rehearsed; "Sign out of all devices" can be reported wrongly if the
      service rejects this device's own sign-in (and other devices keep working

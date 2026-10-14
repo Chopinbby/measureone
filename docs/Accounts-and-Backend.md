@@ -1014,6 +1014,106 @@ changes.
   "... Ballade No. 1. 2 changes waiting to back up." "The account service isn't
   answering" still replaces both.
 
+## Noticing that another device changed something (Pass 116)
+
+The first piece of Phase 2: the app now **notices**, quietly, that the account
+holds something this device hasn't got. It never applies anything. "Get changes
+from your account" works exactly as in Pass 112, and is still the only way a
+change arrives.
+
+- **A light read** (`checkAccountChanges`, `lib/accountSync.js`). From `pieces`
+  only `id, revision, deleted_at`, paged 50 at a time exactly the way
+  `countLiveAccountPieces` pages; from `technique` only `revision`. It never
+  selects the `data` column, so it costs a few hundred bytes however big the
+  pieces are. It never throws and reports the same stopped reasons the other
+  reads do (`connection`, `signed-out`, `other`). A 5xx, a 408/429 or no answer
+  at all is `connection` (it reuses the uploads' `failureKind`), because the
+  service answering with an error looks the same as it not answering.
+- **A pure sorter** (`classifyAccountChanges({ rows, accountRecord,
+  localPieceIds })`). Every piece lands in at most one list:
+  `held` (already held as "changed on another device": known, shown by its own
+  message, never counted again, whether or not it is also newer or deleted);
+  `newer` (the account holds a live row at a higher revision than the record
+  says this device last saw); `added` (a live row this device has neither a
+  piece nor a record entry for); `deleted` (a row marked deleted that this
+  device still holds); `needsReview` (this device holds it, the account has a
+  live row, and the record has no revision for it: Pass 110's "different at
+  first backup"). Plus `techniqueNewer` / `techniqueHeld` for the technique row.
+  **A device's own upload is never newer**: the record takes the revision the
+  moment the account confirms an upload, so the row and the record agree
+  (tested end to end with a real upload through the stand-in database). A piece
+  this device deleted (a record entry, no piece) is never "added", and a row
+  *behind* the record's revision is never "newer". `needsReview` is worked out
+  but not shown anywhere yet.
+- **When it runs.** Only while signed in AND once this device's first backup is
+  checked (the same gate as the uploads); never while the page is hidden; never
+  while an upload run, a manual backup or "Get changes" is running (it looks
+  again two seconds later). Triggers: at startup once sign-in is known (4
+  seconds after, so an upload that is waiting goes first); the window regaining
+  focus or the page becoming visible, **at most once a minute** (a return to
+  the window fires both events; they make one request); the browser's online
+  event, at once; and every five minutes while the page is visible (the page
+  asks once a minute whether one is due, which is only a look at the clock).
+  The throttle lives in `createAccountChecker`, so every trigger meets the same
+  rule and two checks never run at once; `checkIsDue` is the rule. Signed out,
+  or on a build with no account service, no timer starts any request and the
+  account library isn't loaded.
+- **Rows read while this device was writing are not believed.** A check that
+  overlaps an upload could read the row *after* the upload landed but sort it
+  *before* the record knows, which would read as "newer". So the result is
+  thrown away if an upload, a backup or "Get changes" is running when it
+  returns, or the device record changed while it read (`checkRowsUsable`). The
+  next trigger simply tries again.
+- **A failed check is not an error.** It counts toward the same "isn't
+  answering" count the uploads use (after two in a row the status line says so;
+  it shows no error of its own), and a good one starts the count again, as a
+  good upload does. Without that reset, a count raised by checks alone (nothing
+  waiting to upload) could never clear.
+- **The line.** One added status line in the Account panel, under the
+  backed-up line: **"Changes from another device: 3 pieces. Press Get
+  changes."** (or "...: 1 piece and the technique library." / "...: the
+  technique library."). It counts `newer` + `added` + `deleted`; held and
+  needs-review pieces have their own messages. No banner, no sidebar mark. The
+  last light read is kept, and **re-sorted against the device record every
+  time the status is refreshed** (`syncSnapshot({ accountRows })`), so the line
+  goes away on its own once uploads or "Get changes" bring the record up to date,
+  without another request.
+- **Where the code is.** The read, sorter, throttle, outcome and wording are in
+  `lib/accountSync.js` with tests (`test/accountSync.test.mjs`). `App.jsx` has
+  only the scheduling ("Noticing that another device changed something (Pass
+  116)", beside the upload scheduler), and `SettingsTab.jsx` the extra line.
+- **Found, not fixed** (for the passes that follow): (1) **A lost confirmation
+  can flash the line.** If an upload lands but its confirmation is lost, the
+  record is one revision behind the row until the next upload attempt adopts it
+  (Pass 115), so the line can say "1 piece" for up to a retry gap. It corrects
+  itself. (2) **The technique library will often read "newer".** Each device
+  rebuilds today's list and moves the walk position on its own and uploads, so
+  two devices in use keep bumping each other's revision. That is the
+  per-device-parts problem Pass 118 decides. (3) **A piece the person declines
+  in "Get changes" (an unticked new piece) is noticed again on every check**,
+  the same family as the declined combine; it needs the remembered "no" of Pass
+  122. (4) **A piece deleted here and changed elsewhere** (a record entry marked
+  deleted here, a live row at a newer revision) is not reported; deletions are
+  Pass 122. (5) The light read is paged by offset, so a row inserted between two
+  pages can be missed or repeated for one check; the next check corrects it.
+- **Checked** (my own runs; the owner's checks on the preview are in the pull
+  request): unit tests for each rule above; four deliberate breakages, each
+  caught (the check also selecting `data`, a device's own confirmed upload
+  counted as newer, no one-minute throttle on focus, a held piece also counted
+  as newer); and in a browser, the real app and library against a throwaway
+  local stand-in for the database (not committed): a page that is hidden makes
+  no request in over two minutes; a return to the window makes exactly one
+  check (`select=id,revision,deleted_at`, then `select=revision`) and two more
+  focus events seconds later make none; a piece edited, a piece added, a piece
+  deleted and the technique row bumped "elsewhere" each show in the line; "Get
+  changes" shrinks the line without another request (and a piece left unticked
+  keeps being noticed, see above); the device's own uploads never show; the
+  service stopped shows "isn't answering" after the second failed check and no
+  error line of its own, and coming back clears it; with no account service
+  configured, even with a saved session and device record present, no request
+  at all. **Not seen on the real test project**: that needs the owner's sign-in
+  and a second window.
+
 ## Setup (test project)
 
 Done in Pass 108 (2026-09-29). The dashboard steps were done by the user; the

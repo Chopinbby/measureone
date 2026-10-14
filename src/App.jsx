@@ -94,6 +94,8 @@ import {
   syncOutcome,
   describeSyncStatus,
   describeHeldBanner,
+  // Merging by part (Pass 117): the quiet startup step only
+  withPartsRecorded,
   // Noticing that another device changed something (Pass 116)
   CHECK_TICK_MS,
   createAccountChecker,
@@ -649,6 +651,20 @@ export default function App() {
       scheduleSync(Math.max(quietDelayMs(now, syncPendingSinceRef.current), syncNextAttemptRef.current - now));
     }
   }, [pieces, technique, loaded]);
+
+  // Merging by part (Pass 117): pieces recorded before `parts` existed get them
+  // here, once at startup, quietly (no network, no piece changes). A piece whose
+  // fingerprint still equals its record's hasn't changed since it was last
+  // synced, so this device's copy IS the synced state and its parts are
+  // recorded from it. A piece with changes waiting is left alone: it gets parts
+  // at its next confirmed upload, and until then a merge would ask rather than
+  // merge by part. Nothing uses the parts yet (the merge engine,
+  // lib/pieceMerge.js, isn't wired into the app).
+  useEffect(() => {
+    if (!authEnabled || !loaded) return;
+    const { record, recorded } = withPartsRecorded(readDeviceRecord(), pieces);
+    if (recorded > 0) saveDeviceRecord(record);
+  }, [loaded]);
 
   // Signing in, or the app starting with a saved sign-in: work out what's
   // waiting and look at it soon. Signing out, or another account: stop (a run

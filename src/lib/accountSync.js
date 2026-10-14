@@ -29,6 +29,12 @@ import {
   readBackupTechnique,
 } from "./storage";
 import { ensureWorkId } from "./works";
+// The comparing primitives live in pieceMerge.js (Pass 117), which the account
+// code imports and never the other way round; they're re-exported from here so
+// everything that already imports them from this file is unchanged.
+import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints } from "./pieceMerge";
+
+export { fingerprint, canonicalPiece, piecePartFingerprints };
 
 // Mirrors CURRENT_SCHEMA_VERSION in storage.js, which doesn't export it.
 // test/accountSync.test.mjs fails if the two ever disagree.
@@ -46,15 +52,6 @@ const MAX_PAGES = 2000;
 /* ------------------------------------------------------------------ */
 /*  Comparing as data                                                  */
 /* ------------------------------------------------------------------ */
-
-// What JSON would keep of a value: an undefined field vanishes, and the key
-// order stops mattering once the two sides are compared key by key.
-function toJsonValue(value) {
-  const text = JSON.stringify(value);
-  return text === undefined ? null : JSON.parse(text);
-}
-
-const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 function deepEqualJson(a, b) {
   if (a === b) return true;
@@ -77,65 +74,16 @@ export function sameData(a, b) {
   return deepEqualJson(toJsonValue(a), toJsonValue(b));
 }
 
-function canon(v) {
-  if (Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";
-  if (isObject(v)) {
-    return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canon(v[k])).join(",") + "}";
-  }
-  return JSON.stringify(v);
-}
-
-function hash53(text, seed) {
-  let h1 = 0xdeadbeef ^ seed;
-  let h2 = 0x41c6ce57 ^ seed;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
-}
-
-// A short label for "exactly this content", independent of key order. Not
-// security: it's how a later pass can tell that a piece has changed since it
-// was uploaded, without keeping a second copy of it on the device.
-export function fingerprint(value) {
-  const text = canon(toJsonValue(value));
-  return hash53(text, 0).toString(16) + "-" + hash53(text, 1).toString(16);
-}
-
 /* ---- "the same" means the same after a reload (Pass 111) ------------ */
 
-// The app doesn't always hold a piece in exactly the shape a reload gives it.
-// A chunk's first practice record is created without `tier1Done` and
-// `troubleSpots`, which loading then adds (as false and null); a technique
-// task is built without a `tempo`, which loading adds as null. Compared as
-// they stand, a piece that was uploaded and then simply reloaded would look
-// changed and go up again: a pointless extra revision after most days of
-// practice, and, once a second device exists, a false "changed on another
-// device". So pieces and the technique library are fingerprinted and compared
-// in the form loading would give them: the same functions the load uses, after
-// the same trip through JSON that saving and loading make. What's SENT is
-// still the app's own copy, untouched. A value that can't be put in that form
-// is used as it is.
-export function canonicalPiece(piece) {
-  const plain = toJsonValue(piece);
-  try {
-    // validateAndMigratePiece stamps "now" on a piece with no updatedAt and
-    // "today" on one with no startDate, which would make the same piece read
-    // differently from one call to the next. A piece in this app always has
-    // both; a hand-edited row might not, so give those a fixed stand-in.
-    const steady = isObject(plain)
-      ? { ...plain, ...(plain.updatedAt ? {} : { updatedAt: -1 }), ...(plain.startDate ? {} : { startDate: "1970-01-01" }) }
-      : plain;
-    const loaded = validateAndMigratePiece(steady);
-    return loaded ? toJsonValue(loaded) : plain;
-  } catch (e) {
-    return plain;
-  }
-}
+// Pieces are fingerprinted and compared in the form loading would give them
+// (canonicalPiece, pieceMerge.js); the technique library the same way, below.
+// A technique task is built without a `tempo`, which loading adds as null.
+// Compared as they stand, a technique library that was uploaded and then simply
+// reloaded would look changed and go up again, so it is compared in the form
+// the load gives it: the same function the load uses, after the same trip
+// through JSON that saving and loading make. What's SENT is still the app's own
+// copy, untouched. A value that can't be put in that form is used as it is.
 
 export function canonicalTechnique(technique) {
   const plain = toJsonValue(technique);
@@ -326,7 +274,11 @@ export async function deletePieceRow(client, userId, id, expectedRevision, delet
 /*  uploaded for it) and `deletedHere` (this device deleted it, and    */
 /*  the deletion hasn't gone up yet), and, since Pass 115, `sent` (the */
 /*  fingerprints of the last 5 uploads attempted since the account     */
-/*  last confirmed a revision; cleared by the next confirmation). Filed under the signed-in        */
+/*  last confirmed a revision; cleared by the next confirmation), and, */
+/*  since Pass 117, `parts` ({ part: fingerprint }: one for every      */
+/*  top-level field except progress and one for each progress entry,   */
+/*  as last synced with the account; lib/pieceMerge.js. No copy of the */
+/*  piece is kept. A piece recorded before Pass 117 has none). Filed under the signed-in        */
 /*  account's user id, so a different account on this browser starts   */
 /*  empty. `checkedAt` is the first backup's read-back check (Pass     */
 /*  110); `syncedAt` is the last time an upload landed (Pass 111).     */
@@ -351,6 +303,15 @@ function cleanEntry(e) {
   if (Array.isArray(e.sent)) {
     const sent = e.sent.filter((x) => typeof x === "string").slice(-MAX_SENT);
     if (sent.length) out.sent = sent;
+  }
+  // Only meaningful beside a recorded revision and fingerprint: it describes
+  // the same synced state.
+  if (isObject(e.parts) && out.revision !== undefined) {
+    const parts = {};
+    Object.keys(e.parts).forEach((k) => {
+      if (typeof e.parts[k] === "string") parts[k] = e.parts[k];
+    });
+    if (Object.keys(parts).length) out.parts = parts;
   }
   return Object.keys(out).length ? out : null;
 }
@@ -515,7 +476,7 @@ async function runBackup({ pieces, technique, userId, getClient = loadBackend, s
       result.backedUp += 1;
       if (wasSent) result.added += 1;
       else result.alreadyThere += 1;
-      recordPieces[id] = { revision: f.revision, fingerprint: pieceFingerprint(pieces[id]) };
+      recordPieces[id] = { revision: f.revision, fingerprint: pieceFingerprint(pieces[id]), parts: piecePartFingerprints(pieces[id]) };
     } else if (f.status !== NOT_IN_ACCOUNT) {
       // Differs, or (for a row just written) matches only once loaded, which
       // isn't what was sent.
@@ -720,10 +681,14 @@ function changeAccount(deviceRecord, userId, change) {
   };
 }
 
-// The account now holds this piece at `revision`, as fingerprinted.
-export function withPieceUploaded(deviceRecord, userId, id, { revision, fingerprint: print }, at) {
+// The account now holds this piece at `revision`, as fingerprinted. `parts`
+// (Pass 117) is the fingerprint of each part of the piece as the account holds
+// it now; left out when it isn't known (an adopted row that is only an earlier
+// version of this device's own piece), in which case the next confirmed upload
+// records it.
+export function withPieceUploaded(deviceRecord, userId, id, { revision, fingerprint: print, parts }, at) {
   return changeAccount(deviceRecord, userId, (a) => {
-    a.pieces[id] = { revision, fingerprint: print };
+    a.pieces[id] = parts ? { revision, fingerprint: print, parts } : { revision, fingerprint: print };
     a.syncedAt = at;
   });
 }
@@ -751,6 +716,36 @@ export function withPieceHeld(deviceRecord, userId, id) {
   return changeAccount(deviceRecord, userId, (a) => {
     a.pieces[id] = { ...(a.pieces[id] || {}), held: true };
   });
+}
+
+// Pass 117: a quiet step for pieces recorded before `parts` existed. A piece
+// whose fingerprint still equals its record's has not changed since it was last
+// synced, so this device's copy IS the synced state and its parts can be
+// recorded from it. A piece with changes waiting is left alone (it gets parts at
+// its next confirmed upload, and until then falls back to asking), as is any
+// entry that already has them. Works for every account in the record: each
+// compares the same local pieces with its own fingerprints. Pure.
+// Returns { record, recorded } (the same record object when nothing changed).
+export function withPartsRecorded(deviceRecord, pieces) {
+  const accounts = (deviceRecord && deviceRecord.accounts) || {};
+  const local = pieces || {};
+  const nextAccounts = {};
+  let recorded = 0;
+  Object.keys(accounts).forEach((uid) => {
+    const a = accounts[uid];
+    let nextPieces = null; // copied only if something changes
+    Object.keys(a.pieces || {}).forEach((id) => {
+      const entry = a.pieces[id];
+      const piece = local[id];
+      if (!piece || !entry || entry.parts || entry.revision === undefined || typeof entry.fingerprint !== "string") return;
+      if (pieceFingerprint(piece) !== entry.fingerprint) return;
+      if (!nextPieces) nextPieces = { ...a.pieces };
+      nextPieces[id] = { ...entry, parts: piecePartFingerprints(piece) };
+      recorded += 1;
+    });
+    nextAccounts[uid] = nextPieces ? { ...a, pieces: nextPieces } : a;
+  });
+  return recorded > 0 ? { record: { ...deviceRecord, accounts: nextAccounts }, recorded } : { record: deviceRecord, recorded: 0 };
 }
 
 // A deleted piece's deletion has gone up (or there was nothing to delete): the
@@ -1002,7 +997,10 @@ export async function syncWaitingChanges({ pieces, technique, userId, getClient 
     } else if (item.action === "delete") {
       save((r) => withPieceForgotten(r, userId, item.id, at));
     } else {
-      save((r) => withPieceUploaded(r, userId, item.id, { revision, fingerprint: print || pieceFingerprint(pieces[item.id]) }, at));
+      // `print` set means the account holds an earlier version of this piece
+      // that this device no longer has, so its parts are unknown: left out.
+      const parts = print ? undefined : piecePartFingerprints(pieces[item.id]);
+      save((r) => withPieceUploaded(r, userId, item.id, { revision, fingerprint: print || pieceFingerprint(pieces[item.id]), parts }, at));
     }
   };
   const hold = (item) => {
@@ -1598,7 +1596,7 @@ export function planNeedsQuestion(plan) {
 // mergeImportedPiece (practice history is merged, never replaced). Returns
 //   pieces        : the new pieces map (nothing removed)
 //   firstNewId    : the first piece added, or null
-//   entries       : { [pieceId]: { revision, fingerprint } } for the device
+//   entries       : { [pieceId]: { revision, fingerprint, parts } } for the device
 //                   record: the account's copy as read, so whatever this device
 //                   holds on top of it goes up as an ordinary change
 //   markDeleted   : [{ id, revision, name, intoId }] account rows to mark deleted
@@ -1641,7 +1639,9 @@ export function applyAccountMerge({
   };
 
   items.forEach((d, index) => {
-    const rowEntry = { revision: d.revision, fingerprint: pieceFingerprint(d.piece) };
+    // The account's copy as read: its revision, fingerprint and (Pass 117) the
+    // fingerprint of each of its parts: the state this device is now synced to.
+    const rowEntry = { revision: d.revision, fingerprint: pieceFingerprint(d.piece), parts: piecePartFingerprints(d.piece) };
     if (d.kind === "new") {
       const createdAt = Number.isFinite(d.piece.createdAt) ? d.piece.createdAt : now + index;
       next[d.id] = validateAndMigratePiece({ ...d.piece, createdAt });
@@ -1712,7 +1712,8 @@ export function applyAccountMerge({
 export function withAccountCopyRecorded(deviceRecord, userId, { entries = {}, technique = null, checkedAt = null }) {
   return changeAccount(deviceRecord, userId, (a) => {
     Object.keys(entries).forEach((id) => {
-      a.pieces[id] = { revision: entries[id].revision, fingerprint: entries[id].fingerprint };
+      const e = entries[id];
+      a.pieces[id] = e.parts ? { revision: e.revision, fingerprint: e.fingerprint, parts: e.parts } : { revision: e.revision, fingerprint: e.fingerprint };
     });
     if (technique) a.technique = { revision: technique.revision, fingerprint: technique.fingerprint };
     if (checkedAt != null && a.checkedAt == null) a.checkedAt = checkedAt;

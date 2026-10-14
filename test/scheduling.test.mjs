@@ -883,6 +883,59 @@ describe("Pass 74 follow-up — countBehindDays excludes days fully swept into a
   });
 });
 
+describe("[regression, Pass 117] a chunk done EARLIER than the rescheduled-remainder day it is placed on isn't owed on that day", () => {
+  // Merging two devices (lib/pieceMerge.js) can leave a chunk both listed in
+  // a reschedule marker and already done from before it: one device
+  // rescheduled while the other, not knowing, logged the chunk on its own
+  // earlier schedule. One device can't reach that state (it logs a chunk only
+  // on its own card, and a marker lists only untouched chunks). Read strictly,
+  // the day the remainder re-places the chunk on reads "behind" for good.
+  // The marker's day is 12; the remainder places c9 on day 13.
+  const marker = { asOfDay: 12, remainingChunkOrder: ["c9", "c13"], remainingConnectorIds: [], previous: null };
+  const day13 = { dayNumber: 13, newChunkIds: ["c9", "c13"], specialChunkIds: ["t1"], reviewChunkIds: [] };
+  const withProgress = (progress, rescheduleMarker = marker) => basePiece({ progress, rescheduleMarker });
+  const others = { c13: { doneDays: [13] }, t1: { doneDays: [13] } }; // everything else on the day is done on it
+
+  test("c9 done on a day before the marker's day: day 13 is done, not behind", () => {
+    assert.equal(classifyDayCompletion(day13, withProgress({ ...others, c9: { doneDays: [11] } }), 14), "done");
+    assert.equal(countBehindDays(withProgress({ ...others, c9: { doneDays: [11] } }), { days: [day13] }, 14), 0);
+  });
+
+  test("c9 done on the marker's own day, one day before it is placed: also not owed", () => {
+    assert.equal(classifyDayCompletion(day13, withProgress({ ...others, c9: { doneDays: [12] } }), 14), "done");
+  });
+
+  test("c9 done exactly on day 13 is done, as always", () => {
+    assert.equal(classifyDayCompletion(day13, withProgress({ ...others, c9: { doneDays: [13] } }), 14), "done");
+  });
+
+  test("a chunk nobody has done is still behind, and so is one done LATER than the day it is placed on", () => {
+    assert.equal(classifyDayCompletion(day13, withProgress({ ...others }), 14), "behind", "untouched");
+    assert.equal(classifyDayCompletion(day13, withProgress({ ...others, c9: { doneDays: [14] } }), 15), "behind", "done late");
+  });
+
+  test("it excuses only chunks done earlier: the day is still behind while something else on it isn't done", () => {
+    assert.equal(classifyDayCompletion(day13, withProgress({ c13: { doneDays: [] }, t1: { doneDays: [13] }, c9: { doneDays: [11] } }), 14), "behind");
+  });
+
+  test("a day where the only thing listed was done earlier reads empty, like a swept day", () => {
+    const only = { dayNumber: 13, newChunkIds: ["c9"], specialChunkIds: [], reviewChunkIds: [] };
+    assert.equal(classifyDayCompletion(only, withProgress({ c9: { doneDays: [11] } }), 14), "empty");
+  });
+
+  test("a review is never excused this way: a chunk under review always has earlier done-days", () => {
+    const review = { dayNumber: 13, newChunkIds: [], specialChunkIds: [], reviewChunkIds: ["c9"] };
+    assert.equal(classifyDayCompletion(review, withProgress({ c9: { doneDays: [5] } }), 14), "behind");
+  });
+
+  test("nothing changes without a marker, or on a day before the marker's day", () => {
+    assert.equal(classifyDayCompletion(day13, withProgress({ ...others, c9: { doneDays: [11] } }, null), 14), "behind", "no marker: strict, as before");
+    const early = { dayNumber: 5, newChunkIds: ["c9"], specialChunkIds: [], reviewChunkIds: [] };
+    // before the marker's day it is movedIdsForDay's rule, not this one: c9 is on the marker, so it was moved
+    assert.equal(classifyDayCompletion(early, withProgress({ c9: { doneDays: [3] } }), 14), "empty");
+  });
+});
+
 describe("[regression] a day is judged only on what's still owed on it — a half-done, half-moved day is not 'behind'", () => {
   // Reported live: after clicking "Reschedule remaining days" (including via
   // the "Change target date" choice) the banner still said "2 days behind",

@@ -6,7 +6,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generatePracticeChunks } from "../src/lib/chunking.js";
-import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue, diffImportedPiece, diffPieceMaps, savePieceChanges } from "../src/lib/storage.js";
+import { validateAndMigratePiece, parseBackupPieces, mergeImportedPiece, findMatchingPiece, isExportReminderDue, diffImportedPiece, diffPieceMaps, savePieceChanges, mergeSessionArrays } from "../src/lib/storage.js";
 
 const fresh = {
   id: "p_fresh",
@@ -1730,5 +1730,38 @@ describe("[Pass 106] savePieceChanges — writes, removals, and retrying a faile
     assert.deepEqual(s.log.removes, ["a"]);
     assert.deepEqual(run2.saved, { b });
     assert.deepEqual(run2.failed, []);
+  });
+});
+
+describe("[Pass 115] mergeSessionArrays compares sessions by content", () => {
+  const a = { day: 1, cleanReps: 3, bpm: 60, outcome: "pass", loggedDate: "2026-07-01" };
+  const aReordered = { loggedDate: "2026-07-01", outcome: "pass", bpm: 60, cleanReps: 3, day: 1 };
+
+  test("the same session with its keys in a different order is one session", () => {
+    assert.equal(mergeSessionArrays([a], [aReordered]).length, 1);
+    assert.deepEqual(mergeSessionArrays([a], [aReordered])[0], a, "the copy already here is the one kept");
+  });
+
+  test("keys in a different order inside a nested value are still the same", () => {
+    const n1 = { day: 2, notes: { x: 1, y: [{ p: 1, q: 2 }] } }, n2 = { notes: { y: [{ q: 2, p: 1 }], x: 1 }, day: 2 };
+    assert.equal(mergeSessionArrays([n1], [n2]).length, 1);
+  });
+
+  test("two genuinely different sessions stay two", () => {
+    assert.equal(mergeSessionArrays([a], [{ ...a, bpm: 61 }]).length, 2);
+    assert.equal(mergeSessionArrays([a], [{ ...a, extra: true }]).length, 2);
+    assert.equal(mergeSessionArrays([{ ...a, notes: [1, 2] }], [{ ...a, notes: [2, 1] }]).length, 2, "array order still matters");
+  });
+
+  test("a session repeated within one side is still dropped, and missing sides are fine", () => {
+    assert.equal(mergeSessionArrays([a, aReordered], undefined).length, 1);
+    assert.deepEqual(mergeSessionArrays(undefined, undefined), []);
+  });
+
+  test("a file import of a piece whose sessions only differ in key order no longer doubles them", () => {
+    const base = { id: "p1", name: "X", totalMeasures: 32, startDate: "2026-07-01", progress: { c1: { doneDays: [1], sessions: [a] } } };
+    const incoming = { ...base, progress: { c1: { doneDays: [1], sessions: [aReordered] } } };
+    const merged = mergeImportedPiece(validateAndMigratePiece(base), validateAndMigratePiece(incoming), "keep", "keep");
+    assert.equal(merged.progress.c1.sessions.length, 1);
   });
 });

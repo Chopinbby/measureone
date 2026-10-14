@@ -147,8 +147,21 @@ export function canonicalTechnique(technique) {
   }
 }
 
+// What counts as a CHANGE to the technique library (Pass 115): everything
+// except `updatedAt`. It's a stamp the app writes on every change, so two
+// devices that hold identical practice data but stamped it at different times
+// would each read the other as "changed". It stays in the row and in the app;
+// it's only left out of the comparison. Today's list (`dayList`) and the walk
+// position stay IN on purpose (Pass 118 decides how those merge).
+export function techniqueForComparison(technique) {
+  const canon = canonicalTechnique(technique);
+  if (!isObject(canon)) return canon;
+  const { updatedAt, ...rest } = canon;
+  return rest;
+}
+
 export const samePiece = (a, b) => sameData(canonicalPiece(a), canonicalPiece(b));
-export const sameTechnique = (a, b) => sameData(canonicalTechnique(a), canonicalTechnique(b));
+export const sameTechnique = (a, b) => sameData(techniqueForComparison(a), techniqueForComparison(b));
 
 // A fingerprint is worked out once per object. That's exact because pieces and
 // the technique object are replaced, never edited in place (Pass 106's rule),
@@ -165,7 +178,7 @@ function cachedFingerprint(value, canonical) {
   return found;
 }
 export const pieceFingerprint = (piece) => cachedFingerprint(piece, canonicalPiece);
-export const techniqueFingerprint = (technique) => cachedFingerprint(technique, canonicalTechnique);
+export const techniqueFingerprint = (technique) => cachedFingerprint(technique, techniqueForComparison);
 
 // Pure. This device's pieces (a map of id to piece) and technique object
 // against the rows read back from the account: for each piece, and for the
@@ -311,7 +324,9 @@ export async function deletePieceRow(client, userId, id, expectedRevision, delet
 /*  { revision, fingerprint } (what this device last saw and uploaded) */
 /*  plus, since Pass 111, `held` (the account moved on, so nothing is  */
 /*  uploaded for it) and `deletedHere` (this device deleted it, and    */
-/*  the deletion hasn't gone up yet). Filed under the signed-in        */
+/*  the deletion hasn't gone up yet), and, since Pass 115, `sent` (the */
+/*  fingerprints of the last 5 uploads attempted since the account     */
+/*  last confirmed a revision; cleared by the next confirmation). Filed under the signed-in        */
 /*  account's user id, so a different account on this browser starts   */
 /*  empty. `checkedAt` is the first backup's read-back check (Pass     */
 /*  110); `syncedAt` is the last time an upload landed (Pass 111).     */
@@ -320,6 +335,9 @@ export async function deletePieceRow(client, userId, id, expectedRevision, delet
 export function emptyAccountRecord() {
   return { pieces: {}, technique: null, checkedAt: null, syncedAt: null };
 }
+
+// How many of an item's most recent upload attempts are remembered (`sent`).
+export const MAX_SENT = 5;
 
 function cleanEntry(e) {
   if (!isObject(e)) return null;
@@ -330,6 +348,10 @@ function cleanEntry(e) {
   }
   if (e.held === true) out.held = true;
   if (e.deletedHere === true && out.revision !== undefined) out.deletedHere = true;
+  if (Array.isArray(e.sent)) {
+    const sent = e.sent.filter((x) => typeof x === "string").slice(-MAX_SENT);
+    if (sent.length) out.sent = sent;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -706,6 +728,23 @@ export function withPieceUploaded(deviceRecord, userId, id, { revision, fingerpr
   });
 }
 
+// Pass 115. Written BEFORE an upload attempt: "this device is about to send
+// content `print`". If the account then answers but the answer is lost, a later
+// refusal that finds the row holding exactly this content knows it's this
+// device's own earlier upload, not another device's change. Keeps the last
+// MAX_SENT; a confirmed revision (withPieceUploaded/withTechniqueUploaded)
+// replaces the whole entry, which clears it. `item` is { kind, id? }.
+export function withSentRecorded(deviceRecord, userId, item, print) {
+  return changeAccount(deviceRecord, userId, (a) => {
+    const add = (entry) => {
+      const sent = ((entry && entry.sent) || []).filter((x) => x !== print).concat(print).slice(-MAX_SENT);
+      return { ...(entry || {}), sent };
+    };
+    if (item.kind === "technique") a.technique = add(a.technique);
+    else a.pieces[item.id] = add(a.pieces[item.id]);
+  });
+}
+
 // The account moved on without this device: nothing is uploaded for it until
 // something settles it. Whatever the entry knew about the revision is kept.
 export function withPieceHeld(deviceRecord, userId, id) {
@@ -896,15 +935,23 @@ async function readRow(client, userId, item) {
 // - "same": the account's row is exactly what this device holds. Another tab
 //   of this browser got there first, or this device's own earlier upload
 //   landed but its note of it didn't. Not a conflict: adopt the row's revision.
+// - "same" with `earlier` (Pass 115): the row is not what this device holds NOW
+//   but is exactly something it SENT (`sent`, the fingerprints of recent
+//   attempts): its own earlier upload landed, its confirmation was lost, and
+//   more was logged since. Also not a conflict. `fingerprint` is the row's
+//   content, so the piece stays waiting at the adopted revision.
 // - "missing": the row is gone (a table wiped in the dashboard). Put it back,
 //   or for a deletion there's nothing to delete.
 // - "differs": the account moved on. Hold it.
-function judgeRefusal(item, local, row) {
+function judgeRefusal(item, local, row, sent) {
   if (!row) return { kind: "missing" };
   if (item.action === "delete") return row.deleted_at ? { kind: "same", revision: row.revision } : { kind: "differs" };
   if (item.kind === "piece" && row.deleted_at) return { kind: "differs" };
   const same = item.kind === "technique" ? sameTechnique(local, row.data) : samePiece(local, row.data);
-  return same ? { kind: "same", revision: row.revision } : { kind: "differs" };
+  if (same) return { kind: "same", revision: row.revision };
+  const rowPrint = item.kind === "technique" ? techniqueFingerprint(row.data) : pieceFingerprint(row.data);
+  if ((sent || []).includes(rowPrint)) return { kind: "same", revision: row.revision, earlier: true, fingerprint: rowPrint };
+  return { kind: "differs" };
 }
 
 // Sends what's waiting, one item at a time, each "only if still at revision N".
@@ -938,14 +985,16 @@ export async function syncWaitingChanges({ pieces, technique, userId, getClient 
   const sameItem = (a, b) => a.kind === b.kind && a.id === b.id;
   const localOf = (item) => (item.kind === "technique" ? technique : pieces[item.id]);
   // The account now holds what this device holds (or, for a deletion, holds the deletion).
-  const finish = (item, revision) => {
+  // `print` (Pass 115): the fingerprint to record instead of this device's
+  // current copy, when the row is this device's own EARLIER upload.
+  const finish = (item, revision, print) => {
     const at = now();
     if (item.kind === "technique") {
-      save((r) => withTechniqueUploaded(r, userId, { revision, fingerprint: techniqueFingerprint(technique) }, at));
+      save((r) => withTechniqueUploaded(r, userId, { revision, fingerprint: print || techniqueFingerprint(technique) }, at));
     } else if (item.action === "delete") {
       save((r) => withPieceForgotten(r, userId, item.id, at));
     } else {
-      save((r) => withPieceUploaded(r, userId, item.id, { revision, fingerprint: pieceFingerprint(pieces[item.id]) }, at));
+      save((r) => withPieceUploaded(r, userId, item.id, { revision, fingerprint: print || pieceFingerprint(pieces[item.id]) }, at));
     }
   };
   const hold = (item) => {
@@ -955,58 +1004,84 @@ export async function syncWaitingChanges({ pieces, technique, userId, getClient 
   };
   const warn = (what, error) => console.warn(`MeasureOne: ${what}`, error && error.message);
 
+  // Pass 115: note what's about to be sent BEFORE sending it, so that if the
+  // answer is lost, a later refusal can recognize the row as this device's own.
+  const upload = (item) => {
+    if (item.action !== "delete") {
+      const print = item.kind === "technique" ? techniqueFingerprint(technique) : pieceFingerprint(pieces[item.id]);
+      save((r) => withSentRecorded(r, userId, item, print));
+    }
+    return uploadItem(client, userId, item, pieces, technique, now());
+  };
+  const sentOf = (item) => {
+    const acct = accountNow();
+    const entry = item.kind === "technique" ? acct.technique : acct.pieces[item.id];
+    return (entry && entry.sent) || [];
+  };
+
   for (const planned of first.items) {
-    if (isCancelled()) return stopped("cancelled");
-    // Look again at the record as it is now: another tab may have done this one.
-    const item = planNow().items.find((x) => sameItem(x, planned));
-    if (!item) continue;
+    // An item whose refusal turned out to be this device's own earlier upload
+    // is tried once more straight away, from the adopted revision, so what was
+    // logged since goes up now rather than at the next change.
+    let adoptedEarlier = false;
+    for (;;) {
+      if (isCancelled()) return stopped("cancelled");
+      // Look again at the record as it is now: another tab may have done this one.
+      const item = planNow().items.find((x) => sameItem(x, planned));
+      if (!item) break;
 
-    const out = await uploadItem(client, userId, item, pieces, technique, now());
-    if (out.ok) {
-      finish(item, out.revision);
-      result.uploaded += 1;
-      continue;
-    }
-    if (out.failed) {
-      warn("an automatic backup upload didn't go through.", out.error);
-      if (out.failed === "connection") return stopped("connection");
-      result.failed += 1; // this one stays waiting; the others still go
-      continue;
-    }
-
-    // Refused. Never retried and never forced; first make sure it's real.
-    const read = await readRow(client, userId, item);
-    if (!read.ok) {
-      if (read.failed === "connection") return stopped("connection");
-      result.failed += 1;
-      continue;
-    }
-    const verdict = judgeRefusal(item, localOf(item), read.row);
-    if (verdict.kind === "same") {
-      finish(item, verdict.revision);
-      result.resolved += 1;
-      continue;
-    }
-    if (verdict.kind === "missing") {
-      if (item.action === "delete") {
-        finish(item, null);
-        result.resolved += 1;
-        continue;
-      }
-      const again = await uploadItem(client, userId, { ...item, action: "add" }, pieces, technique, now());
-      if (again.ok) {
-        finish(item, again.revision);
+      const out = await upload(item);
+      if (out.ok) {
+        finish(item, out.revision);
         result.uploaded += 1;
-        continue;
+        break;
       }
-      if (again.failed) {
-        if (again.failed === "connection") return stopped("connection");
+      if (out.failed) {
+        warn("an automatic backup upload didn't go through.", out.error);
+        if (out.failed === "connection") return stopped("connection");
+        result.failed += 1; // this one stays waiting; the others still go
+        break;
+      }
+
+      // Refused. Never retried and never forced; first make sure it's real.
+      const read = await readRow(client, userId, item);
+      if (!read.ok) {
+        if (read.failed === "connection") return stopped("connection");
         result.failed += 1;
-        continue;
+        break;
       }
-      // refused again: someone just added it. Fall through and hold it.
+      const verdict = judgeRefusal(item, localOf(item), read.row, sentOf(item));
+      if (verdict.kind === "same") {
+        finish(item, verdict.revision, verdict.fingerprint);
+        result.resolved += 1;
+        if (verdict.earlier && !adoptedEarlier) {
+          adoptedEarlier = true;
+          continue;
+        }
+        break;
+      }
+      if (verdict.kind === "missing") {
+        if (item.action === "delete") {
+          finish(item, null);
+          result.resolved += 1;
+          break;
+        }
+        const again = await upload({ ...item, action: "add" });
+        if (again.ok) {
+          finish(item, again.revision);
+          result.uploaded += 1;
+          break;
+        }
+        if (again.failed) {
+          if (again.failed === "connection") return stopped("connection");
+          result.failed += 1;
+          break;
+        }
+        // refused again: someone just added it. Fall through and hold it.
+      }
+      hold(item);
+      break;
     }
-    hold(item);
   }
   result.remaining = planNow().count;
   return result;
@@ -1057,18 +1132,27 @@ export function describeHeldBanner(held) {
 }
 
 // The one quiet line in the Account panel, or null (before the first backup,
-// or nothing to say). First match wins: the account service not answering
-// (everything is affected), then a piece held as changed on another device,
-// then changes waiting, then when it was last backed up.
+// or nothing to say). The account service not answering replaces everything
+// (it's the more urgent message). Otherwise the held message (if any) and the
+// normal line are shown TOGETHER (Pass 115): the held message, then what's
+// true of everything else: changes waiting, else when it was last backed up.
 //   tone: "ok" (backed up), "quiet" (waiting, or not answering), "problem" (held)
 export function describeSyncStatus({ now, firstBackupDone, backedUpAt, waiting, held, failures }) {
   if (!firstBackupDone) return null;
   if (failures >= NOT_ANSWERING_AFTER) {
     return { tone: "quiet", text: "The account service isn't answering. Everything is still saved on this device." };
   }
-  if (held && (held.pieces.length > 0 || held.technique)) return { tone: "problem", text: describeHeld(held) };
-  if (waiting > 0) return { tone: "quiet", text: `${waiting} ${plural(waiting, "change", "changes")} waiting to back up` };
-  if (backedUpAt != null) return { tone: "ok", text: `Backed up ${describeAgo(now - backedUpAt)}` };
+  const isHeld = !!held && (held.pieces.length > 0 || !!held.technique);
+  let rest = null;
+  if (waiting > 0) rest = `${waiting} ${plural(waiting, "change", "changes")} waiting to back up`;
+  else if (backedUpAt != null) rest = `Backed up ${describeAgo(now - backedUpAt)}`;
+  if (isHeld) {
+    // "Everything else" because the held item is the one thing not backing up.
+    const tail = rest == null ? "" : waiting > 0 ? ` ${rest}.` : ` Everything else ${rest.charAt(0).toLowerCase()}${rest.slice(1)}.`;
+    return { tone: "problem", text: `${describeHeld(held)}.${tail}` };
+  }
+  if (waiting > 0) return { tone: "quiet", text: rest };
+  if (backedUpAt != null) return { tone: "ok", text: rest };
   return null;
 }
 
@@ -1313,39 +1397,6 @@ export function planNeedsQuestion(plan) {
 
 /* ---- applying ------------------------------------------------------ */
 
-function sortKeysDeep(value) {
-  if (Array.isArray(value)) return value.map(sortKeysDeep);
-  if (isObject(value)) return Object.fromEntries(Object.keys(value).sort().map((k) => [k, sortKeysDeep(value[k])]));
-  return value;
-}
-
-// mergeImportedPiece (lib/storage.js) drops a session that both sides hold by
-// comparing its JSON TEXT, which depends on the order of its keys. A backup file
-// and this device were both written by this app, so the order agrees; the
-// account's rows come back from the database with their keys reordered, so
-// without this every session would be kept twice. Putting both sides' sessions
-// in one key order first makes the same session read as the same. (The fix
-// belongs in mergeSessionArrays itself; see the Pass 112 notes in
-// docs/Accounts-and-Backend.md.)
-function withComparableSessions(piece) {
-  if (!piece || !isObject(piece.progress)) return piece;
-  const progress = {};
-  Object.keys(piece.progress).forEach((chunkId) => {
-    const entry = piece.progress[chunkId];
-    if (!isObject(entry)) {
-      progress[chunkId] = entry;
-      return;
-    }
-    const out = { ...entry };
-    if (Array.isArray(entry.sessions)) out.sessions = entry.sessions.map(sortKeysDeep);
-    if (Array.isArray(entry.troubleSpots)) {
-      out.troubleSpots = entry.troubleSpots.map((spot) => (isObject(spot) && Array.isArray(spot.sessions) ? { ...spot, sessions: spot.sessions.map(sortKeysDeep) } : spot));
-    }
-    progress[chunkId] = out;
-  });
-  return { ...piece, progress };
-}
-
 // Does the merge, purely: this device's pieces (and technique) in, the merged
 // ones out. It re-works the plan from what it's given (never trusting an
 // earlier look), over only the pieces in `selectedIds` (null: all).
@@ -1393,7 +1444,7 @@ export function applyAccountMerge({
     // load, and let the schedule re-derive itself (rescheduleMarker cleared).
     return validateAndMigratePiece(
       ensureWorkId({
-        ...mergeImportedPiece(withComparableSessions(existing), withComparableSessions(d.piece), ladderChoice, orderChoice),
+        ...mergeImportedPiece(existing, d.piece, ladderChoice, orderChoice),
         rescheduleMarker: null,
       })
     );

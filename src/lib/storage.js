@@ -1110,11 +1110,24 @@ function mergeById(existingList, importedList) {
   return Object.values(byId);
 }
 
-function mergeSessionArrays(existingSessions, importedSessions) {
+// Text of a value with every object's keys in sorted order, so two values with
+// the same content give the same text whatever order their keys came in.
+function stableStringify(v) {
+  if (Array.isArray(v)) return "[" + v.map((x) => (x === undefined ? "null" : stableStringify(x))).join(",") + "]";
+  if (v && typeof v === "object") {
+    return "{" + Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => JSON.stringify(k) + ":" + stableStringify(v[k])).join(",") + "}";
+  }
+  return JSON.stringify(v);
+}
+
+// Pass 115: two sessions are the same when they hold the same CONTENT, with
+// key order ignored. (It used to compare JSON text, which depends on key
+// order; the account's database returns keys reordered.)
+export function mergeSessionArrays(existingSessions, importedSessions) {
   const combined = [...(existingSessions || []), ...(importedSessions || [])];
   const seen = new Set();
   return combined.filter((s) => {
-    const key = JSON.stringify(s);
+    const key = stableStringify(s);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

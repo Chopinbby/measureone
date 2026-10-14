@@ -862,7 +862,11 @@ export function computeWaiting({ pieces, technique, accountRecord }) {
 
 // Everything App.jsx needs to show the status and decide whether to schedule an
 // upload, from the device record as it is right now. No network.
-export function syncSnapshot({ pieces, technique, userId, storage }) {
+// `accountRows` (Pass 116) is the last light read of the account
+// (checkAccountChanges); with it, `changes` says what another device changed
+// (classifyAccountChanges), worked out from the record as it is NOW, so it
+// shrinks by itself as uploads and "Get changes" bring the record up to date.
+export function syncSnapshot({ pieces, technique, userId, storage, accountRows = null }) {
   const acct = accountRecordFor(readDeviceRecord(storage), userId);
   const plan = computeWaiting({ pieces, technique, accountRecord: acct });
   const times = [acct.checkedAt, acct.syncedAt].filter((t) => t != null);
@@ -871,6 +875,10 @@ export function syncSnapshot({ pieces, technique, userId, storage }) {
     waiting: plan.count,
     held: plan.held,
     backedUpAt: times.length ? Math.max(...times) : null,
+    changes:
+      accountRows && plan.firstBackupDone
+        ? classifyAccountChanges({ rows: accountRows, accountRecord: acct, localPieceIds: Object.keys(pieces || {}) })
+        : null,
   };
 }
 
@@ -1224,6 +1232,188 @@ export function describeFetchProblem(reason) {
 
 export function describeRestoreButton(count) {
   return `Restore ${count} ${plural(count, "piece", "pieces")} from your account`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Noticing that another device changed something (Pass 116)          */
+/*                                                                     */
+/*  A light read of the account (each piece's id, revision and         */
+/*  deleted mark, and the technique row's revision; NEVER a piece's    */
+/*  data), repeated while someone is signed in, sorted by a pure       */
+/*  function into what "Get changes" would bring. It only NOTICES:     */
+/*  nothing here changes the account, this device's pieces or the      */
+/*  device record, and nothing is applied or merged (Passes 117 on).   */
+/*                                                                     */
+/*  A device's own upload is never "newer": the record's revision is   */
+/*  updated the moment the account confirms the upload, so the row     */
+/*  and the record agree.                                              */
+/* ------------------------------------------------------------------ */
+
+// A window regaining focus (or the page becoming visible) starts a check at
+// most this often; and while the page stays visible a check is due this often.
+export const CHECK_FOCUS_GAP_MS = 60 * 1000;
+export const CHECK_EVERY_MS = 5 * 60 * 1000;
+// How often the page asks "is a check due?" (a local clock look, no request).
+export const CHECK_TICK_MS = 60 * 1000;
+
+// The light read. Same shape and reasons as the other reads, and like them it
+// never throws:
+//   { status: "ok", rows: { pieces: [{ id, revision, deleted_at }], technique: { revision } | null } }
+//   { status: "stopped", reason: "connection" | "signed-out" | "other" }
+// A server error (5xx), a timeout or no answer at all is "connection": the
+// same "the service isn't answering" the uploads report.
+export async function checkAccountChanges({ userId, getClient = loadBackend }) {
+  try {
+    const client = await getClient();
+    if (!client) return { status: "stopped", reason: "connection" };
+    const session = await client.auth.getSession();
+    const sessionUser = session && session.data && session.data.session && session.data.session.user;
+    if (!sessionUser || sessionUser.id !== userId) {
+      return { status: "stopped", reason: session && session.error && isConnectionProblem(session.error) ? "connection" : "signed-out" };
+    }
+    const pieces = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const from = page * PAGE_SIZE;
+      const res = await client
+        .from("pieces")
+        .select("id, revision, deleted_at")
+        .eq("user_id", userId)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (res.error) return { status: "stopped", reason: failureKind(res) };
+      const got = res.data || [];
+      got.forEach((r) => pieces.push({ id: r.id, revision: r.revision, deleted_at: r.deleted_at == null ? null : r.deleted_at }));
+      if (got.length < PAGE_SIZE) break;
+    }
+    const t = await client.from("technique").select("revision").eq("user_id", userId);
+    if (t.error) return { status: "stopped", reason: failureKind(t) };
+    const trow = t.data && t.data[0];
+    return { status: "ok", rows: { pieces, technique: trow ? { revision: trow.revision } : null } };
+  } catch (e) {
+    return { status: "stopped", reason: reasonFor(e) };
+  }
+}
+
+// Pure. Sorts the light rows against this device's record and the pieces it
+// holds. Every piece lands in at most one list (ids, sorted):
+//   held         the piece is already held as "changed on another device"
+//                (Pass 111): known, shown by its own message, never counted again
+//   newer        the account holds it (live) at a higher revision than the
+//                record says this device last saw
+//   added        a live row this device has neither a piece nor a record for
+//   deleted      a row marked deleted that this device still holds
+//   needsReview  this device holds it, the account has a live row, and the
+//                record has no revision for it (Pass 110's "different at first
+//                backup": nothing says the two ever matched)
+// plus the technique row: `techniqueNewer` (its revision is above the record's)
+// or `techniqueHeld` (already held, so not counted as newer).
+// A piece this device deleted (a record entry, no piece) is never "added", and
+// a row behind the record's revision is never "newer".
+export function classifyAccountChanges({ rows, accountRecord, localPieceIds }) {
+  const out = { newer: [], added: [], deleted: [], held: [], needsReview: [], techniqueNewer: false, techniqueHeld: false };
+  const acct = accountRecord || emptyAccountRecord();
+  const entries = acct.pieces || {};
+  const here = new Set(localPieceIds || []);
+  const seen = new Set();
+  ((rows && rows.pieces) || []).forEach((row) => {
+    if (!row || row.id == null || seen.has(row.id)) return;
+    seen.add(row.id);
+    const id = row.id;
+    const entry = entries[id];
+    const holdsIt = here.has(id);
+    const hasRevision = !!entry && Number.isFinite(entry.revision);
+    if (entry && entry.held && (holdsIt || entry.deletedHere)) {
+      out.held.push(id);
+    } else if (row.deleted_at != null) {
+      if (holdsIt) out.deleted.push(id);
+    } else if (holdsIt) {
+      if (!hasRevision) out.needsReview.push(id);
+      else if (Number.isFinite(row.revision) && row.revision > entry.revision) out.newer.push(id);
+    } else if (!entry) {
+      out.added.push(id);
+    }
+  });
+  ["newer", "added", "deleted", "held", "needsReview"].forEach((k) => out[k].sort());
+  const trow = rows && rows.technique;
+  const tentry = acct.technique;
+  if (trow && Number.isFinite(trow.revision)) {
+    if (tentry && tentry.held) out.techniqueHeld = true;
+    else if (tentry && Number.isFinite(tentry.revision) && trow.revision > tentry.revision) out.techniqueNewer = true;
+  }
+  return out;
+}
+
+// Is a check due? `trigger` says why it's being asked:
+//   "startup" (sign-in is known) and "online" (the connection came back): always
+//   "focus" (the window regained focus, or the page became visible): at most
+//   once a minute, so the two events a return to the window can fire make one request
+//   "interval" (the page asked on its own clock): every 5 minutes
+// A clock that moved back makes a check due rather than hiding it for an hour.
+export function checkIsDue({ trigger, now, lastStartedAt }) {
+  if (trigger === "startup" || trigger === "online") return true;
+  const since = lastStartedAt == null ? Infinity : now - lastStartedAt;
+  if (since < 0) return true;
+  if (trigger === "focus") return since >= CHECK_FOCUS_GAP_MS;
+  if (trigger === "interval") return since >= CHECK_EVERY_MS;
+  return false;
+}
+
+// Remembers when the last check started, so the throttle above is applied to
+// every caller alike, and never runs two checks at once. `run` resolves to
+// { ran: false, why } when it declined (the page is hidden, a check is already
+// going, or it's too soon), else { ran: true, result } with checkAccountChanges'
+// answer. `reset` forgets everything (signed out, or another account).
+export function createAccountChecker({ getClient = loadBackend, now = Date.now } = {}) {
+  let lastStartedAt = null;
+  let running = false;
+  return {
+    async run({ trigger, userId, visible = true }) {
+      if (!visible) return { ran: false, why: "hidden" };
+      if (running) return { ran: false, why: "running" };
+      const at = now();
+      if (!checkIsDue({ trigger, now: at, lastStartedAt })) return { ran: false, why: "too-soon" };
+      running = true;
+      lastStartedAt = at;
+      try {
+        return { ran: true, result: await checkAccountChanges({ userId, getClient }) };
+      } finally {
+        running = false;
+      }
+    },
+    reset() {
+      lastStartedAt = null;
+      running = false;
+    },
+  };
+}
+
+// "success" (the service answered), "failure" (it didn't: counts toward the
+// same "isn't answering" count the uploads use, and shows no error of its own)
+// or "idle" (nothing ran, or the person is signed out: neither).
+export function checkOutcome(out) {
+  if (!out || !out.ran || !out.result) return "idle";
+  if (out.result.status === "ok") return "success";
+  return out.result.reason === "signed-out" ? "idle" : "failure";
+}
+
+// A check's rows are only believed if nothing that writes the device record
+// (an upload, a manual backup, "Get changes") ran while it was reading, and
+// none is running now: otherwise the rows may already include this device's
+// own upload while the record doesn't yet, which would read as "newer".
+// `recordBefore` / `recordNow` are the account's entry of the device record.
+export function checkRowsUsable({ recordBefore, recordNow, busy }) {
+  return !busy && sameData(recordBefore, recordNow);
+}
+
+// The one added line in the Account panel, or null when there's nothing to say.
+export function describeAccountChanges(changes) {
+  if (!changes) return null;
+  const pieces = changes.newer.length + changes.added.length + changes.deleted.length;
+  const parts = [];
+  if (pieces > 0) parts.push(`${pieces} ${plural(pieces, "piece", "pieces")}`);
+  if (changes.techniqueNewer) parts.push("the technique library");
+  if (parts.length === 0) return null;
+  return `Changes from another device: ${parts.join(" and ")}. Press Get changes.`;
 }
 
 // The account's rows as import candidates:

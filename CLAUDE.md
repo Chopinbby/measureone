@@ -2249,3 +2249,39 @@ themselves. Nothing fetches or applies the account's changes yet (Passes 116,
 - **The Account status line shows held and the normal line together**; "not
   answering" still replaces both. See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115).
+
+**Since Pass 116**, the app **notices**, quietly, that another device changed
+something, and says so with one added line in the Account panel ("Changes from
+another device: 3 pieces. Press Get changes."). **Nothing is applied**: "Get
+changes from your account" is still the only way a change arrives, and works
+exactly as in Pass 112. Five things worth knowing:
+- **The check reads only `id, revision, deleted_at` from `pieces` (paged like
+  `countLiveAccountPieces`) and only `revision` from `technique`, never the
+  `data` column** (`checkAccountChanges`, `lib/accountSync.js`). A test asserts
+  the recorded selects; keep it that way, because the check repeats every few
+  minutes for as long as the page is open.
+- **When it runs is decided in the library, not in `App.jsx`**:
+  `createAccountChecker` / `checkIsDue` hold the throttle (focus or visible at
+  most once a minute, every 5 minutes on the clock, startup and online always,
+  never hidden, never two at once). `App.jsx`'s `requestCheck` only adds the
+  gates that need app state: signed in, first backup checked, and no upload run,
+  manual backup or "Get changes" running. A new trigger goes through
+  `requestCheck`, never straight to `checkAccountChanges`.
+- **`classifyAccountChanges` is revision-only, and "own upload is never newer"
+  rests on one fact: the record takes the revision when the account confirms an
+  upload.** So a result is not believed if an upload, backup or "Get changes" ran
+  while the check was reading (`checkRowsUsable`, discarded and retried by the
+  next trigger). Held pieces go in `held` only, never also `newer`/`deleted`
+  (they already have their own message). A piece this device deleted is never
+  `added`.
+- **Keep the light rows, not the text.** `App.jsx` keeps the last read
+  (`checkRowsRef`) and `refreshSyncInfo` re-sorts it against the device record
+  every time (`syncSnapshot({ accountRows })`), so the line shrinks on its own
+  after uploads or "Get changes". Don't store the sentence.
+- **A failed check shares the uploads' failure count** (after two in a row the
+  status says "isn't answering") and shows no error of its own; a good check
+  resets the count, otherwise a count raised by checks alone could never clear.
+  Not built, on purpose (see
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116)):
+  applying or merging anything (117 to 120), deletions (122), live push.
+

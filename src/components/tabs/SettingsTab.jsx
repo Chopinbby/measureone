@@ -71,6 +71,10 @@ export function SettingsTab({
   syncActive = false,
   syncRunning = false,
   syncStatus = null,
+  // Noticing that another device changed something (Pass 116): one more quiet
+  // line ("Changes from another device: 3 pieces. Press Get changes.") or
+  // null. It only tells; nothing is applied until "Get changes" is pressed.
+  accountChangesText = null,
   backupRunning = false,
   backupLines = [],
   backupCheckedAt = null,
@@ -193,6 +197,11 @@ export function SettingsTab({
                     style={{ margin: "12px 0 0", fontSize: 13 }}
                   >
                     {syncStatus.text}
+                  </p>
+                )}
+                {accountChangesText && (
+                  <p role="status" className="wizard-hint" style={{ margin: "8px 0 0", fontSize: 13 }}>
+                    {accountChangesText}
                   </p>
                 )}
                 {heldCount > 0 && (

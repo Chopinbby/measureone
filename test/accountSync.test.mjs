@@ -53,6 +53,16 @@ import {
   describeSyncStatus,
   describeHeld,
   describeHeldBanner,
+  // Pass 116
+  CHECK_FOCUS_GAP_MS,
+  CHECK_EVERY_MS,
+  checkAccountChanges,
+  classifyAccountChanges,
+  checkIsDue,
+  createAccountChecker,
+  checkOutcome,
+  checkRowsUsable,
+  describeAccountChanges,
   // Pass 115
   MAX_SENT,
   withSentRecorded,
@@ -330,15 +340,22 @@ function syncFake({ pieceRows = [], techniqueRows = [], inject = null } = {}) {
   const rows = { pieces: pieceRows.map((r) => ({ ...r })), technique: techniqueRows.map((r) => ({ ...r })) };
   const calls = [];
   const from = (table) => {
-    const q = { op: "select", filters: [], values: null, selected: false };
+    const q = { op: "select", filters: [], values: null, selected: false, columns: null, range: null };
     const hit = (row) => q.filters.every(([c, v]) => row[c] === v);
     const run = () => {
       const filterId = (q.filters.find(([c]) => c === "id") || [])[1];
-      const call = { table, op: q.op, id: q.op === "insert" ? q.values.id : filterId, values: q.values, filters: q.filters };
+      const call = { table, op: q.op, id: q.op === "insert" ? q.values.id : filterId, values: q.values, filters: q.filters, columns: q.columns };
       calls.push(call);
       const injected = inject && inject(call, rows);
       if (injected) return injected;
-      if (q.op === "select") return { data: rows[table].filter(hit).map(viaJson), error: null, status: 200 };
+      if (q.op === "select") {
+        // Like the real service: a page of rows (range), and only the columns asked for.
+        let out = rows[table].filter(hit);
+        if (q.range) out = out.slice(q.range[0], q.range[1] + 1);
+        const cols = q.columns ? q.columns.split(",").map((c) => c.trim()) : null;
+        if (cols) out = out.map((r) => Object.fromEntries(cols.map((c) => [c, r[c]])));
+        return { data: out.map(viaJson), error: null, status: 200 };
+      }
       if (q.op === "insert") {
         const dup = rows[table].some((r) => r.user_id === q.values.user_id && (table === "technique" || r.id === q.values.id));
         if (dup) return { data: null, error: { code: "23505", message: "duplicate key value" }, status: 409 };
@@ -355,18 +372,18 @@ function syncFake({ pieceRows = [], techniqueRows = [], inject = null } = {}) {
       return { data: changed.map((r) => ({ revision: r.revision })), error: null, status: 200 };
     };
     const api = {
-      select: () => ((q.selected = true), api),
+      select: (cols) => ((q.selected = true), (q.columns = typeof cols === "string" ? cols : null), api),
       insert: (v) => ((q.op = "insert"), (q.values = v), api),
       update: (v) => ((q.op = "update"), (q.values = v), api),
       eq: (c, v) => (q.filters.push([c, v]), api),
       order: () => api,
-      range: () => api,
+      range: (from, to) => ((q.range = [from, to]), api),
       then: (ok, bad) => Promise.resolve(run()).then(ok, bad),
     };
     return api;
   };
   const client = { from, auth: { getSession: async () => ({ data: { session: { user: { id: USER } } }, error: null }) } };
-  return { client, rows, calls, writes: () => calls.filter((c) => c.op !== "select") };
+  return { client, rows, calls, writes: () => calls.filter((c) => c.op !== "select"), selects: () => calls.filter((c) => c.op === "select") };
 }
 
 const noConnection = () => ({ data: null, error: { message: "TypeError: Failed to fetch", code: "" }, status: 0 });
@@ -1834,5 +1851,319 @@ describe("the status line with held and normal together (Pass 115)", () => {
     assert.equal(st({ held: one, backedUpAt: null }).text, "1 piece changed on another device: Ballade No. 1.", "held with nothing else to say");
     assert.equal(st({}).text, "Backed up 3 hours ago");
     assert.equal(st({ held: one, waiting: 2, failures: NOT_ANSWERING_AFTER }).text, "The account service isn't answering. Everything is still saved on this device.");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Pass 116: noticing, quietly, that another device changed something */
+/* ------------------------------------------------------------------ */
+
+describe("sorting what the account holds against this device (Pass 116)", () => {
+  const rec = (pieces = {}, technique = null) => ({ pieces, technique, checkedAt: 1, syncedAt: 1 });
+  const at = (revision, extra = {}) => ({ revision, fingerprint: "f", ...extra });
+  const live = (id, revision) => ({ id, revision, deleted_at: null });
+  const gone = (id, revision) => ({ id, revision, deleted_at: "2026-10-01T00:00:00Z" });
+  const sort = ({ pieces = [], technique = null, record = rec(), here = [] }) =>
+    classifyAccountChanges({ rows: { pieces, technique }, accountRecord: record, localPieceIds: here });
+  const empty = { newer: [], added: [], deleted: [], held: [], needsReview: [], techniqueNewer: false, techniqueHeld: false };
+
+  test("nothing changed gives an empty result", () => {
+    const record = rec({ a: at(3), b: at(1) }, at(2));
+    assert.deepEqual(sort({ pieces: [live("a", 3), live("b", 1)], technique: { revision: 2 }, record, here: ["a", "b"] }), empty);
+    assert.deepEqual(sort({}), empty, "no rows at all");
+    assert.deepEqual(classifyAccountChanges({ rows: null, accountRecord: null, localPieceIds: null }), empty, "nothing read yet");
+  });
+
+  test("this device's own upload is never newer: the record took the revision when the account confirmed it", () => {
+    // device uploaded p1: the row went to 2, and the record says 2
+    assert.deepEqual(sort({ pieces: [live("p1", 2)], record: rec({ p1: at(2) }), here: ["p1"] }), empty);
+  });
+
+  test("a piece the account holds at a higher revision than the record is newer", () => {
+    const r = sort({ pieces: [live("p1", 4), live("p2", 3)], record: rec({ p1: at(3), p2: at(3) }), here: ["p1", "p2"] });
+    assert.deepEqual(r.newer, ["p1"]);
+    assert.deepEqual({ ...r, newer: [] }, empty, "and nothing else is reported");
+  });
+
+  test("a row behind the record's revision is not newer", () => {
+    assert.deepEqual(sort({ pieces: [live("p1", 1)], record: rec({ p1: at(3) }), here: ["p1"] }), empty);
+  });
+
+  test("a live row this device has neither a piece nor a record for is added", () => {
+    const r = sort({ pieces: [live("p9", 1), live("p8", 1)], record: rec({ p1: at(1) }), here: ["p1"] });
+    assert.deepEqual(r.added, ["p8", "p9"], "sorted");
+    assert.deepEqual({ ...r, added: [] }, empty);
+  });
+
+  test("a piece this device deleted is not 'added' (it has a record, no piece), and a deleted row it doesn't hold is nothing", () => {
+    const record = rec({ gone: at(2, { deletedHere: true }) });
+    assert.deepEqual(sort({ pieces: [live("gone", 2), gone("other", 5)], record, here: [] }), empty);
+  });
+
+  test("a row marked deleted that this device still holds is deleted", () => {
+    const r = sort({ pieces: [gone("p2", 5)], record: rec({ p2: at(4) }), here: ["p2"] });
+    assert.deepEqual(r.deleted, ["p2"]);
+    assert.deepEqual({ ...r, deleted: [] }, empty);
+    // and held here with no record at all
+    assert.deepEqual(sort({ pieces: [gone("p3", 1)], here: ["p3"] }).deleted, ["p3"]);
+  });
+
+  test("the technique row is newer only when its revision is above the record's", () => {
+    assert.equal(sort({ technique: { revision: 5 }, record: rec({}, at(2)) }).techniqueNewer, true);
+    assert.equal(sort({ technique: { revision: 2 }, record: rec({}, at(2)) }).techniqueNewer, false, "own upload");
+    assert.equal(sort({ technique: { revision: 1 }, record: rec({}, at(2)) }).techniqueNewer, false);
+    assert.equal(sort({ technique: null, record: rec({}, at(2)) }).techniqueNewer, false, "no row");
+    assert.equal(sort({ technique: { revision: 5 }, record: rec({}, null) }).techniqueNewer, false, "no record to compare with");
+  });
+
+  test("a piece already held is reported as held, and is not counted again as newer or deleted", () => {
+    const record = rec({ a: at(2, { held: true }), b: at(2, { held: true }), c: { held: true } });
+    const r = sort({ pieces: [live("a", 2), live("b", 7), gone("c", 3)], record, here: ["a", "b", "c"] });
+    assert.deepEqual(r.held, ["a", "b", "c"], "held, held and newer, held and deleted");
+    assert.deepEqual({ ...r, held: [] }, empty);
+  });
+
+  test("a held technique library is held, not newer", () => {
+    const r = sort({ technique: { revision: 9 }, record: rec({}, at(2, { held: true })) });
+    assert.equal(r.techniqueHeld, true);
+    assert.equal(r.techniqueNewer, false);
+  });
+
+  test("a piece this device holds with no record entry, that the account has a live row for, needs review", () => {
+    const r = sort({ pieces: [live("p1", 1)], record: rec({}), here: ["p1", "p2"] });
+    assert.deepEqual(r.needsReview, ["p1"], "p2 has no row: it's just waiting to be added");
+    assert.deepEqual({ ...r, needsReview: [] }, empty, "and it isn't also newer");
+  });
+
+  test("a piece appears in at most one list, even if the account lists a row twice", () => {
+    const r = sort({ pieces: [live("p1", 4), live("p1", 4)], record: rec({ p1: at(3) }), here: ["p1"] });
+    assert.deepEqual(r.newer, ["p1"]);
+  });
+
+  test("all of it together", () => {
+    const record = rec({ n: at(1), h: at(1, { held: true }), d: at(1), ok: at(1) }, at(1));
+    const r = sort({
+      pieces: [live("n", 2), live("h", 3), gone("d", 2), live("ok", 1), live("a", 1), live("r", 1)],
+      technique: { revision: 2 },
+      record,
+      here: ["n", "h", "d", "ok", "r"],
+    });
+    assert.deepEqual(r, { newer: ["n"], added: ["a"], deleted: ["d"], held: ["h"], needsReview: ["r"], techniqueNewer: true, techniqueHeld: false });
+  });
+
+  test("a device's own real upload, read back by the light check, is not newer", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    const changed = { ...pieces, p2: { ...pieces.p2, name: "Edited here" } };
+    const tech2 = { ...technique, walkPosition: 5 };
+    await runSync(changed, tech2, fake, storage);
+    assert.equal(fake.rows.pieces.find((x) => x.id === "p2").revision, 2);
+    const read = await checkAccountChanges({ userId: USER, getClient: async () => fake.client });
+    const r = classifyAccountChanges({ rows: read.rows, accountRecord: recordOf(storage), localPieceIds: Object.keys(changed) });
+    assert.deepEqual(r, empty);
+  });
+
+  test("the word for it: pieces, the technique library, or both, and nothing to say", () => {
+    const some = (over) => ({ ...empty, ...over });
+    assert.equal(describeAccountChanges(some({ newer: ["a", "b"], added: ["c"] })), "Changes from another device: 3 pieces. Press Get changes.");
+    assert.equal(describeAccountChanges(some({ deleted: ["a"] })), "Changes from another device: 1 piece. Press Get changes.");
+    assert.equal(describeAccountChanges(some({ techniqueNewer: true })), "Changes from another device: the technique library. Press Get changes.");
+    assert.equal(describeAccountChanges(some({ newer: ["a"], techniqueNewer: true })), "Changes from another device: 1 piece and the technique library. Press Get changes.");
+    assert.equal(describeAccountChanges(empty), null);
+    assert.equal(describeAccountChanges(some({ held: ["a"], needsReview: ["b"], techniqueHeld: true })), null, "held and needs-review have their own messages");
+    assert.equal(describeAccountChanges(null), null);
+  });
+
+  test("what the Account panel is told shrinks by itself as the record catches up", () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const rows = { pieces: [live("p1", 2), live("p2", 1), live("p3", 1), live("p9", 1)], technique: { revision: 3 } };
+    const first = syncSnapshot({ pieces, technique, userId: USER, storage, accountRows: rows });
+    assert.deepEqual([first.changes.newer, first.changes.added, first.changes.techniqueNewer], [["p1"], ["p9"], true]);
+    // "Get changes" records the account's revisions
+    saveDeviceRecord(withPieceUploaded(readDeviceRecord(storage), USER, "p1", { revision: 2, fingerprint: pieceFingerprint(pieces.p1) }, 5), storage);
+    saveDeviceRecord(withPieceUploaded(readDeviceRecord(storage), USER, "p9", { revision: 1, fingerprint: "x" }, 5), storage);
+    saveDeviceRecord(withTechniqueUploaded(readDeviceRecord(storage), USER, { revision: 3, fingerprint: techniqueFingerprint(technique) }, 5), storage);
+    const after = syncSnapshot({ pieces: { ...pieces, p9: piece("p9") }, technique, userId: USER, storage, accountRows: rows });
+    assert.equal(describeAccountChanges(after.changes), null);
+    assert.equal(syncSnapshot({ pieces, technique, userId: USER, storage }).changes, null, "no light read yet");
+    assert.equal(syncSnapshot({ pieces, technique, userId: USER, storage: memoryStorage(), accountRows: rows }).changes, null, "before the first backup is checked");
+  });
+});
+
+describe("the light read (Pass 116)", () => {
+  const manyPieces = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`p${String(i).padStart(3, "0")}`, piece(`p${String(i).padStart(3, "0")}`)]));
+  const readWith = (fake, extra = {}) => checkAccountChanges({ userId: USER, getClient: async () => fake.client, ...extra });
+
+  test("it asks only for id, revision and deleted_at (and the technique row's revision), never the data column", async () => {
+    const pieces = three();
+    const fake = syncFake(accountHolding(pieces, technique));
+    const r = await readWith(fake);
+    assert.equal(r.status, "ok");
+    const asked = fake.selects().map((c) => [c.table, c.columns]);
+    assert.deepEqual(asked, [["pieces", "id, revision, deleted_at"], ["technique", "revision"]]);
+    assert.equal(fake.writes().length, 0, "and writes nothing");
+    assert.equal(fake.selects().every((c) => !/data/.test(c.columns)), true);
+    r.rows.pieces.forEach((row) => assert.deepEqual(Object.keys(row).sort(), ["deleted_at", "id", "revision"]));
+    assert.deepEqual(r.rows.technique, { revision: 1 });
+    assert.deepEqual(r.rows.pieces.map((x) => x.id), ["p1", "p2", "p3"]);
+  });
+
+  test("it pages the way the count does: 50 rows a request, every page light", async () => {
+    const pieces = manyPieces(120);
+    const fake = syncFake(accountHolding(pieces, technique));
+    const r = await readWith(fake);
+    assert.equal(r.rows.pieces.length, 120);
+    const pageCalls = fake.selects().filter((c) => c.table === "pieces");
+    assert.equal(pageCalls.length, 3);
+    assert.equal(pageCalls.every((c) => c.columns === "id, revision, deleted_at"), true);
+    // exactly a full page ends with one more (empty) request, like the count does
+    const exact = syncFake(accountHolding(manyPieces(50), technique));
+    assert.equal((await readWith(exact)).rows.pieces.length, 50);
+    assert.equal(exact.selects().filter((c) => c.table === "pieces").length, 2);
+  });
+
+  test("a row marked deleted and a missing technique row read as such", async () => {
+    const pieces = three();
+    const held = accountHolding(pieces, technique);
+    held.pieceRows[1] = { ...held.pieceRows[1], deleted_at: "2026-10-01T00:00:00Z", revision: 4 };
+    held.techniqueRows = [];
+    const r = await readWith(syncFake(held));
+    assert.deepEqual(r.rows.pieces.find((x) => x.id === "p2"), { id: "p2", revision: 4, deleted_at: "2026-10-01T00:00:00Z" });
+    assert.equal(r.rows.technique, null);
+  });
+
+  test("a 503 (the service isn't answering) is a stopped check, either request", async () => {
+    const down = { data: null, error: { message: "Service Unavailable", code: "" }, status: 503 };
+    for (const table of ["pieces", "technique"]) {
+      const fake = syncFake({ ...accountHolding(three(), technique), inject: (call) => (call.table === table ? down : null) });
+      assert.deepEqual(await readWith(fake), { status: "stopped", reason: "connection" }, `503 on ${table}`);
+    }
+  });
+
+  test("a dropped connection is a stopped check", async () => {
+    const fake = syncFake({ ...accountHolding(three(), technique), inject: () => noConnection() });
+    assert.deepEqual(await readWith(fake), { status: "stopped", reason: "connection" });
+  });
+
+  test("something else the database objects to is 'other'; a client that throws or can't load never throws out", async () => {
+    const denied = { data: null, error: { message: "permission denied", code: "42501" }, status: 403 };
+    const fake = syncFake({ ...accountHolding(three(), technique), inject: () => denied });
+    assert.deepEqual(await readWith(fake), { status: "stopped", reason: "other" });
+    assert.deepEqual(await checkAccountChanges({ userId: USER, getClient: async () => null }), { status: "stopped", reason: "connection" });
+    assert.deepEqual(await checkAccountChanges({ userId: USER, getClient: async () => { throw new TypeError("Failed to fetch"); } }), { status: "stopped", reason: "connection" });
+    assert.deepEqual(await checkAccountChanges({ userId: USER, getClient: async () => { throw new Error("odd"); } }), { status: "stopped", reason: "other" });
+    const broken = { auth: { getSession: async () => ({ data: { session: { user: { id: USER } } } }) }, from: () => { throw new Error("boom"); } };
+    assert.deepEqual(await checkAccountChanges({ userId: USER, getClient: async () => broken }), { status: "stopped", reason: "other" });
+  });
+
+  test("signed out, or signed in as someone else: stopped, and no request is made", async () => {
+    const fake = syncFake(accountHolding(three(), technique));
+    const other = { ...fake.client, auth: { getSession: async () => ({ data: { session: { user: { id: "someone-else" } } }, error: null }) } };
+    assert.deepEqual(await checkAccountChanges({ userId: USER, getClient: async () => other }), { status: "stopped", reason: "signed-out" });
+    const none = { ...fake.client, auth: { getSession: async () => ({ data: { session: null }, error: null }) } };
+    assert.deepEqual(await checkAccountChanges({ userId: USER, getClient: async () => none }), { status: "stopped", reason: "signed-out" });
+    assert.equal(fake.calls.length, 0);
+  });
+});
+
+describe("when a check runs (Pass 116)", () => {
+  // A clock the test moves by hand.
+  const clock = (start = 1_000_000) => {
+    let t = start;
+    return { now: () => t, advance: (ms) => { t += ms; } };
+  };
+  const checkerOver = (fake, c) => createAccountChecker({ getClient: async () => fake.client, now: c.now });
+  const checks = (fake) => fake.selects().filter((x) => x.table === "pieces").length;
+
+  test("two focus events inside a minute make one request", async () => {
+    const fake = syncFake(accountHolding(three(), technique)), c = clock(), checker = checkerOver(fake, c);
+    const a = await checker.run({ trigger: "focus", userId: USER });
+    c.advance(5000); // the visibilitychange that comes with the same return to the window
+    const b = await checker.run({ trigger: "focus", userId: USER });
+    assert.equal(a.ran, true);
+    assert.deepEqual(b, { ran: false, why: "too-soon" });
+    assert.equal(checks(fake), 1);
+    c.advance(CHECK_FOCUS_GAP_MS);
+    assert.equal((await checker.run({ trigger: "focus", userId: USER })).ran, true, "a minute later it does");
+    assert.equal(checks(fake), 2);
+  });
+
+  test("the page's own clock asks every five minutes, not before", async () => {
+    const fake = syncFake(accountHolding(three(), technique)), c = clock(), checker = checkerOver(fake, c);
+    await checker.run({ trigger: "startup", userId: USER });
+    c.advance(CHECK_EVERY_MS - 1000);
+    assert.equal((await checker.run({ trigger: "interval", userId: USER })).ran, false);
+    c.advance(1000);
+    assert.equal((await checker.run({ trigger: "interval", userId: USER })).ran, true);
+    assert.equal(checks(fake), 2);
+  });
+
+  test("startup and coming back online always run (once nothing is already running)", async () => {
+    const fake = syncFake(accountHolding(three(), technique)), c = clock(), checker = checkerOver(fake, c);
+    await checker.run({ trigger: "focus", userId: USER });
+    assert.equal((await checker.run({ trigger: "online", userId: USER })).ran, true);
+    assert.equal((await checker.run({ trigger: "startup", userId: USER })).ran, true);
+    assert.equal(checks(fake), 3);
+  });
+
+  test("never while the page is hidden, and never two at once", async () => {
+    const fake = syncFake(accountHolding(three(), technique)), c = clock(), checker = checkerOver(fake, c);
+    assert.deepEqual(await checker.run({ trigger: "startup", userId: USER, visible: false }), { ran: false, why: "hidden" });
+    assert.equal(fake.calls.length, 0);
+    const first = checker.run({ trigger: "online", userId: USER });
+    const second = await checker.run({ trigger: "online", userId: USER });
+    assert.deepEqual(second, { ran: false, why: "running" });
+    assert.equal((await first).ran, true);
+    assert.equal(checks(fake), 1);
+  });
+
+  test("reset forgets the last check (signed out, or another account)", async () => {
+    const fake = syncFake(accountHolding(three(), technique)), c = clock(), checker = checkerOver(fake, c);
+    await checker.run({ trigger: "focus", userId: USER });
+    checker.reset();
+    assert.equal((await checker.run({ trigger: "focus", userId: USER })).ran, true);
+  });
+
+  test("a clock that moved back doesn't hide checks for an hour", () => {
+    assert.equal(checkIsDue({ trigger: "focus", now: 1000, lastStartedAt: 1000 + 3600000 }), true);
+    assert.equal(checkIsDue({ trigger: "nonsense", now: 1000, lastStartedAt: null }), false);
+  });
+
+  test("a failed check counts toward the same 'isn't answering' count the uploads use, and a good one starts it again", async () => {
+    const down = { data: null, error: { message: "Service Unavailable", code: "" }, status: 503 };
+    const fake = syncFake({ ...accountHolding(three(), technique), inject: () => down }), c = clock(), checker = checkerOver(fake, c);
+    let failures = 0;
+    for (let i = 0; i < NOT_ANSWERING_AFTER; i++) {
+      const out = await checker.run({ trigger: "online", userId: USER });
+      assert.equal(out.result.status, "stopped");
+      assert.equal(checkOutcome(out), "failure");
+      failures = nextFailureCount(failures, checkOutcome(out));
+    }
+    assert.equal(failures, NOT_ANSWERING_AFTER);
+    const status = describeSyncStatus({ now: 9000, firstBackupDone: true, backedUpAt: 1000, waiting: 0, held: { pieces: [], technique: false }, failures });
+    assert.match(status.text, /isn't answering/);
+    // the service comes back
+    const back = syncFake(accountHolding(three(), technique));
+    const good = await createAccountChecker({ getClient: async () => back.client, now: c.now }).run({ trigger: "online", userId: USER });
+    assert.equal(checkOutcome(good), "success");
+    assert.equal(nextFailureCount(failures, checkOutcome(good)), 0);
+  });
+
+  test("what counts as a success, a failure, or neither", () => {
+    assert.equal(checkOutcome({ ran: true, result: { status: "ok", rows: {} } }), "success");
+    assert.equal(checkOutcome({ ran: true, result: { status: "stopped", reason: "connection" } }), "failure");
+    assert.equal(checkOutcome({ ran: true, result: { status: "stopped", reason: "other" } }), "failure");
+    assert.equal(checkOutcome({ ran: true, result: { status: "stopped", reason: "signed-out" } }), "idle");
+    assert.equal(checkOutcome({ ran: false, why: "too-soon" }), "idle");
+    assert.equal(checkOutcome(null), "idle");
+  });
+
+  test("a check's rows are believed only if nothing wrote the device record while it read, and nothing is running now", () => {
+    const before = { pieces: { p1: { revision: 1, fingerprint: "a" } }, technique: null, checkedAt: 1, syncedAt: 1 };
+    assert.equal(checkRowsUsable({ recordBefore: before, recordNow: { ...before, pieces: { p1: { fingerprint: "a", revision: 1 } } }, busy: false }), true, "same record, key order aside");
+    assert.equal(checkRowsUsable({ recordBefore: before, recordNow: { ...before, pieces: { p1: { revision: 2, fingerprint: "b" } }, syncedAt: 9 }, busy: false }), false, "an upload was confirmed meanwhile");
+    assert.equal(checkRowsUsable({ recordBefore: before, recordNow: before, busy: true }), false, "an upload, backup or Get changes is running now");
   });
 });

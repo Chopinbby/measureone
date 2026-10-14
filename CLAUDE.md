@@ -260,6 +260,14 @@ chunking, scheduling, and confidence are actually computed, see
   builds `chunkById` from whatever chunk set it
   already has in scope — a new call site should do the same rather than
   relying on the default.
+- **A chunk done EARLIER than the rescheduled-remainder day it is placed on isn't
+  owed on that day (Pass 117, `classifyDayCompletion`).** Only introductions and
+  connectors (never reviews), only on a day at or after the marker's `asOfDay`, only
+  for an EARLIER done-day (a later one was late and stays behind, as before), and
+  never without a marker. It exists for merged pieces (one device can't reach that
+  state); narrowing or widening it fails a `[regression, Pass 117]` test in
+  `test/scheduling.test.mjs`. See
+  [`docs/Algorithms.md`](docs/Algorithms.md#a-chunk-done-earlier-than-the-remainder-day-its-placed-on-pass-117).
 - **A past day is judged only on what's still *owed* on it — tasks a
   reschedule already moved away never count against it.**
   `classifyDayCompletion` drops every id `movedIdsForDay` reports before
@@ -2284,4 +2292,50 @@ exactly as in Pass 112. Five things worth knowing:
   Not built, on purpose (see
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116)):
   applying or merging anything (117 to 120), deletions (122), live push.
+
+**Since Pass 117**, there is an engine for merging two copies of a piece **by
+part** instead of by whole piece (`src/lib/pieceMerge.js`, new), and the device
+record remembers what each part looked like at the last sync. **Nothing uses the
+engine yet**: "Get changes" and Review still go through Phase 1's whole-piece
+import merge (Pass 120 wires the engine in, Pass 121 asks the question, 118 does
+the technique library, 122 deletions). Seven things worth knowing:
+- **What a part is:** every top-level field except `progress`, `updatedAt` and
+  `lastLoggedAt`, and each `progress` entry on its own (key `progress:<id>`: chunk
+  ids, transition/combo ids, `__consolidation__`, `__cold_start__`, `sr_<sectionId>`).
+  A NEW top-level field is a part automatically; a new field that is derived on
+  load (like `lastLoggedAt`) must be re-derived by the engine or the simulation's
+  invariant 4 fails.
+- **The device record's entry gains `parts`** (`{ part: fingerprint }`, no copy of
+  the piece), written wherever a piece is recorded: a confirmed upload, the first
+  backup, a restore or merge (the parts of the **account's** copy), a refusal adopted
+  as "the same". **A new place that records a piece must record its parts** or that
+  piece will "ask". An adopted row that is only an earlier version of this device's
+  own piece records none, on purpose. A quiet startup step (`withPartsRecorded`,
+  `App.jsx`) records them for pieces that still equal their record.
+- **`fingerprint` and `canonicalPiece` now live in `pieceMerge.js`** (re-exported by
+  `accountSync.js`): the engine never imports the account code, so the account code
+  can import the engine later without a cycle. `canonicalPiece` caches per object and
+  returns a SHARED result: read-only.
+- **Per part:** changed on one side only, take that side; changed on both to the same
+  value, agreement; to different values, a conflict for that part only, this device's
+  value kept and both values listed. **A conflict is never resolved in the engine.**
+  `status: "local-only"` returns `local` itself (the same object) untouched.
+- **One "travel together" rule:** the sides disagree about
+  `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
+  changed progress or the marker: one **whole-piece** conflict. **The reschedule marker
+  is not a merge rule.** The pass's required test (A reschedules, B logs a chunk the
+  marker lists) left a chunk both listed and done, which the scheduler read as a
+  "behind" day for good; that state can't be reached on one device, so the fix is in
+  the scheduler (`classifyDayCompletion` reads a chunk done EARLIER than its remainder
+  day as not owed; see "Rules that matter"), and the merge asks nothing. Don't rewrite
+  the marker at merge time: it re-flows every other chunk the marker places.
+- **Derived, not chosen:** `lastLoggedAt` is recomputed from the merged sessions (not
+  "the later of the two"), and in `scheduleMode: "minutes"` `daysToLearn` is the larger
+  of the two and then reconciled. Both were forced by invariant 4.
+- **The simulation is the safety net** (`test/pieceMerge.test.mjs`: seeded two-device
+  runs, six invariants after every merge). Any change to the engine must keep it green
+  on seeds 1 to 300, and a re-break that doesn't fail it means a hole in the
+  simulation. See [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117)
+  and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 117, five
+  calls awaiting the user's confirmation).
 

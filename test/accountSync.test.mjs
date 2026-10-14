@@ -53,6 +53,9 @@ import {
   describeSyncStatus,
   describeHeld,
   describeHeldBanner,
+  // Pass 117
+  piecePartFingerprints,
+  withPartsRecorded,
   // Pass 116
   CHECK_FOCUS_GAP_MS,
   CHECK_EVERY_MS,
@@ -668,7 +671,7 @@ describe("the same after a reload (Pass 111)", () => {
     const r = await runSync({ p1: edited }, reloadedTechnique(), fake, storage);
     assert.equal(r.newlyHeld.length, 0, "not held as 'changed on another device'");
     assert.equal(r.resolved, 1);
-    assert.deepEqual(recordOf(storage).pieces.p1, { revision: 2, fingerprint: pieceFingerprint(edited) });
+    assert.deepEqual(recordOf(storage).pieces.p1, { revision: 2, fingerprint: pieceFingerprint(edited), parts: piecePartFingerprints(edited) });
   });
 });
 
@@ -689,7 +692,7 @@ describe("uploading what's waiting (Pass 111)", () => {
     assert.equal(row.revision, 2);
     assert.equal(sameData(row.data, changed.p2), true);
     const rec = recordOf(storage);
-    assert.deepEqual(rec.pieces.p2, { revision: 2, fingerprint: pieceFingerprint(changed.p2) });
+    assert.deepEqual(rec.pieces.p2, { revision: 2, fingerprint: pieceFingerprint(changed.p2), parts: piecePartFingerprints(changed.p2) });
     assert.equal(rec.syncedAt, 5000);
     assert.equal(computeWaiting({ pieces: changed, technique, accountRecord: rec }).count, 0);
   });
@@ -745,7 +748,7 @@ describe("uploading what's waiting (Pass 111)", () => {
     const r = await runSync(withNew, technique, fake, storage);
     assert.equal(r.uploaded, 1);
     assert.equal(fake.writes()[0].op, "insert");
-    assert.deepEqual(recordOf(storage).pieces.p4, { revision: 1, fingerprint: pieceFingerprint(withNew.p4) });
+    assert.deepEqual(recordOf(storage).pieces.p4, { revision: 1, fingerprint: pieceFingerprint(withNew.p4), parts: piecePartFingerprints(withNew.p4) });
     assert.equal(sameData(fake.rows.pieces.find((x) => x.id === "p4").data, withNew.p4), true);
   });
 
@@ -849,7 +852,7 @@ describe("refusals and failures (Pass 111)", () => {
     const r = await runSync({ ...pieces, p2: mine }, technique, fake, storage);
     assert.equal(r.resolved, 1);
     assert.deepEqual(r.newlyHeld, []);
-    assert.deepEqual(recordOf(storage).pieces.p2, { revision: 2, fingerprint: pieceFingerprint(mine) });
+    assert.deepEqual(recordOf(storage).pieces.p2, { revision: 2, fingerprint: pieceFingerprint(mine), parts: piecePartFingerprints(mine) });
   });
 
   test("a refusal because the row is gone puts it back, and a deletion with no row has nothing to delete", async () => {
@@ -1353,7 +1356,7 @@ describe("merging what the account holds (Pass 112)", () => {
     assert.equal(out.counts.added, 2);
     assert.equal(out.firstNewId, "a");
     assert.equal(out.becomesChecked, true, "restoring onto an empty device is this device's first, checked backup");
-    assert.deepEqual(out.entries.a, { revision: 3, fingerprint: pieceFingerprint(a) });
+    assert.deepEqual(out.entries.a, { revision: 3, fingerprint: pieceFingerprint(a), parts: piecePartFingerprints(a) });
     const record = withAccountCopyRecorded({ version: 1, accounts: {} }, USER, { entries: out.entries, checkedAt: 2000 });
     const w = computeWaiting({ pieces: out.pieces, technique: null, accountRecord: recordFrom(record) });
     assert.equal(w.firstBackupDone, true);
@@ -1691,7 +1694,7 @@ describe("a refusal that is this device's own earlier upload (Pass 115)", () => 
     const row = fake.rows.pieces.find((x) => x.id === "p2");
     assert.equal(row.revision, 3);
     assert.equal(row.data.name, "Version 3");
-    assert.deepEqual(recordOf(storage).pieces.p2, { revision: 3, fingerprint: pieceFingerprint(v3) }, "confirmed: the sent list is cleared");
+    assert.deepEqual(recordOf(storage).pieces.p2, { revision: 3, fingerprint: pieceFingerprint(v3), parts: piecePartFingerprints(v3) }, "confirmed: the sent list is cleared");
     assert.equal(computeWaiting({ pieces: { ...pieces, p2: v3 }, technique, accountRecord: recordOf(storage) }).count, 0);
   });
 
@@ -2165,5 +2168,205 @@ describe("when a check runs (Pass 116)", () => {
     assert.equal(checkRowsUsable({ recordBefore: before, recordNow: { ...before, pieces: { p1: { fingerprint: "a", revision: 1 } } }, busy: false }), true, "same record, key order aside");
     assert.equal(checkRowsUsable({ recordBefore: before, recordNow: { ...before, pieces: { p1: { revision: 2, fingerprint: "b" } }, syncedAt: 9 }, busy: false }), false, "an upload was confirmed meanwhile");
     assert.equal(checkRowsUsable({ recordBefore: before, recordNow: before, busy: true }), false, "an upload, backup or Get changes is running now");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Pass 117: the record's parts                                       */
+/* ------------------------------------------------------------------ */
+
+describe("the device record's parts (Pass 117)", () => {
+  // A piece with a few real chunk entries, so there are several parts to tell apart.
+  const withWork = (id) =>
+    validateAndMigratePiece({
+      ...piece(id),
+      measureDifficulty: Array(32).fill(1),
+      startDate: "2026-09-01",
+      createdAt: 1234, // every real piece has one; a restore stamps one on a copy that lacks it
+      updatedAt: 5,
+      progress: { c1: { doneDays: [1], sessions: [{ day: 1, loggedAt: 11, loggedDate: "2026-09-01", cleanReps: 3, bpm: 60, outcome: "pass" }] } },
+    });
+  const own = () => ({ p1: withWork("p1"), p2: withWork("p2") });
+
+  test("parts are read from the record only beside a recorded revision, and only as text", () => {
+    const storage = memoryStorage();
+    saveDeviceRecord(
+      {
+        version: 1,
+        accounts: {
+          [USER]: {
+            pieces: {
+              a: { revision: 1, fingerprint: "f", parts: { name: "x", id: "y", bad: 5, worse: null } },
+              b: { held: true, parts: { name: "x" } },
+              c: { revision: 2, fingerprint: "g", parts: {} },
+              d: { revision: 3, fingerprint: "h", parts: "nope" },
+            },
+            technique: null,
+            checkedAt: 1,
+            syncedAt: 1,
+          },
+        },
+      },
+      storage
+    );
+    const entries = recordOf(storage).pieces;
+    assert.deepEqual(entries.a.parts, { name: "x", id: "y" });
+    assert.equal(entries.b.parts, undefined, "no revision, so nothing for it to describe");
+    assert.equal(entries.c.parts, undefined);
+    assert.equal(entries.d.parts, undefined);
+  });
+
+  test("a record written before this pass reads back exactly as it was, with no parts invented", () => {
+    const storage = memoryStorage();
+    const old = { version: 1, accounts: { [USER]: { pieces: { p1: { revision: 4, fingerprint: "abc" } }, technique: { revision: 2, fingerprint: "t" }, checkedAt: 5, syncedAt: 9 } } };
+    saveDeviceRecord(old, storage);
+    assert.deepEqual(readDeviceRecord(storage), old);
+  });
+
+  test("withPieceUploaded records the parts it is given, and an entry without them drops any it had", () => {
+    let record = withPieceUploaded(readDeviceRecord(memoryStorage()), USER, "p1", { revision: 2, fingerprint: "f", parts: { name: "x" } }, 1);
+    assert.deepEqual(accountRecordFor(record, USER).pieces.p1, { revision: 2, fingerprint: "f", parts: { name: "x" } });
+    record = withPieceUploaded(record, USER, "p1", { revision: 3, fingerprint: "g" }, 2);
+    assert.deepEqual(accountRecordFor(record, USER).pieces.p1, { revision: 3, fingerprint: "g" }, "the old parts describe an older sync, so they go");
+  });
+
+  test("an upload that the account confirms records the parts of exactly what was sent", async () => {
+    const storage = memoryStorage(), pieces = own();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    const changed = { ...pieces, p2: { ...pieces.p2, name: "Edited here", updatedAt: 6 } };
+    await runSync(changed, technique, fake, storage);
+    const entry = recordOf(storage).pieces.p2;
+    assert.equal(entry.revision, 2);
+    assert.deepEqual(entry.parts, piecePartFingerprints(changed.p2));
+    assert.ok(entry.parts["progress:c1"] && entry.parts.name && !("progress" in entry.parts) && !("updatedAt" in entry.parts));
+    assert.equal(recordOf(storage).pieces.p1.parts, undefined, "a piece that wasn't uploaded isn't touched");
+  });
+
+  test("a new piece, once added, has its parts recorded too", async () => {
+    const storage = memoryStorage(), pieces = own();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    const withNew = { ...pieces, p3: withWork("p3") };
+    await runSync(withNew, technique, fake, storage);
+    assert.deepEqual(recordOf(storage).pieces.p3.parts, piecePartFingerprints(withNew.p3));
+  });
+
+  test("an adopted row that is only an earlier version of this device's piece has no parts (they would describe a copy this device no longer has), until the next confirmed upload", async () => {
+    const storage = memoryStorage(), pieces = own();
+    afterFirstBackup(pieces, technique, storage);
+    // an upload lands on the account but its confirmation is lost
+    let landed = false;
+    const fake = syncFake({
+      ...accountHolding(pieces, technique),
+      inject: (call, rows) => {
+        if (landed || call.op !== "update" || call.id !== "p2") return null;
+        landed = true;
+        const row = rows.pieces.find((x) => x.id === "p2");
+        Object.assign(row, viaJson(call.values), { data: reorder(viaJson(call.values.data)) });
+        row.revision += 1;
+        return noConnection();
+      },
+    });
+    const v2 = { ...pieces.p2, name: "Version 2" };
+    await runSync({ ...pieces, p2: v2 }, technique, fake, storage);
+    const v3 = { ...v2, name: "Version 3" };
+    // adopt the earlier version, then the retry's own update is lost too, so only the adoption is recorded
+    const stopAfterAdopt = syncFake({
+      pieceRows: fake.rows.pieces,
+      techniqueRows: fake.rows.technique,
+      inject: (c) => (c.op === "update" && c.filters.some(([k, v]) => k === "revision" && v === 2) ? noConnection() : null),
+    });
+    await runSync({ ...pieces, p2: v3 }, technique, stopAfterAdopt, storage);
+    assert.equal(recordOf(storage).pieces.p2.revision, 2, "the row's revision was adopted");
+    assert.equal(recordOf(storage).pieces.p2.parts, undefined, "but no parts: this device doesn't hold that version");
+    // the next confirmed upload records them
+    await runSync({ ...pieces, p2: v3 }, technique, syncFake({ pieceRows: stopAfterAdopt.rows.pieces, techniqueRows: stopAfterAdopt.rows.technique }), storage);
+    assert.deepEqual(recordOf(storage).pieces.p2.parts, piecePartFingerprints(v3));
+  });
+
+  test("the first backup records the parts of every piece it backed up", async () => {
+    const storage = memoryStorage(), pieces = own();
+    const fake = syncFake({});
+    const result = await backUpDevice({ pieces, technique: reloadedTechnique(), userId: USER, getClient: async () => fake.client, storage, now: () => 1000 });
+    assert.equal(result.backedUp, 2);
+    ["p1", "p2"].forEach((id) => assert.deepEqual(recordOf(storage).pieces[id].parts, piecePartFingerprints(pieces[id]), id));
+  });
+
+  test("a copy taken from the account is recorded with the parts of the account's copy, not of whatever this device holds on top of it", () => {
+    const account = withWork("p1");
+    const candidates = accountRowsToCandidates({ pieces: [pieceRow(account, { revision: 4 })], technique: null });
+    const local = { p1: { ...account, name: "Changed here", updatedAt: 99 } };
+    const out = applyAccountMerge({ candidates, localPieces: local, localTechnique: null, accountRecord: { pieces: { p1: { revision: 3, fingerprint: "old" } } }, selectedIds: null, includeTechnique: false });
+    const entry = out.entries.p1;
+    assert.equal(entry.revision, 4);
+    assert.deepEqual(entry.parts, piecePartFingerprints(account));
+    const storage = memoryStorage();
+    saveDeviceRecord(withAccountCopyRecorded(readDeviceRecord(storage), USER, { entries: out.entries }), storage);
+    assert.deepEqual(recordOf(storage).pieces.p1.parts, piecePartFingerprints(account), "and the record keeps them");
+    // an entry that has none (a caller that doesn't know) records none, not an empty object
+    const bare = withAccountCopyRecorded(readDeviceRecord(memoryStorage()), USER, { entries: { p9: { revision: 1, fingerprint: "z" } } });
+    assert.deepEqual(accountRecordFor(bare, USER).pieces.p9, { revision: 1, fingerprint: "z" });
+  });
+
+  test("restoring onto an empty device records every restored piece's parts", () => {
+    const rows = [pieceRow(withWork("p1")), pieceRow(withWork("p2"))];
+    const candidates = accountRowsToCandidates({ pieces: rows, technique: null });
+    const out = applyAccountMerge({ candidates, localPieces: {}, localTechnique: null, accountRecord: null, selectedIds: null, includeTechnique: false });
+    ["p1", "p2"].forEach((id) => assert.deepEqual(out.entries[id].parts, piecePartFingerprints(out.pieces[id]), id));
+  });
+
+  test("the quiet startup step records parts only for pieces that still equal their record", () => {
+    const storage = memoryStorage(), pieces = own();
+    afterFirstBackup(pieces, technique, storage); // a record from before parts existed
+    const edited = { ...pieces, p2: { ...pieces.p2, name: "Changed since the last sync", updatedAt: 6 } };
+    const { record, recorded } = withPartsRecorded(readDeviceRecord(storage), edited);
+    assert.equal(recorded, 1);
+    const entries = accountRecordFor(record, USER).pieces;
+    assert.deepEqual(entries.p1.parts, piecePartFingerprints(pieces.p1), "unchanged since the last sync: the local copy IS the synced state");
+    assert.equal(entries.p2.parts, undefined, "changes waiting: no parts, so a merge would ask");
+    assert.deepEqual({ revision: entries.p1.revision, fingerprint: entries.p1.fingerprint }, { revision: 1, fingerprint: pieceFingerprint(pieces.p1) }, "nothing else about the entry changes");
+    // the piece's whole record didn't need to be touched to know that
+    assert.equal(computeWaiting({ pieces: edited, technique, accountRecord: accountRecordFor(record, USER) }).count, 1);
+  });
+
+  test("the startup step leaves entries that already have parts, entries with nothing recorded, and pieces this device no longer holds alone", () => {
+    const pieces = own();
+    const have = { revision: 1, fingerprint: pieceFingerprint(pieces.p1), parts: { name: "kept as it was" } };
+    const record = {
+      version: 1,
+      accounts: {
+        [USER]: {
+          pieces: { p1: have, p2: { held: true }, gone: { revision: 1, fingerprint: "x" }, p3: { revision: 1, fingerprint: "mismatch" } },
+          technique: null,
+          checkedAt: 1,
+          syncedAt: 1,
+        },
+      },
+    };
+    const out = withPartsRecorded(record, { ...pieces, p3: withWork("p3") });
+    assert.equal(out.recorded, 0);
+    assert.equal(out.record, record, "nothing to record: the very same record comes back");
+  });
+
+  test("the startup step works for every account in the record, and is idempotent", () => {
+    const storage = memoryStorage(), pieces = own();
+    afterFirstBackup(pieces, technique, storage);
+    const other = withBackupRecorded(readDeviceRecord(storage), "user-b", { pieces: { p1: { revision: 7, fingerprint: pieceFingerprint(pieces.p1) } }, technique: null, checkedAt: 3 });
+    const first = withPartsRecorded(other, pieces);
+    assert.equal(first.recorded, 3, "two pieces for one account, one for the other");
+    assert.deepEqual(accountRecordFor(first.record, "user-b").pieces.p1.parts, piecePartFingerprints(pieces.p1));
+    const second = withPartsRecorded(first.record, pieces);
+    assert.equal(second.recorded, 0);
+    assert.equal(second.record, first.record);
+    assert.equal(withPartsRecorded(null, pieces).recorded, 0, "no record at all is fine");
+  });
+
+  test("adding parts doesn't change what's waiting", () => {
+    const storage = memoryStorage(), pieces = own();
+    afterFirstBackup(pieces, technique, storage);
+    const before = computeWaiting({ pieces, technique, accountRecord: recordOf(storage) });
+    const { record } = withPartsRecorded(readDeviceRecord(storage), pieces);
+    assert.deepEqual(computeWaiting({ pieces, technique, accountRecord: accountRecordFor(record, USER) }), before);
   });
 });

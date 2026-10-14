@@ -855,6 +855,149 @@ Nothing here is ever removed:
   backup only if the library here was empty. `App.jsx` then tops up
   today's list (`topUpDayList`).
 
+## Merging by part (Pass 117)
+
+**The engine only. Nothing in the app calls it yet.** "Get changes" and Review
+still go through the whole-piece import merge above (Phase 1); Pass 120 is what
+uses this. It lives in `lib/pieceMerge.js`: pure functions, no clock, no
+network, no React.
+
+**The question it answers.** Two copies of one piece, `local` (this device's)
+and `remote` (the account's), plus `base`: what both agreed on when this device
+last synced. What changed on each side, and can the changes be put together
+without asking anyone? The import merge above answers with one rule per field
+(`preferPresent`, `preferByRecency`) and one comparison of timestamps for the
+whole piece; this answers per **part**, from what each side actually changed.
+
+### Parts
+
+A piece is split into parts: **every top-level field except `progress`**, and
+**each entry of `progress` on its own**: a chunk id, a transition or combo id,
+and the synthetic keys `__consolidation__`, `__cold_start__` and
+`sr_<sectionId>`. A part's key is its field name, or `progress:` plus the entry's
+id. `progress` itself, `updatedAt` and `lastLoggedAt` are never parts.
+
+Each part has a fingerprint (the same hash as `fingerprint()`, over the part as
+loading would give it: `canonicalPiece`, so a piece compared after a reload
+reads the same). The device record keeps those fingerprints as of the last sync
+(`entry.parts`, [Accounts-and-Backend.md](Accounts-and-Backend.md#merging-by-part-pass-117));
+**no copy of the piece is kept**. Comparing a side's fingerprints with the
+recorded ones says which parts that side changed since the base.
+
+### The rule for each part
+
+| changed on this device | changed on the remote | result |
+|---|---|---|
+| no | no | nothing to do |
+| yes | no | this device's value stays |
+| no | yes | the remote's value is taken (a removed part is removed) |
+| yes, to value V | yes, to the same V | **agreement**, not a conflict |
+| yes | yes, to a different value | **a conflict for that part only** |
+
+A conflict is **never resolved here**: the merged piece keeps this device's value
+for it, and the result lists the part with both values (`conflicts[]`, each
+`{ part, kind, local, remote, ... }`). Pass 121 is the one that asks. Merging two
+sessions' ladder state inside one chunk is a conflict too, by design: a chunk
+logged on both sides is a conflict for that chunk and no other.
+
+`updatedAt` is the later of the two. `lastLoggedAt` is **recomputed from the merged
+piece's sessions** (the rule `validateAndMigratePiece` applies on every load), not
+"the later of the two": the app's undo leaves `lastLoggedAt` alone until a reload
+re-derives it, and a conflict keeps this device's chunk entry, so the later of the
+two can name a session the merged piece doesn't hold, and the merged piece would
+change on its next load. (Break test: taking the later of the two fails the
+simulation's invariant 4.)
+
+In `scheduleMode: "minutes"`, `daysToLearn` is **derived, never a conflict**: it
+is taken from whichever side changed it, the larger when both did, and the whole
+schedule is reconciled once more at the end (`reconcileMinutesPerDaySchedule`,
+which keeps a reschedule's extension as a floor). Both sides can honestly derive
+different day counts from different edits; only the merged inputs know the right
+one.
+
+### Parts that must travel together
+
+**The chunk grid against progress (the whole piece is one conflict).** If the sides
+disagree about any of `totalMeasures`, `chunkMode`, `customChunkSize` or
+`chunkSplitPoints`, and the side that did NOT change it changed a progress entry or
+the reschedule marker, the other side's entries are keyed by ids from a grid that no
+longer exists. Status `"whole-piece-conflict"`, `merged` is `local` untouched, and
+`wholePiece` carries both copies (Phase 1's question). *Refinement of the card's
+wording:* it fires only where the two sides' values **differ**. Two devices that made
+the identical split agree about the grid, so their progress entries mean the same
+chunks and merge normally.
+
+**The reschedule marker is NOT a rule, and was nearly one.** A marker is a snapshot of
+which chunks were still untouched when it was made. The pass's required test ("device
+A reschedules, device B logs a session on a chunk A's marker still lists") showed that
+merging the marker with B's session part by part leaves a chunk both listed in the
+marker and done, and the scheduler read the day that chunk is re-placed on as
+**behind** for good (it was done on the wrong day number: `classifyDayCompletion`
+judges a day by exact day, and excused "done elsewhere" only for days before the
+marker's). First answer: the marker and progress entries as one group, asked about.
+Final answer, once it was found that **one device cannot reach that state** (it logs a
+chunk only on its own card, and a marker lists only untouched chunks): the scheduler
+now reads a chunk done **earlier** than the remainder day it is placed on as not owed
+on that day ([below](#a-chunk-done-earlier-than-the-remainder-day-its-placed-on-pass-117)), and
+the merge asks nothing. The merged piece lists the chunk on its new day, unchecked,
+without counting the learner as behind; the next "Reschedule" drops it from the
+marker, as it drops anything done. Not done, deliberately: rewriting the marker at
+merge time to drop the chunk. A marker's contents decide where **every other**
+remainder chunk is placed, so removing one re-flows the plan under logs already made
+against the old placement.
+
+**Not grouped, and open:** `sections`, `measureDifficulty` and `totalMeasures` are
+rewritten together by a resize in Settings but are ordinary parts here, so a resize on
+one device against a difficulty or section edit on the other leaves an inconsistent
+kept piece (reported as a conflict, never silent). Logged with a proposed fix in
+[Decisions.md](Decisions.md#open-questions) (Merging by part: what is still open,
+item 1); so are the other open items (sidebar order and created date, revival,
+pieces with no recorded snapshot).
+
+### What it returns
+
+`planPieceMerge({ local, remote, base })` returns `{ status, merged, conflicts,
+wholePiece, fromRemote, fromLocal, agreed, derived, reason }`:
+
+- `"identical"`: both sides hold the same parts. `merged` is `local`.
+- `"local-only"`: the remote is what the base was (nothing of theirs to bring in).
+  `merged` **is `local`, the same object, untouched**, whatever the remote's
+  `updatedAt` says.
+- `"merged"`: the remote's changes were folded in; no conflict.
+- `"conflicts"`: folded in except the listed parts.
+- `"whole-piece-conflict"`: rule 1. `merged` is `local`.
+- `"ask"`: nothing says who changed what: **no recorded `parts`** (a piece with
+  changes waiting that was recorded before this pass), or two different ids.
+  `merged` is `local`; the caller falls back to Phase 1's behavior. A piece with no
+  parts but identical sides is still `"identical"`.
+
+Inputs are read in the form loading would give them, never modified, and nothing
+in the result aliases them; the merged piece is in that same loaded form, so
+`validateAndMigratePiece` leaves it unchanged. The same inputs always give the same
+result (key lists are sorted).
+
+### The simulation
+
+`test/pieceMerge.test.mjs` runs a seeded, deterministic simulation: two devices
+start from one piece (random size, sections, difficulty, days or minutes mode),
+each applies random edit sequences shaped like the app's own handlers (log or undo
+a session on a random chunk, edit a schedule or difficulty field, change status,
+rename, split a chunk, reschedule, add a focus spot, log time on one), then they
+sync in random orders with offline gaps (rounds of edits, then syncs in a random
+order, a device sometimes skipping a round or syncing twice). After **every** merge
+it checks, judging "changed" from the real pieces and not from the engine's
+fingerprints: (1) no session either device logged since the base is missing: it is
+in the merged piece or in a reported conflict's values; (2) a part changed on one
+side only ends with that side's value; (3) a part changed on both to different
+values is reported as a conflict, never silently chosen, and this device's value is
+kept; (4) the merged piece is unchanged by `validateAndMigratePiece`; (5) merging
+the same inputs again (cloned, so no cache can mask a difference) gives the same
+result; (6) merging when the remote equals the base returns this device's piece
+untouched. It also checks the chunk-grid rule independently of the engine.
+Seeds 1 to 300 with every kind of edit given a real share, and seeds 1 to 100 with an
+everyday mix (mostly sessions); the counts are in the Pass 117 entry of
+[Decisions.md](Decisions.md#accounts-and-backend) and the test prints them.
+
 ## Adaptive review
 
 **Superseded as of Pass 5 of the maintenance-ladder build — kept in this
@@ -2976,6 +3119,42 @@ precedent `isDayFullySwept` already set.
 the catch-up scan, leaving `classifyDayCompletion` alone. That would have
 left two definitions of "behind" that can disagree (Timeline's ✓ vs. the
 banner), the exact duplication Pass 45/74 worked to remove.
+
+### A chunk done earlier than the remainder day it's placed on (Pass 117)
+
+**Found by:** the merge engine's required test (a reschedule on one device, a
+session on another;
+[Merging by part](#merging-by-part-pass-117)). Not reachable on one device.
+
+**The state:** a reschedule marker lists chunk c9 (it was untouched when the marker was
+made), the remainder places c9 on day 13, and c9 is done on a day **before** 13 (the
+other device logged it on its own, earlier, schedule). `classifyDayCompletion` judged a
+day by the exact day number, and `movedIdsForDay` returns nothing for a day at or after the
+marker's `asOfDay`, so day 13 read **"behind"** once it passed, whatever else was done,
+and could never clear. (One device can't get here: it logs a chunk only on its own day's
+card, and a marker lists only untouched chunks. Reproduced with a hand-built piece.)
+
+**Fix:** `classifyDayCompletion` skips an introduction/connector id on a day at or after
+the marker's day when that id has a done-day **earlier than the day itself**, before it
+judges the day. A day with nothing left reads `"empty"`, like a swept day. Deliberately
+narrow:
+- **Earlier only.** A chunk done on a *later* day than its placement was late, and the
+  day stays behind, exactly as before (the strict "exact day" rule is the Pass 45 design).
+- **Not reviews** (`reviewChunkIds`): a chunk under review always has earlier done-days;
+  the same mistake Pass 75's follow-up caught for `movedIdsForDay`.
+- **Only with a marker, only at or after its day.** Days before the marker's day are
+  `movedIdsForDay`'s (it already excuses a chunk done on any other day there); a piece
+  that was never rescheduled is unchanged.
+
+The display is untouched: the day still lists c9 (unchecked); it just doesn't count the
+learner as behind. Hiding it would need `movedIdsForDay`'s "Tasks rescheduled" label
+rethought for days that were placed by the reschedule itself. Not done.
+
+**Alternatives rejected:** asking about it in the merge (the marker-and-progress group:
+built first, removed); dropping the chunk from the marker at merge time (a marker's
+contents decide where every other remainder chunk goes, so removing one moves chunks the
+learner has already logged against their old days). Tests: `[regression, Pass 117]` in
+`test/scheduling.test.mjs`, each boundary above broken on purpose and caught.
 
 ## Revival
 

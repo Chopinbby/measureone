@@ -7554,6 +7554,65 @@ what it rules out.
   day its timer skips fails nothing), and the tests and a restore fire drill live in
   the backups repository.
 
+- **Pass 117 — merging by part, the engine only (2026-10-13).** `lib/pieceMerge.js`
+  (new) plus `parts` in the device record; nothing in the app uses it yet. The
+  design is [Algorithms.md](Algorithms.md#merging-by-part-pass-117); the record
+  side is [Accounts-and-Backend.md](Accounts-and-Backend.md#merging-by-part-pass-117).
+  Calls made while building it, each one a place the card left room or was
+  contradicted by what the code does, **for the user to confirm**:
+  1. **The reschedule marker is not a merge rule: the scheduler was fixed instead
+     (first built as a group conflict, then replaced at the user's request).** The
+     card's required test ("A reschedules, B logs a chunk A's marker lists") showed
+     that merging the marker with B's session leaves a chunk both listed and done, and
+     the scheduler read the day it is re-placed on as behind for good. The card's own
+     fallback, the marker and progress entries as one group, was built first; it made
+     a fresh reschedule plus ANY logging on the other device a question. Asked to fix
+     the gap properly, I found it **cannot happen on one device** (the app logs a chunk
+     only on its own day's card, and a marker lists only untouched chunks; an earlier
+     note here said it reproduced without a merge, but that was with hand-built data).
+     `classifyDayCompletion` (`lib/scheduling.js`) now reads a chunk done **earlier**
+     than the remainder day it is placed on as not owed on that day, and the group rule
+     is gone: the merge keeps A's marker and B's session and asks nothing. Details and
+     the narrow scope: [Algorithms.md](Algorithms.md#a-chunk-done-earlier-than-the-remainder-day-its-placed-on-pass-117).
+     **Left as is, for the user to know:** the merged day still lists the chunk
+     (unchecked) even though it is done; a chunk done LATER than its placement still
+     reads behind (the Pass 45 strictness, unchanged). **Rejected:** dropping the chunk
+     from the marker at merge time (it moves every other chunk the marker places, under
+     logs already made against the old days).
+  2. **The structure rule only fires where the two sides' structure values differ.**
+     The card says "either side changed any of the four fields AND the other side changed
+     progress". Two devices that made the identical split both "changed" structure and
+     both changed progress (the new half's entry), which by the card's words would be a
+     whole-piece conflict between two copies that agree. Applied as written it can't be
+     "agreement, no conflict". Where the values are equal the grid is the same, so their
+     entries mean the same chunks.
+  3. **`lastLoggedAt` is recomputed from the merged sessions, not "the later of the
+     two".** Every load recomputes it, the app's undo doesn't, and a kept chunk entry
+     can drop the session that holds the later date; "the later of the two" then fails
+     the card's own invariant 4 (shown by breaking it on purpose). It equals the later
+     of the two whenever the merged piece holds that session.
+  4. **In minutes mode `daysToLearn` is derived, never a conflict** (larger of the two
+     when both changed it, then reconciled). The card lists every top-level field as a
+     part; for this one field both sides can honestly disagree because it is
+     recomputed from other fields on every load.
+  5. **A restored or adopted entry has `parts` only when this device holds the version
+     the account does.** An adopted row that is just an earlier version of this
+     device's own piece has none until the next confirmed upload; a piece with changes
+     waiting that was recorded before this pass has none until its next upload, and
+     asks.
+  **The simulation's conflict rate is not a usage rate.** It deliberately piles edits
+  up (1 to 4 per device per round, over 8 to 12 chunks, and every kind of edit given a
+  real share), so the same chunk gets logged on both sides far more often than a
+  person would. Seeds 1 to 300, every kind of edit: 3,578 syncs, of which 1,831 had
+  nothing to bring in, 810 merged cleanly, 347 had part conflicts (holding 461
+  single-part conflicts, 236 of them one chunk logged on both sides) and 590 were
+  whole-piece conflicts: 26.2 per cent of all syncs, 53.6 per cent of the 1,747 that
+  had changes from both sides. Seeds 1 to 100, everyday mix (mostly sessions): 1,182
+  syncs, 23.2 per cent, 45.4 per cent of the 603 with changes from both sides; 316 of
+  its 329 single-part conflicts are one chunk logged on both sides.
+  On the owner's real export, one session added to a different chunk on each side
+  merges with no conflict for all 25 pieces.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -7826,7 +7885,74 @@ oversight to silently fix; surface it instead.
      until their access token's hour is up); the "sign in again first" prompt has
      only been seen against a stand-in; `lib/backend.js` has no tests; the
      leaked-password check is Pro-plan only.
-  5. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
+  5. **From Pass 117** (the merge engine; nothing uses it yet): the five calls in
+     the Pass 117 entry above need the user's confirmation, and six open issues are
+     logged separately in
+     [Merging by part: what is still open](#open-questions) (the next entry).
+  6. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
+- **Merging by part (Pass 117): what is still open (logged 2026-10-13, nothing
+  here is built).** The engine is `lib/pieceMerge.js`; the design is
+  [Algorithms.md](Algorithms.md#merging-by-part-pass-117) and what was decided is the
+  Pass 117 entry under "Accounts and backend". These came out of building and testing
+  it. The scheduler gap the pass's required test found is **fixed** (see that entry), not
+  open. Each item says what it is, how it was seen, what is proposed, and who owns it.
+  1. **Resizing a piece against a difficulty or section edit leaves an inconsistent
+     kept piece.** Settings' measure-count field rewrites `totalMeasures`,
+     `measureDifficulty` and `sections` together (`BasicsFields.jsx`: `resizeDifficulty`,
+     `resizeSections`); the engine treats them as three separate parts. **Seen** with a
+     probe: one device resizes 32 to 36, the other changes one measure's difficulty; when
+     the merge runs on the tweaking device the kept piece says 36 measures with a
+     32-entry difficulty list (`weightedDifficultyFromArray` reads the missing measures
+     as easy, silently). It is reported as a conflict on `measureDifficulty`, never
+     hidden, but the piece kept until it is answered is inconsistent. **Proposed:** the
+     piece's size travels as a unit. If either side changed `totalMeasures` and the other
+     changed `measureDifficulty` or `sections`, the three are one conflict, this device's
+     whole set kept (never a mix); with no resize involved they still merge separately.
+     About 10 lines in `lib/pieceMerge.js` next to `STRUCTURE_FIELDS`, unit tests, and a
+     "resize" edit in the simulation (it must mimic `handleSavePiece`: the two resize
+     helpers, `splitPointsAfterStructureEdit`, `migrateOrphanedProgress`, the marker
+     cleared; none of the simulation's edits resizes today). **Cost:** that rare
+     combination becomes a question. **Alternative, not recommended yet:** merge the
+     difficulty list measure by measure. **Owner:** none yet; cheapest before Pass 120
+     wires the engine in.
+  2. **`sortOrder` and `createdAt` are parts, so they can conflict.** Two devices that
+     each reorder the piece list would conflict on a display-only field, and Pass 121
+     would have to ask about it. **Proposed:** the engine never conflicts on them: keep
+     this device's `sortOrder` (it is display arrangement, as Pass 32a's import choice
+     already treats it), and for `createdAt` follow Pass 112's decision (the account's
+     created date wins). Whether the sidebar order should sync between devices at all
+     is the user's call. About 3 lines plus tests. **Owner:** Pass 121 is the natural
+     home; it can be done earlier in the engine.
+  3. **Other snapshot-like parts may have the marker's problem; revival is untested.**
+     A reschedule marker is a snapshot of progress taken at one moment (see the Pass 117
+     entry). `revival.plan` is another (computed from progress and the reassessment
+     ratings). Nothing in the simulation starts or finishes a revival, so a merge of "A
+     starts a revival" against "B logs sessions" has never been run. **Proposed:** add
+     "start revival" and "finish reassessment" edits to the simulation and read the
+     merged piece the way Today's Practice does; then either nothing, a scheduler
+     tolerance like the Pass 117 one, or a group rule. **Owner:** none yet; needs doing
+     before Pass 120.
+  4. **A piece with no recorded "before" snapshot asks, and Pass 120 must handle that.**
+     The engine answers `status: "ask"`, `reason: "no-base"` for a piece recorded before
+     Pass 117 that had changes waiting at upgrade time, and for one whose last sync was
+     an adopted row that is only an earlier version of this device's own copy (those
+     entries have `parts` only after the next confirmed upload). **Needed:** Pass 120
+     routes "ask" to Phase 1's whole-piece flow (today's "Get changes"), not to an
+     error or a silent keep. Not a bug; a requirement on 120.
+  5. **A re-placed chunk that is already done still shows, unchecked, on its new day.**
+     After Pass 117's scheduler fix the merged day no longer reads "behind" because of
+     it, but `movedIdsForDay` still returns nothing for a day at or after the marker's
+     day, so Day view, Timeline, Week view and Master Agenda list the chunk as a task.
+     Logging it again would add a second session. Only reachable after merging two
+     devices. **Proposed (low priority):** hide such ids on those days, and make a day
+     whose only items were hidden read as "Nothing scheduled" rather than "Tasks
+     rescheduled" (`classifyDayEmptyState`). **Owner:** none.
+  6. **(Minor) The device record grew from 2.2 KB to 50 KB for the 25 real pieces.**
+     36 to 86 parts a piece, about 2 KB a piece, written whole on every confirmed
+     upload (reading it costs about 0.17 ms). **Option:** one 53-bit hash per part
+     instead of two (31 per cent smaller on these pieces), declined for now because a
+     false "unchanged" in a merge decision is the worse error. Revisit if the technique
+     library (Pass 118) adds parts or the record starts to matter.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

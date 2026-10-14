@@ -1114,6 +1114,62 @@ change arrives.
   at all. **Not seen on the real test project**: that needs the owner's sign-in
   and a second window.
 
+## Merging by part (Pass 117)
+
+The engine for merging two copies of one piece part by part, **and nothing else**:
+no merge uses it yet ("Get changes" and Review still go through Phase 1's whole-piece
+import merge; Pass 120 wires the engine in, Pass 121 asks the question). How it
+works, the rules, and the simulation that checks it are in
+[Algorithms.md](Algorithms.md#merging-by-part-pass-117). What this pass changes
+about the account code:
+
+- **The device record's entry for each piece gains `parts`**: `{ part: fingerprint }`,
+  one for every top-level field except `progress`/`updatedAt`/`lastLoggedAt`, and one
+  per progress entry (`progress:<id>`), **as last synced with the account**. No copy of
+  the piece is kept, only labels. `cleanEntry` reads it back only beside a recorded
+  revision, and only text values (an unreadable `parts` is dropped, which makes the
+  piece "ask", never wrong).
+- **Written wherever the record already records a piece:** a confirmed upload
+  (`withPieceUploaded`, the parts of exactly what was sent), the first backup
+  (`backUpDevice`), a restore or "Get changes" (`applyAccountMerge` ->
+  `withAccountCopyRecorded`: the parts of the **account's copy**, not of whatever this
+  device holds on top of it, because that is the state this device is synced to), and a
+  refusal adopted as "the same" (the current copy). **One deliberate gap:** an adopted
+  row that is only an *earlier version of this device's own piece* (Pass 115's `sent`
+  match) is recorded with its content fingerprint but **no `parts`**, since they would
+  describe a copy this device no longer holds; the immediate retry that follows records
+  them when it confirms.
+- **Pieces recorded before this pass have no `parts`.** A quiet step at startup
+  (`withPartsRecorded`, `App.jsx`, once when pieces have loaded and accounts are on,
+  no network) records them for every piece whose fingerprint still equals its
+  record's: nothing has changed since the last sync, so this device's copy IS the
+  synced state. A piece with changes waiting is left alone and gets its parts at its
+  next confirmed upload; until then the engine answers `"ask"` for it. It works for
+  every account in the record. Nothing about what's waiting changes (tested).
+- **The comparing primitives moved.** `fingerprint`, `canonicalPiece` and the helpers
+  under them now live in `lib/pieceMerge.js`, which the account code imports and never
+  the other way round (the engine must not import the network code, and Pass 120 will
+  make the account code import the engine); `lib/accountSync.js` re-exports them, so
+  nothing that imported them changed. `canonicalPiece` now caches its result per piece
+  object (like the fingerprint cache, relying on pieces never being edited in place);
+  treat what it returns as read-only.
+- **Size.** For the owner's 25 real pieces (the 2026-10-10 export): the device record
+  was **2,201 bytes** and is **49,978 bytes** with parts (+47,777; 36 to 86 parts a piece,
+  41 on average, 1,032 in all). It is written whole on every confirmed upload and read
+  on every status refresh: reading it costs about 0.17 ms, and the startup step for all
+  25 pieces about 9 ms. If it ever matters, a part's label could be one 53-bit hash
+  instead of two (31 per cent smaller on these pieces); not done, because a false "unchanged" in
+  a merge decision is the worse error.
+- **Checked on the real export** (counts only, no piece data printed; nothing is
+  uploaded or stored): each of the 25 pieces, run through the engine as `local` and as a
+  copy with one session added to a different chunk on each side: merged cleanly, every
+  session present, no conflict, unchanged by `validateAndMigratePiece`, and the same with
+  the two sides swapped (25 of 25 each). As a control, one session added to the **same**
+  chunk on both sides is a conflict for that chunk only (25 of 25).
+- **Not built, on purpose** (see the pass's deferred list): using the engine from "Get
+  changes" or anything automatic (120), the question the person is asked (121), the
+  technique library (118), deletions (122).
+
 ## Setup (test project)
 
 Done in Pass 108 (2026-09-29). The dashboard steps were done by the user; the

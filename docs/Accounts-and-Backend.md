@@ -754,7 +754,11 @@ copy deleted.
   time and today's list are per device but are part of the shared row, so each
   device's upload can be refused by the other's. Review settles it with no
   question, since the merge never removes anything, but the banner will appear
-  often; the real fix is to leave the per-device parts out of the comparison.
+  often; the real fix is to leave the per-device parts out of the comparison
+  (since Pass 115 the last-changed time no longer counts; today's list and the
+  walk position still do). **Seen live on 2026-10-15** (a phone left open during
+  the Pass 118 deploy): it cleared with nothing to merge and did not clear by
+  itself, see [Decisions.md](Decisions.md#open-questions), Pass 118 open item 9.
   (4) **A merge clears the piece's reschedule marker** (the import path does, for
   every merged piece), so a piece that was rescheduled on one device re-derives
   its schedule from scratch after "ask" or "combine" merges; "take" keeps it.

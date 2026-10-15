@@ -2422,4 +2422,5 @@ changed two (below). Nine things worth knowing:
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118),
   [`docs/Technique-Practice.md`](docs/Technique-Practice.md#on-more-than-one-device-pass-118)
   and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 118, nine calls,
-  confirmed 2026-10-15, and eight open items).
+  confirmed 2026-10-15, and nine open items; the ninth, the first live sighting of a
+  spurious technique hold, is the one to read before Pass 120).

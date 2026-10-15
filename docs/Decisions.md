@@ -8191,6 +8191,52 @@ oversight to silently fix; surface it instead.
      every scale would be about 48 times 13 parts, roughly 40 KB. **Option if it
      matters:** one 53-bit hash per part instead of two, declined for the same reason as
      there.
+  9. **First live sighting of a held technique library (2026-10-15): it cleared with
+     nothing to merge, and the hold did not clear itself.** Minutes after the Pass 118
+     deploy the owner's desktop showed "The technique library changed on another
+     device. Everything else backed up 1 minute ago." (the status line, and the red
+     banner with Review). **Cause, found by asking:** her phone had the live site open
+     and she hadn't thought of it (she closed it afterwards). The deploy changed the
+     whole-library fingerprint (Pass 118 stores `lastCheckedAt` on each scale), so both
+     devices had a reason to upload the library once; one went first, the other's
+     upload was refused, and the refusal was judged "differs" because today's list and
+     the walk position are per device but sit in the shared row (the known two-device
+     hold, [Accounts-and-Backend.md](Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112),
+     "For later passes", item 3). **How it cleared:** she pressed Review. No question
+     was asked and the whole result was `Cleared "changed on another device" on 1 item.`
+     with the status line `Backed up 6 minutes ago`: no "Technique library merged (...)"
+     line and no "N changes waiting". Run on made-up data with the app's own functions,
+     that is exactly what Review shows when the two copies already match at the moment
+     it looks; when the account's copy holds anything new, the merged line and "1 change
+     waiting to back up" follow. So the hold was real when it was set and spurious by
+     the time it was settled, and nothing in the app notices the difference: it stays
+     until a person presses Review. **Inferred, not seen:** that the phone uploaded
+     first, and what differed at that moment (most likely today's list, which two
+     devices that haven't synced build from different states). The device record keeps
+     a fingerprint, not what differed, so neither can be read back; the technique row's
+     revision count in the dashboard would show how many uploads landed. **The hand-off
+     after the deploy named only the clean outcome** ("Backed up just now", maybe "1
+     change waiting" first). A second device open at deploy time can instead produce
+     this banner, and the next note should say so. **Proposed:** (a) **a hold
+     re-judges itself.** While something is held, when the account's revision for it
+     moves (Pass 116's light check already reads it), read that one row and give it the
+     same judgement an upload's refusal gets (`judgeRefusal`); if it now matches, clear
+     the hold quietly and record the revision. Keep holding only while the copies truly
+     differ. One extra read, only while held. (b) **A change of fingerprint form
+     shouldn't make every device upload.** Keep the previous form's fingerprint
+     function and a form number in the record: if an entry equals the old-form
+     fingerprint of the library as it is now, nothing changed since the last sync, so
+     rewrite the entry in the new form and upload nothing. That removes the "everyone
+     uploads at once after a deploy" collision for any pass that changes
+     `canonicalTechnique`, `canonicalPiece` or `techniqueForComparison`. (c) **Record
+     what differed in the hold** (the names of the parts, never their values), so the
+     next sighting can be diagnosed from the device record. (d) The standing remedy
+     still applies: leave the per-device parts out of the comparison, or let Pass 120's
+     engine merge them so the technique library rarely needs a hold at all.
+     **Owner:** Pass 120 for (a), (c) and (d); (b) whichever pass next changes a
+     fingerprint's form (or Pass 120, if it is cheap there). **Until then:** a device
+     that was open during a deploy that changes a fingerprint may show this banner;
+     Review is the way out and loses nothing.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

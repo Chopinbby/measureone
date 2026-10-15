@@ -22,7 +22,6 @@
 import { loadBackend, isConnectionProblem, NO_CONNECTION_MESSAGE } from "./backend";
 import {
   validateAndMigratePiece,
-  validateAndMigrateTechnique,
   findMatchingPiece,
   mergeImportedPiece,
   mergeImportedTechnique,
@@ -33,8 +32,11 @@ import { ensureWorkId } from "./works";
 // code imports and never the other way round; they're re-exported from here so
 // everything that already imports them from this file is unchanged.
 import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints } from "./pieceMerge";
+// The same for the technique library (Pass 118): lib/techniqueMerge.js owns its
+// canonical form and its parts, and is imported here and never the other way.
+import { canonicalTechnique, techniquePartFingerprints } from "./techniqueMerge";
 
-export { fingerprint, canonicalPiece, piecePartFingerprints };
+export { fingerprint, canonicalPiece, piecePartFingerprints, canonicalTechnique, techniquePartFingerprints };
 
 // Mirrors CURRENT_SCHEMA_VERSION in storage.js, which doesn't export it.
 // test/accountSync.test.mjs fails if the two ever disagree.
@@ -77,7 +79,8 @@ export function sameData(a, b) {
 /* ---- "the same" means the same after a reload (Pass 111) ------------ */
 
 // Pieces are fingerprinted and compared in the form loading would give them
-// (canonicalPiece, pieceMerge.js); the technique library the same way, below.
+// (canonicalPiece, pieceMerge.js); the technique library the same way
+// (canonicalTechnique, techniqueMerge.js, re-exported above).
 // A technique task is built without a `tempo`, which loading adds as null.
 // Compared as they stand, a technique library that was uploaded and then simply
 // reloaded would look changed and go up again, so it is compared in the form
@@ -85,22 +88,13 @@ export function sameData(a, b) {
 // through JSON that saving and loading make. What's SENT is still the app's own
 // copy, untouched. A value that can't be put in that form is used as it is.
 
-export function canonicalTechnique(technique) {
-  const plain = toJsonValue(technique);
-  if (!isObject(plain)) return plain;
-  try {
-    return toJsonValue(validateAndMigrateTechnique(plain));
-  } catch (e) {
-    return plain;
-  }
-}
-
 // What counts as a CHANGE to the technique library (Pass 115): everything
 // except `updatedAt`. It's a stamp the app writes on every change, so two
 // devices that hold identical practice data but stamped it at different times
 // would each read the other as "changed". It stays in the row and in the app;
 // it's only left out of the comparison. Today's list (`dayList`) and the walk
-// position stay IN on purpose (Pass 118 decides how those merge).
+// position stay IN on purpose (Pass 118's engine, lib/techniqueMerge.js, merges
+// them by part; nothing calls it until Pass 120).
 export function techniqueForComparison(technique) {
   const canon = canonicalTechnique(technique);
   if (!isObject(canon)) return canon;
@@ -278,7 +272,9 @@ export async function deletePieceRow(client, userId, id, expectedRevision, delet
 /*  since Pass 117, `parts` ({ part: fingerprint }: one for every      */
 /*  top-level field except progress and one for each progress entry,   */
 /*  as last synced with the account; lib/pieceMerge.js. No copy of the */
-/*  piece is kept. A piece recorded before Pass 117 has none). Filed under the signed-in        */
+/*  piece is kept. A piece recorded before Pass 117 has none; the      */
+/*  technique entry carries the same, since Pass 118, for the library: */
+/*  lib/techniqueMerge.js). Filed under the signed-in                  */
 /*  account's user id, so a different account on this browser starts   */
 /*  empty. `checkedAt` is the first backup's read-back check (Pass     */
 /*  110); `syncedAt` is the last time an upload landed (Pass 111).     */
@@ -492,7 +488,7 @@ async function runBackup({ pieces, technique, userId, getClient = loadBackend, s
   const ft = final.technique;
   if (ft.status === MATCHES && (!techniqueSent || ft.exact)) {
     result.technique = "backedUp";
-    recordTechnique = { revision: ft.revision, fingerprint: techniqueFingerprint(technique) };
+    recordTechnique = { revision: ft.revision, fingerprint: techniqueFingerprint(technique), parts: techniquePartFingerprints(technique) };
   } else if (ft.status !== NOT_IN_ACCOUNT) {
     result.technique = techniqueSent ? "mismatched" : "different";
   } else if (techniqueMissing && !techniqueSent && !techniqueExists) {
@@ -757,11 +753,41 @@ export function withPieceForgotten(deviceRecord, userId, id, at) {
   });
 }
 
-export function withTechniqueUploaded(deviceRecord, userId, { revision, fingerprint: print }, at) {
+// The account now holds the technique library at `revision`, as fingerprinted.
+// `parts` (Pass 118) is the fingerprint of each part of the library as the
+// account holds it now (lib/techniqueMerge.js), left out when it isn't known,
+// exactly as for a piece (withPieceUploaded).
+export function withTechniqueUploaded(deviceRecord, userId, { revision, fingerprint: print, parts }, at) {
   return changeAccount(deviceRecord, userId, (a) => {
-    a.technique = { revision, fingerprint: print };
+    a.technique = parts ? { revision, fingerprint: print, parts } : { revision, fingerprint: print };
     a.syncedAt = at;
   });
+}
+
+// Pass 118: the quiet step withPartsRecorded is for pieces, for the technique
+// library: an entry recorded before `parts` existed whose fingerprint still
+// equals this device's library has not changed since it was last synced, so this
+// device's copy IS the synced state and its parts can be recorded from it. A
+// library with changes waiting is left alone (it gets parts at its next
+// confirmed upload), as is an entry that already has them. Works for every
+// account in the record. Pure. Returns { record, recorded } (the same record
+// object when nothing changed).
+export function withTechniquePartsRecorded(deviceRecord, technique) {
+  const accounts = (deviceRecord && deviceRecord.accounts) || {};
+  if (!technique) return { record: deviceRecord, recorded: 0 };
+  const nextAccounts = {};
+  let recorded = 0;
+  Object.keys(accounts).forEach((uid) => {
+    const a = accounts[uid];
+    const entry = a.technique;
+    if (!entry || entry.parts || entry.revision === undefined || typeof entry.fingerprint !== "string" || techniqueFingerprint(technique) !== entry.fingerprint) {
+      nextAccounts[uid] = a;
+      return;
+    }
+    nextAccounts[uid] = { ...a, technique: { ...entry, parts: techniquePartFingerprints(technique) } };
+    recorded += 1;
+  });
+  return recorded > 0 ? { record: { ...deviceRecord, accounts: nextAccounts }, recorded } : { record: deviceRecord, recorded: 0 };
 }
 
 export function withTechniqueHeld(deviceRecord, userId) {
@@ -993,7 +1019,10 @@ export async function syncWaitingChanges({ pieces, technique, userId, getClient 
   const finish = (item, revision, print) => {
     const at = now();
     if (item.kind === "technique") {
-      save((r) => withTechniqueUploaded(r, userId, { revision, fingerprint: print || techniqueFingerprint(technique) }, at));
+      // As for a piece: `print` set means the account holds an earlier version
+      // of the library that this device no longer has, so its parts are unknown.
+      const parts = print ? undefined : techniquePartFingerprints(technique);
+      save((r) => withTechniqueUploaded(r, userId, { revision, fingerprint: print || techniqueFingerprint(technique), parts }, at));
     } else if (item.action === "delete") {
       save((r) => withPieceForgotten(r, userId, item.id, at));
     } else {
@@ -1685,7 +1714,9 @@ export function applyAccountMerge({
       // an identical library would still bump its updatedAt and go up again.
       changed: !sameTechnique(localTechnique, merged.technique),
       stats: merged.stats,
-      entry: { revision: t.revision, fingerprint: techniqueFingerprint(t.technique) },
+      // The account's copy as read, with (Pass 118) the fingerprint of each of
+      // its parts, like a piece's entry above.
+      entry: { revision: t.revision, fingerprint: techniqueFingerprint(t.technique), parts: techniquePartFingerprints(t.technique) },
       clearedHeld: !!(accountRecord && accountRecord.technique && accountRecord.technique.held),
     };
     if (technique.clearedHeld) counts.clearedHeld += 1;
@@ -1715,7 +1746,11 @@ export function withAccountCopyRecorded(deviceRecord, userId, { entries = {}, te
       const e = entries[id];
       a.pieces[id] = e.parts ? { revision: e.revision, fingerprint: e.fingerprint, parts: e.parts } : { revision: e.revision, fingerprint: e.fingerprint };
     });
-    if (technique) a.technique = { revision: technique.revision, fingerprint: technique.fingerprint };
+    if (technique) {
+      a.technique = technique.parts
+        ? { revision: technique.revision, fingerprint: technique.fingerprint, parts: technique.parts }
+        : { revision: technique.revision, fingerprint: technique.fingerprint };
+    }
     if (checkedAt != null && a.checkedAt == null) a.checkedAt = checkedAt;
   });
 }

@@ -843,7 +843,7 @@ unreadable scales are reported, not skipped silently) and merged by
 Nothing here is ever removed:
 - **Same item** = same form, key as spelled (`sameSpelledKey`) with minor
   form, octaves and hands. The more recently *checked* tempo wins, moving
-  `evenTempo`, `lastCheckedDate` and `checkOctaves` together; a tie keeps
+  `evenTempo`, `lastCheckedDate`, `lastCheckedAt` and `checkOctaves` together; a tie keeps
   what's here, and an empty imported tempo never replaces a real one.
   `lastPracticedDate` takes the later date, `practicedDates` the union,
   and the imported method last-used dates fold in (later date per method)
@@ -997,6 +997,213 @@ untouched. It also checks the chunk-grid rule independently of the engine.
 Seeds 1 to 300 with every kind of edit given a real share, and seeds 1 to 100 with an
 everyday mix (mostly sessions); the counts are in the Pass 117 entry of
 [Decisions.md](Decisions.md#accounts-and-backend) and the test prints them.
+
+## Merging the technique library by part (Pass 118)
+
+**The engine only. Nothing in the app calls it yet.** Backups, "Restore" and "Get
+changes" still merge the library the Pass 104 way (`mergeImportedTechnique`, see
+[Technique library (Pass 104)](#technique-library-pass-104)); Pass 120 is what uses
+this. It lives in `lib/techniqueMerge.js`: pure functions, no clock, no network, no
+React. It is [Pass 117's engine](#merging-by-part-pass-117) for the one other thing
+that syncs, and it shares its primitives (`fingerprint`, `toJsonValue`).
+
+**Why it is not the same engine.** Two copies of a piece can disagree about what a
+chunk id means, so a piece sometimes has to ask. The library has no chunk grid:
+every part of it can be put together without asking, so this engine **never returns
+a conflict list and never asks**. Where both devices changed the same thing to
+different values, the **account's value is kept and a notice says so** ("Your other
+device's change to D major was kept."). `mergeImportedTechnique` (needs no recorded
+"before", never removes anything) stays for backups and for a device with no
+recorded "before".
+
+### Parts
+
+Each part has a fingerprint (the same hash as everywhere, over the part as loading
+would give it: `canonicalTechnique`, which `lib/accountSync.js` re-exports). The
+device record keeps them as of the last sync (`entry.parts` on the technique entry,
+[Accounts-and-Backend.md](Accounts-and-Backend.md#the-technique-library-by-part-pass-118));
+**no copy of the library is kept**. A part holding its **default** is left out, so
+"no part" and "the default" are the same thing.
+
+| part key | what it is | left out when |
+|---|---|---|
+| `scale:<id>` | form, tonic, quality, minor form | never |
+| `starred:<id>`, `rotation:<id>` | starred; switched off | not starred; switched on |
+| `octaves:<id>`, `hands:<id>` | the two settings the Library edits | never |
+| `check:<id>` | tempo, check date, **the exact time it was logged** (`lastCheckedAt`) and check octaves, **together** (a tempo only means something over the octaves it was measured over) | never |
+| `lastPracticed:<id>` | last practiced date | never practiced |
+| `practicedOn:<id>:<date>` | **one practiced date** | not practiced that day |
+| `usedOn:<id>:<method>` | **the date one method was last used on one scale** | never used on it |
+| `methodStarred:<m>`, `methodOn:<m>` | a method's star and switch | the defaults (the app keeps an entry after toggling back; it reads the same as none) |
+| `customMethod:<id>` | a custom method's definition | |
+| `setting:scalesPerDay`, `setting:minutesPerScale` | the two settings | |
+| `walk` | the walk position | |
+| `taskDone:<date>:<id>` | a task is done: its tempo and undo note | the task isn't done |
+| `taskPlan:<date>:<id>` | a task's methods and tier | |
+
+A scale is its own set of parts (not one fingerprint per scale), so a star on one
+device and a tempo on the other, **on the same scale**, are two changes that don't
+touch. A date is a part of its own, and so is each method's last-used date on each scale,
+so that "added on one side" and "undone on the other" can both be told from "left
+alone" (an earlier version kept one list per scale and folded the two sides' lists
+together when both changed it: two devices that each undid a *different* use of one
+scale folded back into exactly the base, and merging the result again flipped it, which
+the wide simulation found at seed 2446).
+
+### The rule for each part
+
+Same table as a piece's: unchanged both, nothing; changed on one side only, that
+side's value (**an undo on one side travels the same way**, because it changes the
+same parts the check-off did); changed on both to the same value, agreement;
+changed on both to different values, one rule per kind:
+
+| part | both changed, differently |
+|---|---|
+| a scale's octaves or hands; each setting | **the account's value**, with a notice |
+| starred, switched off, a method's star or switch | cannot happen: changed on both sides means changed to the same other value |
+| the tempo check | the newer check date wins, with its check octaves; **an empty tempo never replaces a real one** (a "start fresh" keeps its date); the same date: a real tempo beats an empty one, otherwise **the one logged later, by its exact time** (a tempo with a time beats one saved before times existed; with no time on either, the account's). A notice only on the device whose different tempo (or check octaves) was dropped |
+| practiced dates | each date is three-way: added on either side is kept, undone on one side only is gone |
+| last practiced date | the later of the two |
+| the date a method was last used on a scale | the later date (each is its own part, so a use undone on one side only is gone, and a use added on either side is kept) |
+| a task's done state | done on both: done, with the details of the side that logged a tempo (of two tempos, the side the scale's own tempo came from). One side undid it and the other did it again: **whichever device's library changed most recently decides** (`updatedAt`; a tie keeps the completion), and if the undo wins, the tempo that completion logged goes back with it. (An undo the other side left alone simply travels.) |
+| a task's methods and tier | the account's, no notice |
+| the walk | the account's, then the check below |
+
+**Scales and custom methods are never removed** by a merge: one on one side only is
+kept, whichever side (the app has no way to delete one; switching a scale off is the
+`rotation` part). **Two scales added apart are two scales**, even for the same key:
+ids are what identify them (`mergeImportedTechnique` matches by content for
+backups; this does not). Order is the account's (the remote's), then what only this
+device has, so two devices end up with the same list.
+
+### Today's list
+
+- **Same date:** task by task. A task on one list only is **kept if the base never
+  had it** (it was added there, e.g. a scale added mid-day topped the list up) **or
+  changed there**; one the other side took off (the app does that when its scale is
+  switched off) that this side left alone is **taken off here too**. So a removal
+  travels like any change, and a task done on one side survives the other side's
+  removal.
+- **Different dates:** the later date's list wins whole. What was done on the earlier
+  day is already in the scales' own parts (dates, tempo, last used), so nothing is
+  lost.
+- **Two lists built apart on the same day** (both devices open the app before they
+  have synced) are put together, so the merged list **can have more tasks than
+  `scalesPerDay`**. Trimming is not done here (logged in
+  [Decisions.md](Decisions.md#open-questions)).
+- **An unfinished task of a switched-off scale is left alone.** The app itself leaves
+  one when a done task of such a scale is undone; the merge adds no rule of its own
+  (an earlier version dropped them, and the simulation showed that made "this device
+  changed nothing, so the merge is exactly the account's library" false).
+- **An undo against a redo is decided by which device changed its library last**
+  (`updatedAt`, the stamp the app writes on every change; a tie keeps the completion).
+  It is an approximation, and says so: the app doesn't record when an undo was made, so a
+  device that undid something and then changed something else counts as having changed
+  later. The loser gets the one-line notice. When the undo wins, the scale takes the
+  undone side's tempo check whole (the tempo that completion logged, with its time, goes
+  back); its dates, methods and walk step already go back with the ordinary one-sided
+  rules.
+- **A done task means its scale was practiced that day.** The scale's dates, last
+  practiced date and last-used methods are separate parts, so a completion that
+  stands on one side (undone and done again) can meet an undo of the same completion
+  on the other, and those parts would say it wasn't practiced. After the merge they
+  are put back to agree with the done task (`derived: ["practiced:<id>"]`). It only
+  ever adds.
+
+### The walk
+
+The walk steps **once** when a task in the key of the day is completed
+(`completeTask`). That step is now one function, `nextWalkPosition(items,
+walkPosition)` in `lib/technique.js` (the key of the day is the first walk position at
+or after the stored one that has a scale in rotation, and the step is the one after
+it), which `completeTask` uses and the merge uses. **Nothing was copied**: a test runs
+200 random libraries through both and checks they agree, and that a task not in the key
+of the day moves nothing.
+
+The walk is merged like any part. Then, because a done task keeps a note of the step it
+took (`undo.walkPosition` to `undo.advancedTo`), it is checked against the done tasks:
+**if the walk was taken from one side while a completion that stepped it came from the
+other, and the walk still stands where that step began, the step is taken now**, once
+per such task and chained (each starting where the last ended), with `nextWalkPosition`.
+`derived: ["walk"]` says it happened.
+
+- **Two devices that did the day's task agree on one step.** Each walked
+  `p -> p + 1`; same value on both sides is agreement, nothing is stepped
+  (`walkBothAdvanced` in the simulation).
+- **A side's own walk already holds its own steps**, so a step is only looked at when
+  it came from the *other* side. This is also why a library with so few keys that a
+  day's steps go round in a circle (two keys, three tasks) is safe: nothing of one
+  side's own history is ever "repaired".
+- **Where it fires** (reachable by a merge, not by one device): one device undoes a
+  completion (its walk goes back) while the other undoes it and does it again (its
+  walk is back where the base had it, so it looks unchanged); the merged task is done,
+  the taken walk is the first device's stepped-back one, and the step is taken. And the
+  two-walks case: one device stepped twice, the other once, the account's (shorter)
+  walk is taken and the other step is added.
+- **Not what the card said, and why:** "if a task in the key of the day is done on
+  either side and the merged position hasn't advanced for that day, advance once".
+  That condition fires on a perfectly ordinary state: a scale in the *next* key done
+  out of turn earlier in the day, then the walk steps onto its key. Using each done
+  task's own step note (and only the other side's) fires on merge-made gaps only.
+- **Left as it is, deliberately:** two devices that each did a task for a *different*
+  day before syncing both step `p -> p + 1`, which is agreement, so the walk steps once
+  for two days (it under-steps by one; it revisits a key rather than skipping one).
+
+### What it returns
+
+`planTechniqueMerge({ local, remote, base })` returns `{ status, merged, notices,
+resolved, fromRemote, fromLocal, agreed, derived, list, reason }`:
+
+- `"identical"`: both sides hold the same parts. `merged` is `local`.
+- `"local-only"`: the remote is what the base was. `merged` **is `local`, the same
+  object, untouched**.
+- `"merged"`: the remote's changes were folded in. `notices` lists, in plain words,
+  where this device's different change was dropped for the account's (`part:
+  "scale" | "setting" | "tempo"`, with the scale's title and the `text` to show);
+  `resolved` is every part both sides changed differently and whose value came out.
+- `"ask"`: `reason: "no-base"` (no recorded `parts`) or `"not-libraries"`.
+  `merged` is `local`; **the caller falls back to `mergeImportedTechnique`**, which
+  needs no base.
+
+`base` is the entry's `parts`. Inputs are read in the form loading would give them,
+never modified, and nothing in the result aliases them; the merged library is already
+in that form, so `validateAndMigrateTechnique` leaves it unchanged, and `updatedAt` is
+the later of the two. The same inputs always give the same result.
+
+### The simulation
+
+`test/techniqueMerge.test.mjs` runs a seeded, deterministic simulation: two devices
+start from one library (4 to 11 scales in random keys, forms and octaves, some with
+tempos and practiced dates, a random walk position, a day's list built by the real
+`buildDayList`), each applies random edit sequences shaped like the app's own handlers
+(check off, log a tempo, undo, star, switch off or on, change octaves or hands, change
+the check octaves keeping or starting fresh, add a scale, star or switch off a method,
+add a custom method, change a setting), the clock moves on by a day between some
+rounds, and they sync in random orders with offline gaps (a device sometimes skipping a
+round or syncing twice, sometimes syncing before it has opened on the new day). After
+**every** merge it checks, judging from the real libraries and the base the device
+remembers, never from the engine's fingerprints: no scale is lost; each setting follows
+the three-way rule; **no tempo is lost** (an empty one never replaces a real one, the
+newer check wins, and of two tempos on the same day the one logged later by its exact
+time); **no practiced date is lost** except one undone on one side only;
+**a completion survives unless it was undone on one side only, or the undo was the more
+recent change** (a one-sided undo travels, done on both is done, an undone-and-redone
+completion goes to whichever device's library changed last, and a winning undo takes
+the tempo it logged back with it); the **walk is a side's own value unless a step was repaired, is agreed
+when both sides agree, and is always a position reached by taking each done task's
+step note at most once** (two devices that did the same day's task hold a step from the
+same place, and only one of them can be used; a step of one device and the next step of
+the other chain, so the walk can legitimately stand past both devices' own); methods,
+custom methods and settings follow their rules; today's list is the later day's, or the
+task-by-task merge; a done task shows its practice; the merged library is unchanged by
+`validateAndMigrateTechnique`; the same inputs (cloned) give the same result; **merging
+the result with the same remote again changes nothing**; **merging when the remote
+equals the base returns this device's library untouched** (same object); **when this
+device changed nothing, the merge is exactly the remote's library**; and at the end
+**both devices and the account hold one library**. Seeds 1 to 300 with every kind of
+edit, and 1 to 100 with an everyday mix (mostly check-offs and tempos); the counts are
+in the Pass 118 entry of [Decisions.md](Decisions.md#accounts-and-backend) and the test
+prints them.
 
 ## Adaptive review
 
@@ -4126,11 +4333,14 @@ library of methods. Methods are recorded as used only by `completeTask`.
 
 ### Completing, tempo, and octaves
 
-- `completeTask(state, itemId, today, tempo?)` returns new state (inputs
+- `completeTask(state, itemId, today, tempo?, now?)` returns new state (inputs
   untouched). It marks the task done, sets `lastPracticedDate` and appends
   to `practicedDates` (trimmed to 14 days), records the task's methods as
-  used, and may advance the walk. With a tempo it also sets `evenTempo` and
-  `lastCheckedDate`; a bare check-off leaves both alone.
+  used, and may advance the walk. With a tempo it also sets `evenTempo`,
+  `lastCheckedDate` and (Pass 118) `lastCheckedAt`, the exact time it was
+  logged, which the caller passes as `now` because this file has no clock (no
+  `now`: stored as unknown, never guessed); a bare check-off leaves all three
+  alone.
 - `startingTempo(item)` = `round(evenTempo × 0.85)`, or `null` with no
   tempo.
 - `changeCheckOctaves(item, n, choice?)` returns `"unchanged"`, `"applied"`
@@ -4140,8 +4350,8 @@ library of methods. Methods are recorded as used only by `completeTask`.
 
 - **Undo (Pass 101):** `completeTask` stores an `undo` snapshot on the
   task: the walk position before and the position it advanced to, the
-  item's `lastPracticedDate`/`practicedDates`/`evenTempo`/`lastCheckedDate`,
-  and each of the task's methods' previous last-used date. `uncompleteTask`
+  item's `lastPracticedDate`/`practicedDates`/`evenTempo`/`lastCheckedDate`/
+  `lastCheckedAt`, and each of the task's methods' previous last-used date. `uncompleteTask`
   puts them back and marks the task not done. The walk is only stepped
   back if it still sits where this completion left it, so undoing an
   earlier task never rewinds a later one's step. Star, rotation and octave

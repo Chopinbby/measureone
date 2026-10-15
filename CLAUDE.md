@@ -2339,3 +2339,87 @@ the technique library, 122 deletions). Seven things worth knowing:
   and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 117, five
   calls awaiting the user's confirmation).
 
+
+**Since Pass 118**, there is an engine for merging two copies of the **technique
+library** by part (`src/lib/techniqueMerge.js`, new), and the device record's
+technique entry remembers what each part looked like at the last sync (`parts`, like a
+piece's). **Nothing uses the engine yet**: backups, restore and "Get changes" still
+merge the library with `mergeImportedTechnique` (`lib/storage.js`; Pass 120 wires the
+engine in; the one change to it is that `lastCheckedAt` moves with the tempo). Unlike a
+piece, the library is **always** mergeable: no conflict list, no question; where both
+sides changed the same octaves, hands or setting to different values the account's value
+is kept and a notice says so. **The user confirmed the pass's calls on 2026-10-15** and
+changed two (below). Nine things worth knowing:
+- **What a part is** (`techniquePartKey`): per scale its settings (`starred`,
+  `rotation`, `octaves`, `hands`), its tempo check (tempo, check date, **the exact time
+  it was logged** and check octaves, **together**), its last practiced date, **each practiced date on its own**, and its
+  last-used date for each method (**one part per scale and method**); per method its star and switch; each custom method; the two
+  settings; the walk; per task on today's list (by date and scale) its done state and
+  its plan. **A part holding its default is left out** (a scale not starred, a task not
+  done, a method with the default entry the app keeps after toggling back), so "no
+  part" and "the default" are the same thing. **A new field on a scale, a method, the
+  settings or a task must be given a part** (`partsOfCanonical`) or a change to it is
+  invisible to a merge, and the simulation's per-field checks must learn it.
+- **Per part:** changed on one side only, take that side (**an undo travels the same
+  way**: it changes the same parts the check-off did); same value on both, agreement;
+  different values, a rule per kind (octaves, hands and the settings: the account's with
+  a notice; the tempo check: newer check date wins, **an empty tempo never replaces a
+  real one**, and on the same date **the one logged later by its exact time** (a time
+  beats none; no time on either: the account's); dates: three-way per date; a method's
+  last-used date: three-way, later date when both changed it (**an earlier "one list per
+  scale, folded" version failed "merging twice gives the same result"**); a task: done on
+  both is done; **undone on one side and done again on the other: whichever device's
+  library changed most recently (`updatedAt`) decides, a tie keeps the completion, and if
+  the undo wins the scale takes that side's tempo check, so the tempo goes back with
+  it**). A yes/no part can't conflict.
+  Scales and custom methods are **never removed**; two scales added apart stay two.
+- **Today's list:** same date merges task by task (a task on one list only is kept if
+  added or changed there, **taken off if the other side took it off and this side left
+  it alone**: "kept always" made a removed task come back on every merge); different
+  dates, the later list wins whole. **Two lists built apart can add up to more than
+  `scalesPerDay`** (open). **Don't add a rule that drops an unfinished task of a
+  switched-off scale**: the app's own undo leaves one, and the rule broke "this device
+  changed nothing, so the merge is exactly the account's library".
+- **The walk's advance step is one function now**, `nextWalkPosition(items,
+  walkPosition)` / `walkStepPast` in `lib/technique.js`, used by `completeTask` and by
+  the merge (a 200-library test pins them together); don't inline it again. The merge
+  steps the walk **once**, only for a step whose completion came from the OTHER side
+  than the walk's value and which still stands where it began (`settleWalk`). **Two
+  devices that did the day's task agree on one step; "advance once per side" breaks it**
+  (re-broken on purpose: 12 tests fail). The first version, using every done task's step
+  note, stepped the walk on a library where both devices already agreed (seed 51).
+- **A done task puts its scale's day, last practiced date and last-used methods back**
+  if the merge left them out (an undo on one side meeting a redo on the other). It only
+  adds.
+- **`lastCheckedAt` (the exact time a tempo was logged) is a stored scale field now**
+  (the user chose "Exact now", 2026-10-15, so the later of two same-day tempos wins by
+  its real time). It lives in `normalizeTechniqueItem` and the undo snapshot
+  (`lib/storage.js`), is set by `completeTask(state, itemId, today, tempo, now)`
+  (`lib/technique.js` has no clock: the caller passes `now`; `App.jsx`'s
+  `handleTechniqueComplete` passes `Date.now()`), and moves with the tempo in
+  `mergeImportedTechnique`. **Any new place that logs a tempo must pass the time**, or
+  that tempo can't win a same-day tie. Empty (null) means "saved before this existed";
+  never guess it. The library's whole fingerprint changed once, so each device uploads
+  its library once after this ships.
+- **`status: "identical"` means identical BY PARTS, not by fingerprint.** A method
+  toggled back leaves a default-holding entry the whole-library fingerprint still sees
+  (`techniqueFingerprint`) and the parts don't. **Pass 120 must treat `"identical"` as in
+  sync** (record the account's revision, don't upload). No recorded `parts` answers
+  `"ask"`; the caller falls back to `mergeImportedTechnique`.
+- **`canonicalTechnique` moved to `techniqueMerge.js`** (re-exported by
+  `accountSync.js`, uncached). The technique entry gets `parts` wherever it is recorded
+  (confirmed upload, first backup, restore or merge: the **account's** copy; an adopted
+  earlier version records none). `withTechniquePartsRecorded` (the startup step for a
+  library recorded before this pass) is built and tested but **`App.jsx` does not call it
+  yet**: one line for Pass 120. 48 scales are 260 parts, 14.5 KB in the record.
+- **The simulation is the safety net** (`test/techniqueMerge.test.mjs`: seeded two-device
+  runs, the invariants checked after every merge, and convergence at the end). Any change
+  to the engine must keep it green on seeds 1 to 300 (every kind of edit) and 1 to 100
+  (everyday mix); it caught four real bugs while this was built (the walk repair above,
+  a removed task coming back, dropped unfinished tasks, a per-scale list of last-used
+  methods that wasn't stable under a second merge). **Run it wider before trusting a
+  change**: the last bug only showed past seed 2400 (copy the test and raise `RUNS`). See
+  [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118),
+  [`docs/Technique-Practice.md`](docs/Technique-Practice.md#on-more-than-one-device-pass-118)
+  and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 118, nine calls,
+  confirmed 2026-10-15, and eight open items).

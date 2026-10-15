@@ -1164,6 +1164,9 @@ The schema is `validateAndMigrateTechnique` / `defaultTechnique`
     evenTempo: number | null,   // last verified even tempo
     checkOctaves: 1-4,          // octaves for the even-rhythm check
     lastCheckedDate: ISO | null,   // last time a tempo was logged
+    lastCheckedAt: number | null,  // the exact time (ms since 1970) it was logged (Pass 118);
+                                   // null for a tempo logged before this existed. Lets the later of
+                                   // two devices' tempos for the same day win when they are merged.
     lastPracticedDate: ISO | null, // last check-off of any kind
     practicedDates: [ISO],      // last 14 days of practice; the weekly pace reads it
     starred, inRotation,

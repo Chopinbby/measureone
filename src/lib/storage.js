@@ -671,6 +671,10 @@ export function normalizeTechniqueItem(raw) {
     evenTempo: positiveNumberOrNull(raw.evenTempo),
     checkOctaves: Number.isInteger(raw.checkOctaves) && raw.checkOctaves >= 1 && raw.checkOctaves <= 4 ? raw.checkOctaves : octaves,
     lastCheckedDate: isISODate(raw.lastCheckedDate) ? raw.lastCheckedDate : null,
+    // The exact time (ms since 1970) the tempo was logged, so that when two devices
+    // log different tempos on the same day the later one can win (Pass 118). null
+    // for a tempo logged before this existed: it can't be placed within its day.
+    lastCheckedAt: positiveNumberOrNull(raw.lastCheckedAt),
     lastPracticedDate: isISODate(raw.lastPracticedDate) ? raw.lastPracticedDate : null,
     practicedDates: Array.isArray(raw.practicedDates) ? raw.practicedDates.filter(isISODate) : [],
     starred: !!raw.starred,
@@ -691,6 +695,7 @@ function normalizeUndo(u) {
       practicedDates: Array.isArray(item.practicedDates) ? item.practicedDates.filter(isISODate) : [],
       evenTempo: positiveNumberOrNull(item.evenTempo),
       lastCheckedDate: isISODate(item.lastCheckedDate) ? item.lastCheckedDate : null,
+      lastCheckedAt: positiveNumberOrNull(item.lastCheckedAt),
     },
     methodLastUsed: isPlainObject(u.methodLastUsed)
       ? Object.fromEntries(Object.entries(u.methodLastUsed).map(([k, v]) => [k, isISODate(v) ? v : null]))
@@ -944,7 +949,7 @@ const laterDate = (a, b) => (!a ? b || null : !b ? a : a >= b ? a : b);
 // Merges a backup's technique block into what's here. Never removes
 // anything already here:
 // - Same item (sameTechniqueItem): the more recently CHECKED tempo wins —
-//   evenTempo, lastCheckedDate and checkOctaves move together, since a tempo
+//   evenTempo, lastCheckedDate, lastCheckedAt and checkOctaves move together, since a tempo
 //   only means something with the octaves it was measured over. A tie (or no
 //   check on either side) keeps what's here. An EMPTY tempo never replaces a
 //   real one here, even with a newer check date (a "Start fresh" on the
@@ -984,6 +989,7 @@ export function mergeImportedTechnique(existing, imported) {
       if (newerCheck && inc.evenTempo != null) {
         here.evenTempo = inc.evenTempo;
         here.lastCheckedDate = inc.lastCheckedDate;
+        here.lastCheckedAt = inc.lastCheckedAt; // the exact time moves with the tempo it belongs to (Pass 118)
         here.checkOctaves = inc.checkOctaves;
         stats.temposUpdated++;
       }

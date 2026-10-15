@@ -1004,7 +1004,8 @@ changes.
   it to decide which side is newer** (grepped `lib/` and `App.jsx`: it's written
   in `updateTechnique`, passed through `validateAndMigrateTechnique`, and that's
   all). Today's list (`dayList`) and the walk position still count as changes,
-  on purpose: Pass 118 decides how those merge. Piece fingerprints are
+  on purpose: Pass 118 decided how those merge (an engine only, not yet used;
+  [below](#the-technique-library-by-part-pass-118)). Piece fingerprints are
   unchanged, so no piece re-uploads. **The technique fingerprint changes once,
   so each device uploads its library once after this ships** (the library's
   revision rises by one), then stays still (tested, including a new stamp).
@@ -1089,7 +1090,8 @@ change arrives.
   itself. (2) **The technique library will often read "newer".** Each device
   rebuilds today's list and moves the walk position on its own and uploads, so
   two devices in use keep bumping each other's revision. That is the
-  per-device-parts problem Pass 118 decides. (3) **A piece the person declines
+  per-device-parts problem Pass 118's engine settles part by part (not yet used;
+  Pass 120 wires it in). (3) **A piece the person declines
   in "Get changes" (an unticked new piece) is noticed again on every check**,
   the same family as the declined combine; it needs the remembered "no" of Pass
   122. (4) **A piece deleted here and changed elsewhere** (a record entry marked
@@ -1169,6 +1171,81 @@ about the account code:
 - **Not built, on purpose** (see the pass's deferred list): using the engine from "Get
   changes" or anything automatic (120), the question the person is asked (121), the
   technique library (118), deletions (122).
+
+## The technique library by part (Pass 118)
+
+The engine for merging two copies of the technique library part by part, **and
+nothing else**: no merge uses it yet (backups, "Restore" and "Get changes" still use
+`mergeImportedTechnique`, unchanged; Pass 120 wires the engine in). How it works, the
+rules, the walk and the simulation are in
+[Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118); what
+people will see of it is in [Technique-Practice.md](Technique-Practice.md#on-more-than-one-device-pass-118).
+What this pass changes about the account code:
+
+- **The technique entry in the device record gains `parts`**: `{ part: fingerprint }`,
+  as last synced with the account, exactly as a piece's entry does since Pass 117 (no
+  copy of the library is kept, only labels; `cleanEntry` reads it back only beside a
+  recorded revision, and only text values). The parts are listed in
+  [Algorithms.md](Algorithms.md#parts-1): per scale (its settings, its tempo check, its
+  practiced dates one by one, the date each method was last used on it), per method, the two settings, the
+  walk, and per task on today's list (by date and scale).
+- **Written wherever the record already records the library:** a confirmed upload
+  (`withTechniqueUploaded`, the parts of exactly what was sent), the first backup
+  (`backUpDevice`), and a restore or "Get changes" (`applyAccountMerge` ->
+  `withAccountCopyRecorded`: the parts of **the account's copy**, not of whatever this
+  device holds on top of it). **The same deliberate gap as for a piece:** an adopted
+  row that is only an *earlier version of this device's own library* is recorded
+  without `parts` (they would describe a copy this device no longer holds); the
+  immediate retry that follows records them when it confirms.
+- **A library recorded before this pass has no `parts`.** `withTechniquePartsRecorded(record,
+  technique)` (pure, `lib/accountSync.js`) records them for every account whose entry
+  still equals this device's library (nothing has changed since the last sync, so this
+  copy IS the synced state), for every account in the record, and leaves a library
+  with changes waiting alone. **`App.jsx` does not call it yet**: that one line belongs
+  beside the startup step for pieces (`withPartsRecorded`), and `App.jsx` was outside
+  this pass's list, so it is for Pass 120. Until then such an entry gets its parts at
+  its next confirmed upload, and the engine answers `"ask"` (and the caller falls back
+  to `mergeImportedTechnique`) for it. Nothing about what's waiting changes (tested).
+- **`canonicalTechnique` moved** to `lib/techniqueMerge.js`, which the account code
+  imports and never the other way round (as for `canonicalPiece`); `accountSync.js`
+  re-exports it, so nothing that imported it changed. It is **not cached** (a library is
+  small, and a caller may change an object between calls); a test pins that
+  `accountSync.canonicalTechnique` is the one function.
+- **"The same by parts" is not "the same fingerprint".** A method switched on and off
+  again leaves an entry holding the defaults; the parts call that the same as no entry
+  (so two such libraries are `"identical"`), but the whole-library fingerprint
+  (`techniqueFingerprint`) still tells them apart. **Pass 120 must read `"identical"` as
+  in sync** (record the account's revision, don't upload) rather than expect the
+  fingerprints to match; a test pins the difference so it can't be missed.
+- **Size.** For the owner's real library (48 scales, the 2026-10-10 export): **260
+  parts, 14,805 bytes** in the device record, on top of the pieces' 50 KB (Pass 117).
+  Computing them takes about 1 ms and one merge about 2 ms. The main download grew
+  by about 2.5 KB (0.8 kB gzipped); the separate sign-in library file is unchanged.
+- **The library's whole fingerprint changes once.** Every scale gains `lastCheckedAt`
+  (the exact time a tempo was logged, empty for one saved before this), so
+  `techniqueFingerprint` reads every existing library as changed and **each device
+  uploads its library once after this ships** (the same one-off as Pass 115's
+  `updatedAt` change). `lastCheckedAt` is part of the `check` part, so nothing else about
+  the parts changes (still 260 for the real library). A device running the previous build
+  drops the field when it loads a library (its loader doesn't know it), so the "later
+  logged tempo wins" rule has nothing to compare for a tempo that device logged; the
+  site is one build, so this only lasts until its page reloads.
+- **Checked on the real export** (counts only; no scale, tempo or date printed;
+  nothing uploaded or stored): the technique block merged with a copy where one scale is
+  starred on one side and a different scale is checked off, at a tempo, on the other:
+  merged with no notice and nothing to decide, all 48 scales kept, starred 0 to 1, done
+  0 to 1, tempos 10 to 11, practiced dates 10 to 11, methods last used 40 to 44, nothing
+  went backwards, unchanged by `validateAndMigrateTechnique`, the same library whichever
+  device does the merge, merging the result again changes nothing, and a remote equal to
+  the base returns this device's library untouched. The walk, on the same library: the
+  same key-of-the-day task done on both devices steps it once (not twice), and an undo on
+  one device travels (the walk goes back with it). That library's list has only one task
+  that steps the walk, so "two different tasks in the key, one on each device" was
+  exercised by the tests and the simulation, not on this data.
+- **Not built, on purpose** (see the pass's deferred list): using the engine from "Get
+  changes" or anything automatic (120), showing the notices (120), a per-device setting
+  for scales per day, trimming a merged list down to `scalesPerDay`, combining two
+  scales added apart for the same key, and any change to how backups merge the library.
 
 ## Setup (test project)
 

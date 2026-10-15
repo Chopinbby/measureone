@@ -1217,11 +1217,24 @@ describe("technique storage (Pass 100)", () => {
     assert.equal(m.walkPosition, 5);
     assert.deepEqual(m.items[0], {
       id: "a", form: "scale", tonic: "D", quality: "major", minorForm: null, octaves: 2,
-      hands: "together", evenTempo: 100, checkOctaves: 2, lastCheckedDate: null,
+      hands: "together", evenTempo: 100, checkOctaves: 2, lastCheckedDate: null, lastCheckedAt: null,
       lastPracticedDate: null, practicedDates: [], starred: false, inRotation: true,
     });
     assert.deepEqual(m.methodState, {});
     assert.deepEqual(m.settings, { scalesPerDay: 3, minutesPerScale: 5 });
+  });
+
+  test("the exact time a tempo was logged (Pass 118): kept when valid, null when missing or unusable, and an old save reads as unknown", () => {
+    const read = (extra) => validateAndMigrateTechnique({ items: [{ id: "a", tonic: "D", quality: "major", ...extra }] }).items[0].lastCheckedAt;
+    assert.equal(read({ lastCheckedAt: 1_760_000_000_000 }), 1_760_000_000_000);
+    for (const bad of [undefined, null, 0, -1, "1760000000000", NaN, Infinity, {}, []]) assert.equal(read({ lastCheckedAt: bad }), null, String(bad));
+    assert.equal(read({}), null, "a save from before the field existed");
+    // the time inside a done task's undo snapshot, likewise
+    const withUndo = validateAndMigrateTechnique({
+      items: [{ id: "a", tonic: "C", quality: "major" }],
+      dayList: { date: "2025-01-06", tasks: [{ itemId: "a", methodIds: [], done: true, tier: "walk", undo: { walkPosition: 0, advancedTo: null, item: { evenTempo: 90, lastCheckedDate: "2025-01-01", lastCheckedAt: 42 } } }] },
+    });
+    assert.equal(withUndo.dayList.tasks[0].undo.item.lastCheckedAt, 42);
   });
 
   test("migration keeps a valid save byte-for-byte after one round trip", () => {
@@ -1247,7 +1260,8 @@ describe("technique storage (Pass 100)", () => {
     // checkOctaves: null — a snapshot saved before that field existed (Pass
     // 101 review fix) reads as "unknown", and uncompleteTask then restores the
     // tempo as it always did.
-    assert.deepEqual(u, { walkPosition: 0, advancedTo: 1, checkOctaves: null, item: { lastPracticedDate: null, practicedDates: [], evenTempo: 90, lastCheckedDate: "2025-01-01" }, methodLastUsed: { eyes: null } });
+    // lastCheckedAt: null likewise (Pass 118): a snapshot saved before the exact time existed reads as unknown.
+    assert.deepEqual(u, { walkPosition: 0, advancedTo: 1, checkOctaves: null, item: { lastPracticedDate: null, practicedDates: [], evenTempo: 90, lastCheckedDate: "2025-01-01", lastCheckedAt: null }, methodLastUsed: { eyes: null } });
     assert.deepEqual(validateAndMigrateTechnique(JSON.parse(JSON.stringify(withUndo))), withUndo);
   });
 
@@ -1414,6 +1428,15 @@ describe("technique in backups (Pass 104)", () => {
     assert.deepEqual(fs.practicedDates, ["2026-09-01", "2026-09-05"]);
     assert.deepEqual(technique.methodLastUsed.x, { eyes: "2026-09-01" }, "imported method dates land on the local item's id");
     assert.equal(stats.temposUpdated, 1);
+  });
+
+  test("the exact time of a tempo moves with that tempo in a backup import (Pass 118), and stays where it was when the tempo doesn't move", () => {
+    const here = validateAndMigrateTechnique({ items: [tItem("x", "F♯", "major", { evenTempo: 70, lastCheckedDate: "2026-08-01", lastCheckedAt: 111 })] });
+    const newer = validateAndMigrateTechnique({ items: [tItem("q", "F♯", "major", { evenTempo: 95, lastCheckedDate: "2026-09-01", lastCheckedAt: 222 })] });
+    assert.equal(mergeImportedTechnique(here, newer).technique.items[0].lastCheckedAt, 222);
+    assert.equal(mergeImportedTechnique(newer, here).technique.items[0].lastCheckedAt, 222, "an older tempo in the backup doesn't replace it");
+    const emptyNewer = validateAndMigrateTechnique({ items: [tItem("q", "F♯", "major", { evenTempo: null, lastCheckedDate: "2026-09-01", lastCheckedAt: 333 })] });
+    assert.equal(mergeImportedTechnique(here, emptyNewer).technique.items[0].lastCheckedAt, 111, "an empty tempo never replaces a real one, and its time doesn't either");
   });
 
   test("identity is form + key (as spelled, with minor form) + octaves + hands", () => {

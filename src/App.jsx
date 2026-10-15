@@ -1194,7 +1194,8 @@ export default function App() {
         { items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition },
         itemId,
         t.dayList.date,
-        tempo
+        tempo,
+        Date.now() // the exact time of the check (Pass 118): when two devices log a tempo the same day, the later wins
       );
       return { ...t, items: done.items, dayList: done.dayList, methodLastUsed: done.methodLastUsed, walkPosition: done.walkPosition };
     });

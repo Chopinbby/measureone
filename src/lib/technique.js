@@ -249,6 +249,23 @@ export function effectiveWalkPosition(walkPosition, items) {
   return null;
 }
 
+// The step the walk takes once the key of the day has been practiced: one past
+// that key's position, wrapping around the lap.
+export function walkStepPast(keyPosition) {
+  return (keyPosition + 1) % TECHNIQUE_WALK_LAP_DAYS;
+}
+
+// Where the walk goes from `walkPosition` once its key of the day is practiced:
+// one step past the first position at or after `walkPosition` whose key has an
+// in-rotation item (the key of the day). Unchanged when no key has one.
+// completeTask takes exactly this step (when the completed scale is in the key of
+// the day), and so does merging two devices' libraries (lib/techniqueMerge.js),
+// so there is one definition of it.
+export function nextWalkPosition(items, walkPosition) {
+  const pos = effectiveWalkPosition(walkPosition, items);
+  return pos == null ? walkPosition : walkStepPast(pos);
+}
+
 // For the Technique page's walk hint ("Circle of fifths: D major today,
 // B minor next."). Both skip keys with no in-rotation items; `next` wraps
 // across the end of the lap. Returns null if the library has no keys at
@@ -527,15 +544,21 @@ const PRACTICED_DATES_KEPT = 14; // two calendar weeks is all paceStatus reads
 // when the completed item is in the key of the day — completion, never the
 // calendar, moves it.
 //
+// `now` (Pass 118, ms since 1970) is the exact time of the check, kept with the
+// tempo it logged (lastCheckedAt) so that when two devices log different tempos
+// on the same day the later one wins. This file has no clock, so the caller
+// passes it; without one the time is left unknown (null), never guessed.
+//
 // state: { items, dayList, methodLastUsed, walkPosition }
 // Returns a new state object; inputs are not mutated.
-export function completeTask(state, itemId, today, tempo = null) {
+export function completeTask(state, itemId, today, tempo = null, now = null) {
   const { items = [], dayList, methodLastUsed = {}, walkPosition = 0 } = state;
   const task = dayList?.tasks.find((t) => t.itemId === itemId);
   if (!task || task.done) return state;
 
   const keyOfDayPos = effectiveWalkPosition(walkPosition, items);
   const hasTempo = typeof tempo === "number" && Number.isFinite(tempo) && tempo > 0;
+  const checkedAt = typeof now === "number" && Number.isFinite(now) && now > 0 ? now : null;
 
   let completedItem = null;
   const nextItems = items.map((it) => {
@@ -547,7 +570,7 @@ export function completeTask(state, itemId, today, tempo = null) {
       ...it,
       lastPracticedDate: today,
       practicedDates: dates,
-      ...(hasTempo ? { evenTempo: tempo, lastCheckedDate: today } : {}),
+      ...(hasTempo ? { evenTempo: tempo, lastCheckedDate: today, lastCheckedAt: checkedAt } : {}),
     };
     return completedItem;
   });
@@ -559,7 +582,7 @@ export function completeTask(state, itemId, today, tempo = null) {
   let nextWalk = walkPosition;
   let advancedTo = null;
   if (completedItem && keyOfDayPos != null && itemInKey(completedItem, WALK_KEYS[keyOfDayPos])) {
-    nextWalk = (keyOfDayPos + 1) % TECHNIQUE_WALK_LAP_DAYS;
+    nextWalk = nextWalkPosition(items, walkPosition);
     advancedTo = nextWalk;
   }
 
@@ -575,6 +598,7 @@ export function completeTask(state, itemId, today, tempo = null) {
       practicedDates: before.practicedDates || [],
       evenTempo: before.evenTempo ?? null,
       lastCheckedDate: before.lastCheckedDate ?? null,
+      lastCheckedAt: before.lastCheckedAt ?? null,
     },
     methodLastUsed: Object.fromEntries(task.methodIds.map((mid) => [mid, previousUsed[mid] ?? null])),
   };
@@ -614,7 +638,7 @@ export function uncompleteTask(state, itemId) {
   const octavesChanged = (it) => undo.checkOctaves != null && it.checkOctaves !== undo.checkOctaves;
   const nextItems = items.map((it) => {
     if (it.id !== itemId) return it;
-    const { evenTempo, lastCheckedDate, ...dates } = undo.item;
+    const { evenTempo, lastCheckedDate, lastCheckedAt, ...dates } = undo.item;
     return octavesChanged(it) ? { ...it, ...dates } : { ...it, ...undo.item };
   });
 

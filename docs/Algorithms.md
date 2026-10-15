@@ -843,7 +843,7 @@ unreadable scales are reported, not skipped silently) and merged by
 Nothing here is ever removed:
 - **Same item** = same form, key as spelled (`sameSpelledKey`) with minor
   form, octaves and hands. The more recently *checked* tempo wins, moving
-  `evenTempo`, `lastCheckedDate` and `checkOctaves` together; a tie keeps
+  `evenTempo`, `lastCheckedDate`, `lastCheckedAt` and `checkOctaves` together; a tie keeps
   what's here, and an empty imported tempo never replaces a real one.
   `lastPracticedDate` takes the later date, `practicedDates` the union,
   and the imported method last-used dates fold in (later date per method)
@@ -854,6 +854,356 @@ Nothing here is ever removed:
 - Today's list and settings stay local; the walk position comes from the
   backup only if the library here was empty. `App.jsx` then tops up
   today's list (`topUpDayList`).
+
+## Merging by part (Pass 117)
+
+**The engine only. Nothing in the app calls it yet.** "Get changes" and Review
+still go through the whole-piece import merge above (Phase 1); Pass 120 is what
+uses this. It lives in `lib/pieceMerge.js`: pure functions, no clock, no
+network, no React.
+
+**The question it answers.** Two copies of one piece, `local` (this device's)
+and `remote` (the account's), plus `base`: what both agreed on when this device
+last synced. What changed on each side, and can the changes be put together
+without asking anyone? The import merge above answers with one rule per field
+(`preferPresent`, `preferByRecency`) and one comparison of timestamps for the
+whole piece; this answers per **part**, from what each side actually changed.
+
+### Parts
+
+A piece is split into parts: **every top-level field except `progress`**, and
+**each entry of `progress` on its own**: a chunk id, a transition or combo id,
+and the synthetic keys `__consolidation__`, `__cold_start__` and
+`sr_<sectionId>`. A part's key is its field name, or `progress:` plus the entry's
+id. `progress` itself, `updatedAt` and `lastLoggedAt` are never parts.
+
+Each part has a fingerprint (the same hash as `fingerprint()`, over the part as
+loading would give it: `canonicalPiece`, so a piece compared after a reload
+reads the same). The device record keeps those fingerprints as of the last sync
+(`entry.parts`, [Accounts-and-Backend.md](Accounts-and-Backend.md#merging-by-part-pass-117));
+**no copy of the piece is kept**. Comparing a side's fingerprints with the
+recorded ones says which parts that side changed since the base.
+
+### The rule for each part
+
+| changed on this device | changed on the remote | result |
+|---|---|---|
+| no | no | nothing to do |
+| yes | no | this device's value stays |
+| no | yes | the remote's value is taken (a removed part is removed) |
+| yes, to value V | yes, to the same V | **agreement**, not a conflict |
+| yes | yes, to a different value | **a conflict for that part only** |
+
+A conflict is **never resolved here**: the merged piece keeps this device's value
+for it, and the result lists the part with both values (`conflicts[]`, each
+`{ part, kind, local, remote, ... }`). Pass 121 is the one that asks. Merging two
+sessions' ladder state inside one chunk is a conflict too, by design: a chunk
+logged on both sides is a conflict for that chunk and no other.
+
+`updatedAt` is the later of the two. `lastLoggedAt` is **recomputed from the merged
+piece's sessions** (the rule `validateAndMigratePiece` applies on every load), not
+"the later of the two": the app's undo leaves `lastLoggedAt` alone until a reload
+re-derives it, and a conflict keeps this device's chunk entry, so the later of the
+two can name a session the merged piece doesn't hold, and the merged piece would
+change on its next load. (Break test: taking the later of the two fails the
+simulation's invariant 4.)
+
+In `scheduleMode: "minutes"`, `daysToLearn` is **derived, never a conflict**: it
+is taken from whichever side changed it, the larger when both did, and the whole
+schedule is reconciled once more at the end (`reconcileMinutesPerDaySchedule`,
+which keeps a reschedule's extension as a floor). Both sides can honestly derive
+different day counts from different edits; only the merged inputs know the right
+one.
+
+### Parts that must travel together
+
+**The chunk grid against progress (the whole piece is one conflict).** If the sides
+disagree about any of `totalMeasures`, `chunkMode`, `customChunkSize` or
+`chunkSplitPoints`, and the side that did NOT change it changed a progress entry or
+the reschedule marker, the other side's entries are keyed by ids from a grid that no
+longer exists. Status `"whole-piece-conflict"`, `merged` is `local` untouched, and
+`wholePiece` carries both copies (Phase 1's question). *Refinement of the card's
+wording:* it fires only where the two sides' values **differ**. Two devices that made
+the identical split agree about the grid, so their progress entries mean the same
+chunks and merge normally.
+
+**The reschedule marker is NOT a rule, and was nearly one.** A marker is a snapshot of
+which chunks were still untouched when it was made. The pass's required test ("device
+A reschedules, device B logs a session on a chunk A's marker still lists") showed that
+merging the marker with B's session part by part leaves a chunk both listed in the
+marker and done, and the scheduler read the day that chunk is re-placed on as
+**behind** for good (it was done on the wrong day number: `classifyDayCompletion`
+judges a day by exact day, and excused "done elsewhere" only for days before the
+marker's). First answer: the marker and progress entries as one group, asked about.
+Final answer, once it was found that **one device cannot reach that state** (it logs a
+chunk only on its own card, and a marker lists only untouched chunks): the scheduler
+now reads a chunk done **earlier** than the remainder day it is placed on as not owed
+on that day ([below](#a-chunk-done-earlier-than-the-remainder-day-its-placed-on-pass-117)), and
+the merge asks nothing. The merged piece lists the chunk on its new day, unchecked,
+without counting the learner as behind; the next "Reschedule" drops it from the
+marker, as it drops anything done. Not done, deliberately: rewriting the marker at
+merge time to drop the chunk. A marker's contents decide where **every other**
+remainder chunk is placed, so removing one re-flows the plan under logs already made
+against the old placement.
+
+**Not grouped, and open:** `sections`, `measureDifficulty` and `totalMeasures` are
+rewritten together by a resize in Settings but are ordinary parts here, so a resize on
+one device against a difficulty or section edit on the other leaves an inconsistent
+kept piece (reported as a conflict, never silent). Logged with a proposed fix in
+[Decisions.md](Decisions.md#open-questions) (Merging by part: what is still open,
+item 1); so are the other open items (sidebar order and created date, revival,
+pieces with no recorded snapshot).
+
+### What it returns
+
+`planPieceMerge({ local, remote, base })` returns `{ status, merged, conflicts,
+wholePiece, fromRemote, fromLocal, agreed, derived, reason }`:
+
+- `"identical"`: both sides hold the same parts. `merged` is `local`.
+- `"local-only"`: the remote is what the base was (nothing of theirs to bring in).
+  `merged` **is `local`, the same object, untouched**, whatever the remote's
+  `updatedAt` says.
+- `"merged"`: the remote's changes were folded in; no conflict.
+- `"conflicts"`: folded in except the listed parts.
+- `"whole-piece-conflict"`: rule 1. `merged` is `local`.
+- `"ask"`: nothing says who changed what: **no recorded `parts`** (a piece with
+  changes waiting that was recorded before this pass), or two different ids.
+  `merged` is `local`; the caller falls back to Phase 1's behavior. A piece with no
+  parts but identical sides is still `"identical"`.
+
+Inputs are read in the form loading would give them, never modified, and nothing
+in the result aliases them; the merged piece is in that same loaded form, so
+`validateAndMigratePiece` leaves it unchanged. The same inputs always give the same
+result (key lists are sorted).
+
+### The simulation
+
+`test/pieceMerge.test.mjs` runs a seeded, deterministic simulation: two devices
+start from one piece (random size, sections, difficulty, days or minutes mode),
+each applies random edit sequences shaped like the app's own handlers (log or undo
+a session on a random chunk, edit a schedule or difficulty field, change status,
+rename, split a chunk, reschedule, add a focus spot, log time on one), then they
+sync in random orders with offline gaps (rounds of edits, then syncs in a random
+order, a device sometimes skipping a round or syncing twice). After **every** merge
+it checks, judging "changed" from the real pieces and not from the engine's
+fingerprints: (1) no session either device logged since the base is missing: it is
+in the merged piece or in a reported conflict's values; (2) a part changed on one
+side only ends with that side's value; (3) a part changed on both to different
+values is reported as a conflict, never silently chosen, and this device's value is
+kept; (4) the merged piece is unchanged by `validateAndMigratePiece`; (5) merging
+the same inputs again (cloned, so no cache can mask a difference) gives the same
+result; (6) merging when the remote equals the base returns this device's piece
+untouched. It also checks the chunk-grid rule independently of the engine.
+Seeds 1 to 300 with every kind of edit given a real share, and seeds 1 to 100 with an
+everyday mix (mostly sessions); the counts are in the Pass 117 entry of
+[Decisions.md](Decisions.md#accounts-and-backend) and the test prints them.
+
+## Merging the technique library by part (Pass 118)
+
+**The engine only. Nothing in the app calls it yet.** Backups, "Restore" and "Get
+changes" still merge the library the Pass 104 way (`mergeImportedTechnique`, see
+[Technique library (Pass 104)](#technique-library-pass-104)); Pass 120 is what uses
+this. It lives in `lib/techniqueMerge.js`: pure functions, no clock, no network, no
+React. It is [Pass 117's engine](#merging-by-part-pass-117) for the one other thing
+that syncs, and it shares its primitives (`fingerprint`, `toJsonValue`).
+
+**Why it is not the same engine.** Two copies of a piece can disagree about what a
+chunk id means, so a piece sometimes has to ask. The library has no chunk grid:
+every part of it can be put together without asking, so this engine **never returns
+a conflict list and never asks**. Where both devices changed the same thing to
+different values, the **account's value is kept and a notice says so** ("Your other
+device's change to D major was kept."). `mergeImportedTechnique` (needs no recorded
+"before", never removes anything) stays for backups and for a device with no
+recorded "before".
+
+### Parts
+
+Each part has a fingerprint (the same hash as everywhere, over the part as loading
+would give it: `canonicalTechnique`, which `lib/accountSync.js` re-exports). The
+device record keeps them as of the last sync (`entry.parts` on the technique entry,
+[Accounts-and-Backend.md](Accounts-and-Backend.md#the-technique-library-by-part-pass-118));
+**no copy of the library is kept**. A part holding its **default** is left out, so
+"no part" and "the default" are the same thing.
+
+| part key | what it is | left out when |
+|---|---|---|
+| `scale:<id>` | form, tonic, quality, minor form | never |
+| `starred:<id>`, `rotation:<id>` | starred; switched off | not starred; switched on |
+| `octaves:<id>`, `hands:<id>` | the two settings the Library edits | never |
+| `check:<id>` | tempo, check date, **the exact time it was logged** (`lastCheckedAt`) and check octaves, **together** (a tempo only means something over the octaves it was measured over) | never |
+| `lastPracticed:<id>` | last practiced date | never practiced |
+| `practicedOn:<id>:<date>` | **one practiced date** | not practiced that day |
+| `usedOn:<id>:<method>` | **the date one method was last used on one scale** | never used on it |
+| `methodStarred:<m>`, `methodOn:<m>` | a method's star and switch | the defaults (the app keeps an entry after toggling back; it reads the same as none) |
+| `customMethod:<id>` | a custom method's definition | |
+| `setting:scalesPerDay`, `setting:minutesPerScale` | the two settings | |
+| `walk` | the walk position | |
+| `taskDone:<date>:<id>` | a task is done: its tempo and undo note | the task isn't done |
+| `taskPlan:<date>:<id>` | a task's methods and tier | |
+
+A scale is its own set of parts (not one fingerprint per scale), so a star on one
+device and a tempo on the other, **on the same scale**, are two changes that don't
+touch. A date is a part of its own, and so is each method's last-used date on each scale,
+so that "added on one side" and "undone on the other" can both be told from "left
+alone" (an earlier version kept one list per scale and folded the two sides' lists
+together when both changed it: two devices that each undid a *different* use of one
+scale folded back into exactly the base, and merging the result again flipped it, which
+the wide simulation found at seed 2446).
+
+### The rule for each part
+
+Same table as a piece's: unchanged both, nothing; changed on one side only, that
+side's value (**an undo on one side travels the same way**, because it changes the
+same parts the check-off did); changed on both to the same value, agreement;
+changed on both to different values, one rule per kind:
+
+| part | both changed, differently |
+|---|---|
+| a scale's octaves or hands; each setting | **the account's value**, with a notice |
+| starred, switched off, a method's star or switch | cannot happen: changed on both sides means changed to the same other value |
+| the tempo check | the newer check date wins, with its check octaves; **an empty tempo never replaces a real one** (a "start fresh" keeps its date); the same date: a real tempo beats an empty one, otherwise **the one logged later, by its exact time** (a tempo with a time beats one saved before times existed; with no time on either, the account's). A notice only on the device whose different tempo (or check octaves) was dropped |
+| practiced dates | each date is three-way: added on either side is kept, undone on one side only is gone |
+| last practiced date | the later of the two |
+| the date a method was last used on a scale | the later date (each is its own part, so a use undone on one side only is gone, and a use added on either side is kept) |
+| a task's done state | done on both: done, with the details of the side that logged a tempo (of two tempos, the side the scale's own tempo came from). One side undid it and the other did it again: **whichever device's library changed most recently decides** (`updatedAt`; a tie keeps the completion), and if the undo wins, the tempo that completion logged goes back with it. (An undo the other side left alone simply travels.) |
+| a task's methods and tier | the account's, no notice |
+| the walk | the account's, then the check below |
+
+**Scales and custom methods are never removed** by a merge: one on one side only is
+kept, whichever side (the app has no way to delete one; switching a scale off is the
+`rotation` part). **Two scales added apart are two scales**, even for the same key:
+ids are what identify them (`mergeImportedTechnique` matches by content for
+backups; this does not). Order is the account's (the remote's), then what only this
+device has, so two devices end up with the same list.
+
+### Today's list
+
+- **Same date:** task by task. A task on one list only is **kept if the base never
+  had it** (it was added there, e.g. a scale added mid-day topped the list up) **or
+  changed there**; one the other side took off (the app does that when its scale is
+  switched off) that this side left alone is **taken off here too**. So a removal
+  travels like any change, and a task done on one side survives the other side's
+  removal.
+- **Different dates:** the later date's list wins whole. What was done on the earlier
+  day is already in the scales' own parts (dates, tempo, last used), so nothing is
+  lost.
+- **Two lists built apart on the same day** (both devices open the app before they
+  have synced) are put together, so the merged list **can have more tasks than
+  `scalesPerDay`**. Trimming is not done here (logged in
+  [Decisions.md](Decisions.md#open-questions)).
+- **An unfinished task of a switched-off scale is left alone.** The app itself leaves
+  one when a done task of such a scale is undone; the merge adds no rule of its own
+  (an earlier version dropped them, and the simulation showed that made "this device
+  changed nothing, so the merge is exactly the account's library" false).
+- **An undo against a redo is decided by which device changed its library last**
+  (`updatedAt`, the stamp the app writes on every change; a tie keeps the completion).
+  It is an approximation, and says so: the app doesn't record when an undo was made, so a
+  device that undid something and then changed something else counts as having changed
+  later. The loser gets the one-line notice. When the undo wins, the scale takes the
+  undone side's tempo check whole (the tempo that completion logged, with its time, goes
+  back); its dates, methods and walk step already go back with the ordinary one-sided
+  rules.
+- **A done task means its scale was practiced that day.** The scale's dates, last
+  practiced date and last-used methods are separate parts, so a completion that
+  stands on one side (undone and done again) can meet an undo of the same completion
+  on the other, and those parts would say it wasn't practiced. After the merge they
+  are put back to agree with the done task (`derived: ["practiced:<id>"]`). It only
+  ever adds.
+
+### The walk
+
+The walk steps **once** when a task in the key of the day is completed
+(`completeTask`). That step is now one function, `nextWalkPosition(items,
+walkPosition)` in `lib/technique.js` (the key of the day is the first walk position at
+or after the stored one that has a scale in rotation, and the step is the one after
+it), which `completeTask` uses and the merge uses. **Nothing was copied**: a test runs
+200 random libraries through both and checks they agree, and that a task not in the key
+of the day moves nothing.
+
+The walk is merged like any part. Then, because a done task keeps a note of the step it
+took (`undo.walkPosition` to `undo.advancedTo`), it is checked against the done tasks:
+**if the walk was taken from one side while a completion that stepped it came from the
+other, and the walk still stands where that step began, the step is taken now**, once
+per such task and chained (each starting where the last ended), with `nextWalkPosition`.
+`derived: ["walk"]` says it happened.
+
+- **Two devices that did the day's task agree on one step.** Each walked
+  `p -> p + 1`; same value on both sides is agreement, nothing is stepped
+  (`walkBothAdvanced` in the simulation).
+- **A side's own walk already holds its own steps**, so a step is only looked at when
+  it came from the *other* side. This is also why a library with so few keys that a
+  day's steps go round in a circle (two keys, three tasks) is safe: nothing of one
+  side's own history is ever "repaired".
+- **Where it fires** (reachable by a merge, not by one device): one device undoes a
+  completion (its walk goes back) while the other undoes it and does it again (its
+  walk is back where the base had it, so it looks unchanged); the merged task is done,
+  the taken walk is the first device's stepped-back one, and the step is taken. And the
+  two-walks case: one device stepped twice, the other once, the account's (shorter)
+  walk is taken and the other step is added.
+- **Not what the card said, and why:** "if a task in the key of the day is done on
+  either side and the merged position hasn't advanced for that day, advance once".
+  That condition fires on a perfectly ordinary state: a scale in the *next* key done
+  out of turn earlier in the day, then the walk steps onto its key. Using each done
+  task's own step note (and only the other side's) fires on merge-made gaps only.
+- **Left as it is, deliberately:** two devices that each did a task for a *different*
+  day before syncing both step `p -> p + 1`, which is agreement, so the walk steps once
+  for two days (it under-steps by one; it revisits a key rather than skipping one).
+
+### What it returns
+
+`planTechniqueMerge({ local, remote, base })` returns `{ status, merged, notices,
+resolved, fromRemote, fromLocal, agreed, derived, list, reason }`:
+
+- `"identical"`: both sides hold the same parts. `merged` is `local`.
+- `"local-only"`: the remote is what the base was. `merged` **is `local`, the same
+  object, untouched**.
+- `"merged"`: the remote's changes were folded in. `notices` lists, in plain words,
+  where this device's different change was dropped for the account's (`part:
+  "scale" | "setting" | "tempo"`, with the scale's title and the `text` to show);
+  `resolved` is every part both sides changed differently and whose value came out.
+- `"ask"`: `reason: "no-base"` (no recorded `parts`) or `"not-libraries"`.
+  `merged` is `local`; **the caller falls back to `mergeImportedTechnique`**, which
+  needs no base.
+
+`base` is the entry's `parts`. Inputs are read in the form loading would give them,
+never modified, and nothing in the result aliases them; the merged library is already
+in that form, so `validateAndMigrateTechnique` leaves it unchanged, and `updatedAt` is
+the later of the two. The same inputs always give the same result.
+
+### The simulation
+
+`test/techniqueMerge.test.mjs` runs a seeded, deterministic simulation: two devices
+start from one library (4 to 11 scales in random keys, forms and octaves, some with
+tempos and practiced dates, a random walk position, a day's list built by the real
+`buildDayList`), each applies random edit sequences shaped like the app's own handlers
+(check off, log a tempo, undo, star, switch off or on, change octaves or hands, change
+the check octaves keeping or starting fresh, add a scale, star or switch off a method,
+add a custom method, change a setting), the clock moves on by a day between some
+rounds, and they sync in random orders with offline gaps (a device sometimes skipping a
+round or syncing twice, sometimes syncing before it has opened on the new day). After
+**every** merge it checks, judging from the real libraries and the base the device
+remembers, never from the engine's fingerprints: no scale is lost; each setting follows
+the three-way rule; **no tempo is lost** (an empty one never replaces a real one, the
+newer check wins, and of two tempos on the same day the one logged later by its exact
+time); **no practiced date is lost** except one undone on one side only;
+**a completion survives unless it was undone on one side only, or the undo was the more
+recent change** (a one-sided undo travels, done on both is done, an undone-and-redone
+completion goes to whichever device's library changed last, and a winning undo takes
+the tempo it logged back with it); the **walk is a side's own value unless a step was repaired, is agreed
+when both sides agree, and is always a position reached by taking each done task's
+step note at most once** (two devices that did the same day's task hold a step from the
+same place, and only one of them can be used; a step of one device and the next step of
+the other chain, so the walk can legitimately stand past both devices' own); methods,
+custom methods and settings follow their rules; today's list is the later day's, or the
+task-by-task merge; a done task shows its practice; the merged library is unchanged by
+`validateAndMigrateTechnique`; the same inputs (cloned) give the same result; **merging
+the result with the same remote again changes nothing**; **merging when the remote
+equals the base returns this device's library untouched** (same object); **when this
+device changed nothing, the merge is exactly the remote's library**; and at the end
+**both devices and the account hold one library**. Seeds 1 to 300 with every kind of
+edit, and 1 to 100 with an everyday mix (mostly check-offs and tempos); the counts are
+in the Pass 118 entry of [Decisions.md](Decisions.md#accounts-and-backend) and the test
+prints them.
 
 ## Adaptive review
 
@@ -2977,6 +3327,42 @@ the catch-up scan, leaving `classifyDayCompletion` alone. That would have
 left two definitions of "behind" that can disagree (Timeline's ✓ vs. the
 banner), the exact duplication Pass 45/74 worked to remove.
 
+### A chunk done earlier than the remainder day it's placed on (Pass 117)
+
+**Found by:** the merge engine's required test (a reschedule on one device, a
+session on another;
+[Merging by part](#merging-by-part-pass-117)). Not reachable on one device.
+
+**The state:** a reschedule marker lists chunk c9 (it was untouched when the marker was
+made), the remainder places c9 on day 13, and c9 is done on a day **before** 13 (the
+other device logged it on its own, earlier, schedule). `classifyDayCompletion` judged a
+day by the exact day number, and `movedIdsForDay` returns nothing for a day at or after the
+marker's `asOfDay`, so day 13 read **"behind"** once it passed, whatever else was done,
+and could never clear. (One device can't get here: it logs a chunk only on its own day's
+card, and a marker lists only untouched chunks. Reproduced with a hand-built piece.)
+
+**Fix:** `classifyDayCompletion` skips an introduction/connector id on a day at or after
+the marker's day when that id has a done-day **earlier than the day itself**, before it
+judges the day. A day with nothing left reads `"empty"`, like a swept day. Deliberately
+narrow:
+- **Earlier only.** A chunk done on a *later* day than its placement was late, and the
+  day stays behind, exactly as before (the strict "exact day" rule is the Pass 45 design).
+- **Not reviews** (`reviewChunkIds`): a chunk under review always has earlier done-days;
+  the same mistake Pass 75's follow-up caught for `movedIdsForDay`.
+- **Only with a marker, only at or after its day.** Days before the marker's day are
+  `movedIdsForDay`'s (it already excuses a chunk done on any other day there); a piece
+  that was never rescheduled is unchanged.
+
+The display is untouched: the day still lists c9 (unchecked); it just doesn't count the
+learner as behind. Hiding it would need `movedIdsForDay`'s "Tasks rescheduled" label
+rethought for days that were placed by the reschedule itself. Not done.
+
+**Alternatives rejected:** asking about it in the merge (the marker-and-progress group:
+built first, removed); dropping the chunk from the marker at merge time (a marker's
+contents decide where every other remainder chunk goes, so removing one moves chunks the
+learner has already logged against their old days). Tests: `[regression, Pass 117]` in
+`test/scheduling.test.mjs`, each boundary above broken on purpose and caught.
+
 ## Revival
 
 Data shapes: [Data-Model.md](Data-Model.md#revival). Recovering a piece that
@@ -3947,11 +4333,14 @@ library of methods. Methods are recorded as used only by `completeTask`.
 
 ### Completing, tempo, and octaves
 
-- `completeTask(state, itemId, today, tempo?)` returns new state (inputs
+- `completeTask(state, itemId, today, tempo?, now?)` returns new state (inputs
   untouched). It marks the task done, sets `lastPracticedDate` and appends
   to `practicedDates` (trimmed to 14 days), records the task's methods as
-  used, and may advance the walk. With a tempo it also sets `evenTempo` and
-  `lastCheckedDate`; a bare check-off leaves both alone.
+  used, and may advance the walk. With a tempo it also sets `evenTempo`,
+  `lastCheckedDate` and (Pass 118) `lastCheckedAt`, the exact time it was
+  logged, which the caller passes as `now` because this file has no clock (no
+  `now`: stored as unknown, never guessed); a bare check-off leaves all three
+  alone.
 - `startingTempo(item)` = `round(evenTempo × 0.85)`, or `null` with no
   tempo.
 - `changeCheckOctaves(item, n, choice?)` returns `"unchanged"`, `"applied"`
@@ -3961,8 +4350,8 @@ library of methods. Methods are recorded as used only by `completeTask`.
 
 - **Undo (Pass 101):** `completeTask` stores an `undo` snapshot on the
   task: the walk position before and the position it advanced to, the
-  item's `lastPracticedDate`/`practicedDates`/`evenTempo`/`lastCheckedDate`,
-  and each of the task's methods' previous last-used date. `uncompleteTask`
+  item's `lastPracticedDate`/`practicedDates`/`evenTempo`/`lastCheckedDate`/
+  `lastCheckedAt`, and each of the task's methods' previous last-used date. `uncompleteTask`
   puts them back and marks the task not done. The walk is only stepped
   back if it still sits where this completion left it, so undoing an
   earlier task never rewinds a later one's step. Star, rotation and octave

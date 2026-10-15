@@ -1004,7 +1004,8 @@ changes.
   it to decide which side is newer** (grepped `lib/` and `App.jsx`: it's written
   in `updateTechnique`, passed through `validateAndMigrateTechnique`, and that's
   all). Today's list (`dayList`) and the walk position still count as changes,
-  on purpose: Pass 118 decides how those merge. Piece fingerprints are
+  on purpose: Pass 118 decided how those merge (an engine only, not yet used;
+  [below](#the-technique-library-by-part-pass-118)). Piece fingerprints are
   unchanged, so no piece re-uploads. **The technique fingerprint changes once,
   so each device uploads its library once after this ships** (the library's
   revision rises by one), then stays still (tested, including a new stamp).
@@ -1013,6 +1014,238 @@ changes.
   Ballade No. 1. Everything else backed up 3 hours ago." With changes waiting:
   "... Ballade No. 1. 2 changes waiting to back up." "The account service isn't
   answering" still replaces both.
+
+## Noticing that another device changed something (Pass 116)
+
+The first piece of Phase 2: the app now **notices**, quietly, that the account
+holds something this device hasn't got. It never applies anything. "Get changes
+from your account" works exactly as in Pass 112, and is still the only way a
+change arrives.
+
+- **A light read** (`checkAccountChanges`, `lib/accountSync.js`). From `pieces`
+  only `id, revision, deleted_at`, paged 50 at a time exactly the way
+  `countLiveAccountPieces` pages; from `technique` only `revision`. It never
+  selects the `data` column, so it costs a few hundred bytes however big the
+  pieces are. It never throws and reports the same stopped reasons the other
+  reads do (`connection`, `signed-out`, `other`). A 5xx, a 408/429 or no answer
+  at all is `connection` (it reuses the uploads' `failureKind`), because the
+  service answering with an error looks the same as it not answering.
+- **A pure sorter** (`classifyAccountChanges({ rows, accountRecord,
+  localPieceIds })`). Every piece lands in at most one list:
+  `held` (already held as "changed on another device": known, shown by its own
+  message, never counted again, whether or not it is also newer or deleted);
+  `newer` (the account holds a live row at a higher revision than the record
+  says this device last saw); `added` (a live row this device has neither a
+  piece nor a record entry for); `deleted` (a row marked deleted that this
+  device still holds); `needsReview` (this device holds it, the account has a
+  live row, and the record has no revision for it: Pass 110's "different at
+  first backup"). Plus `techniqueNewer` / `techniqueHeld` for the technique row.
+  **A device's own upload is never newer**: the record takes the revision the
+  moment the account confirms an upload, so the row and the record agree
+  (tested end to end with a real upload through the stand-in database). A piece
+  this device deleted (a record entry, no piece) is never "added", and a row
+  *behind* the record's revision is never "newer". `needsReview` is worked out
+  but not shown anywhere yet.
+- **When it runs.** Only while signed in AND once this device's first backup is
+  checked (the same gate as the uploads); never while the page is hidden; never
+  while an upload run, a manual backup or "Get changes" is running (it looks
+  again two seconds later). Triggers: at startup once sign-in is known (4
+  seconds after, so an upload that is waiting goes first); the window regaining
+  focus or the page becoming visible, **at most once a minute** (a return to
+  the window fires both events; they make one request); the browser's online
+  event, at once; and every five minutes while the page is visible (the page
+  asks once a minute whether one is due, which is only a look at the clock).
+  The throttle lives in `createAccountChecker`, so every trigger meets the same
+  rule and two checks never run at once; `checkIsDue` is the rule. Signed out,
+  or on a build with no account service, no timer starts any request and the
+  account library isn't loaded.
+- **Rows read while this device was writing are not believed.** A check that
+  overlaps an upload could read the row *after* the upload landed but sort it
+  *before* the record knows, which would read as "newer". So the result is
+  thrown away if an upload, a backup or "Get changes" is running when it
+  returns, or the device record changed while it read (`checkRowsUsable`). The
+  next trigger simply tries again.
+- **A failed check is not an error.** It counts toward the same "isn't
+  answering" count the uploads use (after two in a row the status line says so;
+  it shows no error of its own), and a good one starts the count again, as a
+  good upload does. Without that reset, a count raised by checks alone (nothing
+  waiting to upload) could never clear.
+- **The line.** One added status line in the Account panel, under the
+  backed-up line: **"Changes from another device: 3 pieces. Press Get
+  changes."** (or "...: 1 piece and the technique library." / "...: the
+  technique library."). It counts `newer` + `added` + `deleted`; held and
+  needs-review pieces have their own messages. No banner, no sidebar mark. The
+  last light read is kept, and **re-sorted against the device record every
+  time the status is refreshed** (`syncSnapshot({ accountRows })`), so the line
+  goes away on its own once uploads or "Get changes" bring the record up to date,
+  without another request.
+- **Where the code is.** The read, sorter, throttle, outcome and wording are in
+  `lib/accountSync.js` with tests (`test/accountSync.test.mjs`). `App.jsx` has
+  only the scheduling ("Noticing that another device changed something (Pass
+  116)", beside the upload scheduler), and `SettingsTab.jsx` the extra line.
+- **Found, not fixed** (for the passes that follow): (1) **A lost confirmation
+  can flash the line.** If an upload lands but its confirmation is lost, the
+  record is one revision behind the row until the next upload attempt adopts it
+  (Pass 115), so the line can say "1 piece" for up to a retry gap. It corrects
+  itself. (2) **The technique library will often read "newer".** Each device
+  rebuilds today's list and moves the walk position on its own and uploads, so
+  two devices in use keep bumping each other's revision. That is the
+  per-device-parts problem Pass 118's engine settles part by part (not yet used;
+  Pass 120 wires it in). (3) **A piece the person declines
+  in "Get changes" (an unticked new piece) is noticed again on every check**,
+  the same family as the declined combine; it needs the remembered "no" of Pass
+  122. (4) **A piece deleted here and changed elsewhere** (a record entry marked
+  deleted here, a live row at a newer revision) is not reported; deletions are
+  Pass 122. (5) The light read is paged by offset, so a row inserted between two
+  pages can be missed or repeated for one check; the next check corrects it.
+- **Checked** (my own runs; the owner's checks on the preview are in the pull
+  request): unit tests for each rule above; four deliberate breakages, each
+  caught (the check also selecting `data`, a device's own confirmed upload
+  counted as newer, no one-minute throttle on focus, a held piece also counted
+  as newer); and in a browser, the real app and library against a throwaway
+  local stand-in for the database (not committed): a page that is hidden makes
+  no request in over two minutes; a return to the window makes exactly one
+  check (`select=id,revision,deleted_at`, then `select=revision`) and two more
+  focus events seconds later make none; a piece edited, a piece added, a piece
+  deleted and the technique row bumped "elsewhere" each show in the line; "Get
+  changes" shrinks the line without another request (and a piece left unticked
+  keeps being noticed, see above); the device's own uploads never show; the
+  service stopped shows "isn't answering" after the second failed check and no
+  error line of its own, and coming back clears it; with no account service
+  configured, even with a saved session and device record present, no request
+  at all. **Not seen on the real test project**: that needs the owner's sign-in
+  and a second window.
+
+## Merging by part (Pass 117)
+
+The engine for merging two copies of one piece part by part, **and nothing else**:
+no merge uses it yet ("Get changes" and Review still go through Phase 1's whole-piece
+import merge; Pass 120 wires the engine in, Pass 121 asks the question). How it
+works, the rules, and the simulation that checks it are in
+[Algorithms.md](Algorithms.md#merging-by-part-pass-117). What this pass changes
+about the account code:
+
+- **The device record's entry for each piece gains `parts`**: `{ part: fingerprint }`,
+  one for every top-level field except `progress`/`updatedAt`/`lastLoggedAt`, and one
+  per progress entry (`progress:<id>`), **as last synced with the account**. No copy of
+  the piece is kept, only labels. `cleanEntry` reads it back only beside a recorded
+  revision, and only text values (an unreadable `parts` is dropped, which makes the
+  piece "ask", never wrong).
+- **Written wherever the record already records a piece:** a confirmed upload
+  (`withPieceUploaded`, the parts of exactly what was sent), the first backup
+  (`backUpDevice`), a restore or "Get changes" (`applyAccountMerge` ->
+  `withAccountCopyRecorded`: the parts of the **account's copy**, not of whatever this
+  device holds on top of it, because that is the state this device is synced to), and a
+  refusal adopted as "the same" (the current copy). **One deliberate gap:** an adopted
+  row that is only an *earlier version of this device's own piece* (Pass 115's `sent`
+  match) is recorded with its content fingerprint but **no `parts`**, since they would
+  describe a copy this device no longer holds; the immediate retry that follows records
+  them when it confirms.
+- **Pieces recorded before this pass have no `parts`.** A quiet step at startup
+  (`withPartsRecorded`, `App.jsx`, once when pieces have loaded and accounts are on,
+  no network) records them for every piece whose fingerprint still equals its
+  record's: nothing has changed since the last sync, so this device's copy IS the
+  synced state. A piece with changes waiting is left alone and gets its parts at its
+  next confirmed upload; until then the engine answers `"ask"` for it. It works for
+  every account in the record. Nothing about what's waiting changes (tested).
+- **The comparing primitives moved.** `fingerprint`, `canonicalPiece` and the helpers
+  under them now live in `lib/pieceMerge.js`, which the account code imports and never
+  the other way round (the engine must not import the network code, and Pass 120 will
+  make the account code import the engine); `lib/accountSync.js` re-exports them, so
+  nothing that imported them changed. `canonicalPiece` now caches its result per piece
+  object (like the fingerprint cache, relying on pieces never being edited in place);
+  treat what it returns as read-only.
+- **Size.** For the owner's 25 real pieces (the 2026-10-10 export): the device record
+  was **2,201 bytes** and is **49,978 bytes** with parts (+47,777; 36 to 86 parts a piece,
+  41 on average, 1,032 in all). It is written whole on every confirmed upload and read
+  on every status refresh: reading it costs about 0.17 ms, and the startup step for all
+  25 pieces about 9 ms. If it ever matters, a part's label could be one 53-bit hash
+  instead of two (31 per cent smaller on these pieces); not done, because a false "unchanged" in
+  a merge decision is the worse error.
+- **Checked on the real export** (counts only, no piece data printed; nothing is
+  uploaded or stored): each of the 25 pieces, run through the engine as `local` and as a
+  copy with one session added to a different chunk on each side: merged cleanly, every
+  session present, no conflict, unchanged by `validateAndMigratePiece`, and the same with
+  the two sides swapped (25 of 25 each). As a control, one session added to the **same**
+  chunk on both sides is a conflict for that chunk only (25 of 25).
+- **Not built, on purpose** (see the pass's deferred list): using the engine from "Get
+  changes" or anything automatic (120), the question the person is asked (121), the
+  technique library (118), deletions (122).
+
+## The technique library by part (Pass 118)
+
+The engine for merging two copies of the technique library part by part, **and
+nothing else**: no merge uses it yet (backups, "Restore" and "Get changes" still use
+`mergeImportedTechnique`, unchanged; Pass 120 wires the engine in). How it works, the
+rules, the walk and the simulation are in
+[Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118); what
+people will see of it is in [Technique-Practice.md](Technique-Practice.md#on-more-than-one-device-pass-118).
+What this pass changes about the account code:
+
+- **The technique entry in the device record gains `parts`**: `{ part: fingerprint }`,
+  as last synced with the account, exactly as a piece's entry does since Pass 117 (no
+  copy of the library is kept, only labels; `cleanEntry` reads it back only beside a
+  recorded revision, and only text values). The parts are listed in
+  [Algorithms.md](Algorithms.md#parts-1): per scale (its settings, its tempo check, its
+  practiced dates one by one, the date each method was last used on it), per method, the two settings, the
+  walk, and per task on today's list (by date and scale).
+- **Written wherever the record already records the library:** a confirmed upload
+  (`withTechniqueUploaded`, the parts of exactly what was sent), the first backup
+  (`backUpDevice`), and a restore or "Get changes" (`applyAccountMerge` ->
+  `withAccountCopyRecorded`: the parts of **the account's copy**, not of whatever this
+  device holds on top of it). **The same deliberate gap as for a piece:** an adopted
+  row that is only an *earlier version of this device's own library* is recorded
+  without `parts` (they would describe a copy this device no longer holds); the
+  immediate retry that follows records them when it confirms.
+- **A library recorded before this pass has no `parts`.** `withTechniquePartsRecorded(record,
+  technique)` (pure, `lib/accountSync.js`) records them for every account whose entry
+  still equals this device's library (nothing has changed since the last sync, so this
+  copy IS the synced state), for every account in the record, and leaves a library
+  with changes waiting alone. **`App.jsx` does not call it yet**: that one line belongs
+  beside the startup step for pieces (`withPartsRecorded`), and `App.jsx` was outside
+  this pass's list, so it is for Pass 120. Until then such an entry gets its parts at
+  its next confirmed upload, and the engine answers `"ask"` (and the caller falls back
+  to `mergeImportedTechnique`) for it. Nothing about what's waiting changes (tested).
+- **`canonicalTechnique` moved** to `lib/techniqueMerge.js`, which the account code
+  imports and never the other way round (as for `canonicalPiece`); `accountSync.js`
+  re-exports it, so nothing that imported it changed. It is **not cached** (a library is
+  small, and a caller may change an object between calls); a test pins that
+  `accountSync.canonicalTechnique` is the one function.
+- **"The same by parts" is not "the same fingerprint".** A method switched on and off
+  again leaves an entry holding the defaults; the parts call that the same as no entry
+  (so two such libraries are `"identical"`), but the whole-library fingerprint
+  (`techniqueFingerprint`) still tells them apart. **Pass 120 must read `"identical"` as
+  in sync** (record the account's revision, don't upload) rather than expect the
+  fingerprints to match; a test pins the difference so it can't be missed.
+- **Size.** For the owner's real library (48 scales, the 2026-10-10 export): **260
+  parts, 14,805 bytes** in the device record, on top of the pieces' 50 KB (Pass 117).
+  Computing them takes about 1 ms and one merge about 2 ms. The main download grew
+  by about 2.5 KB (0.8 kB gzipped); the separate sign-in library file is unchanged.
+- **The library's whole fingerprint changes once.** Every scale gains `lastCheckedAt`
+  (the exact time a tempo was logged, empty for one saved before this), so
+  `techniqueFingerprint` reads every existing library as changed and **each device
+  uploads its library once after this ships** (the same one-off as Pass 115's
+  `updatedAt` change). `lastCheckedAt` is part of the `check` part, so nothing else about
+  the parts changes (still 260 for the real library). A device running the previous build
+  drops the field when it loads a library (its loader doesn't know it), so the "later
+  logged tempo wins" rule has nothing to compare for a tempo that device logged; the
+  site is one build, so this only lasts until its page reloads.
+- **Checked on the real export** (counts only; no scale, tempo or date printed;
+  nothing uploaded or stored): the technique block merged with a copy where one scale is
+  starred on one side and a different scale is checked off, at a tempo, on the other:
+  merged with no notice and nothing to decide, all 48 scales kept, starred 0 to 1, done
+  0 to 1, tempos 10 to 11, practiced dates 10 to 11, methods last used 40 to 44, nothing
+  went backwards, unchanged by `validateAndMigrateTechnique`, the same library whichever
+  device does the merge, merging the result again changes nothing, and a remote equal to
+  the base returns this device's library untouched. The walk, on the same library: the
+  same key-of-the-day task done on both devices steps it once (not twice), and an undo on
+  one device travels (the walk goes back with it). That library's list has only one task
+  that steps the walk, so "two different tasks in the key, one on each device" was
+  exercised by the tests and the simulation, not on this data.
+- **Not built, on purpose** (see the pass's deferred list): using the engine from "Get
+  changes" or anything automatic (120), showing the notices (120), a per-device setting
+  for scales per day, trimming a merged list down to `scalesPerDay`, combining two
+  scales added apart for the same key, and any change to how backups merge the library.
 
 ## Setup (test project)
 

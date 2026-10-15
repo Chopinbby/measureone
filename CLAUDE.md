@@ -260,6 +260,14 @@ chunking, scheduling, and confidence are actually computed, see
   builds `chunkById` from whatever chunk set it
   already has in scope — a new call site should do the same rather than
   relying on the default.
+- **A chunk done EARLIER than the rescheduled-remainder day it is placed on isn't
+  owed on that day (Pass 117, `classifyDayCompletion`).** Only introductions and
+  connectors (never reviews), only on a day at or after the marker's `asOfDay`, only
+  for an EARLIER done-day (a later one was late and stays behind, as before), and
+  never without a marker. It exists for merged pieces (one device can't reach that
+  state); narrowing or widening it fails a `[regression, Pass 117]` test in
+  `test/scheduling.test.mjs`. See
+  [`docs/Algorithms.md`](docs/Algorithms.md#a-chunk-done-earlier-than-the-remainder-day-its-placed-on-pass-117).
 - **A past day is judged only on what's still *owed* on it — tasks a
   reschedule already moved away never count against it.**
   `classifyDayCompletion` drops every id `movedIdsForDay` reports before
@@ -2249,3 +2257,169 @@ themselves. Nothing fetches or applies the account's changes yet (Passes 116,
 - **The Account status line shows held and the normal line together**; "not
   answering" still replaces both. See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115).
+
+**Since Pass 116**, the app **notices**, quietly, that another device changed
+something, and says so with one added line in the Account panel ("Changes from
+another device: 3 pieces. Press Get changes."). **Nothing is applied**: "Get
+changes from your account" is still the only way a change arrives, and works
+exactly as in Pass 112. Five things worth knowing:
+- **The check reads only `id, revision, deleted_at` from `pieces` (paged like
+  `countLiveAccountPieces`) and only `revision` from `technique`, never the
+  `data` column** (`checkAccountChanges`, `lib/accountSync.js`). A test asserts
+  the recorded selects; keep it that way, because the check repeats every few
+  minutes for as long as the page is open.
+- **When it runs is decided in the library, not in `App.jsx`**:
+  `createAccountChecker` / `checkIsDue` hold the throttle (focus or visible at
+  most once a minute, every 5 minutes on the clock, startup and online always,
+  never hidden, never two at once). `App.jsx`'s `requestCheck` only adds the
+  gates that need app state: signed in, first backup checked, and no upload run,
+  manual backup or "Get changes" running. A new trigger goes through
+  `requestCheck`, never straight to `checkAccountChanges`.
+- **`classifyAccountChanges` is revision-only, and "own upload is never newer"
+  rests on one fact: the record takes the revision when the account confirms an
+  upload.** So a result is not believed if an upload, backup or "Get changes" ran
+  while the check was reading (`checkRowsUsable`, discarded and retried by the
+  next trigger). Held pieces go in `held` only, never also `newer`/`deleted`
+  (they already have their own message). A piece this device deleted is never
+  `added`.
+- **Keep the light rows, not the text.** `App.jsx` keeps the last read
+  (`checkRowsRef`) and `refreshSyncInfo` re-sorts it against the device record
+  every time (`syncSnapshot({ accountRows })`), so the line shrinks on its own
+  after uploads or "Get changes". Don't store the sentence.
+- **A failed check shares the uploads' failure count** (after two in a row the
+  status says "isn't answering") and shows no error of its own; a good check
+  resets the count, otherwise a count raised by checks alone could never clear.
+  Not built, on purpose (see
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116)):
+  applying or merging anything (117 to 120), deletions (122), live push.
+
+**Since Pass 117**, there is an engine for merging two copies of a piece **by
+part** instead of by whole piece (`src/lib/pieceMerge.js`, new), and the device
+record remembers what each part looked like at the last sync. **Nothing uses the
+engine yet**: "Get changes" and Review still go through Phase 1's whole-piece
+import merge (Pass 120 wires the engine in, Pass 121 asks the question, 118 does
+the technique library, 122 deletions). Seven things worth knowing:
+- **What a part is:** every top-level field except `progress`, `updatedAt` and
+  `lastLoggedAt`, and each `progress` entry on its own (key `progress:<id>`: chunk
+  ids, transition/combo ids, `__consolidation__`, `__cold_start__`, `sr_<sectionId>`).
+  A NEW top-level field is a part automatically; a new field that is derived on
+  load (like `lastLoggedAt`) must be re-derived by the engine or the simulation's
+  invariant 4 fails.
+- **The device record's entry gains `parts`** (`{ part: fingerprint }`, no copy of
+  the piece), written wherever a piece is recorded: a confirmed upload, the first
+  backup, a restore or merge (the parts of the **account's** copy), a refusal adopted
+  as "the same". **A new place that records a piece must record its parts** or that
+  piece will "ask". An adopted row that is only an earlier version of this device's
+  own piece records none, on purpose. A quiet startup step (`withPartsRecorded`,
+  `App.jsx`) records them for pieces that still equal their record.
+- **`fingerprint` and `canonicalPiece` now live in `pieceMerge.js`** (re-exported by
+  `accountSync.js`): the engine never imports the account code, so the account code
+  can import the engine later without a cycle. `canonicalPiece` caches per object and
+  returns a SHARED result: read-only.
+- **Per part:** changed on one side only, take that side; changed on both to the same
+  value, agreement; to different values, a conflict for that part only, this device's
+  value kept and both values listed. **A conflict is never resolved in the engine.**
+  `status: "local-only"` returns `local` itself (the same object) untouched.
+- **One "travel together" rule:** the sides disagree about
+  `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
+  changed progress or the marker: one **whole-piece** conflict. **The reschedule marker
+  is not a merge rule.** The pass's required test (A reschedules, B logs a chunk the
+  marker lists) left a chunk both listed and done, which the scheduler read as a
+  "behind" day for good; that state can't be reached on one device, so the fix is in
+  the scheduler (`classifyDayCompletion` reads a chunk done EARLIER than its remainder
+  day as not owed; see "Rules that matter"), and the merge asks nothing. Don't rewrite
+  the marker at merge time: it re-flows every other chunk the marker places.
+- **Derived, not chosen:** `lastLoggedAt` is recomputed from the merged sessions (not
+  "the later of the two"), and in `scheduleMode: "minutes"` `daysToLearn` is the larger
+  of the two and then reconciled. Both were forced by invariant 4.
+- **The simulation is the safety net** (`test/pieceMerge.test.mjs`: seeded two-device
+  runs, six invariants after every merge). Any change to the engine must keep it green
+  on seeds 1 to 300, and a re-break that doesn't fail it means a hole in the
+  simulation. See [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117)
+  and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 117, five
+  calls awaiting the user's confirmation).
+
+
+**Since Pass 118**, there is an engine for merging two copies of the **technique
+library** by part (`src/lib/techniqueMerge.js`, new), and the device record's
+technique entry remembers what each part looked like at the last sync (`parts`, like a
+piece's). **Nothing uses the engine yet**: backups, restore and "Get changes" still
+merge the library with `mergeImportedTechnique` (`lib/storage.js`; Pass 120 wires the
+engine in; the one change to it is that `lastCheckedAt` moves with the tempo). Unlike a
+piece, the library is **always** mergeable: no conflict list, no question; where both
+sides changed the same octaves, hands or setting to different values the account's value
+is kept and a notice says so. **The user confirmed the pass's calls on 2026-10-15** and
+changed two (below). Nine things worth knowing:
+- **What a part is** (`techniquePartKey`): per scale its settings (`starred`,
+  `rotation`, `octaves`, `hands`), its tempo check (tempo, check date, **the exact time
+  it was logged** and check octaves, **together**), its last practiced date, **each practiced date on its own**, and its
+  last-used date for each method (**one part per scale and method**); per method its star and switch; each custom method; the two
+  settings; the walk; per task on today's list (by date and scale) its done state and
+  its plan. **A part holding its default is left out** (a scale not starred, a task not
+  done, a method with the default entry the app keeps after toggling back), so "no
+  part" and "the default" are the same thing. **A new field on a scale, a method, the
+  settings or a task must be given a part** (`partsOfCanonical`) or a change to it is
+  invisible to a merge, and the simulation's per-field checks must learn it.
+- **Per part:** changed on one side only, take that side (**an undo travels the same
+  way**: it changes the same parts the check-off did); same value on both, agreement;
+  different values, a rule per kind (octaves, hands and the settings: the account's with
+  a notice; the tempo check: newer check date wins, **an empty tempo never replaces a
+  real one**, and on the same date **the one logged later by its exact time** (a time
+  beats none; no time on either: the account's); dates: three-way per date; a method's
+  last-used date: three-way, later date when both changed it (**an earlier "one list per
+  scale, folded" version failed "merging twice gives the same result"**); a task: done on
+  both is done; **undone on one side and done again on the other: whichever device's
+  library changed most recently (`updatedAt`) decides, a tie keeps the completion, and if
+  the undo wins the scale takes that side's tempo check, so the tempo goes back with
+  it**). A yes/no part can't conflict.
+  Scales and custom methods are **never removed**; two scales added apart stay two.
+- **Today's list:** same date merges task by task (a task on one list only is kept if
+  added or changed there, **taken off if the other side took it off and this side left
+  it alone**: "kept always" made a removed task come back on every merge); different
+  dates, the later list wins whole. **Two lists built apart can add up to more than
+  `scalesPerDay`** (open). **Don't add a rule that drops an unfinished task of a
+  switched-off scale**: the app's own undo leaves one, and the rule broke "this device
+  changed nothing, so the merge is exactly the account's library".
+- **The walk's advance step is one function now**, `nextWalkPosition(items,
+  walkPosition)` / `walkStepPast` in `lib/technique.js`, used by `completeTask` and by
+  the merge (a 200-library test pins them together); don't inline it again. The merge
+  steps the walk **once**, only for a step whose completion came from the OTHER side
+  than the walk's value and which still stands where it began (`settleWalk`). **Two
+  devices that did the day's task agree on one step; "advance once per side" breaks it**
+  (re-broken on purpose: 12 tests fail). The first version, using every done task's step
+  note, stepped the walk on a library where both devices already agreed (seed 51).
+- **A done task puts its scale's day, last practiced date and last-used methods back**
+  if the merge left them out (an undo on one side meeting a redo on the other). It only
+  adds.
+- **`lastCheckedAt` (the exact time a tempo was logged) is a stored scale field now**
+  (the user chose "Exact now", 2026-10-15, so the later of two same-day tempos wins by
+  its real time). It lives in `normalizeTechniqueItem` and the undo snapshot
+  (`lib/storage.js`), is set by `completeTask(state, itemId, today, tempo, now)`
+  (`lib/technique.js` has no clock: the caller passes `now`; `App.jsx`'s
+  `handleTechniqueComplete` passes `Date.now()`), and moves with the tempo in
+  `mergeImportedTechnique`. **Any new place that logs a tempo must pass the time**, or
+  that tempo can't win a same-day tie. Empty (null) means "saved before this existed";
+  never guess it. The library's whole fingerprint changed once, so each device uploads
+  its library once after this ships.
+- **`status: "identical"` means identical BY PARTS, not by fingerprint.** A method
+  toggled back leaves a default-holding entry the whole-library fingerprint still sees
+  (`techniqueFingerprint`) and the parts don't. **Pass 120 must treat `"identical"` as in
+  sync** (record the account's revision, don't upload). No recorded `parts` answers
+  `"ask"`; the caller falls back to `mergeImportedTechnique`.
+- **`canonicalTechnique` moved to `techniqueMerge.js`** (re-exported by
+  `accountSync.js`, uncached). The technique entry gets `parts` wherever it is recorded
+  (confirmed upload, first backup, restore or merge: the **account's** copy; an adopted
+  earlier version records none). `withTechniquePartsRecorded` (the startup step for a
+  library recorded before this pass) is built and tested but **`App.jsx` does not call it
+  yet**: one line for Pass 120. 48 scales are 260 parts, 14.5 KB in the record.
+- **The simulation is the safety net** (`test/techniqueMerge.test.mjs`: seeded two-device
+  runs, the invariants checked after every merge, and convergence at the end). Any change
+  to the engine must keep it green on seeds 1 to 300 (every kind of edit) and 1 to 100
+  (everyday mix); it caught four real bugs while this was built (the walk repair above,
+  a removed task coming back, dropped unfinished tasks, a per-scale list of last-used
+  methods that wasn't stable under a second merge). **Run it wider before trusting a
+  change**: the last bug only showed past seed 2400 (copy the test and raise `RUNS`). See
+  [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118),
+  [`docs/Technique-Practice.md`](docs/Technique-Practice.md#on-more-than-one-device-pass-118)
+  and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 118, nine calls,
+  confirmed 2026-10-15, and eight open items).

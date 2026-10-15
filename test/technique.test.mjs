@@ -51,7 +51,7 @@ function item(id, tonic, quality, extra = {}) {
   return {
     id, form: "scale", tonic, quality, minorForm: quality === "minor" ? "harmonic" : null,
     octaves: 2, hands: "together", evenTempo: 120, checkOctaves: 2,
-    lastCheckedDate: null, lastPracticedDate: null, practicedDates: [],
+    lastCheckedDate: null, lastCheckedAt: null, lastPracticedDate: null, practicedDates: [],
     starred: false, inRotation: true, ...extra,
   };
 }
@@ -435,6 +435,17 @@ describe("completeTask, startingTempo, changeCheckOctaves", () => {
     assert.equal(s.dayList.tasks[0].tempo, 112);
   });
 
+  test("a check with a tempo saves the exact time it was logged (Pass 118); a bare check-off and an unknown time leave it alone / unknown", () => {
+    const NOW = 1_760_000_000_000;
+    assert.equal(completeTask(setup(), "c", MONDAY, 112, NOW).items[0].lastCheckedAt, NOW);
+    assert.equal(completeTask(setup(), "c", MONDAY, 112).items[0].lastCheckedAt, null, "no clock given: unknown, never guessed");
+    for (const bad of [0, -5, NaN, "now", Infinity]) assert.equal(completeTask(setup(), "c", MONDAY, 112, bad).items[0].lastCheckedAt, null, String(bad));
+    const earlier = { ...setup(), items: [item("c", "C", "major", { evenTempo: 100, lastCheckedDate: "2024-12-01", lastCheckedAt: 5 })] };
+    earlier.dayList = buildDayList(earlier, MONDAY);
+    assert.equal(completeTask(earlier, "c", MONDAY, null, NOW).items[0].lastCheckedAt, 5, "a bare check-off logs no tempo, so the time of the last tempo stays");
+    assert.equal(completeTask(earlier, "c", MONDAY, 112, NOW).items[0].lastCheckedAt, NOW);
+  });
+
   test("starting tempo is 85% of the last verified tempo, null when there is none", () => {
     assert.equal(startingTempo({ evenTempo: 120 }), 102);
     assert.equal(startingTempo({ evenTempo: null }), null);
@@ -484,6 +495,17 @@ describe("uncompleteTask (Pass 101)", () => {
     assert.equal(task.done, false);
     assert.equal(task.tempo, null);
     assert.equal(task.undo, undefined);
+  });
+
+  test("undo puts back the time of the earlier tempo too (Pass 118), and leaves the tempo fields alone if the check octaves changed since", () => {
+    const start = setup();
+    start.items[0] = { ...start.items[0], lastCheckedAt: 777 };
+    const done = completeTask(start, "c", MONDAY, 120, 1_760_000_000_000);
+    assert.equal(done.items[0].lastCheckedAt, 1_760_000_000_000);
+    assert.equal(uncompleteTask(done, "c").items[0].lastCheckedAt, 777);
+    const changedOctaves = { ...done, items: done.items.map((it) => ({ ...it, checkOctaves: 3, evenTempo: null })) };
+    const undone = uncompleteTask(changedOctaves, "c").items[0];
+    assert.deepEqual([undone.evenTempo, undone.lastCheckedAt], [null, 1_760_000_000_000], "the tempo fields, time included, stay as the person left them");
   });
 
   test("a bare check-off undoes too; the task can then be completed again", () => {

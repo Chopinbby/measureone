@@ -1129,7 +1129,27 @@ export function classifyDayCompletion(day, piece, currentDay, chunkById = {}) {
     return consolidationDoneDays.includes(day.dayNumber) ? "done" : "behind";
   }
   const moved = movedIdsForDay(day, piece, chunkById);
-  const ids = allIds.filter((id) => !moved.has(id));
+  // A day IN the rescheduled remainder (at or after the marker's day) can list
+  // a chunk that was already done from an EARLIER day than this one. A single
+  // device never gets there: it only logs a chunk on its own card, and a marker
+  // lists only chunks untouched when it was made. Two devices can: one
+  // reschedules (so the marker lists the chunk) while the other, not knowing,
+  // logs it on its own earlier schedule, and merging the two (Pass 117) leaves
+  // the chunk both listed and done. Doing a chunk EARLIER than the day it is
+  // placed on means that day doesn't owe it, so it doesn't make the day behind.
+  // Scoped to introductions/connectors (a review always has earlier done-days),
+  // to days at or after the marker's day (earlier days are movedIdsForDay's),
+  // and to EARLIER completions only: a chunk done on a later day than its
+  // placement was late, and the day stays behind, exactly as before. Without a
+  // marker nothing changes.
+  const marker = piece.rescheduleMarker;
+  const introOrConnectorIds = new Set([...day.newChunkIds, ...day.specialChunkIds]);
+  const doneEarlier = (id) =>
+    marker != null &&
+    day.dayNumber >= marker.asOfDay &&
+    introOrConnectorIds.has(id) &&
+    ((piece.progress[id] || {}).doneDays || []).some((d) => d < day.dayNumber);
+  const ids = allIds.filter((id) => !moved.has(id) && !doneEarlier(id));
   if (!ids.length) return "empty";
   const allDone = ids.every((id) => ((piece.progress[id] || {}).doneDays || []).includes(day.dayNumber));
   return allDone ? "done" : "behind";

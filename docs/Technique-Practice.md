@@ -163,8 +163,9 @@ It never goes through `setPieces` or `updatePiece`.
 
 - **Items:** `form` (scale/arpeggio), key (tonic + major/minor + minor form),
   `octaves`, `hands`, `evenTempo` (nullable), `checkOctaves`,
-  `lastCheckedDate` (tempo logged), `lastPracticedDate` (any check-off),
-  `starred`, `inRotation`.
+  `lastCheckedDate` (tempo logged), `lastCheckedAt` (the exact time it was
+  logged, Pass 118; empty for a tempo saved before then), `lastPracticedDate`
+  (any check-off), `starred`, `inRotation`.
 - **Methods:** built-ins live in code with stable ids; user state (`starred`,
   `enabled`) and custom methods are saved separately; a last-used date per
   item per method.
@@ -220,6 +221,50 @@ methods per scale, slowest third, 7-day cooldown) are starting values, not
 derived from any study. The canonical inventory is in
 [Research.md](Research.md#technique-practice-constants).
 
+## On more than one device (Pass 118)
+
+**Built as an engine only; nothing in the app uses it yet** (Pass 120 wires it in).
+This is what a person will see once it is, and the rules the engine already follows.
+The mechanics are in [Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118).
+
+Practice on a phone and a laptop, sync, and the library ends up with **everything both
+did, with no question asked**:
+
+- **Nothing is lost.** A scale added on either device is added. Every practiced day,
+  every tempo and every "methods last used" date from either device is kept. A scale is
+  never removed by a sync (switching one off is a setting, and that travels like any
+  other).
+- **Different things changed on different scales, or different settings of the same
+  scale, are all kept.** A star on one device and a tempo on the other, even on the
+  same scale, are both there afterwards.
+- **A check-off on one device shows on the other**, along with its tempo, its day and
+  its methods. **If both devices checked off the same task, it is checked off once.**
+  **An undo on one device travels** (the task is unchecked, and the day, tempo and walk
+  step it had added go back). If one device undid a check-off and the other undid it and
+  did it again, **whichever device's library changed most recently decides**: the
+  check-off stands, or it goes with its tempo, day and walk step. (The app doesn't record
+  when an undo was made, so this is the device that changed anything last; a tie keeps
+  the check-off.)
+- **Two tempos for the same scale on the same day: the one logged later is kept**,
+  by the exact time saved with each tempo (Pass 118; a tempo saved before then has no
+  time, so one with a time beats it). Two tempos on different days keep the newer day;
+  **a "start fresh" never wipes a real tempo** from the other device. The device whose
+  tempo was replaced sees one line, never a question: "Your other device's tempo for
+  C major was kept."
+- **If both devices changed the same octaves, hands or setting to different values**,
+  the account's (the first to sync) is kept and the person is told, in one line, never
+  asked: "Your other device's change to D major was kept."
+- **The circle-of-fifths walk steps once for the day.** If both devices did the day's
+  scale, the walk moves one key, not two.
+- **Today's list:** for the same day, both devices' tasks are kept (so if both opened
+  the app before syncing, the list can be longer than "scales per day" for that day);
+  for different days, the later day's list wins.
+
+Two things this does **not** do, on purpose: it does not combine **the same scale added
+separately on two devices** (they become two scales; the app has no merge-two-scales
+step), and it does not give the two devices **their own** "scales per day" (it is one
+setting for the account). Both are in [Decisions.md](Decisions.md#open-questions).
+
 ## Not in v1
 
 - Technique time in Progress, "time practiced", or the consistency heatmap.
@@ -258,6 +303,14 @@ Each item has its own entry, with the alternative it rules out, in
    from exposure multipliers to days-a-week targets.
 5. **Crowding at 3 tasks a day is accepted**; the priority order stands.
    Levers kept for later: scales per day, or repertoire pace per key.
+6. **Across devices (Pass 118), confirmed by the user 2026-10-15:** the library
+   merges by part with no question asked; where both devices changed the same
+   octaves, hands or setting to different values the account's is kept (with a
+   notice); the **later logged tempo** wins by its exact time; an undo against a redo
+   goes to whichever device's library changed most recently; scales are never removed
+   by a merge; and the walk steps once for the day. See
+   [On more than one device](#on-more-than-one-device-pass-118) and the Pass 118 entry
+   in [Decisions.md](Decisions.md#accounts-and-backend).
 
 No open questions remain.
 

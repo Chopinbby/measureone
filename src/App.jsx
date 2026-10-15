@@ -94,6 +94,14 @@ import {
   syncOutcome,
   describeSyncStatus,
   describeHeldBanner,
+  // Merging by part (Pass 117): the quiet startup step only
+  withPartsRecorded,
+  // Noticing that another device changed something (Pass 116)
+  CHECK_TICK_MS,
+  createAccountChecker,
+  checkOutcome,
+  checkRowsUsable,
+  describeAccountChanges,
   // Getting things from the account (Pass 112)
   accountRecordFor,
   fetchAccountCopy,
@@ -179,8 +187,12 @@ function PieceStatusBadge({ status }) {
 // What the automatic upload (Pass 111) knows, for the status line and the
 // "changed on another device" banner. Worked out from the device record by
 // syncSnapshot; `failures` is how many attempts in a row have failed.
-const NO_SYNC_INFO = { firstBackupDone: false, waiting: 0, held: { pieces: [], technique: false }, backedUpAt: null, failures: 0, running: false };
+// `changes` (Pass 116) is what the last light read of the account says another
+// device changed (classifyAccountChanges), or null.
+const NO_SYNC_INFO = { firstBackupDone: false, waiting: 0, held: { pieces: [], technique: false }, backedUpAt: null, failures: 0, running: false, changes: null };
 const heldKey = (held) => held.pieces.map((p) => `${p.id}:${p.name}:${p.deletedHere ? 1 : 0}`).join("|") + (held.technique ? "|T" : "");
+const changesKey = (c) =>
+  c ? [c.newer, c.added, c.deleted, c.held, c.needsReview].map((ids) => ids.join(",")).join("|") + (c.techniqueNewer ? "|N" : "") + (c.techniqueHeld ? "|H" : "") : "";
 const sameSyncInfo = (a, b) =>
   a === b ||
   (a.firstBackupDone === b.firstBackupDone &&
@@ -188,9 +200,13 @@ const sameSyncInfo = (a, b) =>
     a.backedUpAt === b.backedUpAt &&
     a.failures === b.failures &&
     a.running === b.running &&
-    heldKey(a.held) === heldKey(b.held));
+    heldKey(a.held) === heldKey(b.held) &&
+    changesKey(a.changes) === changesKey(b.changes));
 // How long after startup (or signing in) before the first look at what's waiting.
 const SYNC_STARTUP_DELAY_MS = 2000;
+// ...and before the first light look at what other devices changed, a little
+// later so an upload that's waiting goes first.
+const CHECK_STARTUP_DELAY_MS = 4000;
 
 export default function App() {
   const [pieces, setPieces] = useState({});
@@ -362,6 +378,15 @@ export default function App() {
   const syncGenRef = useRef(0);
   const syncLatestRef = useRef({ pieces: {}, technique: null, userId: null, loaded: false });
   const prevPiecesForSyncRef = useRef(null);
+  // Noticing that another device changed something (Pass 116). The checker
+  // (lib/accountSync.js) holds when the last check started, so every trigger is
+  // throttled alike; `checkRowsRef` is the last light read ({ userId, rows }),
+  // re-sorted against the device record by refreshSyncInfo, so the line in the
+  // Account panel shrinks by itself as uploads and "Get changes" bring this
+  // device up to date. Nothing here changes any data.
+  const checkerRef = useRef(null);
+  const checkRowsRef = useRef(null);
+  const checkTimerRef = useRef(null);
   // Technique data (Pass 100) — app-level, one localStorage key of its own,
   // never part of `pieces` and never touched by setPieces/updatePiece. Its
   // write failures are tracked in their own flag so the pieces save effect
@@ -456,7 +481,13 @@ export default function App() {
       setSyncInfo((prev) => (prev === NO_SYNC_INFO ? prev : NO_SYNC_INFO));
       return null;
     }
-    const snap = syncSnapshot({ pieces: latestPieces, technique: latestTechnique, userId });
+    const lastRead = checkRowsRef.current;
+    const snap = syncSnapshot({
+      pieces: latestPieces,
+      technique: latestTechnique,
+      userId,
+      accountRows: lastRead && lastRead.userId === userId ? lastRead.rows : null,
+    });
     const next = { ...snap, failures: syncFailuresRef.current, running: syncRunningRef.current };
     setSyncInfo((prev) => (sameSyncInfo(prev, next) ? prev : next));
     return snap;
@@ -469,6 +500,57 @@ export default function App() {
       syncTimerRef.current = null;
       runSync();
     }, Math.max(0, delayMs));
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Noticing that another device changed something (Pass 116).       */
+  /*  A light read (ids, revisions, deleted marks; never a piece's     */
+  /*  data) that only NOTICES: nothing is applied, and "Get changes"   */
+  /*  works exactly as before. It runs only while signed in and only   */
+  /*  once this device's first backup is checked; never while the page */
+  /*  is hidden, and never while an upload, a manual backup or "Get    */
+  /*  changes" is running. Triggers: startup (once sign-in is known),  */
+  /*  the window regaining focus or the page becoming visible (at most */
+  /*  once a minute), the browser coming back online, and every five   */
+  /*  minutes while the page is visible. A failed check counts toward  */
+  /*  the same "isn't answering" count the uploads use and shows no    */
+  /*  error of its own. When it runs and what it means are decided in  */
+  /*  lib/accountSync.js, and tested.                                  */
+  /* ---------------------------------------------------------------- */
+
+  const scheduleCheck = (delayMs, trigger) => {
+    if (!authEnabled) return;
+    clearTimeout(checkTimerRef.current);
+    checkTimerRef.current = setTimeout(() => {
+      checkTimerRef.current = null;
+      requestCheck(trigger);
+    }, Math.max(0, delayMs));
+  };
+
+  const requestCheck = async (trigger) => {
+    const { userId, loaded: isLoaded } = syncLatestRef.current;
+    if (!authEnabled || !userId || !isLoaded) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    if (!hasRecordedBackup(readDeviceRecord(), userId)) return;
+    const isBusy = () => backupRunningRef.current || accountFlowBusyRef.current || syncRunningRef.current;
+    if (isBusy()) {
+      scheduleCheck(2000, trigger); // look again once it's finished
+      return;
+    }
+    if (!checkerRef.current) checkerRef.current = createAccountChecker();
+    const generation = syncGenRef.current;
+    const recordBefore = accountRecordFor(readDeviceRecord(), userId);
+    const out = await checkerRef.current.run({ trigger, userId, visible: true });
+    if (!out.ran) return;
+    if (syncGenRef.current !== generation) return; // signed out, or another account, meanwhile
+    syncFailuresRef.current = nextFailureCount(syncFailuresRef.current, checkOutcome(out));
+    // Rows read while an upload, a backup or "Get changes" was changing the
+    // record could already include this device's own upload without the
+    // record knowing yet, which would read as "newer": don't believe them.
+    if (out.result.status === "ok" && checkRowsUsable({ recordBefore, recordNow: accountRecordFor(readDeviceRecord(), userId), busy: isBusy() })) {
+      checkRowsRef.current = { userId, rows: out.result.rows };
+    }
+    refreshSyncInfo();
   };
 
   // One upload run: send what's waiting (the library does it, one item at a
@@ -570,6 +652,20 @@ export default function App() {
     }
   }, [pieces, technique, loaded]);
 
+  // Merging by part (Pass 117): pieces recorded before `parts` existed get them
+  // here, once at startup, quietly (no network, no piece changes). A piece whose
+  // fingerprint still equals its record's hasn't changed since it was last
+  // synced, so this device's copy IS the synced state and its parts are
+  // recorded from it. A piece with changes waiting is left alone: it gets parts
+  // at its next confirmed upload, and until then a merge would ask rather than
+  // merge by part. Nothing uses the parts yet (the merge engine,
+  // lib/pieceMerge.js, isn't wired into the app).
+  useEffect(() => {
+    if (!authEnabled || !loaded) return;
+    const { record, recorded } = withPartsRecorded(readDeviceRecord(), pieces);
+    if (recorded > 0) saveDeviceRecord(record);
+  }, [loaded]);
+
   // Signing in, or the app starting with a saved sign-in: work out what's
   // waiting and look at it soon. Signing out, or another account: stop (a run
   // still going stops at its next item), forget this session's retry state and
@@ -585,6 +681,11 @@ export default function App() {
     syncFailuresRef.current = 0;
     syncNextAttemptRef.current = 0;
     syncPendingSinceRef.current = null;
+    // The last light read belongs to the last account: forget it (Pass 116).
+    if (checkerRef.current) checkerRef.current.reset();
+    checkRowsRef.current = null;
+    clearTimeout(checkTimerRef.current);
+    checkTimerRef.current = null;
     if (!authEnabled || !authSession) {
       setSyncInfo((prev) => (prev === NO_SYNC_INFO ? prev : NO_SYNC_INFO));
       return;
@@ -592,6 +693,7 @@ export default function App() {
     if (!loaded) return;
     const snap = refreshSyncInfo();
     if (snap && snap.firstBackupDone && snap.waiting > 0) scheduleSync(SYNC_STARTUP_DELAY_MS);
+    if (snap && snap.firstBackupDone) scheduleCheck(CHECK_STARTUP_DELAY_MS, "startup");
   }, [loaded, authSession ? authSession.userId : null]);
 
   // The connection coming back is an immediate retry (and forgets the
@@ -606,6 +708,7 @@ export default function App() {
       syncNextAttemptRef.current = 0;
       const snap = refreshSyncInfo();
       if (snap && snap.firstBackupDone && snap.waiting > 0) scheduleSync(0);
+      requestCheck("online");
     };
     const onFocus = () => {
       if (!syncLatestRef.current.userId) return;
@@ -614,6 +717,7 @@ export default function App() {
       if (snap && snap.firstBackupDone && snap.waiting > 0 && !syncRunningRef.current && Date.now() >= syncNextAttemptRef.current) {
         scheduleSync(1000);
       }
+      requestCheck("focus");
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") onFocus();
@@ -626,6 +730,18 @@ export default function App() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
       clearTimeout(syncTimerRef.current);
+    };
+  }, []);
+
+  // Every five minutes while the page is visible (Pass 116): the page asks
+  // once a minute whether a check is due, which costs no request; the checker
+  // only lets one through when five minutes have passed since the last.
+  useEffect(() => {
+    if (!authEnabled) return;
+    const id = setInterval(() => requestCheck("interval"), CHECK_TICK_MS);
+    return () => {
+      clearInterval(id);
+      clearTimeout(checkTimerRef.current);
     };
   }, []);
 
@@ -1078,7 +1194,8 @@ export default function App() {
         { items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition },
         itemId,
         t.dayList.date,
-        tempo
+        tempo,
+        Date.now() // the exact time of the check (Pass 118): when two devices log a tempo the same day, the later wins
       );
       return { ...t, items: done.items, dayList: done.dayList, methodLastUsed: done.methodLastUsed, walkPosition: done.walkPosition };
     });
@@ -3456,6 +3573,7 @@ export default function App() {
                 syncActive={syncInfo.firstBackupDone}
                 syncRunning={syncInfo.running}
                 syncStatus={authSession ? describeSyncStatus({ now: syncClock, ...syncInfo }) : null}
+                accountChangesText={authSession ? describeAccountChanges(syncInfo.changes) : null}
                 backupRunning={backup.running}
                 backupLines={authSession && backup.userId === authSession.userId && backup.result ? describeBackupResult(backup.result) : []}
                 backupCheckedAt={authSession && backup.userId === authSession.userId && backup.result && backup.result.status === "done" ? backup.finishedAt : null}

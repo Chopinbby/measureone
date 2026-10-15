@@ -7554,6 +7554,248 @@ what it rules out.
   day its timer skips fails nothing), and the tests and a restore fire drill live in
   the backups repository.
 
+- **Pass 117 — merging by part, the engine only (2026-10-13).** `lib/pieceMerge.js`
+  (new) plus `parts` in the device record; nothing in the app uses it yet. The
+  design is [Algorithms.md](Algorithms.md#merging-by-part-pass-117); the record
+  side is [Accounts-and-Backend.md](Accounts-and-Backend.md#merging-by-part-pass-117).
+  Calls made while building it, each one a place the card left room or was
+  contradicted by what the code does, **for the user to confirm**:
+  1. **The reschedule marker is not a merge rule: the scheduler was fixed instead
+     (first built as a group conflict, then replaced at the user's request).** The
+     card's required test ("A reschedules, B logs a chunk A's marker lists") showed
+     that merging the marker with B's session leaves a chunk both listed and done, and
+     the scheduler read the day it is re-placed on as behind for good. The card's own
+     fallback, the marker and progress entries as one group, was built first; it made
+     a fresh reschedule plus ANY logging on the other device a question. Asked to fix
+     the gap properly, I found it **cannot happen on one device** (the app logs a chunk
+     only on its own day's card, and a marker lists only untouched chunks; an earlier
+     note here said it reproduced without a merge, but that was with hand-built data).
+     `classifyDayCompletion` (`lib/scheduling.js`) now reads a chunk done **earlier**
+     than the remainder day it is placed on as not owed on that day, and the group rule
+     is gone: the merge keeps A's marker and B's session and asks nothing. Details and
+     the narrow scope: [Algorithms.md](Algorithms.md#a-chunk-done-earlier-than-the-remainder-day-its-placed-on-pass-117).
+     **Left as is, for the user to know:** the merged day still lists the chunk
+     (unchecked) even though it is done; a chunk done LATER than its placement still
+     reads behind (the Pass 45 strictness, unchanged). **Rejected:** dropping the chunk
+     from the marker at merge time (it moves every other chunk the marker places, under
+     logs already made against the old days).
+  2. **The structure rule only fires where the two sides' structure values differ.**
+     The card says "either side changed any of the four fields AND the other side changed
+     progress". Two devices that made the identical split both "changed" structure and
+     both changed progress (the new half's entry), which by the card's words would be a
+     whole-piece conflict between two copies that agree. Applied as written it can't be
+     "agreement, no conflict". Where the values are equal the grid is the same, so their
+     entries mean the same chunks.
+  3. **`lastLoggedAt` is recomputed from the merged sessions, not "the later of the
+     two".** Every load recomputes it, the app's undo doesn't, and a kept chunk entry
+     can drop the session that holds the later date; "the later of the two" then fails
+     the card's own invariant 4 (shown by breaking it on purpose). It equals the later
+     of the two whenever the merged piece holds that session.
+  4. **In minutes mode `daysToLearn` is derived, never a conflict** (larger of the two
+     when both changed it, then reconciled). The card lists every top-level field as a
+     part; for this one field both sides can honestly disagree because it is
+     recomputed from other fields on every load.
+  5. **A restored or adopted entry has `parts` only when this device holds the version
+     the account does.** An adopted row that is just an earlier version of this
+     device's own piece has none until the next confirmed upload; a piece with changes
+     waiting that was recorded before this pass has none until its next upload, and
+     asks.
+  **The simulation's conflict rate is not a usage rate.** It deliberately piles edits
+  up (1 to 4 per device per round, over 8 to 12 chunks, and every kind of edit given a
+  real share), so the same chunk gets logged on both sides far more often than a
+  person would. Seeds 1 to 300, every kind of edit: 3,578 syncs, of which 1,831 had
+  nothing to bring in, 810 merged cleanly, 347 had part conflicts (holding 461
+  single-part conflicts, 236 of them one chunk logged on both sides) and 590 were
+  whole-piece conflicts: 26.2 per cent of all syncs, 53.6 per cent of the 1,747 that
+  had changes from both sides. Seeds 1 to 100, everyday mix (mostly sessions): 1,182
+  syncs, 23.2 per cent, 45.4 per cent of the 603 with changes from both sides; 316 of
+  its 329 single-part conflicts are one chunk logged on both sides.
+  On the owner's real export, one session added to a different chunk on each side
+  merges with no conflict for all 25 pieces.
+
+- **Pass 118 — the technique library across devices, the engine only (2026-10-13).**
+  `lib/techniqueMerge.js` (new) plus `parts` in the technique entry of the device
+  record; nothing in the app uses it yet. The design is
+  [Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118); the
+  record side is
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#the-technique-library-by-part-pass-118);
+  what a person will see is
+  [Technique-Practice.md](Technique-Practice.md#on-more-than-one-device-pass-118).
+  The card proposed six rules and asked for each to be confirmed. Where the code or
+  the simulation contradicted or sharpened a rule, the call is listed below, and **the
+  user answered each on 2026-10-15**: confirmed as built: 1, 2, 3, 6 (a task one side took
+  off), 7 and 8, and the two-day walk left as it is; **changed at the user's request:**
+  4 (a same-day tempo tie goes to the one logged LATER, by an exact time saved with each
+  tempo, "Exact now") and 6 (an undo against a redo goes to whichever device's library
+  changed most recently). 9 records what "Exact now" cost.
+  1. **Scales and custom methods are never removed by a merge; added on either side is
+     added; switching a scale off is a setting. As proposed.** Two scales added apart
+     for the same key stay **two**, because ids are what identify a scale (the backup
+     merge matches by content; this does not). Not combined: it would have to choose
+     which id survives, and today's list and "methods last used" are keyed by id.
+  2. **Parts are finer than "one fingerprint per scale".** The device record keeps only
+     labels, so with one label per scale, "a star here, a tempo there, on the same
+     scale" cannot be told from "the same thing changed on both" and would need the
+     other side's values to decide (they are not kept). So a scale is its settings
+     (`starred`, `rotation`, `octaves`, `hands`), its tempo check, its last practiced
+     date, **each practiced date on its own**, and **each method's last-used date on its
+     own**; a method is its star and its switch. A part holding its default is left out.
+     Cost: 260 parts, 14.5 KB for the owner's 48 scales.
+  3. **Item settings: the card's rule, narrowed by what can actually conflict.** A yes/no
+     part (starred, switched off) cannot be changed to two different values, so it never
+     conflicts. Octaves, hands and the two settings do: the account's value is kept and
+     a notice says "Your other device's change to D major was kept." (one notice per
+     scale, however many of its settings differ). **The check octaves are not an
+     ordinary setting here**: they are part of the tempo check (`check:<id>`), because a
+     tempo only means something over the octaves it was measured over, which is what
+     `mergeImportedTechnique` already did. Changed on one side only they travel; changed
+     on both, the tempo rules below decide, and two different check octaves on the same
+     date with the same tempo give the same notice as a setting.
+  4. **Tempos, last checked: `mergeImportedTechnique`'s rules, then the later logged.**
+     The newer check wins, an empty tempo never replaces a real one (a "start fresh" keeps
+     its date), and a "start fresh" on one side only **does** travel (nothing changed on
+     the other). **Not in the card, so a call (answered 2026-10-15):** on the same check
+     date a real tempo beats an empty one, and of two different real tempos **the one
+     logged later is kept, by the exact time saved with it** (call 9). I first built "the
+     account's wins" (`mergeImportedTechnique` keeps "what's here" on a tie, which would
+     let two devices keep their own forever); the user asked for the most recent instead.
+     A tempo with a time beats one saved before times existed; where neither has a time,
+     the account's. Only the device whose tempo was dropped sees the notice ("Your other
+     device's tempo for C major was kept."), so the later-logging device sees nothing.
+  5. **Practiced dates: each date is a part, not "dates unioned".** A union can't tell "the
+     other device added this date" from "this device undid it", so an undo on one side
+     would be undone by a union. Per date: added on either side is kept, undone on one
+     side only is gone. The last practiced date is the later of the two; **the date each
+     method was last used on a scale is a part of its own, the later date winning when
+     both sides changed it.** (First built as one list per scale, folded to the later date
+     per method when both changed it, on the grounds that a part per method is 13 times
+     every scale. The wide simulation, seed 2446, showed the cost: two devices that each
+     undid a different use of one scale folded back into exactly the base, and merging the
+     result again flipped it, so "merging twice gives the same result" failed. A part per
+     method fixes it and costs 1.8 KB for the owner's library.)
+  6. **Today's list.** Same date: each task is a part (a task's done state with its tempo
+     and undo note; its methods and tier). **Done changed on one side only: that side's.
+     Done on both: done, with the details of the side that logged a tempo, of two tempos
+     the side the scale's own tempo came from (so the task and the scale agree; first
+     built as "the account's", which let them disagree, seed 106). Undone on one side and
+     redone differently on the other (answered 2026-10-15): whichever device's library
+     changed most recently decides** (`updatedAt`; a tie keeps the completion), and
+     **when the undo wins, the tempo that completion logged goes back with it** (the scale
+     takes the undone side's tempo check whole; its dates, methods and walk step already go
+     back by the ordinary one-sided rules). This is an approximation and says so: the app
+     doesn't record when an undo was made, so a device that undid something and then changed
+     something else counts as having changed later. First built as "done wins" (a
+     completion survives unless undone on one side ONLY); the user chose recency. **A task
+     on one list only: the card said "kept". Built: kept if the base
+     never had it or if it changed there; taken off if the other side took it off and this
+     side left it alone.** Kept-always made a task one device had removed (by switching
+     its scale off) come back on every later merge: the simulation showed "merge the
+     result again" changing the result and two devices never settling. Different dates:
+     the later date's list wins whole. **Two lists built apart on the same day add up to
+     more than `scalesPerDay`** (every task kept; trimming is not done, see open
+     questions). **Added, not in the card:** a done task puts its scale's day, last
+     practiced date and last-used methods back if the merge left them out (an undo on one
+     side meeting a redo on the other leaves them out otherwise; it only ever adds).
+     **Tried and removed:** dropping an unfinished task of a scale that is switched off
+     (the app's own undo of a done task of such a scale leaves exactly that state, and the
+     rule made "this device changed nothing" no longer give the account's library).
+  7. **The walk: the card's repair, rebuilt on each done task's own step note.** The card
+     said: if a task in the key of the day is done on either side and the merged position
+     hasn't advanced, advance once with the engine's own advance. Two parts of that stand:
+     **the engine's own advance is reused, not copied** (`lib/technique.js` exposes
+     `nextWalkPosition` and `walkStepPast`; `completeTask` uses the same one; a 200-library
+     test pins them together), and the walk is merged like any part and then repaired.
+     **The condition changed.** "A done task in the key of the day" also describes an
+     ordinary state (a scale in the next key done out of turn, then the walk steps onto its
+     key), so it would step the walk wrongly there. A first version using every done task's
+     step note (not only the other side's) was run through the simulation and **stepped the
+     walk on a library where both devices already agreed** (seed 51: two keys, a day's steps
+     going round in a circle). Built: a step is only taken when it came from the **other**
+     side than the walk's own value, still stands where it began, and then once per such
+     task. Two devices that did the day's task agree on one step; "advance once per side"
+     breaks it (see the re-breaks). **Left, knowingly:** two devices that each did a task for
+     a *different day* before syncing both step `p -> p + 1`, which is agreement, so the
+     walk steps once for two days (it revisits a key; it does not skip one).
+  8. **No recorded "before" asks, and the caller falls back to `mergeImportedTechnique`.**
+     The engine answers `status: "ask"`, `reason: "no-base"`; it does not call the backup
+     merge itself.
+  9. **"Exact now": each tempo saves the time it was logged (the user's choice,
+     2026-10-15, over "approximate now", which compared the two libraries' last-changed
+     stamps, and over "account's").** A new scale field, `lastCheckedAt` (ms since 1970,
+     empty for a tempo saved before this), set by `completeTask(..., now)` (the caller
+     passes the time; that file has no clock; `App.jsx`'s handler passes `Date.now()`),
+     carried in the undo snapshot, and part of the `check` part. **This took the pass
+     outside the card's list of files, on the user's say-so:** `lib/storage.js` (the item
+     and undo normalizers, and one line in `mergeImportedTechnique` so the time moves with
+     the tempo it belongs to, which is not a change to how backups merge), `lib/technique.js`
+     and `App.jsx` (one argument). Costs, told to the user before they chose: every saved
+     library reads as changed once (each device uploads its library once after this ships,
+     like Pass 115's `updatedAt` change), and a device still running the previous build
+     drops the field when it loads. **Why an exact time and not the library's `updatedAt`
+     (which is still what undo-against-redo uses):** `updatedAt` is when the device last
+     changed ANYTHING, so a device that logged an earlier tempo and then starred a scale
+     looks more recent than one that logged a later tempo.
+  **What the simulation caught while this was built** (seeds in brackets): the walk repair
+  above [51]; a task one side took off coming back on a re-merge [34]; dropped unfinished
+  tasks of switched-off scales breaking "unchanged here means exactly the account's
+  library" [169]; and last-used methods kept as one list per scale folding two sides'
+  undos back into the base, so a second merge flipped the result [2446, found only by the
+  sweep past seed 300]. All four are fixed and pinned.
+  **Re-breaks, on purpose, each reverted:** (e) "ignore which device changed last, a
+  completion always survives an undo": 3 tests fail, among them the undo-against-redo unit
+  test and both simulations; (d) "ignore the exact time, a same-day tempo tie goes to the
+  account's": 5 tests fail, among them the two tempo unit tests and both simulations;
+  (c) "a use undone on one side comes back" (the
+  union of the two sides' last-used methods): 5 tests fail, among them the new unit test
+  for seed 2446 and both simulations; (a) "union completions even when one side
+  undid" (a task is done if either side has it done): 5 tests fail, among them the
+  undo-travels unit test and both simulations (seed 1, round 4: "s6 done"); (b) "step the
+  walk once for each side that completed a task instead of once for the day": 12 tests
+  fail, among them the unit test "both devices did the day's task: the walk steps once,
+  not twice", and, with the idempotence and "unchanged here" checks removed from a scratch
+  copy of the simulation, the simulation's own walk invariant ("the walk is reachable by
+  taking each step at most once", seed 1, round 0).
+  **Two mistakes of the simulation's own, found by running it past seed 300 (not engine
+  bugs, both fixed in the test):** the walk invariant first said "no further on than the
+  furthest side", and seed 694 showed the merge correctly chaining one device's step
+  (8 to 9) onto the other's (9 to 12) to stand at 12, past both devices' own walks; seed
+  1060 showed the same chaining starting from a device's own walk rather than the base.
+  The invariant now says "a side's own, or reached by taking each done task's step note at
+  most once", which still fails the once-per-side break.
+  **The simulation** (final rules, after the 2026-10-15 changes). Seeds 1 to 300, every
+  kind of edit given a real share: 4,836 syncs, 1,113 with nothing to bring in (this
+  device's library came back untouched), 1,461 identical, 2,262 merged, with 60 notices
+  in all; lists merged: same date 1,939, this side's later 295, the account's later 28;
+  2,765 done tasks kept, 202 undos that travelled, 1,379 tasks done on both sides, 99
+  syncs where both devices had stepped the walk, 11 walk repairs, 15 practice repairs;
+  **300 of 300 runs ended with both devices and the account holding one library.** Seeds
+  1 to 100, everyday mix (mostly check-offs and tempos): 1,594 syncs (362 with nothing to
+  bring in, 485 identical, 747 merged with 26 notices), 1,305 done tasks kept, 22 undos
+  that travelled, 900 tasks done on both sides, 113 walks both devices stepped, 9 walk
+  repairs, 10 practice repairs; 100 of 100 converged. **The notice count is not a usage
+  rate:** the simulation piles up to 4 edits per device per round on 4 to 11 scales.
+  **A wider sweep, once, not committed** (the test file with the run count raised to
+  6,000, run on the final rules): seeds 1 to 6000, 96,091 syncs (21,763 with nothing to
+  bring in, 29,133 identical, 45,195 merged with 827 notices), 50,523 done tasks kept,
+  3,998 undos that travelled, 24,845 tasks done on both sides, 2,018 syncs where both
+  devices had stepped the walk, 181 walk repairs, 352 practice repairs: every invariant
+  held after every merge and **6,000 of 6,000 runs ended with both devices and the
+  account on one library**. It takes about five minutes. An earlier 6,000-run sweep (before
+  the 2026-10-15 changes) is what found the last-used-methods bug at seed 2446; the
+  committed 300 and 100 did not.
+  **On the owner's real export** (48 scales; counts only): one scale starred on one side
+  and a different one checked off, at a tempo, on the other: merged with no notice, all 48
+  scales kept, starred 0 to 1, tempos 10 to 11, practiced dates 10 to 11, methods last used
+  40 to 44, the same library whichever device merges, and a remote equal to the base
+  returns this device's library untouched; the walk steps once when both devices did the
+  same key-of-the-day task, and an undo travels.
+  **Touched beyond the card's list, on the user's say-so (call 9):** `lib/storage.js` (the
+  item and undo normalizers, and one line in `mergeImportedTechnique`: `lastCheckedAt`
+  moves with the tempo), `lib/technique.js` (`completeTask`'s `now`, the undo snapshot),
+  `App.jsx` (one argument, `Date.now()`), and their tests. **Not touched, as the card
+  required:** how backups merge the library (apart from that one line) and everything
+  that calls it (backups, restore, "Get changes"), and the rest of `App.jsx`.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -7814,8 +8056,8 @@ oversight to silently fix; surface it instead.
      every Get changes (Pass 122); ~~two devices that both use the app often hold
      each other's technique library (its per-device parts are in the shared
      row)~~ **the `updatedAt` part is resolved in Pass 115** (it no longer counts
-     as a change; today's list and the walk position still do, Pass 118 decides
-     how those merge); a name match with a blank composer can combine two
+     as a change; today's list and the walk position still do; Pass 118 decided how
+     those merge, as an engine only, see its entry above); a name match with a blank composer can combine two
      different pieces; there is no "undelete" (Pass 122); a merge clears the
      piece's reschedule marker; and ~~`mergeSessionArrays` compares sessions as
      text, so key order matters~~ **resolved in Pass 115** (compares content;
@@ -7826,7 +8068,129 @@ oversight to silently fix; surface it instead.
      until their access token's hour is up); the "sign in again first" prompt has
      only been seen against a stand-in; `lib/backend.js` has no tests; the
      leaked-password check is Pro-plan only.
-  5. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
+  5. **From Pass 117** (the merge engine; nothing uses it yet): the five calls in
+     the Pass 117 entry above need the user's confirmation, and six open issues are
+     logged separately in
+     [Merging by part: what is still open](#open-questions) (the next entry).
+  6. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
+- **Merging by part (Pass 117): what is still open (logged 2026-10-13, nothing
+  here is built).** The engine is `lib/pieceMerge.js`; the design is
+  [Algorithms.md](Algorithms.md#merging-by-part-pass-117) and what was decided is the
+  Pass 117 entry under "Accounts and backend". These came out of building and testing
+  it. The scheduler gap the pass's required test found is **fixed** (see that entry), not
+  open. Each item says what it is, how it was seen, what is proposed, and who owns it.
+  1. **Resizing a piece against a difficulty or section edit leaves an inconsistent
+     kept piece.** Settings' measure-count field rewrites `totalMeasures`,
+     `measureDifficulty` and `sections` together (`BasicsFields.jsx`: `resizeDifficulty`,
+     `resizeSections`); the engine treats them as three separate parts. **Seen** with a
+     probe: one device resizes 32 to 36, the other changes one measure's difficulty; when
+     the merge runs on the tweaking device the kept piece says 36 measures with a
+     32-entry difficulty list (`weightedDifficultyFromArray` reads the missing measures
+     as easy, silently). It is reported as a conflict on `measureDifficulty`, never
+     hidden, but the piece kept until it is answered is inconsistent. **Proposed:** the
+     piece's size travels as a unit. If either side changed `totalMeasures` and the other
+     changed `measureDifficulty` or `sections`, the three are one conflict, this device's
+     whole set kept (never a mix); with no resize involved they still merge separately.
+     About 10 lines in `lib/pieceMerge.js` next to `STRUCTURE_FIELDS`, unit tests, and a
+     "resize" edit in the simulation (it must mimic `handleSavePiece`: the two resize
+     helpers, `splitPointsAfterStructureEdit`, `migrateOrphanedProgress`, the marker
+     cleared; none of the simulation's edits resizes today). **Cost:** that rare
+     combination becomes a question. **Alternative, not recommended yet:** merge the
+     difficulty list measure by measure. **Owner:** none yet; cheapest before Pass 120
+     wires the engine in.
+  2. **`sortOrder` and `createdAt` are parts, so they can conflict.** Two devices that
+     each reorder the piece list would conflict on a display-only field, and Pass 121
+     would have to ask about it. **Proposed:** the engine never conflicts on them: keep
+     this device's `sortOrder` (it is display arrangement, as Pass 32a's import choice
+     already treats it), and for `createdAt` follow Pass 112's decision (the account's
+     created date wins). Whether the sidebar order should sync between devices at all
+     is the user's call. About 3 lines plus tests. **Owner:** Pass 121 is the natural
+     home; it can be done earlier in the engine.
+  3. **Other snapshot-like parts may have the marker's problem; revival is untested.**
+     A reschedule marker is a snapshot of progress taken at one moment (see the Pass 117
+     entry). `revival.plan` is another (computed from progress and the reassessment
+     ratings). Nothing in the simulation starts or finishes a revival, so a merge of "A
+     starts a revival" against "B logs sessions" has never been run. **Proposed:** add
+     "start revival" and "finish reassessment" edits to the simulation and read the
+     merged piece the way Today's Practice does; then either nothing, a scheduler
+     tolerance like the Pass 117 one, or a group rule. **Owner:** none yet; needs doing
+     before Pass 120.
+  4. **A piece with no recorded "before" snapshot asks, and Pass 120 must handle that.**
+     The engine answers `status: "ask"`, `reason: "no-base"` for a piece recorded before
+     Pass 117 that had changes waiting at upgrade time, and for one whose last sync was
+     an adopted row that is only an earlier version of this device's own copy (those
+     entries have `parts` only after the next confirmed upload). **Needed:** Pass 120
+     routes "ask" to Phase 1's whole-piece flow (today's "Get changes"), not to an
+     error or a silent keep. Not a bug; a requirement on 120.
+  5. **A re-placed chunk that is already done still shows, unchecked, on its new day.**
+     After Pass 117's scheduler fix the merged day no longer reads "behind" because of
+     it, but `movedIdsForDay` still returns nothing for a day at or after the marker's
+     day, so Day view, Timeline, Week view and Master Agenda list the chunk as a task.
+     Logging it again would add a second session. Only reachable after merging two
+     devices. **Proposed (low priority):** hide such ids on those days, and make a day
+     whose only items were hidden read as "Nothing scheduled" rather than "Tasks
+     rescheduled" (`classifyDayEmptyState`). **Owner:** none.
+  6. **(Minor) The device record grew from 2.2 KB to 50 KB for the 25 real pieces.**
+     36 to 86 parts a piece, about 2 KB a piece, written whole on every confirmed
+     upload (reading it costs about 0.17 ms). **Option:** one 53-bit hash per part
+     instead of two (31 per cent smaller on these pieces), declined for now because a
+     false "unchanged" in a merge decision is the worse error. Revisit if the technique
+     library (Pass 118, which added 14.5 KB for the owner's 48 scales) adds parts or the record
+     starts to matter.
+- **Merging the technique library (Pass 118): what is still open (logged 2026-10-13,
+  nothing here is built).** The engine is `lib/techniqueMerge.js`; the design is
+  [Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118) and what
+  was decided is the Pass 118 entry under "Accounts and backend" (eight calls there need
+  the user's confirmation). Each item says what it is, how it was seen, what is
+  proposed, and who owns it.
+  1. **Two scales added apart for the same key stay two.** One device adds F major, the
+     other adds F major before they sync: the library then has two (different ids). Seen
+     in a unit test (documented, not a bug in the rule). **Proposed:** a "combine" step
+     in the same family as Pass 112's combine for pieces, matching with the backup merge's
+     own `sameTechniqueItem` (form, key as spelled, minor form, octaves, hands), choosing
+     the id already on today's list or most practiced, and re-keying `methodLastUsed` and
+     the tasks. **Cost:** the re-keying (about 30 lines and tests) and a question when
+     both have history. **Owner:** none; it belongs with Pass 121's questions, or to the
+     Library (a "same as" suggestion) if it turns out to happen in real use.
+  2. **Two lists built apart on the same day add up to more than `scalesPerDay`.** Both
+     devices open the app on a new day before they have synced and each builds a list
+     (identical when they hold the same state, different when they don't). The merge
+     keeps every task. **Proposed:** when neither side has done anything on the day, keep
+     the account's list only; otherwise keep every task that is done or that the account
+     has, and trim the rest to `scalesPerDay`. About 15 lines in the same-date branch and
+     tests; the simulation already builds such lists. **Owner:** none yet; cheapest before
+     Pass 120.
+  3. **"Scales per day" is one setting for the whole account.** The card deferred a
+     per-device setting. With it shared, a change on one device replaces the other's
+     (the account's wins on a conflict, with a notice). **Owner:** the user's call
+     whether it should be per device (and then it leaves the parts, a smaller engine).
+  4. **The walk steps once for two days when two devices each did a task for a different
+     day before syncing.** Left on purpose (see call 7). **Proposed if it matters:**
+     count a step per distinct day by keeping each day's first step note, which means
+     keeping the earlier day's list long enough to read them. **Owner:** none.
+  5. **`"identical"` by parts is not "the same fingerprint" (a requirement on Pass 120).**
+     A method switched on and off again leaves an entry that holds the defaults. The
+     parts call two such libraries identical; `techniqueFingerprint` still tells them
+     apart. Pass 120 must treat `"identical"` as in sync (record the account's revision,
+     don't upload) rather than expect the fingerprints to match, or a harmless extra
+     upload ping-pongs between devices. Pinned by a test. **Owner:** Pass 120.
+  6. **`App.jsx` does not record technique parts at startup yet.** `withTechniquePartsRecorded`
+     is built and tested; calling it is one line beside the startup step for pieces
+     (`withPartsRecorded`), and `App.jsx` was outside this pass's list. Until it is
+     called, a library recorded before this pass gets its parts at its next confirmed
+     upload and the engine answers `"ask"` for it. **Owner:** Pass 120.
+  7. **The merge's notices have nowhere to show.** `notices` carries the sentence to
+     show (and which scale or setting it is about); nothing displays it. **Owner:** Pass
+     120 (where the merge is called) or 121 (where the question is asked).
+  8. **The device record grew again.** 260 parts, 14.5 KB, for the owner's 48 scales, on top
+     of the pieces' 50 KB: about 65 KB written whole on every confirmed upload (the
+     earlier "revisit if the record starts to matter" note, item 6 of the Pass 117 list
+     above, still stands). The parts that grow with use are the practiced dates (at most
+     14 a scale: the app keeps two weeks) and each method's last-used date on each scale
+     (at most 13 a scale; 40 of the 260 today). A library that has used every method on
+     every scale would be about 48 times 13 parts, roughly 40 KB. **Option if it
+     matters:** one 53-bit hash per part instead of two, declined for the same reason as
+     there.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

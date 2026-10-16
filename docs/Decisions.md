@@ -7419,8 +7419,8 @@ what it rules out.
   purpose (decided by the user, 2026-10-03).** Nobody but the owner could
   reach accounts before go-live, so a mistaken "changed on another device"
   hold (an upload lands, its confirmation is lost, more is logged) and a status
-  line that shows one message at a time stayed as they were. Both are still
-  open; see Open questions.
+  line that shows one message at a time stayed as they were. **Both were fixed
+  in Pass 115** (see the Pass 115 entry below and Open questions).
 - **Pass 112 — "Get changes" takes the account's copy without asking only when
   nothing here was waiting AND the account's revision moved, never by a clock
   (confirmed by the user, 2026-10-03).** Anything changed on both sides gets
@@ -7429,7 +7429,10 @@ what it rules out.
   replace work that was never uploaded. Alternative ruled out: reusing the
   import path's last-changed rule (simpler, but loses work when clocks
   differ). A test that lets the rule apply with a change waiting fails eight
-  tests. See
+  tests. **Superseded in part on 2026-10-15** (the owner chose "most recent wins,
+  item by item", and automatic updates; see "When two copies disagree" under
+  Pass 118 below). The rule stays as built, and its tests stay, until Pass 120
+  replaces it on purpose. See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112).
 - **Pass 112 — a piece from the account keeps the account's created date
   (confirmed by the user, 2026-10-03).** A restore then matches the account
@@ -7554,12 +7557,77 @@ what it rules out.
   day its timer skips fails nothing), and the tests and a restore fire drill live in
   the backups repository.
 
+- **Pass 115 — "same" and "changed" made trustworthy before devices sync by
+  themselves (built 2026-10-13, on `main` 2026-10-14).** The mechanics are in
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115);
+  these are the calls and what they cost. **Decisions.md had no entry for this pass
+  when it shipped; this one was written in the 2026-10-15 wrap-up from the code, the
+  pass's own docs and its commit.**
+  1. **The false hold is closed by remembering what each attempt sent.** Built as
+     Pass 111's notes proposed: before an upload the device records the fingerprint of
+     what it is about to send (`sent`, the last 5, cleared when the account confirms a
+     revision); a refused row that equals the current copy, or any of those, is this
+     device's own earlier upload and its revision is adopted. A row matching none is
+     held, as before. **A call beyond the card:** after adopting an earlier send, that
+     one item is tried once more at once, because `App.jsx` doesn't reschedule a run
+     that ended without a failure. **Hand-picked:** keeping 5 sends.
+  2. **Sessions are compared by content, key order ignored (`mergeSessionArrays`).**
+     This also changes file import: two sessions identical except for key order used
+     to both be kept and are now one. Accepted, since a backup this app wrote has one
+     key order. The workaround `withComparableSessions` is deleted.
+  3. **The technique library's last-changed time (`updatedAt`) is not a change; today's
+     list and the walk position still are.** Nothing reads `updatedAt` to decide which
+     side is newer (grepped), so leaving it out of the comparison loses nothing.
+     `dayList` and `walkPosition` stay in on purpose: how they merge was left to Pass
+     118. **Cost, accepted:** the library's fingerprint changed once, so every device
+     uploaded its library once after the deploy; with two devices open that can
+     collide and hold one of them
+     ([Pass 118 open item 9](#open-questions)).
+  4. **The Account status line shows the held message and the normal line together**
+     ("not answering" still replaces both), so a held item no longer hides "N changes
+     waiting" or when it last backed up.
+
+- **Pass 116 — the app notices that another device changed something, and applies
+  nothing (built 2026-10-13, on `main` 2026-10-15).** The mechanics are in
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116).
+  **Written in the 2026-10-15 wrap-up from the code and the pass's own docs; none
+  was logged here when it shipped.**
+  1. **The check reads only ids and revisions, never the `data` column.** It repeats
+     every few minutes while the page is open, so it has to stay a few hundred bytes
+     however big the pieces are. A test asserts the recorded selects.
+  2. **It is revision-only, and a device's own upload is never "newer".** That rests on
+     one fact: the record takes the revision when the account confirms an upload. So a
+     result is not believed if an upload, a backup or "Get changes" ran while it was
+     reading (`checkRowsUsable`); the next trigger tries again.
+  3. **When it runs is one rule in the library (`createAccountChecker`), not in
+     `App.jsx`:** at startup 4 seconds after sign-in is known, on focus or when the page
+     becomes visible at most once a minute, on the browser's online event, every 5
+     minutes while visible, never while hidden, never two at once, and only when signed
+     in with the first backup checked. **Hand-picked:** those timings, listed in
+     [Research.md](Research.md#account-sync-timings).
+  4. **A failed check is not an error.** It shares the uploads' failure count (two in
+     a row show "isn't answering") and a good one resets it; it shows no message of
+     its own.
+  5. **The only surface is one added line in the Account panel** ("Changes from another
+     device: 3 pieces. Press Get changes."): no banner, no sidebar mark, and "Get
+     changes" is still the only way a change arrives. The last read is kept and re-sorted
+     against the device record, so the line goes away by itself.
+  **Found, not fixed (owners in brackets):** (a) a lost confirmation can make the line
+  say "1 piece" for up to a retry gap; it corrects itself. (b) The technique library
+  will often read "newer" while two devices are in use, because each rebuilds today's
+  list on its own, the per-device-parts problem (Pass 120). (c) A piece declined in "Get
+  changes" is noticed again on every check (Pass 122's remembered "no"). (d) A piece
+  deleted here and changed elsewhere isn't reported (Pass 122). (e) The light read pages
+  by offset, so a row inserted between two pages can be missed or repeated for one
+  check; the next check corrects it.
+
 - **Pass 117 — merging by part, the engine only (2026-10-13).** `lib/pieceMerge.js`
   (new) plus `parts` in the device record; nothing in the app uses it yet. The
   design is [Algorithms.md](Algorithms.md#merging-by-part-pass-117); the record
   side is [Accounts-and-Backend.md](Accounts-and-Backend.md#merging-by-part-pass-117).
   Calls made while building it, each one a place the card left room or was
-  contradicted by what the code does, **for the user to confirm**:
+  contradicted by what the code does, **for the user to confirm (call 1 was replaced at
+  her request on 2026-10-14; she confirmed calls 2 to 5 as built on 2026-10-15)**:
   1. **The reschedule marker is not a merge rule: the scheduler was fixed instead
      (first built as a group conflict, then replaced at the user's request).** The
      card's required test ("A reschedules, B logs a chunk A's marker lists") showed
@@ -7795,6 +7863,70 @@ what it rules out.
   `App.jsx` (one argument, `Date.now()`), and their tests. **Not touched, as the card
   required:** how backups merge the library (apart from that one line) and everything
   that calls it (backups, restore, "Get changes"), and the rest of `App.jsx`.
+
+- **When two copies disagree, the most recent change wins, item by item, and other
+  devices' changes are applied automatically (decided by the owner, 2026-10-15).**
+  **Nothing here is built.** The code still follows the Pass 112 rule until Pass 120
+  replaces it. This **supersedes in part** the "never by a clock" Pass 112 entry above
+  and changes what Passes 120 and 121 are.
+  **What was decided** (two direct questions; both answered with the recommended option):
+  1. **"Most recent wins", item by item.** For any single value two devices changed
+     differently (a tempo, a setting, a check-off or an undo, a piece field), the most
+     recent change wins, with no question. **Practice sessions and scales logged on
+     either device are always kept**: they are added together, not chosen between.
+     **Rejected: "whole copy"**, where the most recent copy replaces the other entirely.
+     It is the simplest and never asks, but practice logged on the other device is lost
+     whichever way "recent" is counted: 3 sessions on the laptop at 10:00, 1 on an
+     offline phone at 9:30, the phone reconnecting at 11:00. Counted by when it was
+     changed, the laptop's copy wins and the phone's session goes; counted by when it
+     synced, the phone's copy wins and the laptop's 3 go.
+  2. **A device brings in other devices' changes by itself** when the app is opened or
+     returned to, with no "Get changes" button. **Rejected:** keeping the button.
+  **Why.** The owner's picture is one timeline: what was done on the laptop is simply
+  there when the phone is picked up, so the latest action is what was meant, an undo
+  included. That holds whenever devices are in sync. The only gap is a device that has
+  not yet seen the other's action (offline, asleep, or a page left open, as with her
+  phone on 2026-10-15), and in that gap "most recent" is the right guess for a single
+  value. **Why "always in sync" can't just be assumed:** it needs both devices online,
+  both pages awake and the app listening, and the app is offline-first on purpose, so each
+  device keeps its own working copy. Today the app only notices other devices' changes
+  (every few minutes and when the window is returned to) and never applies them.
+  **What it reverses, said to her before she chose.** On 2026-10-03 she confirmed that
+  disagreements are never settled by a clock, because "two devices' clocks can disagree,
+  and a wrong guess would replace work that was never uploaded". **Cost accepted:** a
+  device with a wrong clock can win a single value by mistake, and a stale page can
+  briefly act on old information. She had already accepted a clock-based "most recent"
+  for tempos and for an undo against a redo (Pass 118, 2026-10-15).
+  **What it changes:**
+  - **Pass 120** wires both engines in and applies what they merge automatically when
+    the app is opened or returned to. A refused upload is merged item by item and sent
+    again instead of being held, so the red "changed on another device" banner and
+    Review should rarely appear. This subsumes proposal (a) of Pass 118 open item 9.
+  - **The engines' conflict rule changes.** The piece engine reports a part both sides
+    changed differently, keeps this device's value and lists both ("never resolved in
+    the engine"); it will pick the most recent instead. The technique engine's rule
+    that the account's value wins for octaves, hands and settings, with a notice, also
+    becomes "the most recent wins".
+  - **Pass 121 (the question) mostly goes away.** What is left of it is whatever "most
+    recent" can't settle: see the open items below.
+  - **Unchanged:** practice sessions, practiced dates and scales are always kept; a
+    deletion is marked, never erased (Design D); manual export stays.
+  **Open, to settle with the owner before or in Pass 120 (not decided):**
+  (i) **A piece whose chunk grid was changed on one device while the other logged
+  practice against the old grid** (the engine's "travel together" case). Progress is
+  keyed by chunk id, so it can't be carried across by id: "most recent wins" would either
+  lose the other side's sessions or need them re-homed by measure position, as a
+  Settings edit does on one device (`migrateOrphanedProgress`).
+  (ii) **How "most recent" is measured for a piece part.** The device record keeps a
+  fingerprint per part, not a time. What exists is the piece's `updatedAt`, each
+  session's own time and, for the technique library, the library's `updatedAt` and each
+  tempo's exact time. Options: the piece's `updatedAt` as the stand-in for any part both
+  sides changed, or a time kept per part.
+  (iii) **Deletions (Pass 122):** if one device deletes a piece and the other practices
+  it later, "the later action wins" means either the piece comes back or the practice is
+  lost; it needs her answer.
+  (iv) **A wrong device clock** is not guarded against; the account's own order of
+  arrival could break a near tie. Not designed.
 
 ## Open questions
 
@@ -8068,9 +8200,12 @@ oversight to silently fix; surface it instead.
      until their access token's hour is up); the "sign in again first" prompt has
      only been seen against a stand-in; `lib/backend.js` has no tests; the
      leaked-password check is Pro-plan only.
-  5. **From Pass 117** (the merge engine; nothing uses it yet): the five calls in
-     the Pass 117 entry above need the user's confirmation, and six open issues are
-     logged separately in
+  5. **From Pass 117** (the merge engine; nothing uses it yet): call 1 in the Pass 117
+     entry above was changed at the user's request (2026-10-14, "fix the gap
+     properly"); **calls 2 to 5 were put to her as direct questions and confirmed as
+     built on 2026-10-15** (identical splits count as agreement, "last logged" is
+     worked out from the merged sessions, days to learn is never a conflict, and a piece
+     with no record asks once the old way), and six open issues are logged separately in
      [Merging by part: what is still open](#open-questions) (the next entry).
   6. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
 - **Merging by part (Pass 117): what is still open (logged 2026-10-13, nothing
@@ -8140,9 +8275,10 @@ oversight to silently fix; surface it instead.
 - **Merging the technique library (Pass 118): what is still open (logged 2026-10-13,
   nothing here is built).** The engine is `lib/techniqueMerge.js`; the design is
   [Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118) and what
-  was decided is the Pass 118 entry under "Accounts and backend" (eight calls there need
-  the user's confirmation). Each item says what it is, how it was seen, what is
-  proposed, and who owns it.
+  was decided is the Pass 118 entry under "Accounts and backend" (its nine calls were
+  answered by the user on 2026-10-15). Each item says what it is, how it was seen, what
+  is proposed, and who owns it. Items 1 to 8 were logged 2026-10-13; item 9 is the first
+  live sighting, 2026-10-15.
   1. **Two scales added apart for the same key stay two.** One device adds F major, the
      other adds F major before they sync: the library then has two (different ids). Seen
      in a unit test (documented, not a bug in the rule). **Proposed:** a "combine" step
@@ -8236,7 +8372,11 @@ oversight to silently fix; surface it instead.
      **Owner:** Pass 120 for (a), (c) and (d); (b) whichever pass next changes a
      fingerprint's form (or Pass 120, if it is cheap there). **Until then:** a device
      that was open during a deploy that changes a fingerprint may show this banner;
-     Review is the way out and loses nothing.
+     Review is the way out and loses nothing. **Later the same evening the owner decided
+     that disagreements are settled automatically, the most recent change winning item by
+     item** ([When two copies disagree](#open-questions), below): that **subsumes (a)**
+     (a refused upload is merged and sent again instead of held, so there is nothing to
+     re-judge), and leaves (b), (c) and (d) standing.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

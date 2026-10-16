@@ -28,10 +28,13 @@
   live site) a person can optionally sign in, and the app then also keeps a
   copy of every piece and the technique library in their account**: sign-in
   (Pass 109), a checked first backup (Pass 110), every later change sent by
-  itself (Pass 111), restore and "Get changes" (Pass 112), and change password
-  and sign out of all devices (Pass 113). Signed out, or with no connection
-  settings, the app is exactly the `localStorage`-only app and makes no
-  account request. See [Accounts-and-Backend.md](Accounts-and-Backend.md).
+  itself (Pass 111), restore and "Get changes" (Pass 112), change password
+  and sign out of all devices (Pass 113), and a quiet notice when another
+  device changed something (Pass 116). **Changes still never arrive by
+  themselves:** the engines that will merge two devices' copies part by part
+  (Passes 117, 118) are built but not yet called. Signed out, or with no
+  connection settings, the app is exactly the `localStorage`-only app and makes
+  no account request. See [Accounts-and-Backend.md](Accounts-and-Backend.md).
 - No React Router — navigation is a simple `activeTab` string in state,
   switched via a sidebar.
 
@@ -69,7 +72,7 @@ MeasureOne.jsx/
 │                               # Safari 14 build target can't parse.
 └── src/
     ├── main.jsx                 # ReactDOM entry point, just mounts <App />
-    ├── App.jsx                  # state + layout only — ~4,300 lines; renders
+    ├── App.jsx                  # state + layout only — ~4,400 lines; renders
     │                            # the sidebar and whichever tab is active,
     │                            # owns updatePiece and every handler passed
     │                            # down as props. The CSS string also still
@@ -187,20 +190,41 @@ MeasureOne.jsx/
     │   │                                  # live site before Pass 114). Also the wording
     │   │                                  # and helpers for sign-in errors, password
     │   │                                  # change and "sign out of all devices" (Pass 113)
-    │   └── accountSync.js                 # Pass 110-112: copying this device to the
-    │                                      # account. No React; takes the client as an
-    │                                      # argument so a test can fake it. The first
-    │                                      # backup (adds only, checked by reading it
-    │                                      # back), then what's waiting (computeWaiting),
-    │                                      # uploading it "only if still at revision N",
-    │                                      # refusals, retry timing and the status
-    │                                      # wording. Pieces and the technique library
-    │                                      # are fingerprinted and compared in the form
-    │                                      # a reload would give them (canonicalPiece/
-    │                                      # canonicalTechnique, via storage.js).
-    │                                      # Pass 112: restore and get changes
-    │                                      # (fetchAccountCopy, planAccountMerge,
-    │                                      # applyAccountMerge)
+    │   ├── accountSync.js                 # Pass 110-116: copying this device to the
+    │   │                                  # account. No React; takes the client as an
+    │   │                                  # argument so a test can fake it. The first
+    │   │                                  # backup (adds only, checked by reading it
+    │   │                                  # back), then what's waiting (computeWaiting),
+    │   │                                  # uploading it "only if still at revision N",
+    │   │                                  # refusals (judgeRefusal; since Pass 115 each
+    │   │                                  # attempt first notes a `sent` fingerprint, so
+    │   │                                  # a lost confirmation isn't read as a
+    │   │                                  # conflict), retry timing and the status
+    │   │                                  # wording. Pieces and the technique library
+    │   │                                  # are fingerprinted and compared in the form
+    │   │                                  # a reload would give them (canonicalPiece,
+    │   │                                  # canonicalTechnique: defined in pieceMerge.js
+    │   │                                  # and techniqueMerge.js, re-exported here).
+    │   │                                  # Pass 112: restore and get changes
+    │   │                                  # (fetchAccountCopy, planAccountMerge,
+    │   │                                  # applyAccountMerge). Pass 116: noticing that
+    │   │                                  # another device changed something (the light
+    │   │                                  # read checkAccountChanges, the sorter
+    │   │                                  # classifyAccountChanges, the throttle
+    │   │                                  # createAccountChecker). The device record's
+    │   │                                  # `parts` (Pass 117, 118) are written here too
+    │   ├── pieceMerge.js                  # Pass 117: the merge-by-part ENGINE for one
+    │   │                                  # piece (planPieceMerge), plus fingerprint,
+    │   │                                  # canonicalPiece and piecePartFingerprints.
+    │   │                                  # Pure; never imports the account code (the
+    │   │                                  # account code imports it). Nothing in the
+    │   │                                  # app calls the merge yet (Pass 120 does).
+    │   │                                  # Algorithms.md#merging-by-part-pass-117
+    │   └── techniqueMerge.js              # Pass 118: the same for the technique
+    │                                      # library (planTechniqueMerge), plus
+    │                                      # canonicalTechnique and
+    │                                      # techniquePartFingerprints. Same status.
+    │                                      # Algorithms.md#merging-the-technique-library-by-part-pass-118
     └── components/
         ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
         │   ScheduleBanner.jsx, Sparkline.jsx,
@@ -216,7 +240,9 @@ MeasureOne.jsx/
         │   └── BasicsFields.jsx, SectionsEditor.jsx, DifficultyEditor.jsx,
         │       RecurringEditor.jsx, ScheduleFields.jsx, BpmZonesEditor.jsx,
         │       RecordingsEditor.jsx, RecordingsList.jsx,
-        │       DocumentsEditor.jsx, DocumentsList.jsx
+        │       DocumentsEditor.jsx, DocumentsList.jsx,
+        │       LadderConfigEditor.jsx (Pass 17; used only by SettingsTab's
+        │       edit page, in its "Maintenance ladder" panel, not by Wizard)
         └── tabs/
             ├── OverviewTab.jsx, TimelineTab.jsx, PieceMapTab.jsx,
             │   ProgressTab.jsx, SettingsTab.jsx,
@@ -281,7 +307,7 @@ single-file Claude.ai artifact.
 | `AllPiecesTab` (Pass 42) | Cross-piece summary: a "Practiced this week" stat, a piece count, a 14-day cross-piece consistency heatmap, and one row per piece in `pieces` — progress % (`computeProgressTier`, same measure-tier math `OverviewTab` uses for "Measures learned"), confidence % (`computeConfidence`, same averaging `OverviewTab` uses for "Total progress"), days since last touched (`piece.lastLoggedAt`), and time practiced *this week* (`sumPracticeSecondsSince`, Monday through today via `startOfWeekISO` — both `lib/utils.js`, Pass 42 follow-up). A "Back to {current piece}" button in the header reuses the same `onSelectPiece` (`switchToPiece`) call the rows use, just passed the currently-open piece's id instead of a row's. Clicking a row lands on that piece's Overview. Not in `NAV_BASE` — reached only via `ProgressTab`'s button, a "button-triggered `activeTab`, no permanent nav entry" shape the old `"revival"` `activeTab` value used to share before Pass 88 retired it (revival is a mode within `TodayTab` now, not its own `activeTab` at all — see the `TodayTab` row above and [Decisions.md](Decisions.md#revival)). Confidence is computed off `elapsedDay(piece)` (unclamped real calendar days), not the timeline-clamped `getCurrentDay` `OverviewTab`/`MasterAgendaTab` use for the piece currently open — see [Decisions.md](Decisions.md#cross-piece-views) for why. The consistency heatmap (`computeCrossPieceConsistency`, `lib/utils.js`) reads each session's `loggedDate` directly rather than `ProgressTab`'s plan-relative day numbers, so pieces with different start dates share one calendar axis; "touched" excludes skipped/provisional sessions via the existing `loggedSessions()`, the same rule `ProgressTab`'s own heatmap uses. |
 | `MasterAgendaTab` | Cross-piece daily view — aggregates every *active* piece's scheduled tasks for a selected date (date-navigable, not locked to today) into one list, so a multi-piece user isn't switching between pieces to see the whole day. **First item in the sidebar as of Pass 18.** For a piece still inside its plan it reads `getEffectiveTimeline(...).days[dayNumber - 1]` directly, the same fixed-length, `daysToLearn`-bounded indexing `TodayTab` uses. **Since Pass 8, a piece that has run past its plan no longer falls out of that indexing** — it renders a due-maintenance summary from `computeDueReviews` (`lib/maintenance.js`) instead: merged measure ranges under a "Due" tag, plus a count. That branch only ever fires for the real today, since due-ness is strictly "as of today" and the date picker must not become a forward-looking window. **Since Pass 19 the content is split across three subtabs** — Learning phase / Maintenance due / Revival — with counts in the labels. The first two are a pure presentation split of the same `agendaData.items` array, partitioned on the `isDueList` flag that already distinguished the two card shapes; no new computation, and the combined count is unchanged. The Revival subtab is *not* such a split: pieces in revival are skipped when building the other two lists (`isInRevival`), so each piece appears in exactly one subtab, and revival cards are built from a separate derivation — status (reassessment in progress / plan ready) plus the **highest-priority items** as merged measure ranges under a "Start here" tag. Not "today's work": a revival plan is priority-ordered, not dated. Uses `piece.revival.plan` when one exists (so it agrees with what `TodayTab`'s revival branch shows — `RevivalTab` before Pass 88) and falls back to a live `computeRevivalPlan` call mid-reassessment. Revival cards deliberately carry no time estimate and contribute nothing to the "Total planned" banner. The selected subtab persists across tab switches via a module-level variable (not state, not `localStorage`) — a fresh page load starts on Learning phase. See [Decisions.md](Decisions.md#revival). **Since Pass 21, three more controls, all gated to the real today (the date picker must not turn these into a forward-looking action):** a "Reschedule all" panel on the Learning-phase subtab, shown whenever `planRescheduleForPieces` finds any behind-schedule pieces, applying the bulk reschedule described in [Algorithms.md](Algorithms.md#rescheduling); a "Pick a random piece to practice" button (offered once two or more pieces have real work today) that switches the active piece; and a `RandomStartPanel` on the Maintenance-due subtab, pooling every due spot across every piece so a review session doesn't always start at the top of the same list — see [Decisions.md](Decisions.md#scheduling) for all three. **Since Pass 75**, a per-piece day card shares the same `isDayFullySwept`/`withLiveReviewStatus` treatment `WeekView` gets (see that row above) — a fully-rescheduled day collapses to "Tasks rescheduled," and a stale review no longer shows as if still open. **Since Pass 92**, a day emptied purely by that staleness reads "Nothing scheduled." (via the same shared `classifyDayEmptyState`, `lib/scheduling.js`, all four day-list surfaces now use), replacing the dedicated "Now due — see today" note this originally showed. **Since Pass 102**, on the real today it also shows the shared `TechniquePanel` (`variant="shared"`) directly under the Total planned banner, above the random-piece button and the subtabs. Total planned adds the technique minutes, with an "includes Nm technique" line under the number. Both the minutes and the panel's visibility come from `techniqueTodaySummary` (`lib/technique.js`), and the Status wording from `agendaStatusLabel` there too. Technique counts toward the Busy/Moderate tier, never toward "N pieces scheduled", and a day with scales but no pieces reads "<tier> — technique only". |
 | `TechniqueTab` (Pass 101) | The Technique page, app-level (not scoped to the open piece), second in the sidebar after Master Agenda with a hairline divider (`.nav-divider`) before the piece-scoped items. Eyebrow "Technique", h1 "Scales and arpeggios", an "Add scale or arpeggio" button (`AddTechniqueItemForm`), and three subtabs: **Today** (`TechniquePanel` with the circle-of-fifths walk hint), **Library** (`TechniqueLibrary`: filter, three sorts, row editor, the check-octaves keep/start-fresh prompt inside the row) and **Methods** (`TechniqueMethods`). `TechniquePanel` is deliberately standalone: **since Pass 102** the same component is on Master Agenda and Daily Practice (`variant="shared"`, no walk hint), fed by one `techniquePanelHandlers` bundle from `App.jsx`, so a check-off on any screen shows on all of them. On those two screens it only appears when `techniqueTodaySummary(technique, today).visible`: today's saved list, with at least one task. So no empty panel shows on every piece's page when the library is empty or every scale is switched off. The Technique page always shows its panel, empty states included. Every change goes through `App.jsx`'s `handleTechnique*` handlers and `updateTechnique`, never `setPieces`/`updatePiece`. Layout and copy follow [the mockup](mockups/technique-practice.html); behavior follows [Technique-Practice.md](Technique-Practice.md). |
-| `SettingsTab` | **Landing page (non-editing):** only what isn't about the current piece — "Pieces" (Add new piece) and "Backup & restore" (Export/Import) — plus a read-only "Current piece details" summary (name, composer, measures, schedule, notes, recordings, documents) directly above the "Edit piece settings" button (`startEditing`, `App.jsx`; the same button is in the sidebar on every tab, **since Pass 93**). **Edit page ("Edit piece settings"):** the shared field-editor components inside the draft form, plus three draft-form panels that used to apply immediately and now save with "Save changes" (**Pass 93**): "Focus spots" (On/Off toggle for `piece.troubleSpotsEnabled` and, only while On, a `NumberInput` for `piece.troubleSpotDefaultMinutes` — see [Algorithms.md](Algorithms.md#focus-spots-v1)), "Revival settings" (only while `isInRevival(editDraft)`; the tempo ladder's starting-BPM field, `tempoLadderStartFraction`, derived from `BPM / targetBPM` on commit), and "Learned elsewhere" (`piece.markedLearnedElsewhere`, an unconditional override for a piece finished away from the app, freely reversible; marking it asks for confirmation first). "Save changes" is disabled on a blank piece name or zero total measures, or a blank work title with "Multiple movements" on. **Below the Save/Discard row, outside the draft**, an "Applies immediately" group: Practice status (Pause/Archive/Resume/Reactivate — Archive gated on `isPlanActuallyComplete`) and Delete this piece. Those two still act on the live piece straight away. **Save never writes the whole draft back:** `handleSavePiece` builds the saved piece with `mergeEditedPiece` (`lib/pieceEdit.js`), which takes only the fields the form edits (an allow-list, `EDIT_FORM_FIELDS`) from the draft and keeps everything else — progress, chunk notes, `status`, the rest of `revival`, etc. — from the live piece. Without that, Save silently undid anything that changed while the form was open (logged practice, ratings, a Pause/Archive, an ended revival). If you add a field to the edit form, add it to `EDIT_FORM_FIELDS` or the edit won't save. |
+| `SettingsTab` | **Landing page (non-editing):** only what isn't about the current piece — "Pieces" (Add new piece) and "Backup & restore" (Export/Import) — plus a read-only "Current piece details" summary (name, composer, measures, schedule, notes, recordings, documents) directly above the "Edit piece settings" button (`startEditing`, `App.jsx`; the same button is in the sidebar on every tab, **since Pass 93**). **Edit page ("Edit piece settings"):** the shared field-editor components inside the draft form, plus three draft-form panels that used to apply immediately and now save with "Save changes" (**Pass 93**): "Focus spots" (On/Off toggle for `piece.troubleSpotsEnabled` and, only while On, a `NumberInput` for `piece.troubleSpotDefaultMinutes` — see [Algorithms.md](Algorithms.md#focus-spots-v1)), "Revival settings" (only while `isInRevival(editDraft)`; the tempo ladder's starting-BPM field, `tempoLadderStartFraction`, derived from `BPM / targetBPM` on commit), and "Learned elsewhere" (`piece.markedLearnedElsewhere`, an unconditional override for a piece finished away from the app, freely reversible; marking it asks for confirmation first). "Save changes" is disabled on a blank piece name or zero total measures, or a blank work title with "Multiple movements" on. **Below the Save/Discard row, outside the draft**, an "Applies immediately" group: Practice status (Pause/Archive/Resume/Reactivate — Archive gated on `isPlanActuallyComplete`) and Delete this piece. Those two still act on the live piece straight away. **Save never writes the whole draft back:** `handleSavePiece` builds the saved piece with `mergeEditedPiece` (`lib/pieceEdit.js`), which takes only the fields the form edits (an allow-list, `EDIT_FORM_FIELDS`) from the draft and keeps everything else — progress, chunk notes, `status`, the rest of `revival`, etc. — from the live piece. Without that, Save silently undid anything that changed while the form was open (logged practice, ratings, a Pause/Archive, an ended revival). If you add a field to the edit form, add it to `EDIT_FORM_FIELDS` or the edit won't save. **The "Account" panel** (Pass 109 on; rendered only when `authEnabled`, after "Backup & restore") shows sign-in, or the signed-in email with Sign out; once signed in, "Back up this device" (its first-backup question is asked inline, never in a pop-up), "Get changes from your account" and, while anything is held, "Review"; the one-line sync status (`describeSyncStatus`: the held message, "N changes waiting to back up", or when it last backed up) plus, since Pass 116, a "Changes from another device" line; the last result of a restore, Get changes or Review (`accountNotice`); and, in a group at the bottom, Change password and Sign out of all devices (Pass 113). Its state (`authSession`, `backup`, `syncInfo`, `accountNotice`) lives in `App.jsx`, not here, so leaving Settings loses nothing. |
 | `App` | Root component. Owns all state and renders the sidebar + active tab, or the empty-state/loading screens. |
 
 ## State management
@@ -405,8 +431,8 @@ library.
     `storageError`, because the pieces save effect resets `storageError` on
     every run and would otherwise clear a technique failure (and vice
     versa). The existing storage banner shows while either is set.
-- **Account sign-in, the automatic backup, restore and account settings
-  (Passes 109-113): all optional, all behind `authEnabled`**
+- **Account sign-in, the automatic backup, restore, account settings and
+  noticing other devices (Passes 109-118): all optional, all behind `authEnabled`**
   (`isBackendConfigured()`; false in tests, in a fresh checkout and on the live
   site before Pass 114, and then none of what follows renders or runs; the live
   site has had the connection settings since go-live). `authSession` is only
@@ -445,6 +471,26 @@ library.
     window in `mode="change"`) and `handleSignOutAll` in `App.jsx`, with their words
     and the sign-out result logic in `lib/backend.js` (`describeSignOutAll`). They
     touch no piece, technique data or device record.
+  - **Noticing another device's changes (Pass 116):** `requestCheck(trigger)` in
+    `App.jsx` adds only the gates that need app state (signed in, first backup
+    checked, and no upload run, manual backup or "Get changes" running) and hands the
+    rest to `createAccountChecker` (`lib/accountSync.js`), which owns the throttle.
+    The last light read is kept in `checkRowsRef` and re-sorted against the device
+    record by `refreshSyncInfo` every time the status is refreshed, so the Account
+    panel's extra line shrinks by itself. It reads only ids and revisions and applies
+    nothing; a new trigger goes through `requestCheck`, never straight to
+    `checkAccountChanges`.
+  - **Parts in the device record (Passes 117, 118):** the record's entries carry
+    `parts` (a fingerprint per part, never a copy of the data), the base the two
+    merge engines compare against. A startup step (`withPartsRecorded`, called from
+    `App.jsx`) records them for pieces that still equal their record;
+    `withTechniquePartsRecorded` is built and tested but **`App.jsx` does not call it
+    yet** (Pass 120). **Nothing in `App.jsx` calls either merge engine yet:** "Get
+    changes" and Review still merge with the import path's own functions.
+  - **The technique clock (Pass 118):** `lib/technique.js` has no clock, so
+    `handleTechniqueComplete` passes `Date.now()` to `completeTask`, which stores it
+    as the scale's `lastCheckedAt` along with a tempo. Any new place that logs a
+    tempo must pass the time too.
 - `storageError` (a failed `localStorage` write) and `exportReminderDue` /
   `exportReminderDismissed` (**Pass 12** — a day-plus since the last export,
   or since first use if never exported; `isExportReminderDue`,

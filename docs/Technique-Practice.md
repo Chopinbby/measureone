@@ -227,6 +227,24 @@ derived from any study. The canonical inventory is in
 This is what a person will see once it is, and the rules the engine already follows.
 The mechanics are in [Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118).
 
+**What the live app does today, until Pass 120.** The whole library is one row in
+the account and goes up as one piece, only if the account is still at the revision
+this device last saw. When another device got there first, the upload is refused and
+the library is **held**: "The technique library changed on another device", with a
+Review button. Review (and "Get changes") settle it with the older import-style merge,
+asking nothing: a scale the other copy has and this one lacks is added; a tempo
+with a strictly newer check date replaces this device's, with its time and check
+octaves; practiced days are combined; each method's last-used date takes the later
+one; methods the other copy has are added. Nothing is removed. **Today's list, the
+walk position and the settings stay as this device has them**, and a same-day tempo tie
+keeps this device's tempo (the exact-time rule below is the engine's, not used yet).
+Because today's list and the walk position are per device but sit in the shared row,
+two devices in use can hold each other's library often, and a hold can clear with
+nothing to merge. First seen live on 2026-10-15
+([Decisions.md](Decisions.md#open-questions), Pass 118 open item 9).
+
+What follows describes the engine, for when it is wired in.
+
 Practice on a phone and a laptop, sync, and the library ends up with **everything both
 did, with no question asked**:
 
@@ -253,7 +271,8 @@ did, with no question asked**:
   C major was kept."
 - **If both devices changed the same octaves, hands or setting to different values**,
   the account's (the first to sync) is kept and the person is told, in one line, never
-  asked: "Your other device's change to D major was kept."
+  asked: "Your other device's change to D major was kept." (**Decided 2026-10-15:**
+  Pass 120 changes this to "the most recent change wins".)
 - **The circle-of-fifths walk steps once for the day.** If both devices did the day's
   scale, the walk moves one key, not two.
 - **Today's list:** for the same day, both devices' tasks are kept (so if both opened
@@ -306,7 +325,7 @@ Each item has its own entry, with the alternative it rules out, in
 6. **Across devices (Pass 118), confirmed by the user 2026-10-15:** the library
    merges by part with no question asked; where both devices changed the same
    octaves, hands or setting to different values the account's is kept (with a
-   notice); the **later logged tempo** wins by its exact time; an undo against a redo
+   notice; the most recent from Pass 120, decided 2026-10-15); the **later logged tempo** wins by its exact time; an undo against a redo
    goes to whichever device's library changed most recently; scales are never removed
    by a merge; and the walk steps once for the day. See
    [On more than one device](#on-more-than-one-device-pass-118) and the Pass 118 entry

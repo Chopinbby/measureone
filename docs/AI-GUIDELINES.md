@@ -1106,6 +1106,63 @@ a backup (the owner saw "successful"), so the instruction became "limit 0". The 
 then arrived, but in the Updates tab of the owner's mail rather than the inbox: say where an
 alert may land.
 
+## A pull request built on another unmerged pass's branch merges into that branch, not into `main`
+
+Passes 116 and 117 were opened against the previous pass's branch, because each was
+built on top of it. The owner merged them "separately", GitHub marked each one Merged,
+and each landed in its own base branch: `main`, and so the live site, held only Pass
+115 for two days, and nobody noticed until a question ("I thought I already merged 116
+and 117") prompted a fresh `git fetch`. "Merged" on GitHub only means merged into that
+pull request's own base. When passes stack, say in the pull request and in the reply
+which one must merge first, or base each on `main`. After the owner says she merged,
+check three things instead of believing the badge: `git merge-base --is-ancestor <sha>
+origin/main`, the pull request's base branch, and that a file or function from the pass
+exists on `origin/main`. Also list the open and recent pull requests for ones you
+didn't open: the owner may have merged the top of the stack instead of the one you
+asked for (she did, and it carried everything). If something is missing, offer one
+repair pull request and don't open it unasked.
+
+## A check that can't fail isn't a check: when one says yes where you expected no, run it a second way
+
+Checking whether Pass 117's engine file was on `main`, a shell line built
+`git cat-file -e $ref:src/lib/pieceMerge.js`. In zsh a bare `$ref:s...` is a text
+modifier, so git received only `origin/main`, a perfectly valid object, and exited 0:
+"PRESENT", for a branch that lacked the file. The lines beside it printed "bad
+substitution", which was the clue. Brace the variable (`"${ref}:path"`), and when an
+existence check reports success on something you expected to be missing, confirm it
+with an independent measure (commit ancestry, a grep count) before telling the owner.
+Give any new checker a case that must fail: the link checker used for the
+2026-10-15 wrap-up was first run on a throwaway folder with one planted bad link and
+one planted bad anchor, and caught both, before its "0 broken" was believed.
+
+## A hand-off that names only the clean outcome will be read as the whole story
+
+After the Pass 118 deploy the owner was told to expect "Backed up just now", maybe "1
+change waiting" first. The deploy changed every fingerprint, so every device uploads
+once; her phone, open and forgotten, got there first, and her desktop showed "The
+technique library changed on another device". Nothing was lost and Review cleared it,
+but the hand-off had not said it could happen. Asked whether the site was open
+anywhere else, she first said no (not on the Claude app, other browsers or the phone),
+then remembered it was on her phone. When a change makes every device act at once,
+say in the hand-off what the second-device outcome looks like and what clears it, and
+ask about phones, old tabs and the Claude app's browser pane **by name**: "anywhere
+else?" gets "no" from memory. See
+[Decisions.md](Decisions.md#open-questions), Pass 118 open item 9.
+
+## A committed simulation's run count is a floor, not a verdict
+
+The two merge engines (Passes 117 and 118) each ship with a seeded two-device
+simulation (300 runs of every kind of edit, 100 of the everyday mix), and each passed
+while a much wider sweep (thousands of seeds, run from a scratch copy of the test) still
+found a real bug late: for the technique engine, a per-scale list of last-used methods
+that wasn't stable under a second merge, first seen past seed 2400. Both the engine and
+its checks were written by the same author, so they share blind spots. Before trusting a
+change to a simulated engine, run it wider than the committed count, break the engine on
+purpose to confirm the simulation can fail (see "Verify a regression test can actually
+fail" above), and keep the simulation's oracles independent of the engine's own
+fingerprints. Report the confidence honestly ("reasonably confident, not certain")
+rather than rounding up.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

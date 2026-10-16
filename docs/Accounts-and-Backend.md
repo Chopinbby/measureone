@@ -4,8 +4,8 @@
 > keeping a copy of every piece and the technique library in the account, on
 > Supabase. The plain-language case for doing this at all, and the risks it
 > has to guard against, is [SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md).
-> **Audience:** Anyone building or changing Passes 106–114, and anyone asking
-> "where does my data live once I sign in?"
+> **Audience:** Anyone building or changing Passes 106–118 (and the Phase 2
+> passes after them), and anyone asking "where does my data live once I sign in?"
 > **Scope:** What was decided, how the account copy works (its shape on the
 > server, conflicts, deletes, security, connection settings), known limits of
 > the service, and the pass plan. Not the reasoning behind each choice — see
@@ -25,7 +25,8 @@
 > depends on.
 
 **Status: designed (Pass 105, 2026-09-27); Phase 1 built, and live since
-Pass 114 (2026-10-10).** Passes 106–113 built it and Pass 114 put it live, see
+Pass 114 (2026-10-10); Phase 2 begun (Passes 115 to 118, live 2026-10-14 and
+15).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
 [Pass plan](#pass-plan). Since Pass 108 a **test** Supabase project exists with
 the tables and security rules, connected to preview sites and local
 development (see [Setup](#setup-test-project)), and since Pass 114 a separate
@@ -44,10 +45,20 @@ Pass 112 a signed-in person can bring things back from the account**: restore
 onto a new device, "Get changes from your account", and Review for a piece
 held as "changed on another device" (see
 [Restore, get changes and settle](#restore-get-changes-and-settle-pass-112)).
-Changes still don't arrive by themselves (Phase 2). **Since Pass 114
-(2026-10-10) the live site is connected to the production project**: a person
-with an account (invitation only, so far just the owner) gets everything
-above there, and a signed-out visitor sees the app exactly as before.
+**Since Pass 114 (2026-10-10) the live site is connected to the production
+project**: a person with an account (invitation only, so far just the owner) gets
+everything above there, and a signed-out visitor sees the app exactly as before.
+**Phase 2 has begun, and is groundwork so far.** Pass 115 made "the same" and
+"changed" trustworthy; since Pass 116 the app **notices**, quietly, that another
+device changed something (it applies nothing); and Passes 117 and 118 built the
+two engines that will merge a piece and the technique library part by part
+(see [Merging by part](#merging-by-part-pass-117) and
+[The technique library by part](#the-technique-library-by-part-pass-118)).
+**Nothing calls the engines yet (Pass 120), and changes still don't arrive by
+themselves:** "Get changes" and Review still merge with the import path's own
+functions. **Decided 2026-10-15 (not built):** from Pass 120 other devices' changes
+are applied automatically and the most recent change wins item by item (Decided 6
+below). See [Pass plan](#pass-plan).
 
 ## Decided
 
@@ -72,6 +83,15 @@ alternative it rules out, in [Decisions.md](Decisions.md#accounts-and-backend).
 5. **No live multi-device sync in Phase 1**
    ([SOW §5.3](SOW-Accounts-and-Sync.md#53-is-live-multi-device-sync-required-on-day-one),
    decided earlier).
+6. **Added 2026-10-15, for Phase 2: when two copies disagree, the most recent
+   change wins, item by item, and other devices' changes are applied
+   automatically** when the app is opened or returned to. Practice sessions and
+   scales logged on either device are always kept (added together, never chosen
+   between); a deletion is still marked, never erased. This **reverses** the
+   2026-10-03 rule that disagreements are never settled by a clock (Pass 112), and
+   nothing is built yet: the code keeps that rule until Pass 120 replaces it. The
+   reasoning, the cost accepted and four open questions are in
+   [Decisions.md](Decisions.md#open-questions) ("When two copies disagree").
 
 ## Design
 
@@ -251,7 +271,30 @@ Manual export and the export reminder stay throughout Phase 1
 ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
 risk 1).
 
-**Phase 2:** multi-device sync, and what happens offline.
+**Phase 2 — multi-device sync, and what happens offline** (begun; nothing arrives
+by itself yet):
+- **115** "Same" and "changed" you can trust: a lost confirmation no longer reads
+  as a conflict, sessions are compared by content, the technique library's
+  last-changed time is not a change, and the status line shows both messages.
+  Built; see [Same and changed you can trust](#same-and-changed-you-can-trust-pass-115).
+- **116** Notice, quietly, that another device changed something (one added line
+  in the Account panel; nothing is applied). Built; see
+  [Noticing that another device changed something](#noticing-that-another-device-changed-something-pass-116).
+- **117** The merge-by-part engine for a piece, and `parts` in the device record.
+  Built, **nothing uses it yet**; see [Merging by part](#merging-by-part-pass-117).
+  Shipped with it: a scheduler fix (a chunk done earlier than the day a
+  reschedule places it on is not owed there).
+- **118** The same for the technique library. Built, **nothing uses it yet**; see
+  [The technique library by part](#the-technique-library-by-part-pass-118).
+- **120** (named in the docs, not built) wires both engines in and, **by the owner's
+  decision of 2026-10-15** (Decided 6), applies other devices' changes automatically
+  when the app is opened or returned to, the most recent change winning item by item;
+  a refused upload is merged and sent again instead of held. **121**, which was to ask
+  when two copies really disagree, is left with only what "most recent" can't settle
+  (the open items under "When two copies disagree" in
+  [Decisions.md](Decisions.md#open-questions)); **122** deletions. There is no Pass
+  119 in these docs.
+- After those: what happens offline.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring, and an in-app "delete my account", which must exist before
@@ -623,7 +666,7 @@ What was built, and the small choices made building it:
   `sameTechnique`. (3), (5), (6) and (7) were not part of Pass 112's card and are
   unchanged: a held piece's false hold is still possible (Review settles it, with
   a picker that isn't really needed), and the status line still shows one message
-  at a time.
+  at a time (both as of Pass 112; **Pass 115 fixed both**, see above).
 
 ## Restore, get changes and settle (Pass 112)
 
@@ -725,7 +768,10 @@ copy deleted.
   kept twice (caught by the first test). `withComparableSessions`
   (`lib/accountSync.js`) puts both sides' sessions in one key order before
   merging. The real fix is in `mergeSessionArrays` (`lib/storage.js`), which this
-  pass's file list doesn't include; see "For later passes" below.
+  pass's file list doesn't include; see "For later passes" below. **Fixed in Pass
+  115:** `mergeSessionArrays` compares sessions by content and
+  `withComparableSessions` is deleted, see
+  [Same and changed you can trust](#same-and-changed-you-can-trust-pass-115).
 - **Checked** (my own runs; the owner's checks are in the pull request): unit
   tests for each rule above; the five breakages (the no-ask rule with a change
   waiting, the no-ask rule without the account having changed, no mark-deleted
@@ -746,10 +792,11 @@ copy deleted.
   export file; the technique library differed only in its own last-changed time);
   signed out, and a build with no account service configured (the live site's
   configuration before go-live): nothing changes.
-- **For later passes** (found here, not decided): (1) **the two items left from
+- **For later passes** (found here, not decided): (1) ~~**the two items left from
   Pass 111**: a false hold is still possible, and the status line still shows one
-  message at a time. (2) **`mergeSessionArrays` should compare sessions by
-  content, not by JSON text** (`lib/storage.js`). (3) **Two devices that both
+  message at a time.~~ **Fixed in Pass 115.** (2) ~~**`mergeSessionArrays` should
+  compare sessions by content, not by JSON text** (`lib/storage.js`).~~ **Fixed in
+  Pass 115.** (3) **Two devices that both
   use the app will often hold each other's technique library**: its last-changed
   time and today's list are per device but are part of the shared row, so each
   device's upload can be refused by the other's. Review settles it with no
@@ -1124,7 +1171,9 @@ change arrives.
 
 The engine for merging two copies of one piece part by part, **and nothing else**:
 no merge uses it yet ("Get changes" and Review still go through Phase 1's whole-piece
-import merge; Pass 120 wires the engine in, Pass 121 asks the question). How it
+import merge; Pass 120 wires the engine in, Pass 121 asks the question; **since
+2026-10-15 Pass 120 also applies it automatically and the most recent change wins
+instead of a question**, see Decided 6 above). How it
 works, the rules, and the simulation that checks it are in
 [Algorithms.md](Algorithms.md#merging-by-part-pass-117). What this pass changes
 about the account code:
@@ -1173,8 +1222,9 @@ about the account code:
   the two sides swapped (25 of 25 each). As a control, one session added to the **same**
   chunk on both sides is a conflict for that chunk only (25 of 25).
 - **Not built, on purpose** (see the pass's deferred list): using the engine from "Get
-  changes" or anything automatic (120), the question the person is asked (121), the
-  technique library (118), deletions (122).
+  changes" or anything automatic (120), the question the person is asked (121; since
+  2026-10-15 reduced to what "most recent wins" can't settle), the technique library
+  (118), deletions (122).
 
 ## The technique library by part (Pass 118)
 

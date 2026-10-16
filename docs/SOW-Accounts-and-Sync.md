@@ -1,8 +1,12 @@
 # Scope of Work: User Accounts, Backend, and Sync
 
 **Status:** Phase 0 decided on 2026-09-27; the technical design is
-[Accounts-and-Backend.md](Accounts-and-Backend.md). No code has been written
-against this yet. This document stays the plain-language record of why.
+[Accounts-and-Backend.md](Accounts-and-Backend.md). **Since then** Phase 1 was
+built and went live (Passes 105 to 114, 2026-10-10) and Phase 2 has begun
+(Passes 115 to 118, live 2026-10-14 and 15); the text below is unchanged from when it was
+written, so read it as the plain-language record of why, not as the current
+state (that is in [Accounts-and-Backend.md](Accounts-and-Backend.md) and
+[Roadmap.md](Roadmap.md)).
 **Written for:** a non-technical reader making product decisions. Technical
 terms are explained the first time they're used.
 **Last updated:** 2026-09-27.

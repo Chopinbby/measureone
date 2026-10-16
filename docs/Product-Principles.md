@@ -162,3 +162,30 @@ gate plan generation and grouping them up front means a learner who
 already knows this information isn't sent hunting for it across several
 screens. They're unchanged everywhere else — same components, same fields,
 still fully optional, still separately editable from Settings afterward.
+
+## Two copies reconcile themselves: the most recent change wins, and logged practice is never thrown away
+
+Once a person's practice can live in more than one place (this browser, and
+optionally an account), two copies will sometimes disagree. The rule, **decided by
+the owner on 2026-10-15** (it replaces an earlier, more cautious one; see
+[Decisions.md](Decisions.md#open-questions), "When two copies disagree"):
+
+- **The app reconciles by itself.** It brings in other devices' changes when it is
+  opened or returned to, and doesn't ask the person to referee.
+- **The most recent change wins, item by item.** For any single value two devices
+  changed differently (a tempo, a setting, a check-off or an undo), the most recent
+  change wins, with no question.
+- **Logged practice and scales are always kept.** Practice sessions, practiced days
+  and scales logged on either device are added together, never chosen between. A
+  deletion is marked, never erased.
+- The browser's copy stays the working copy. Signed out, the app is the local-only app.
+
+Why not "the most recent whole copy wins": it is simpler, but practice logged on the
+other device is lost whichever way "recent" is counted (3 sessions on the laptop at
+10:00, 1 on an offline phone at 9:30, the phone reconnecting at 11:00: one device's
+practice disappears). **Cost accepted:** a device with a wrong clock can win a single
+value by mistake, and a page left open and asleep can briefly act on old information.
+
+**Status: decided, not built.** Until Pass 120 the app only notices another device's
+changes, holds an upload when another device got there first, and the person presses
+Get changes or Review. See [Accounts-and-Backend.md](Accounts-and-Backend.md#decided).

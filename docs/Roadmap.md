@@ -386,8 +386,11 @@ Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale. **The one thread already in motion is the
 accounts work (Phase 2):** the passes the docs name next are 120 (wire the two
-merge engines into "Get changes" and Review), 121 (ask when two copies really
-disagree) and 122 (deletions); see backlog item 5.
+merge engines in and apply other devices' changes automatically when the app is
+opened or returned to, **the most recent change winning item by item, decided
+2026-10-15**), 121 (only what "most recent" can't settle) and 122 (deletions); see
+backlog item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies
+disagree".
 
 ## Priority-ordered backlog
 
@@ -481,9 +484,10 @@ disagree) and 122 (deletions); see backlog item 5.
    that keeps a checked copy of every piece and the technique library, restore,
    account settings, live since Pass 114) is Done above, and **Phase 2 has
    begun** (Passes 115 to 118, Done above). Still to build in **Phase 2**: the two
-   merge engines wired in (120), the question when two copies really disagree
-   (121), deletions (122), changes arriving on other devices by themselves, and
-   what happens offline; **Phase 3**, open sign-up, a privacy policy and terms, a
+   merge engines wired in, with other devices' changes applied automatically and the
+   most recent change winning item by item (120; decided 2026-10-15, which also
+   shrinks 121, the question when two copies disagree, to what "most recent" can't
+   settle), deletions (122), and what happens offline; **Phase 3**, open sign-up, a privacy policy and terms, a
    real email provider (Supabase's built-in sender reaches only the project's
    own team and only a couple of messages an hour, which is why the owner's is
    the only account for now), monitoring, and an in-app change of email and

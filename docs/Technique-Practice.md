@@ -271,7 +271,8 @@ did, with no question asked**:
   C major was kept."
 - **If both devices changed the same octaves, hands or setting to different values**,
   the account's (the first to sync) is kept and the person is told, in one line, never
-  asked: "Your other device's change to D major was kept."
+  asked: "Your other device's change to D major was kept." (**Decided 2026-10-15:**
+  Pass 120 changes this to "the most recent change wins".)
 - **The circle-of-fifths walk steps once for the day.** If both devices did the day's
   scale, the walk moves one key, not two.
 - **Today's list:** for the same day, both devices' tasks are kept (so if both opened
@@ -324,7 +325,7 @@ Each item has its own entry, with the alternative it rules out, in
 6. **Across devices (Pass 118), confirmed by the user 2026-10-15:** the library
    merges by part with no question asked; where both devices changed the same
    octaves, hands or setting to different values the account's is kept (with a
-   notice); the **later logged tempo** wins by its exact time; an undo against a redo
+   notice; the most recent from Pass 120, decided 2026-10-15); the **later logged tempo** wins by its exact time; an undo against a redo
    goes to whichever device's library changed most recently; scales are never removed
    by a merge; and the walk steps once for the day. See
    [On more than one device](#on-more-than-one-device-pass-118) and the Pass 118 entry

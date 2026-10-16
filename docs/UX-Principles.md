@@ -290,6 +290,8 @@ banner. Only something held, where this device's copy has not been uploaded over
 another device's, gets the red banner with **Review**, on every screen, because
 it won't clear without a person. And what the app merely **notices** about another
 device ("Changes from another device: 3 pieces. Press Get changes.") is a line,
-not a banner, and is never applied unasked. See
+not a banner, and is never applied unasked (**true until Pass 120**: the owner decided
+on 2026-10-15 that other devices' changes will then be applied automatically when the
+app is opened or returned to, so this line and the held banner should rarely show). See
 [User-Flows.md](User-Flows.md#12-getting-things-from-your-account-optional-pass-112)
 and [Accounts-and-Backend.md](Accounts-and-Backend.md#keeping-the-backup-current-pass-111).

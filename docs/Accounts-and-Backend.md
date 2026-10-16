@@ -56,7 +56,9 @@ two engines that will merge a piece and the technique library part by part
 [The technique library by part](#the-technique-library-by-part-pass-118)).
 **Nothing calls the engines yet (Pass 120), and changes still don't arrive by
 themselves:** "Get changes" and Review still merge with the import path's own
-functions. See [Pass plan](#pass-plan).
+functions. **Decided 2026-10-15 (not built):** from Pass 120 other devices' changes
+are applied automatically and the most recent change wins item by item (Decided 6
+below). See [Pass plan](#pass-plan).
 
 ## Decided
 
@@ -81,6 +83,15 @@ alternative it rules out, in [Decisions.md](Decisions.md#accounts-and-backend).
 5. **No live multi-device sync in Phase 1**
    ([SOW §5.3](SOW-Accounts-and-Sync.md#53-is-live-multi-device-sync-required-on-day-one),
    decided earlier).
+6. **Added 2026-10-15, for Phase 2: when two copies disagree, the most recent
+   change wins, item by item, and other devices' changes are applied
+   automatically** when the app is opened or returned to. Practice sessions and
+   scales logged on either device are always kept (added together, never chosen
+   between); a deletion is still marked, never erased. This **reverses** the
+   2026-10-03 rule that disagreements are never settled by a clock (Pass 112), and
+   nothing is built yet: the code keeps that rule until Pass 120 replaces it. The
+   reasoning, the cost accepted and four open questions are in
+   [Decisions.md](Decisions.md#open-questions) ("When two copies disagree").
 
 ## Design
 
@@ -275,10 +286,15 @@ by itself yet):
   reschedule places it on is not owed there).
 - **118** The same for the technique library. Built, **nothing uses it yet**; see
   [The technique library by part](#the-technique-library-by-part-pass-118).
-- **120** (named in the docs, not built) wires both engines into "Get changes" and
-  Review; **121** asks when two copies really disagree; **122** deletions. There is
-  no Pass 119 in these docs.
-- After those: changes arriving on their own, and what happens offline.
+- **120** (named in the docs, not built) wires both engines in and, **by the owner's
+  decision of 2026-10-15** (Decided 6), applies other devices' changes automatically
+  when the app is opened or returned to, the most recent change winning item by item;
+  a refused upload is merged and sent again instead of held. **121**, which was to ask
+  when two copies really disagree, is left with only what "most recent" can't settle
+  (the open items under "When two copies disagree" in
+  [Decisions.md](Decisions.md#open-questions)); **122** deletions. There is no Pass
+  119 in these docs.
+- After those: what happens offline.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring, and an in-app "delete my account", which must exist before
@@ -1155,7 +1171,9 @@ change arrives.
 
 The engine for merging two copies of one piece part by part, **and nothing else**:
 no merge uses it yet ("Get changes" and Review still go through Phase 1's whole-piece
-import merge; Pass 120 wires the engine in, Pass 121 asks the question). How it
+import merge; Pass 120 wires the engine in, Pass 121 asks the question; **since
+2026-10-15 Pass 120 also applies it automatically and the most recent change wins
+instead of a question**, see Decided 6 above). How it
 works, the rules, and the simulation that checks it are in
 [Algorithms.md](Algorithms.md#merging-by-part-pass-117). What this pass changes
 about the account code:
@@ -1204,8 +1222,9 @@ about the account code:
   the two sides swapped (25 of 25 each). As a control, one session added to the **same**
   chunk on both sides is a conflict for that chunk only (25 of 25).
 - **Not built, on purpose** (see the pass's deferred list): using the engine from "Get
-  changes" or anything automatic (120), the question the person is asked (121), the
-  technique library (118), deletions (122).
+  changes" or anything automatic (120), the question the person is asked (121; since
+  2026-10-15 reduced to what "most recent wins" can't settle), the technique library
+  (118), deletions (122).
 
 ## The technique library by part (Pass 118)
 

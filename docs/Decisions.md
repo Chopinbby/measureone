@@ -7429,7 +7429,10 @@ what it rules out.
   replace work that was never uploaded. Alternative ruled out: reusing the
   import path's last-changed rule (simpler, but loses work when clocks
   differ). A test that lets the rule apply with a change waiting fails eight
-  tests. See
+  tests. **Superseded in part on 2026-10-15** (the owner chose "most recent wins,
+  item by item", and automatic updates; see "When two copies disagree" under
+  Pass 118 below). The rule stays as built, and its tests stay, until Pass 120
+  replaces it on purpose. See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112).
 - **Pass 112 — a piece from the account keeps the account's created date
   (confirmed by the user, 2026-10-03).** A restore then matches the account
@@ -7860,6 +7863,70 @@ what it rules out.
   `App.jsx` (one argument, `Date.now()`), and their tests. **Not touched, as the card
   required:** how backups merge the library (apart from that one line) and everything
   that calls it (backups, restore, "Get changes"), and the rest of `App.jsx`.
+
+- **When two copies disagree, the most recent change wins, item by item, and other
+  devices' changes are applied automatically (decided by the owner, 2026-10-15).**
+  **Nothing here is built.** The code still follows the Pass 112 rule until Pass 120
+  replaces it. This **supersedes in part** the "never by a clock" Pass 112 entry above
+  and changes what Passes 120 and 121 are.
+  **What was decided** (two direct questions; both answered with the recommended option):
+  1. **"Most recent wins", item by item.** For any single value two devices changed
+     differently (a tempo, a setting, a check-off or an undo, a piece field), the most
+     recent change wins, with no question. **Practice sessions and scales logged on
+     either device are always kept**: they are added together, not chosen between.
+     **Rejected: "whole copy"**, where the most recent copy replaces the other entirely.
+     It is the simplest and never asks, but practice logged on the other device is lost
+     whichever way "recent" is counted: 3 sessions on the laptop at 10:00, 1 on an
+     offline phone at 9:30, the phone reconnecting at 11:00. Counted by when it was
+     changed, the laptop's copy wins and the phone's session goes; counted by when it
+     synced, the phone's copy wins and the laptop's 3 go.
+  2. **A device brings in other devices' changes by itself** when the app is opened or
+     returned to, with no "Get changes" button. **Rejected:** keeping the button.
+  **Why.** The owner's picture is one timeline: what was done on the laptop is simply
+  there when the phone is picked up, so the latest action is what was meant, an undo
+  included. That holds whenever devices are in sync. The only gap is a device that has
+  not yet seen the other's action (offline, asleep, or a page left open, as with her
+  phone on 2026-10-15), and in that gap "most recent" is the right guess for a single
+  value. **Why "always in sync" can't just be assumed:** it needs both devices online,
+  both pages awake and the app listening, and the app is offline-first on purpose, so each
+  device keeps its own working copy. Today the app only notices other devices' changes
+  (every few minutes and when the window is returned to) and never applies them.
+  **What it reverses, said to her before she chose.** On 2026-10-03 she confirmed that
+  disagreements are never settled by a clock, because "two devices' clocks can disagree,
+  and a wrong guess would replace work that was never uploaded". **Cost accepted:** a
+  device with a wrong clock can win a single value by mistake, and a stale page can
+  briefly act on old information. She had already accepted a clock-based "most recent"
+  for tempos and for an undo against a redo (Pass 118, 2026-10-15).
+  **What it changes:**
+  - **Pass 120** wires both engines in and applies what they merge automatically when
+    the app is opened or returned to. A refused upload is merged item by item and sent
+    again instead of being held, so the red "changed on another device" banner and
+    Review should rarely appear. This subsumes proposal (a) of Pass 118 open item 9.
+  - **The engines' conflict rule changes.** The piece engine reports a part both sides
+    changed differently, keeps this device's value and lists both ("never resolved in
+    the engine"); it will pick the most recent instead. The technique engine's rule
+    that the account's value wins for octaves, hands and settings, with a notice, also
+    becomes "the most recent wins".
+  - **Pass 121 (the question) mostly goes away.** What is left of it is whatever "most
+    recent" can't settle: see the open items below.
+  - **Unchanged:** practice sessions, practiced dates and scales are always kept; a
+    deletion is marked, never erased (Design D); manual export stays.
+  **Open, to settle with the owner before or in Pass 120 (not decided):**
+  (i) **A piece whose chunk grid was changed on one device while the other logged
+  practice against the old grid** (the engine's "travel together" case). Progress is
+  keyed by chunk id, so it can't be carried across by id: "most recent wins" would either
+  lose the other side's sessions or need them re-homed by measure position, as a
+  Settings edit does on one device (`migrateOrphanedProgress`).
+  (ii) **How "most recent" is measured for a piece part.** The device record keeps a
+  fingerprint per part, not a time. What exists is the piece's `updatedAt`, each
+  session's own time and, for the technique library, the library's `updatedAt` and each
+  tempo's exact time. Options: the piece's `updatedAt` as the stand-in for any part both
+  sides changed, or a time kept per part.
+  (iii) **Deletions (Pass 122):** if one device deletes a piece and the other practices
+  it later, "the later action wins" means either the piece comes back or the practice is
+  lost; it needs her answer.
+  (iv) **A wrong device clock** is not guarded against; the account's own order of
+  arrival could break a near tie. Not designed.
 
 ## Open questions
 
@@ -8305,7 +8372,11 @@ oversight to silently fix; surface it instead.
      **Owner:** Pass 120 for (a), (c) and (d); (b) whichever pass next changes a
      fingerprint's form (or Pass 120, if it is cheap there). **Until then:** a device
      that was open during a deploy that changes a fingerprint may show this banner;
-     Review is the way out and loses nothing.
+     Review is the way out and loses nothing. **Later the same evening the owner decided
+     that disagreements are settled automatically, the most recent change winning item by
+     item** ([When two copies disagree](#open-questions), below): that **subsumes (a)**
+     (a refused upload is merged and sent again instead of held, so there is nothing to
+     re-judge), and leaves (b), (c) and (d) standing.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

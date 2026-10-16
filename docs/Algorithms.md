@@ -899,7 +899,11 @@ recorded ones says which parts that side changed since the base.
 
 A conflict is **never resolved here**: the merged piece keeps this device's value
 for it, and the result lists the part with both values (`conflicts[]`, each
-`{ part, kind, local, remote, ... }`). Pass 121 is the one that asks. Merging two
+`{ part, kind, local, remote, ... }`). Pass 121 was to be the one that asks; **since
+2026-10-15 the owner has chosen that the most recent change wins, item by item**, so
+Pass 120 will pick the most recent value for such a part instead (and apply the
+result automatically), and 121 is left with only what that can't settle (see
+[Decisions.md](Decisions.md#open-questions), "When two copies disagree"). Merging two
 sessions' ladder state inside one chunk is a conflict too, by design: a chunk
 logged on both sides is a conflict for that chunk and no other.
 
@@ -1015,7 +1019,10 @@ chunk id means, so a piece sometimes has to ask. The library has no chunk grid:
 every part of it can be put together without asking, so this engine **never returns
 a conflict list and never asks**. Where both devices changed the same thing to
 different values, the **account's value is kept and a notice says so** ("Your other
-device's change to D major was kept."). `mergeImportedTechnique` (needs no recorded
+device's change to D major was kept."). **Decided 2026-10-15:** Pass 120 changes this
+to the most recent change winning (see [Decisions.md](Decisions.md#open-questions),
+"When two copies disagree"); until then this is what the engine does.
+`mergeImportedTechnique` (needs no recorded
 "before", never removes anything) stays for backups and for a device with no
 recorded "before".
 
@@ -1062,7 +1069,7 @@ changed on both to different values, one rule per kind:
 
 | part | both changed, differently |
 |---|---|
-| a scale's octaves or hands; each setting | **the account's value**, with a notice |
+| a scale's octaves or hands; each setting | **the account's value**, with a notice (the most recent from Pass 120, decided 2026-10-15) |
 | starred, switched off, a method's star or switch | cannot happen: changed on both sides means changed to the same other value |
 | the tempo check | the newer check date wins, with its check octaves; **an empty tempo never replaces a real one** (a "start fresh" keeps its date); the same date: a real tempo beats an empty one, otherwise **the one logged later, by its exact time** (a tempo with a time beats one saved before times existed; with no time on either, the account's). A notice only on the device whose different tempo (or check octaves) was dropped |
 | practiced dates | each date is three-way: added on either side is kept, undone on one side only is gone |

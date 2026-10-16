@@ -45,7 +45,9 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   quietly, when another device changed something (Pass 116). **Changes still never
   arrive by themselves, and nothing merges two devices' copies part by part yet:**
   the engines for that (Passes 117 and 118) are built but nothing calls them, and
-  Pass 120 wires them in. See "Since Pass 109" to "Since Pass 118" below.)
+  Pass 120 wires them in and, by a 2026-10-15 decision, applies other devices'
+  changes automatically, the most recent change winning item by item. See "Since
+  Pass 109" to "Since Pass 118" below.)
 - No React Router — navigation is a simple `activeTab` string in state.
 
 ## Running it locally
@@ -467,10 +469,11 @@ See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently
 singled out as "next"; pick from the priority-ordered backlog there. **The
 accounts work is the one thread in motion:** it is mid-Phase 2 (Passes 115 to
 118 are built and live), and the passes the docs name next are 120 (wires the
-two merge engines in), 121 (asks when two copies disagree) and 122 (deletions);
-see "Since Pass 118" below and
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) (Pass 118 open item 9
-first). The
+two merge engines in and applies other devices' changes automatically, the most
+recent change winning item by item: **decided 2026-10-15**), 121 (only what "most
+recent" can't settle) and 122 (deletions); see "Since Pass 118" below and
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) (the "When two copies
+disagree" entry and Pass 118 open item 9 first). The
 Analytics fold-in that used to occupy that slot **shipped in Pass 20**:
 Analytics is gone as a tab and its "Confidence by difficulty" panel lives
 in Progress (the other folded-in panel, "Recurring material payoff", was
@@ -2133,7 +2136,12 @@ Ten things worth knowing:
   revision, never by a clock** (confirmed 2026-10-03). Weakening it (letting it
   apply with a change waiting) would replace work that was never uploaded, and a
   test fails eight tests if you do. Anything changed on both sides gets the
-  picker even where import would have settled it by `updatedAt`.
+  picker even where import would have settled it by `updatedAt`. **Superseded in
+  direction on 2026-10-15:** the owner chose "most recent wins, item by item" and
+  automatic updates ([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When
+  two copies disagree"). **Don't weaken or remove this rule before Pass 120, which
+  replaces it on purpose;** until then it is what the code does and what its tests
+  pin.
 - **`applyAccountFlow` saves the device record BEFORE any state changes.** The
   record gets each merged piece at the revision read, with the fingerprint of
   the account's copy (`withAccountCopyRecorded`); the pieces change after. Reverse
@@ -2331,7 +2339,9 @@ part** instead of by whole piece (`src/lib/pieceMerge.js`, new), and the device
 record remembers what each part looked like at the last sync. **Nothing uses the
 engine yet**: "Get changes" and Review still go through Phase 1's whole-piece
 import merge (Pass 120 wires the engine in, Pass 121 asks the question, 118 does
-the technique library, 122 deletions). Seven things worth knowing:
+the technique library, 122 deletions; **since 2026-10-15 Pass 120 also applies it
+automatically and "most recent wins" replaces the conflict list, so 121 shrinks to
+what that can't settle**). Seven things worth knowing:
 - **What a part is:** every top-level field except `progress`, `updatedAt` and
   `lastLoggedAt`, and each `progress` entry on its own (key `progress:<id>`: chunk
   ids, transition/combo ids, `__consolidation__`, `__cold_start__`, `sr_<sectionId>`).
@@ -2351,8 +2361,10 @@ the technique library, 122 deletions). Seven things worth knowing:
   returns a SHARED result: read-only.
 - **Per part:** changed on one side only, take that side; changed on both to the same
   value, agreement; to different values, a conflict for that part only, this device's
-  value kept and both values listed. **A conflict is never resolved in the engine.**
-  `status: "local-only"` returns `local` itself (the same object) untouched.
+  value kept and both values listed. **A conflict is never resolved in the engine**
+  (**Pass 120 changes this:** the owner decided on 2026-10-15 that the most recent
+  change wins instead). `status: "local-only"` returns `local` itself (the same
+  object) untouched.
 - **One "travel together" rule:** the sides disagree about
   `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
   changed progress or the marker: one **whole-piece** conflict. **The reschedule marker
@@ -2382,7 +2394,8 @@ merge the library with `mergeImportedTechnique` (`lib/storage.js`; Pass 120 wire
 engine in; the one change to it is that `lastCheckedAt` moves with the tempo). Unlike a
 piece, the library is **always** mergeable: no conflict list, no question; where both
 sides changed the same octaves, hands or setting to different values the account's value
-is kept and a notice says so. **The user confirmed the pass's calls on 2026-10-15** and
+is kept and a notice says so (**Pass 120 changes this to "the most recent wins"**,
+decided 2026-10-15). **The user confirmed the pass's calls on 2026-10-15** and
 changed two (below). Nine things worth knowing:
 - **What a part is** (`techniquePartKey`): per scale its settings (`starred`,
   `rotation`, `octaves`, `hands`), its tempo check (tempo, check date, **the exact time

@@ -6227,6 +6227,37 @@ directory rather than keeping it as a separate, un-tracked file.**
   file) and in [Roadmap.md](Roadmap.md); nothing from it should be treated as
   living only in that external file going forward.
 
+**Decision (2026-10-16): `CLAUDE.md` is rules and orientation, not a pass-by-pass
+changelog. Each pass gets one line there; its detail lives in `docs/` and `git log`.**
+
+- **Why:** the file had grown to 2,473 lines (about 166 KB), loaded into every
+  session, and most of it was a "Since Pass N" paragraph per pass that repeated what
+  `docs/` and `git log` already hold. The few rules that stop a silent regression were
+  hard to find among them, and the history lived in two places that could drift. It is
+  now about 915 lines (65 KB).
+- **Kept:** the every-session rules (lightly tightened), the rules that were buried in
+  old pass paragraphs and still prevent a regression (for example a late review is
+  slack, the Interleaved leave-guard, `resolveRequiredReps` having two callers, review
+  cost priced in three places, the Cold-Start key staying out of `__consolidation__`),
+  the accounts, sync and deploy rules (tightened), a short "Open threads" paragraph, a
+  "Find things" table, and one line per pass for Passes 29 to 118. The owner chose the
+  one-line-per-pass entries, and chose to keep the accounts and deploy rules in this
+  file rather than move them to `docs/`, because they have to be seen before anyone
+  touches that code.
+- **Moved:** `NumberInput`'s two optional props to [Architecture.md](Architecture.md#main-ui-components),
+  and the "logged today" lesson to [AI-GUIDELINES.md](AI-GUIDELINES.md#an-undo-keyed-to-a-yesno-like-logged-today-has-to-undo-everything-the-yesno-counts).
+  Everything else dropped is in `docs/` (start with the pass's Decisions entry) or in
+  `git log`. Three code names existed only in the old file; all three are retired code.
+- **How it was checked:** a script compared every code name and rule-like sentence in
+  the old rules and kept paragraphs with the new file (what differed was read by hand:
+  retired code, history, or detail documented elsewhere); every code name in the new
+  file exists in the repo; the link and anchor check found 0 broken; `npm test` passes.
+- **Recovering anything:** `git show 209d77a:CLAUDE.md` is the last pass-by-pass version.
+- **Convention from now on:** a new pass adds one line to "What each pass added"; a rule
+  goes under "Rules that matter every session" only if forgetting it breaks something
+  silently; everything else goes in `docs/`. If this file grows back toward a
+  changelog, compact it again.
+
 ## Cold-Start check
 
 **Decision (Pass 56): the escalating 3/7/14/28/... "prompt due" check is

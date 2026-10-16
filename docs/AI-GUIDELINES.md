@@ -1010,6 +1010,20 @@ predicate in a new place, re-derive what question it actually answers rather
 than trusting its name. Then verify the tests can fail (revert the fix, and
 also try the wrong-but-tempting version); both were done here.
 
+## An undo keyed to a yes/no like "logged today" has to undo everything the yes/no counts
+
+The focus-spot card (Pass 91) shows a checkbox once `loggedToday` is true, and that
+yes/no means "does *any* session exist for today", not "was the most recent action
+today". The first version of its undo removed only the latest session logged today. A
+second time-log the same day (log some time, come back later, log more: an ordinary
+thing to do) then left an earlier session in place, so the box stayed checked and one
+click looked like it did nothing. It was found from the owner's own report ("working
+inconsistently"), not in testing. When you build an undo for a yes/no derived from
+stored records, read how the yes/no is computed and make the undo remove everything
+that makes it true, then test it with the case that has more than one record (here two
+sessions, one click, none left, not one). See
+[Decisions.md](Decisions.md#focus-spots-v1).
+
 ## A review's "reproduction" has to demonstrate the state it claims — a plausible-looking output isn't proof
 
 A self-review of Pass 97 claimed to have reproduced a bug ("split point 11 on a

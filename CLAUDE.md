@@ -2370,8 +2370,8 @@ the technique library, 122 deletions). Seven things worth knowing:
   on seeds 1 to 300, and a re-break that doesn't fail it means a hole in the
   simulation. See [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117)
   and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 117, five
-  calls: call 1 was changed at the owner's request on 2026-10-14; calls 2 to 5 have
-  not been explicitly confirmed).
+  calls: call 1 was changed at the owner's request on 2026-10-14; calls 2 to 5 were
+  confirmed as built on 2026-10-15).
 
 
 **Since Pass 118**, there is an engine for merging two copies of the **technique

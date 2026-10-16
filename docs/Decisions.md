@@ -7623,7 +7623,8 @@ what it rules out.
   design is [Algorithms.md](Algorithms.md#merging-by-part-pass-117); the record
   side is [Accounts-and-Backend.md](Accounts-and-Backend.md#merging-by-part-pass-117).
   Calls made while building it, each one a place the card left room or was
-  contradicted by what the code does, **for the user to confirm**:
+  contradicted by what the code does, **for the user to confirm (call 1 was replaced at
+  her request on 2026-10-14; she confirmed calls 2 to 5 as built on 2026-10-15)**:
   1. **The reschedule marker is not a merge rule: the scheduler was fixed instead
      (first built as a group conflict, then replaced at the user's request).** The
      card's required test ("A reschedules, B logs a chunk A's marker lists") showed
@@ -8134,9 +8135,10 @@ oversight to silently fix; surface it instead.
      leaked-password check is Pro-plan only.
   5. **From Pass 117** (the merge engine; nothing uses it yet): call 1 in the Pass 117
      entry above was changed at the user's request (2026-10-14, "fix the gap
-     properly"); **calls 2 to 5 have not been explicitly confirmed** (the pull request
-     was merged, which is not the same as answering them), and six open issues are
-     logged separately in
+     properly"); **calls 2 to 5 were put to her as direct questions and confirmed as
+     built on 2026-10-15** (identical splits count as agreement, "last logged" is
+     worked out from the merged sessions, days to learn is never a conflict, and a piece
+     with no record asks once the old way), and six open issues are logged separately in
      [Merging by part: what is still open](#open-questions) (the next entry).
   6. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
 - **Merging by part (Pass 117): what is still open (logged 2026-10-13, nothing

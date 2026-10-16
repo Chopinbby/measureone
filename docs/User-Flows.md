@@ -717,10 +717,36 @@ row stays). Design:
    once the count has come back; none if the account is empty or can't be
    reached). It opens the modal below.
 2. **Get changes, any time.** Settings → **Account** → **Get changes from your
-   account**.
+   account**. Since Pass 116 the Account panel also says when there is something
+   to get (see the status lines below); it only notices, and nothing arrives until
+   you press the button.
 3. **Review, for a piece held as "changed on another device".** The red banner
    and the Account panel show **Review** while anything is held. It looks only at
    what's held.
+
+**The status lines in the Account panel** (Passes 111, 115 and 116). One quiet
+line sits under the buttons, and the first of these that applies is shown:
+
+- **"The account service isn't answering. Everything is still saved on this
+  device."** after two failed attempts in a row. It replaces everything below.
+- **The held message, with the normal line after it**, for example "The technique
+  library changed on another device. Everything else backed up 1 minute ago." or
+  "1 piece changed on another device: Ballade No. 1. 2 changes waiting to back up."
+  Something is held when the account's copy was changed by another device since
+  this device last synced it: this device's copy is untouched and hasn't been
+  uploaded over the account's, and everything else keeps backing up. A red banner
+  with **Review** shows on every screen while anything is held. **Pressing Review
+  settles it without a question when the merge needs none, and can clear a hold
+  with nothing to merge** (the copies already match by then): the result then says
+  only `Cleared "changed on another device" on 1 item.`
+- **"N changes waiting to back up"**, then **"Backed up just now"** or "Backed up 6
+  minutes ago" once nothing is waiting. Changes go up a few seconds after you stop
+  logging, and are retried by themselves if the connection fails.
+- **"Changes from another device: 3 pieces. Press Get changes."** (Pass 116), an
+  extra line under the others (also "...: 1 piece and the technique library." or
+  "...: the technique library."). It counts pieces another device changed, added or
+  deleted that this device doesn't have yet, and goes away by itself once **Get
+  changes** brings them in. No banner, no sidebar mark.
 
 **What happens**
 

@@ -7,7 +7,9 @@
 > deciding whether a proposed change needs evidence or just a product judgment
 > call.
 > **Scope:** Evidence backing (or lack of it) for MeasureOne's scheduling and
-> confidence heuristics. Not the algorithms themselves — see
+> confidence heuristics, plus (as pure inventory, no practice science behind
+> them) its technique-practice constants and its account-sync timings. Not the
+> algorithms themselves — see
 > [Algorithms.md](Algorithms.md). Not future features — see
 > [Roadmap.md](Roadmap.md).
 > **Related:** [Algorithms.md](Algorithms.md) · [Data-Model.md](Data-Model.md) ·
@@ -143,6 +145,30 @@ numbers in particular are explicitly marked "tune after real use".
 | Tempo range | 30–300 (`TECHNIQUE_MIN_TEMPO` / `TECHNIQUE_MAX_TEMPO`) | Accepted even-rhythm check tempo and Add-form starting tempo. 30 is the mockup's floor; 300 is a sanity ceiling added in the Pass 101 review so a typo can't become the baseline | Real data on the fastest tempos people log; raise the ceiling if anyone legitimately exceeds it |
 | Library "rotation priority" sort weights | slowness 70%, days since last checked 30% (capped at 21 days) | Display order of the Library's default sort only — never the engine's tiers. Taken from the approved mockup; local constants in `TechniqueLibrary.jsx` | Whether this order actually matches what users want to see first |
 | Week-alternation start date | 2024-01-01, a Monday (`TECHNIQUE_WEEK_PARITY_EPOCH`) | Which calendar weeks count as "even" (4 days) vs. "odd" (3 days) for a scale that is both starred and repertoire | Arbitrary anchor, not a tuning value; changing it only swaps which weeks are 3 vs. 4 |
+
+## Account sync timings
+
+Plumbing, not practice science: none of these touches scheduling, confidence or
+what a person practices. They were picked by feel in Passes 111, 115 and 116 and
+were **not tracked here until the 2026-10-15 wrap-up**, against this file's own
+rule that a hand-picked constant must not go untracked. Design:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#keeping-the-backup-current-pass-111)
+and [the Pass 116 section](Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116).
+All live in `lib/accountSync.js` unless noted. None has been measured: the owner
+is the only account so far, so "real use" below means hers.
+
+| Constant | Value | What it controls | What it should eventually be backed by |
+|---|---|---|---|
+| Startup delay before the first upload look | 2 seconds (`SYNC_STARTUP_DELAY_MS`, `App.jsx`) | How long after startup or sign-in the first run looks at what's waiting | Real data on how soon after load changes are waiting |
+| Quiet period | 5 seconds (`SYNC_QUIET_MS`) | Wait after the last change, so several logged in a row become one upload | How often real practice logging comes in bursts |
+| Longest wait | 60 seconds (`SYNC_MAX_WAIT_MS`) | A change is never kept waiting longer than this just because more keep arriving | Same |
+| Retry gaps | 30 seconds, 2 minutes, then every 10 minutes (`RETRY_GAPS_MS`) | Time before the next attempt after a failure. Any success restarts the count, and the browser's online event retries at once | How long real outages and paused projects last |
+| "Isn't answering" threshold | 2 failures in a row (`NOT_ANSWERING_AFTER`) | When the status stops saying "waiting" and says the account service isn't answering (a paused project looks like no connection) | How often a single failure is transient in real use |
+| Sends remembered per item (Pass 115) | 5 (`MAX_SENT`) | How many recent upload attempts' fingerprints are kept, so a lost confirmation reads as this device's own earlier upload instead of a conflict. Past 5 unconfirmed attempts the oldest is forgotten | How many attempts really pile up before a confirmation lands (a long offline stretch with many edits and retries could pass 5) |
+| Startup delay before the first check of other devices (Pass 116) | 4 seconds (`CHECK_STARTUP_DELAY_MS`, `App.jsx`) | A little after the upload look, so a waiting upload goes first | Same as the upload delay |
+| Check on focus or when the page becomes visible | at most once a minute (`CHECK_FOCUS_GAP_MS`) | How often returning to the window can start a check | How often people switch windows, against how current the "Changes from another device" line has to be |
+| Check on the clock | every 5 minutes while the page is visible (`CHECK_EVERY_MS`) | How stale that line may get | Same |
+| Clock look | every 60 seconds (`CHECK_TICK_MS`) | How often the page asks whether a check is due (a look at the clock, no request) | Not tuned: it only bounds how late a due check can start |
 
 ## Open research questions
 

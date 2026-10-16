@@ -824,7 +824,10 @@ piece (not a per-field or per-chunk merge — see
 [Decisions.md](Decisions.md#data-model) for why per-chunk granularity was
 deliberately not built) — `doneDays`/`sessions` still merge additively
 underneath regardless of which side "wins" the ladder fields, so practice
-history itself is never at risk either way.
+history itself is never at risk either way. (A session both sides hold counts
+once: `mergeSessionArrays` compares sessions **by content, key order ignored**,
+since Pass 115. Before that it compared their JSON text, so a database that
+reordered keys made every session count twice in an account merge.)
 
 What this fixes, concretely: a plain older backup (the common case —
 re-importing your own earlier export, or accidentally re-importing an old

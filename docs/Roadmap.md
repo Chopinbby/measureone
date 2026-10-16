@@ -356,14 +356,38 @@ and [Decisions.md](Decisions.md#accounts-and-backend). Since 2026-10-12 a free
 daily backup of the account database runs into a private repository (see
 [Backups of the account copy](Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12)).
 
+**Accounts and backend, Phase 2 so far (Passes 115–118; 115 live since
+2026-10-14, 116 to 118 since 2026-10-15)** — groundwork for changes arriving on
+other devices by themselves. **Nothing arrives by itself yet, and nothing merges
+two devices' copies part by part yet.** Built: "same" and "changed" made
+trustworthy (an upload notes what it is about to send, so a lost confirmation no
+longer reads as a conflict; sessions are compared by content; the technique
+library's last-changed time no longer counts as a change; the Account line shows
+the held message and the normal one together) (115); the app **notices**, quietly,
+that another device changed something, with one added line in the Account panel
+(116); and two merge engines that merge **by part** instead of by whole piece, one
+for a piece and one for the technique library (117, 118), each proved by a seeded
+two-device simulation but **not called by the app yet**. Alongside, a scheduler
+fix: a chunk done earlier than the day a reschedule places it on is no longer
+owed there (a state only merged copies can reach). The first live sighting after
+the deploy, a technique library held as "changed on another device" that cleared
+with nothing to merge, is
+[Pass 118 open item 9](Decisions.md#open-questions). See
+[Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115),
+[Decisions.md](Decisions.md#accounts-and-backend) and
+[Algorithms.md](Algorithms.md#merging-by-part-pass-117).
+
 ## Immediate next action
 
-Nothing is currently singled out here. The previous occupant — "fold
+Nothing in the backlog is singled out here. The previous occupant — "fold
 Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 20** (see the Done section above and
 [Decisions.md](Decisions.md#ux) for the pinned-down panel placement).
 Pick the next thing from the priority-ordered backlog below rather than
-assuming this section is stale.
+assuming this section is stale. **The one thread already in motion is the
+accounts work (Phase 2):** the passes the docs name next are 120 (wire the two
+merge engines into "Get changes" and Review), 121 (ask when two copies really
+disagree) and 122 (deletions); see backlog item 5.
 
 ## Priority-ordered backlog
 
@@ -455,9 +479,11 @@ assuming this section is stale.
    having enough session history to tune against.
 5. **Accounts and backend, Phases 2 and 3** — Phase 1 (an optional account
    that keeps a checked copy of every piece and the technique library, restore,
-   account settings, live since Pass 114) is Done above. Still to build:
-   **Phase 2**, changes arriving on other devices by themselves, and what
-   happens offline; **Phase 3**, open sign-up, a privacy policy and terms, a
+   account settings, live since Pass 114) is Done above, and **Phase 2 has
+   begun** (Passes 115 to 118, Done above). Still to build in **Phase 2**: the two
+   merge engines wired in (120), the question when two copies really disagree
+   (121), deletions (122), changes arriving on other devices by themselves, and
+   what happens offline; **Phase 3**, open sign-up, a privacy policy and terms, a
    real email provider (Supabase's built-in sender reaches only the project's
    own team and only a couple of messages an hour, which is why the owner's is
    the only account for now), monitoring, and an in-app change of email and

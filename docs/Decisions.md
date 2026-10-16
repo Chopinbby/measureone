@@ -7419,8 +7419,8 @@ what it rules out.
   purpose (decided by the user, 2026-10-03).** Nobody but the owner could
   reach accounts before go-live, so a mistaken "changed on another device"
   hold (an upload lands, its confirmation is lost, more is logged) and a status
-  line that shows one message at a time stayed as they were. Both are still
-  open; see Open questions.
+  line that shows one message at a time stayed as they were. **Both were fixed
+  in Pass 115** (see the Pass 115 entry below and Open questions).
 - **Pass 112 — "Get changes" takes the account's copy without asking only when
   nothing here was waiting AND the account's revision moved, never by a clock
   (confirmed by the user, 2026-10-03).** Anything changed on both sides gets
@@ -7553,6 +7553,70 @@ what it rules out.
   (suggested and accepted the same day: GitHub only emails about failed runs, and a
   day its timer skips fails nothing), and the tests and a restore fire drill live in
   the backups repository.
+
+- **Pass 115 — "same" and "changed" made trustworthy before devices sync by
+  themselves (built 2026-10-13, on `main` 2026-10-14).** The mechanics are in
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115);
+  these are the calls and what they cost. **Decisions.md had no entry for this pass
+  when it shipped; this one was written in the 2026-10-15 wrap-up from the code, the
+  pass's own docs and its commit.**
+  1. **The false hold is closed by remembering what each attempt sent.** Built as
+     Pass 111's notes proposed: before an upload the device records the fingerprint of
+     what it is about to send (`sent`, the last 5, cleared when the account confirms a
+     revision); a refused row that equals the current copy, or any of those, is this
+     device's own earlier upload and its revision is adopted. A row matching none is
+     held, as before. **A call beyond the card:** after adopting an earlier send, that
+     one item is tried once more at once, because `App.jsx` doesn't reschedule a run
+     that ended without a failure. **Hand-picked:** keeping 5 sends.
+  2. **Sessions are compared by content, key order ignored (`mergeSessionArrays`).**
+     This also changes file import: two sessions identical except for key order used
+     to both be kept and are now one. Accepted, since a backup this app wrote has one
+     key order. The workaround `withComparableSessions` is deleted.
+  3. **The technique library's last-changed time (`updatedAt`) is not a change; today's
+     list and the walk position still are.** Nothing reads `updatedAt` to decide which
+     side is newer (grepped), so leaving it out of the comparison loses nothing.
+     `dayList` and `walkPosition` stay in on purpose: how they merge was left to Pass
+     118. **Cost, accepted:** the library's fingerprint changed once, so every device
+     uploaded its library once after the deploy; with two devices open that can
+     collide and hold one of them
+     ([Pass 118 open item 9](#open-questions)).
+  4. **The Account status line shows the held message and the normal line together**
+     ("not answering" still replaces both), so a held item no longer hides "N changes
+     waiting" or when it last backed up.
+
+- **Pass 116 — the app notices that another device changed something, and applies
+  nothing (built 2026-10-13, on `main` 2026-10-15).** The mechanics are in
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116).
+  **Written in the 2026-10-15 wrap-up from the code and the pass's own docs; none
+  was logged here when it shipped.**
+  1. **The check reads only ids and revisions, never the `data` column.** It repeats
+     every few minutes while the page is open, so it has to stay a few hundred bytes
+     however big the pieces are. A test asserts the recorded selects.
+  2. **It is revision-only, and a device's own upload is never "newer".** That rests on
+     one fact: the record takes the revision when the account confirms an upload. So a
+     result is not believed if an upload, a backup or "Get changes" ran while it was
+     reading (`checkRowsUsable`); the next trigger tries again.
+  3. **When it runs is one rule in the library (`createAccountChecker`), not in
+     `App.jsx`:** at startup 4 seconds after sign-in is known, on focus or when the page
+     becomes visible at most once a minute, on the browser's online event, every 5
+     minutes while visible, never while hidden, never two at once, and only when signed
+     in with the first backup checked. **Hand-picked:** those timings, listed in
+     [Research.md](Research.md#account-sync-timings).
+  4. **A failed check is not an error.** It shares the uploads' failure count (two in
+     a row show "isn't answering") and a good one resets it; it shows no message of
+     its own.
+  5. **The only surface is one added line in the Account panel** ("Changes from another
+     device: 3 pieces. Press Get changes."): no banner, no sidebar mark, and "Get
+     changes" is still the only way a change arrives. The last read is kept and re-sorted
+     against the device record, so the line goes away by itself.
+  **Found, not fixed (owners in brackets):** (a) a lost confirmation can make the line
+  say "1 piece" for up to a retry gap; it corrects itself. (b) The technique library
+  will often read "newer" while two devices are in use, because each rebuilds today's
+  list on its own, the per-device-parts problem (Pass 120). (c) A piece declined in "Get
+  changes" is noticed again on every check (Pass 122's remembered "no"). (d) A piece
+  deleted here and changed elsewhere isn't reported (Pass 122). (e) The light read pages
+  by offset, so a row inserted between two pages can be missed or repeated for one
+  check; the next check corrects it.
 
 - **Pass 117 — merging by part, the engine only (2026-10-13).** `lib/pieceMerge.js`
   (new) plus `parts` in the device record; nothing in the app uses it yet. The
@@ -8068,8 +8132,10 @@ oversight to silently fix; surface it instead.
      until their access token's hour is up); the "sign in again first" prompt has
      only been seen against a stand-in; `lib/backend.js` has no tests; the
      leaked-password check is Pro-plan only.
-  5. **From Pass 117** (the merge engine; nothing uses it yet): the five calls in
-     the Pass 117 entry above need the user's confirmation, and six open issues are
+  5. **From Pass 117** (the merge engine; nothing uses it yet): call 1 in the Pass 117
+     entry above was changed at the user's request (2026-10-14, "fix the gap
+     properly"); **calls 2 to 5 have not been explicitly confirmed** (the pull request
+     was merged, which is not the same as answering them), and six open issues are
      logged separately in
      [Merging by part: what is still open](#open-questions) (the next entry).
   6. **Not built:** Phases 2 and 3 (see [Roadmap.md](Roadmap.md)).
@@ -8140,9 +8206,10 @@ oversight to silently fix; surface it instead.
 - **Merging the technique library (Pass 118): what is still open (logged 2026-10-13,
   nothing here is built).** The engine is `lib/techniqueMerge.js`; the design is
   [Algorithms.md](Algorithms.md#merging-the-technique-library-by-part-pass-118) and what
-  was decided is the Pass 118 entry under "Accounts and backend" (eight calls there need
-  the user's confirmation). Each item says what it is, how it was seen, what is
-  proposed, and who owns it.
+  was decided is the Pass 118 entry under "Accounts and backend" (its nine calls were
+  answered by the user on 2026-10-15). Each item says what it is, how it was seen, what
+  is proposed, and who owns it. Items 1 to 8 were logged 2026-10-13; item 9 is the first
+  live sighting, 2026-10-15.
   1. **Two scales added apart for the same key stay two.** One device adds F major, the
      other adds F major before they sync: the library then has two (different ids). Seen
      in a unit test (documented, not a bug in the rule). **Proposed:** a "combine" step

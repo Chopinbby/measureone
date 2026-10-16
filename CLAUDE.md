@@ -36,11 +36,16 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
 - No CSS framework — a single hand-written CSS string (`const CSS = \`...\``)
   injected via a `<style>` tag inside the root component, using CSS custom
   properties defined on `.measureone-app`. No Tailwind, no CSS modules.
-- No backend. All persistence is client-side `localStorage`. (Since Pass 109 an
-  optional account sign-in exists on sites connected to an account service (the
-  live site too, since Pass 114), and since Pass 110 it can copy this browser's
-  data to the account on request; see "Since Pass 109", "Since Pass 110" and
-  "Since Pass 114" below.)
+- No backend of our own. The working copy is always client-side `localStorage`.
+  (Since Pass 109 an optional, invitation-only account sign-in (Supabase) exists
+  on sites connected to an account service, the live site too since Pass 114.
+  Signed in, this browser's pieces and technique library are copied to the
+  account (Pass 110), every later change goes up by itself (Pass 111), things come
+  back by restore, "Get changes" and Review (Pass 112), and the app notices,
+  quietly, when another device changed something (Pass 116). **Changes still never
+  arrive by themselves, and nothing merges two devices' copies part by part yet:**
+  the engines for that (Passes 117 and 118) are built but nothing calls them, and
+  Pass 120 wires them in. See "Since Pass 109" to "Since Pass 118" below.)
 - No React Router — navigation is a simple `activeTab` string in state.
 
 ## Running it locally
@@ -62,12 +67,20 @@ MeasureOne.jsx/
 ├── index.html
 ├── package.json
 ├── vite.config.js
+├── DEPLOYMENT.md      # Vercel setup, the live site's settings, rolling back
+├── scripts/           # check-rls.mjs: the account security check (Pass 114);
+│                      # not part of the app or of `npm test`
+├── supabase/migrations/   # the account database's two SQL files; applied by
+│                          # hand in the Supabase SQL Editor, never by the app
+├── test/              # `npm test`: node:test over lib/ only
 └── src/
     ├── main.jsx        # ReactDOM entry point, just mounts <App />
     ├── App.jsx         # state + layout only — owns updatePiece and every
     │                   # handler, renders the sidebar + active tab
     ├── lib/            # pure functions: chunking, scheduling, confidence,
-    │                   # revival, storage, shared constants/utils — no JSX
+    │                   # revival, storage, technique, shared constants/utils,
+    │                   # and the account code (backend.js, accountSync.js,
+    │                   # pieceMerge.js, techniqueMerge.js) — no JSX
     └── components/     # everything with JSX: NumberInput, Wizard, field
                          # editors (fields/), and every tab (tabs/)
 ```
@@ -451,7 +464,13 @@ are never read from each other.
 ## Roadmap
 
 See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently
-singled out as "next"; pick from the priority-ordered backlog there. The
+singled out as "next"; pick from the priority-ordered backlog there. **The
+accounts work is the one thread in motion:** it is mid-Phase 2 (Passes 115 to
+118 are built and live), and the passes the docs name next are 120 (wires the
+two merge engines in), 121 (asks when two copies disagree) and 122 (deletions);
+see "Since Pass 118" below and
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) (Pass 118 open item 9
+first). The
 Analytics fold-in that used to occupy that slot **shipped in Pass 20**:
 Analytics is gone as a tab and its "Confidence by difficulty" panel lives
 in Progress (the other folded-in panel, "Recurring material payoff", was
@@ -2123,8 +2142,10 @@ Ten things worth knowing:
 - **`mergeImportedPiece` dedups sessions by JSON text, so key order matters, and
   the database returns keys reordered**: without `withComparableSessions` every
   session in an account merge is kept twice (the first test caught it). The real
-  fix is in `mergeSessionArrays` (`lib/storage.js`, not touched here). Anything
-  else that merges data that has been through the database has the same trap.
+  fix is in `mergeSessionArrays` (`lib/storage.js`, not touched here).
+  **Fixed in Pass 115** (sessions are compared by content and the workaround is
+  gone, see below). Anything else that merges data that has been through the
+  database has the same trap.
 - **A piece from the account keeps the account's created date** (confirmed
   2026-10-03); a piece that matches except for it is "same", with its date set
   quietly. A file import still re-stamps. A "take" replaces the piece outright
@@ -2146,8 +2167,8 @@ Ten things worth knowing:
   dismissible banner), never a browser pop-up. `accountFlowBusyRef` makes the
   automatic upload and a manual backup wait while the flow reads and applies.
 - **Not built, on purpose:** the two items left from Pass 111 (a false hold is
-  still possible; the status line still shows one message), an "undelete", and
-  anything arriving by itself. Found, not fixed: two devices that both use the app
+  still possible; the status line still shows one message; **both fixed in Pass
+  115**, below), an "undelete", and anything arriving by itself. Found, not fixed: two devices that both use the app
   will often hold each other's technique library (its per-device parts are in the
   shared row); a name match with a blank composer can combine two different
   pieces, and a combine the person declines is offered again on every Get changes
@@ -2193,6 +2214,18 @@ The owner's own account exists (invited, backed up and restored on a phone on
   it). **Never tick Preview on a production setting, and never put the secret
   key anywhere** (Vercel, `.env.local`, the repo). Deleting the two Production
   settings and redeploying takes accounts off the live site again.
+- **Two things learned shipping Passes 115 to 118 (2026-10-15).** (1) **"Merged" on
+  GitHub means merged into that pull request's own base.** A pass built on another
+  unmerged pass's branch and merged "separately" lands in that branch, not `main`
+  (116 and 117 sat off `main` for two days). After she says she merged, check
+  `git merge-base --is-ancestor <sha> origin/main`, the pull request's base, and that
+  a file from the pass exists on `origin/main`. (2) **A change to what
+  `canonicalPiece`, `canonicalTechnique` or `techniqueForComparison` return changes
+  every fingerprint, so every device uploads once after the deploy.** A second device
+  left open (her phone) can then collide with the first and show "The technique
+  library changed on another device" even though nothing is lost; Review clears it
+  (Pass 118 open item 9, which also proposes avoiding the forced upload). Say so in
+  the hand-off, and ask about phones and old tabs by name.
 - **One build, three addresses, separate pieces.** `measureone.vercel.app`,
   `measureone-git-main-measure-one.vercel.app` and
   `measureone-measure-one.vercel.app` serve the same deployment, but the
@@ -2337,7 +2370,8 @@ the technique library, 122 deletions). Seven things worth knowing:
   on seeds 1 to 300, and a re-break that doesn't fail it means a hole in the
   simulation. See [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117)
   and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 117, five
-  calls awaiting the user's confirmation).
+  calls: call 1 was changed at the owner's request on 2026-10-14; calls 2 to 5 have
+  not been explicitly confirmed).
 
 
 **Since Pass 118**, there is an engine for merging two copies of the **technique

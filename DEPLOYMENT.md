@@ -231,6 +231,19 @@ account copy stays in Supabase.
    (below): it is a branch address, and whether an instant rollback moves it
    was never tested.
 
+**Rollback points since go-live (added 2026-10-15).** Every merge to `main` makes an
+ordinary Production deployment, so earlier ones stay listed in Vercel (for as long
+as Vercel keeps them). The app code has changed three times since go-live: the
+deployment of `92e6282` (PR 62) is the last one before Pass 115 (app file
+`index-BquOI88d.js`, accounts on); `b877140` (PR 63) is Pass 115 alone; `8eae8fd`
+(PR 67) is Passes 116 to 118, the current app code (the later merge `8c8d637` is
+docs only). **A rollback across Pass 115 or Pass 118 changes how the technique
+library is fingerprinted** (Pass 115: its last-changed time stopped counting; Pass
+118: a new scale field), so expect each device to upload its library once more
+afterwards, and a second device left open to show "The technique library changed on
+another device". Review clears it and nothing is lost. This is reasoned from the
+fingerprints, not rehearsed.
+
 ### Checking which project a site talks to
 
 The project's address is built into the app file, so a deployed site can be

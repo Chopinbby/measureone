@@ -261,3 +261,35 @@ mistake above needs to occur in — and doesn't, because the underlying
 function was written dated from the outset rather than needing a
 display-layer `isRealToday` gate bolted on after the fact. See
 [Algorithms.md](Algorithms.md#historical-cards-on-daily-practice).
+
+## Account surfaces are quiet, and a required step never rides on a browser pop-up
+
+Two patterns that settled across the account passes (110 to 116) and recur
+every time that area changes. They sit beside "Direct manipulation over
+confirmation ceremony" above rather than replacing it.
+
+**A question whose "no" looks the same as "nothing happened" is asked in the
+page, and results are shown in the page.** The first version of "Back up this
+device" asked its first-backup question with `window.confirm` and did nothing on
+its first real try: a blocked or auto-dismissed pop-up reads as "No", and the
+handler returned without a word (reproduced exactly by making the pop-up answer
+"No"). So the first-backup question is two buttons in the Account panel (**Back
+up** and **Not now**), "Sign out of all devices" asks in the panel too, and the
+result of a backup, a restore, "Get changes" or Review is plain text in the
+Account panel (or a dismissible banner elsewhere), never an `alert`. A
+`window.confirm` that only guards a destructive action (see the section above)
+may stay one, because declining it is exactly "do nothing". About fifteen older
+pop-ups elsewhere share the weakness; they are logged, not fixed
+([Decisions.md](Decisions.md#open-questions)).
+
+**Account state is one quiet line, and a banner is for the one case that waiting
+won't fix.** The Account panel shows a single line of text (when it last backed
+up, how many changes are waiting, or that the service isn't answering). Ordinary
+cases that mend themselves, such as retrying after a lost connection, never get a
+banner. Only something held, where this device's copy has not been uploaded over
+another device's, gets the red banner with **Review**, on every screen, because
+it won't clear without a person. And what the app merely **notices** about another
+device ("Changes from another device: 3 pieces. Press Get changes.") is a line,
+not a banner, and is never applied unasked. See
+[User-Flows.md](User-Flows.md#12-getting-things-from-your-account-optional-pass-112)
+and [Accounts-and-Backend.md](Accounts-and-Backend.md#keeping-the-backup-current-pass-111).

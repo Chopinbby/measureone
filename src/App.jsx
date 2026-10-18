@@ -22,6 +22,21 @@ import {
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange, newId } from "./lib/utils";
 import {
+  busyPieceIds,
+  keyScope,
+  syncFromStorage,
+  applyPiecesResult,
+  applyTechniqueResult,
+  settleBaselines,
+  settleTechniqueBaseline,
+  guardPieceWrites,
+  guardTechniqueWrite,
+  createTabLease,
+  LEASE_KEY,
+  LEASE_CHECK_MS,
+  LEASE_CONFIRM_MS,
+} from "./lib/tabSync";
+import {
   generateAllChunks,
   migrateOrphanedProgress,
   reassociateTroubleSpots,
@@ -402,7 +417,42 @@ export default function App() {
   const [exportReminderDismissed, setExportReminderDismissed] = useState(false);
   const importInputRef = useRef(null);
 
+  // Keeping every tab of one browser in step (Pass 119, lib/tabSync.js). The
+  // deciding is all in the library; this file only runs it. Everything a
+  // listener or timer needs is in a ref, set during render, so a callback that
+  // fires later sees the newest committed state and never a stale one.
+  //   piecesRef / techniqueRef  the newest committed pieces and technique
+  //   busyCtxRef                what makes a piece "in use" (isPieceBusy)
+  //   lastSavedTechniqueRef     the technique library as this tab last saved or
+  //                             loaded it (null until its first save, which is
+  //                             the old unconditional one); the pieces' twin is
+  //                             lastSavedPiecesRef above
+  //   pendingBaselinesRef       promises "once this tab holds X, X is what it
+  //                             last saved", settled by the save effects only
+  //                             when the committed state really holds X
+  //   deferredTabSyncRef        pieces in use whose change from another tab waits
+  //   tabSyncTick               makes the save effects run again after a result
+  //                             that changes no state (a kept copy)
+  //   leaseRef / leaseStepRef   this tab's lease on the account work (below)
+  const piecesRef = useRef({});
+  const techniqueRef = useRef(null);
+  const loadedRef = useRef(false);
+  const busyCtxRef = useRef(null);
+  const lastSavedTechniqueRef = useRef(null);
+  const pendingBaselinesRef = useRef({ pieces: {}, technique: null });
+  const deferredTabSyncRef = useRef(new Set());
+  const [tabSyncTick, setTabSyncTick] = useState(0);
+  const tabIdRef = useRef(null);
+  if (!tabIdRef.current) tabIdRef.current = newId("tab");
+  const leaseRef = useRef(null);
+  const leaseStepRef = useRef(null);
+
   const piece = activePieceId ? pieces[activePieceId] : null;
+
+  piecesRef.current = pieces;
+  techniqueRef.current = technique;
+  loadedRef.current = loaded;
+  busyCtxRef.current = { activePieceId, interleaveRisk, assessmentTimerRisk, settingsEditing, editDraft };
 
   // Load every saved piece, then whichever one was active last.
   useEffect(() => {
@@ -413,6 +463,9 @@ export default function App() {
     lastSavedPiecesRef.current = found;
     setPieces(found);
     setActivePieceId(loadActivePieceId(found));
+    // The technique library's first save after a load is the old, unconditional
+    // one (nothing to compare with yet), which sets this (Pass 119).
+    lastSavedTechniqueRef.current = null;
     setTechnique(loadTechniqueFromStorage());
     setLoaded(true);
   }, []);
@@ -450,18 +503,141 @@ export default function App() {
   // write isn't marked saved, so it's retried on the next change, and
   // storageError still means "this run had a failed write" — see
   // savePieceChanges (lib/storage.js).
+  //
+  // Pass 119: a write guard sits in front of that. Every tab of this browser
+  // shares one localStorage but keeps its own pieces in memory, so before a
+  // piece is written it is compared with what storage holds NOW against what
+  // this tab last saved or loaded; if another tab wrote in between (or
+  // deleted the piece), the write is held and the tab reconciles instead of
+  // overwriting (guardPieceWrites, lib/tabSync.js). The "last saved" map is
+  // first brought up to date with any result that has landed
+  // (settleBaselines).
   useEffect(() => {
     if (!loaded) return;
-    const { saved, failed } = savePieceChanges(lastSavedPiecesRef.current, pieces);
+    const settled = settleBaselines({ pieces, lastSavedPieces: lastSavedPiecesRef.current, pending: pendingBaselinesRef.current.pieces });
+    lastSavedPiecesRef.current = settled.lastSavedPieces;
+    pendingBaselinesRef.current.pieces = settled.pending;
+    const busy = busyPieceIds(Object.keys(pieces), busyCtxRef.current);
+    const { writable, hold } = guardPieceWrites({ pieces, lastSaved: lastSavedPiecesRef.current, busy });
+    const { saved, failed } = savePieceChanges(lastSavedPiecesRef.current, writable);
     lastSavedPiecesRef.current = saved;
     setStorageError(failed.length > 0);
-  }, [pieces, loaded]);
+    if (hold.length) requestTabSync({ pieceIds: hold, technique: false });
+  }, [pieces, loaded, tabSyncTick]);
 
   // Persist technique data, separately from pieces (see techniqueStorageError).
+  // Same guard as the pieces' (Pass 119): not written over a library another
+  // tab changed since this tab last saved or loaded it. A library that is
+  // exactly the one last saved (a result just adopted) isn't written again.
   useEffect(() => {
     if (!loaded || !technique) return;
-    setTechniqueStorageError(!saveTechniqueToStorage(technique).ok);
-  }, [technique, loaded]);
+    const settled = settleTechniqueBaseline({ technique, lastSavedTechnique: lastSavedTechniqueRef.current, pending: pendingBaselinesRef.current.technique });
+    lastSavedTechniqueRef.current = settled.lastSavedTechnique;
+    pendingBaselinesRef.current.technique = settled.pending;
+    if (lastSavedTechniqueRef.current === technique) return;
+    if (guardTechniqueWrite({ technique, lastSaved: lastSavedTechniqueRef.current }).hold) {
+      requestTabSync({ pieceIds: [], technique: true });
+      return;
+    }
+    const saved = saveTechniqueToStorage(technique);
+    if (saved.ok) lastSavedTechniqueRef.current = technique;
+    setTechniqueStorageError(!saved.ok);
+  }, [technique, loaded, tabSyncTick]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Several tabs of one browser (Pass 119).                          */
+  /*  runTabSync reads what storage holds, asks lib/tabSync.js what    */
+  /*  this tab should do about it, and applies the answer through the  */
+  /*  usual setters. It is the ONE place that happens, whoever asks:   */
+  /*  another tab's `storage` event, the write guard above holding a   */
+  /*  write back, a piece that was in use becoming idle, or this tab   */
+  /*  taking the lease (a full catch-up). It never writes: the save    */
+  /*  effects do, after the result has landed, and a result that is    */
+  /*  adopted as-is is not written back.                               */
+  /* ---------------------------------------------------------------- */
+
+  const runTabSync = (scope = { pieceIds: null, technique: true }) => {
+    if (!loadedRef.current) return;
+    const memory = { pieces: piecesRef.current, technique: techniqueRef.current };
+    const lastSaved = { pieces: lastSavedPiecesRef.current, technique: lastSavedTechniqueRef.current };
+    const busy = busyPieceIds(Object.keys(memory.pieces), busyCtxRef.current);
+    const out = syncFromStorage({ memory, lastSaved, busy, pieceIds: scope.pieceIds, technique: scope.technique !== false });
+    // A piece in use waits; remember it until it is idle (an effect below).
+    const deferred = deferredTabSyncRef.current;
+    if (scope.pieceIds) scope.pieceIds.forEach((id) => deferred.delete(id));
+    else deferred.clear();
+    out.deferred.forEach((id) => deferred.add(id));
+    if (out.conflicts.length) console.warn("[tab sync] Couldn't put some changes together cleanly; this tab's copy was kept.", out.conflicts);
+    if (!out.changed) return;
+    const pending = pendingBaselinesRef.current;
+    pendingBaselinesRef.current = { pieces: { ...pending.pieces, ...out.baselines.pieces }, technique: out.baselines.technique || pending.technique };
+    setPieces((prev) => applyPiecesResult(prev, memory.pieces, out.result));
+    setTechnique((prev) => applyTechniqueResult(prev, memory.technique, out.result));
+    // A piece the other tab deleted takes its screens with it; one that arrives
+    // on an empty welcome screen becomes the open piece.
+    const openId = busyCtxRef.current && busyCtxRef.current.activePieceId;
+    if (openId && out.removedIds.includes(openId)) {
+      const remaining = Object.keys({ ...memory.pieces }).filter((id) => !out.removedIds.includes(id));
+      setActivePieceId(remaining[0] || out.addedIds[0] || null);
+      setActiveTab("overview");
+      setDayOverride(null);
+      setSwitcherOpen(false);
+      setDeleteModalOpen(false);
+    } else if (!openId && out.addedIds.length) {
+      setActivePieceId(out.addedIds[0]);
+    }
+    setTabSyncTick((n) => n + 1);
+  };
+
+  // Asked from inside an effect, so it runs a moment later, outside React's own
+  // commit work.
+  const requestTabSync = (scope) => {
+    setTimeout(() => runTabSync(scope), 0);
+  };
+
+  // The two places that write a piece straight to storage before its state is
+  // set (importing a backup, and the bulk reschedule's other pieces) pass the
+  // same check as the save effect. If another tab changed the piece, nothing is
+  // written here and { ok: true } is returned: the caller's state update goes
+  // ahead and the save effect reconciles first (merging by part) instead of
+  // overwriting. A write that did land is recorded as saved, so the save effect
+  // doesn't write the same piece again.
+  const writePieceDirect = (id, piece) => {
+    const last = lastSavedPiecesRef.current;
+    const g = guardPieceWrites({ pieces: { [id]: piece }, lastSaved: Object.prototype.hasOwnProperty.call(last, id) ? { [id]: last[id] } : {} });
+    if (g.hold.length) return { ok: true, held: true };
+    const result = savePieceToStorage(id, piece);
+    if (result.ok) lastSavedPiecesRef.current = { ...last, [id]: piece };
+    return result;
+  };
+
+  // Another tab wrote to storage.
+  useEffect(() => {
+    const onStorage = (e) => {
+      try {
+        if (e.storageArea && e.storageArea !== window.localStorage) return;
+      } catch (err) {
+        return;
+      }
+      if (e.key === LEASE_KEY) {
+        if (leaseStepRef.current) leaseStepRef.current();
+        return;
+      }
+      const scope = keyScope(e.key);
+      if (scope) runTabSync(scope);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // A piece that was in use is idle now (an Interleaved attempt confirmed or
+  // discarded, a reassessment timer stopped, the settings draft saved or
+  // discarded): bring in what waited for it.
+  useEffect(() => {
+    if (!loaded || deferredTabSyncRef.current.size === 0) return;
+    const idle = [...deferredTabSyncRef.current].filter((id) => busyPieceIds([id], busyCtxRef.current).length === 0);
+    if (idle.length) requestTabSync({ pieceIds: idle, technique: false });
+  }, [loaded, activePieceId, interleaveRisk, assessmentTimerRisk, settingsEditing, editDraft ? editDraft.id : null]);
 
   /* ---------------------------------------------------------------- */
   /*  Keeping the backup current (Pass 111).                           */
@@ -492,6 +668,13 @@ export default function App() {
     setSyncInfo((prev) => (sameSyncInfo(prev, next) ? prev : next));
     return snap;
   };
+
+  // Only one tab of this browser does the account work (Pass 119): the automatic
+  // upload and the look at what other devices changed. `holdsNow` looks at the
+  // lease again each time instead of trusting a flag, because a tab that was
+  // asleep may have lost it since its last look. Buttons the person presses
+  // (Back up this device, Get changes) work in any tab: they asked for them.
+  const holdsLease = () => !!leaseRef.current && leaseRef.current.holdsNow();
 
   const scheduleSync = (delayMs) => {
     if (!authEnabled) return;
@@ -531,6 +714,7 @@ export default function App() {
     const { userId, loaded: isLoaded } = syncLatestRef.current;
     if (!authEnabled || !userId || !isLoaded) return;
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    if (!holdsLease()) return; // another tab does the looking (Pass 119)
     if (!hasRecordedBackup(readDeviceRecord(), userId)) return;
     const isBusy = () => backupRunningRef.current || accountFlowBusyRef.current || syncRunningRef.current;
     if (isBusy()) {
@@ -562,6 +746,7 @@ export default function App() {
   const runSync = async () => {
     const { pieces: latestPieces, technique: latestTechnique, userId, loaded: isLoaded } = syncLatestRef.current;
     if (!authEnabled || !userId || !isLoaded || !latestTechnique) return;
+    if (!holdsLease()) return; // another tab does the uploading (Pass 119); taking the lease starts it again
     if (backupRunningRef.current || accountFlowBusyRef.current) {
       // a manual backup, or the account being read or merged (Pass 112), is
       // running: don't overlap it
@@ -587,7 +772,7 @@ export default function App() {
         pieces: latestPieces,
         technique: latestTechnique,
         userId,
-        isCancelled: () => syncGenRef.current !== generation,
+        isCancelled: () => syncGenRef.current !== generation || !holdsLease(),
       });
     } catch (e) {
       // syncWaitingChanges reports its own failures; this is only a last resort.
@@ -744,6 +929,89 @@ export default function App() {
       clearTimeout(checkTimerRef.current);
     };
   }, []);
+
+  /* ---------------------------------------------------------------- */
+  /*  One tab does the account work (Pass 119).                        */
+  /*  A lease in localStorage (lib/tabSync.js, createTabLease): the    */
+  /*  holder renews it every 10 seconds, another tab takes it over     */
+  /*  once it has gone 30 seconds without one, and a closing tab hands */
+  /*  it on at once. A tab without it does not upload and does not     */
+  /*  look at what other devices changed (runSync and requestCheck     */
+  /*  above), but it still hears what the holder saves, through the    */
+  /*  storage listener. Taking the lease first catches up with storage */
+  /*  (this tab may have missed events), then starts the work again.   */
+  /*  Only while signed in: with no account service, or signed out,    */
+  /*  there is no account work to share.                               */
+  /* ---------------------------------------------------------------- */
+
+  const onLeaseGained = () => {
+    runTabSync({ pieceIds: null, technique: true });
+    const snap = refreshSyncInfo();
+    if (snap && snap.firstBackupDone && snap.waiting > 0) scheduleSync(SYNC_STARTUP_DELAY_MS);
+    if (snap && snap.firstBackupDone) scheduleCheck(CHECK_STARTUP_DELAY_MS, "startup");
+  };
+
+  // Stop what this tab had going: a run in flight stops at its next item.
+  const onLeaseLost = () => {
+    syncGenRef.current += 1;
+    clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = null;
+    clearTimeout(checkTimerRef.current);
+    checkTimerRef.current = null;
+    syncRerunRef.current = false;
+  };
+
+  useEffect(() => {
+    if (!authEnabled || !authSession) return;
+    // Merely reading window.localStorage can throw (some browsers' private modes):
+    // then no tab holds a lease and none does account work, which is the safe side.
+    let storage = null;
+    try {
+      storage = window.localStorage;
+    } catch (e) {
+      storage = null;
+    }
+    if (!storage) return;
+    const lease = createTabLease({ storage, tabId: tabIdRef.current });
+    leaseRef.current = lease;
+    let wasHolder = false;
+    let confirmTimer = null;
+    const apply = (state) => {
+      if (state.holder && !wasHolder) {
+        wasHolder = true;
+        onLeaseGained();
+      } else if (!state.holder && wasHolder) {
+        wasHolder = false;
+        onLeaseLost();
+      }
+      if (state.claiming) {
+        clearTimeout(confirmTimer);
+        confirmTimer = setTimeout(() => apply(lease.confirm()), LEASE_CONFIRM_MS);
+      }
+    };
+    const step = () => apply(lease.check());
+    leaseStepRef.current = step;
+    step();
+    const timer = setInterval(step, LEASE_CHECK_MS);
+    const release = () => {
+      clearTimeout(confirmTimer);
+      lease.release();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") step();
+    };
+    window.addEventListener("pagehide", release);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(confirmTimer);
+      window.removeEventListener("pagehide", release);
+      document.removeEventListener("visibilitychange", onVisible);
+      lease.release();
+      if (leaseRef.current === lease) leaseRef.current = null;
+      if (leaseStepRef.current === step) leaseStepRef.current = null;
+    };
+  }, [authEnabled, authSession ? authSession.userId : null]);
 
   // The status line says "Backed up 3 minutes ago", so while the Settings page
   // is showing and someone is signed in, re-read the clock every half minute.
@@ -1392,7 +1660,7 @@ export default function App() {
           rescheduleMarker: null,
         }));
         next[match.id] = merged;
-        savePieceToStorage(match.id, merged);
+        writePieceDirect(match.id, merged);
         updatedCount++;
       } else {
         const id = next[p.id] ? newId("p") : p.id;
@@ -1406,7 +1674,7 @@ export default function App() {
         const withId = validateAndMigratePiece({ ...p, id, createdAt: importedAt + index, startDate: p.startDate || todayISODate() });
         next[id] = withId;
         if (!firstNewId) firstNewId = id;
-        savePieceToStorage(id, withId);
+        writePieceDirect(id, withId);
         createdCount++;
       }
     });
@@ -2788,7 +3056,7 @@ export default function App() {
         const current = pieces[pieceId];
         if (!current) return;
         const next = { ...current, rescheduleMarker: marker, ...extendPatch(extend), updatedAt: Date.now() };
-        if (savePieceToStorage(pieceId, next).ok) saved[pieceId] = next;
+        if (writePieceDirect(pieceId, next).ok) saved[pieceId] = next;
         else failedNames.push(current.name || "Untitled piece");
       });
 

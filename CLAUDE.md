@@ -16,7 +16,12 @@ operational rules that matter every session. It intentionally does **not**
 duplicate the deep reference material in `docs/` — if something here and
 something in `docs/` ever disagree, `docs/` is canonical for product/design
 reasoning, and the actual source code under `src/` is canonical for
-implementation fact.
+implementation fact. **It is rules and orientation, not a changelog:** what each
+pass added is one line each in "What each pass added" at the end, and the full
+story is in `docs/` and `git log`. (It was compacted on 2026-10-16 from a
+2,500-line pass-by-pass log. If a rule or a detail you expected is missing, the old
+text is `git show 209d77a:CLAUDE.md`; check there and in `docs/` before assuming it
+never existed.)
 
 ## What this app is
 
@@ -37,18 +42,15 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   injected via a `<style>` tag inside the root component, using CSS custom
   properties defined on `.measureone-app`. No Tailwind, no CSS modules.
 - No backend of our own. The working copy is always client-side `localStorage`.
-  (Since Pass 109 an optional, invitation-only account sign-in (Supabase) exists
-  on sites connected to an account service, the live site too since Pass 114.
-  Signed in, this browser's pieces and technique library are copied to the
-  account (Pass 110), every later change goes up by itself (Pass 111), things come
-  back by restore, "Get changes" and Review (Pass 112), and the app notices,
-  quietly, when another device changed something (Pass 116). **Changes still never
-  arrive by themselves, and nothing merges two devices' copies part by part yet:**
-  the engines for that (Passes 117 and 118) are built but nothing calls them, and
-  Pass 120 wires them in and, by a 2026-10-15 decision, applies other devices'
-  changes automatically, the most recent change winning item by item. Tabs of ONE
-  browser are kept in step since Pass 119. See "Since Pass 109" to "Since Pass 119"
-  below.)
+  An optional, invitation-only account sign-in (Supabase) exists on sites
+  connected to an account service (the live site too, since Pass 114): signed in,
+  this browser's pieces and technique library are copied to the account and kept
+  current, can be restored or brought back with "Get changes", and the app notices
+  when another device changed something. **Changes still never arrive by
+  themselves, and nothing merges two devices' copies part by part yet:** the
+  engines exist (Passes 117 and 118) but nothing calls them for the account (since
+  Pass 119 tabs of ONE browser use them between themselves). See "Accounts, sync
+  and deploys" below.
 - No React Router — navigation is a simple `activeTab` string in state.
 
 ## Running it locally
@@ -110,7 +112,8 @@ chunking, scheduling, and confidence are actually computed, see
   `<input type="number">`.** It decouples displayed text from the committed
   value (commits on blur/Enter) to avoid a controlled-input bug where
   clearing a field to retype gets fought by React re-rendering the old value
-  mid-keystroke.
+  mid-keystroke. Its optional `onDraftChange` and `acceptPlaceholderOnTab`
+  props are described in [`docs/Architecture.md`](docs/Architecture.md#main-ui-components).
 - **Setup and editing share the same field-editor components**
   (`BasicsFields`, `SectionsEditor`, `DifficultyEditor`, `RecurringEditor`,
   `ScheduleFields`, `BpmZonesEditor`, `RecordingsEditor`, `DocumentsEditor`)
@@ -141,113 +144,87 @@ chunking, scheduling, and confidence are actually computed, see
     per-piece day lookup, `ScheduleBanner`'s suppression, `planRescheduleForPieces`'
     eligibility, `SettingsTab`'s Archive-button gate, and `OverviewTab`'s
     "Continue learning"/"Continue maintenance" relabel — must go through
-    `isPlanActuallyComplete(piece, chunkSet,
-    timeline)` (`lib/scheduling.js`), never a raw `elapsedDay(piece) >
-    timeline.days.length` comparison. A `scheduleMode: "days"` piece whose
-    target date passed with real work still outstanding is *behind*, not
-    *done* — the raw calendar comparison used to conflate the two, which is
-    exactly the bug this function exists to fix; if a new call site reaches
-    for the raw comparison instead, that's this regression coming back. See
+    `isPlanActuallyComplete(piece, chunkSet, timeline)` (`lib/scheduling.js`),
+    never a raw `elapsedDay(piece) > timeline.days.length` comparison. A
+    `scheduleMode: "days"` piece whose target date passed with real work still
+    outstanding is *behind*, not *done*; a new call site that reaches for the raw
+    comparison brings this regression back. See
     [`docs/Algorithms.md`](docs/Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
   - **Rescheduling a piece more than once must chain through its whole
-    reschedule history, not just re-derive from the raw, never-rescheduled
-    schedule (Pass 48 follow-up).** `getEffectiveTimeline`
-    (`lib/scheduling.js`) recurses through each `rescheduleMarker`'s
-    `previous` link to compute what came before the *current* marker's
-    `asOfDay`, rather than always calling `computeTimeline` fresh. Without
-    that chain, a second reschedule silently discards everything the first
-    one actually placed for the days in between — including a session
-    someone genuinely logged there, which then displays as a completely
-    different, unstarted chunk (confirmed live, not hypothetical). Every
-    place that constructs a new marker (`App.jsx`'s `handleReschedule`;
-    `planRescheduleForPieces` and `computeMinutesModeAutoExtend`, both
-    `lib/scheduling.js`) must set `previous: piece.rescheduleMarker ||
-    null`, or this regression comes back for that path specifically. A
-    piece whose second reschedule already happened *before* this fix
-    existed has no `previous` link to recover — that piece's history is
-    genuinely unrecoverable, not just unfixed; it corrects itself only once
-    rescheduled again. See
+    reschedule history (Pass 48 follow-up).** `getEffectiveTimeline`
+    (`lib/scheduling.js`) recurses through each `rescheduleMarker`'s `previous`
+    link to compute what came before the *current* marker's `asOfDay`, rather than
+    always calling `computeTimeline` fresh; without that, a second reschedule
+    silently discards what the first placed for the days in between, including a
+    session genuinely logged there. Every place that constructs a new marker
+    (`App.jsx`'s `handleReschedule`; `planRescheduleForPieces` and
+    `computeMinutesModeAutoExtend`, both `lib/scheduling.js`) must set
+    `previous: piece.rescheduleMarker || null`, or this regression comes back for
+    that path. A piece rescheduled twice before this fix has no `previous` link to
+    recover; it corrects itself on its next reschedule. See
     [`docs/Algorithms.md`](docs/Algorithms.md#rescheduling) and
     [`docs/Decisions.md`](docs/Decisions.md#scheduling).
   - **Introduction placement must be fully settled (including Pass 90's
-    load-smoothing) before transitions/combos/reviews compute anything
-    from `introducedDay` (Pass 90).** `computeTimeline`'s Phase A.5
-    (introduction-only smoothing, scoped to `frontDays`) runs immediately
-    after chunks are placed and *before* the `transitions.forEach`/
-    `combos.forEach` loops — never after. If a chunk's own introduction
-    day could still change once those loops have already read it, a
-    transition/combo ends up anchored to a day its own dependency has
-    since moved away from. This was a real architectural fork, confirmed
-    before building rather than guessed at: the alternative (let anything
-    move, then reflow whatever was anchored to it) would need a kind of
-    re-derivation this codebase has never built. See
-    [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) rule 1
+    load-smoothing) before transitions/combos/reviews compute anything from
+    `introducedDay` (Pass 90).** `computeTimeline`'s Phase A.5 (introduction-only
+    smoothing, scoped to `frontDays`) runs immediately after chunks are placed and
+    *before* the `transitions.forEach`/`combos.forEach` loops, never after: if a
+    chunk's introduction day could still change once those loops have read it, a
+    transition/combo ends up anchored to a day its dependency has since moved away
+    from. See [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) rule 1
     and [`docs/Decisions.md`](docs/Decisions.md#scheduling).
-  - **The daily-workload smoothing pass (`smoothOverloadedDays`,
-    rule 5) must never move a Tier 1 item, in either of its two call
-    sites (Pass 90).** Tier 1 is where schedule pressure deliberately
-    never gets absorbed (see the Tier 1 entry above) — a movable-items
-    pool built for a future extension of this pass that includes Tier 1
-    by accident would silently reintroduce exactly what that design
-    already rejected.
-  - **`sortPracticeChunksForIntroduction`'s hard-chunk-neighbor check
-    matches by measure boundary (`prevChunk.end + 1 === c.start`), never
-    by raw array index (Pass 89, fixed same broader session as Pass 90).**
-    Array-index adjacency is only correct when `practiceChunks` is the
-    pristine, gapless list `generateAllChunks` produces — a rescheduled
-    remainder (`getEffectiveTimeline`'s `subChunkSet.practiceChunks`) is a
-    *filtered* subsequence with gaps wherever an already-practiced chunk
-    was removed, and array-index adjacency there can call two chunks
-    neighbors purely because whatever used to sit between them is gone.
-    Confirmed as a real, reproduced bug, not hypothetical. If you touch
-    this function's neighbor logic, keep the boundary-based match — see
+  - **The daily-workload smoothing pass (`smoothOverloadedDays`, rule 5) must
+    never move a Tier 1 item, in either of its two call sites (Pass 90).** Tier 1
+    is where schedule pressure deliberately never gets absorbed; a movable-items
+    pool that includes Tier 1 by accident would silently reintroduce what that
+    design rejected. See [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler).
+  - **`sortPracticeChunksForIntroduction`'s hard-chunk-neighbor check matches by
+    measure boundary (`prev.end + 1 === c.start`), never by raw array index
+    (Pass 89).** Array-index adjacency is only right for the pristine, gapless list
+    `generateAllChunks` produces; a rescheduled remainder
+    (`getEffectiveTimeline`'s `subChunkSet.practiceChunks`) is a *filtered*
+    subsequence with gaps, and index adjacency there calls two chunks neighbors
+    because whatever sat between them is gone. A real, reproduced bug. Keep the
+    boundary-based match. See
     [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md#position-based-logic-is-only-correct-for-the-caller-whose-list-it-was-written-against)
-    for the general lesson and
-    [`docs/Decisions.md`](docs/Decisions.md#scheduling) for the incident.
-  - **`reassociateTroubleSpots` (`lib/chunking.js`) matches a focus spot to
-    its chunk by measure position (`startMeasure`), never by trusting the
-    chunk id it's nested under (Pass 91, experimental v1).** The same
-    general lesson as the bullet above, a second instance of it: chunk ids
-    are `c${start}`, so a chunking-scheme edit (`customChunkSize` 8 → 4)
-    can produce an id that still exists in the new chunk set but now
-    covers different measures entirely (a "c9" meaning 9–16, then 9–12) —
-    an id-existence check alone reads that as continuity.
-    `migrateOrphanedProgress` is correct for what it does (whole-entry
-    reattachment by best overlap); this function exists specifically to
-    catch what that one can't. If you touch this function's matching
-    logic, keep the measure-position check — simplifying it down to "does
-    this id still exist" silently reintroduces the exact spot-orphaning
-    bug it was built to fix. See
-    [`docs/Algorithms.md`](docs/Algorithms.md#focus-spots-v1).
+    for the general lesson and [`docs/Decisions.md`](docs/Decisions.md#scheduling).
+  - **`reassociateTroubleSpots` (`lib/chunking.js`) matches a focus spot to its
+    chunk by measure position (`startMeasure`), never by trusting the chunk id it's
+    nested under (Pass 91).** The same lesson as the bullet above: chunk ids are
+    `c${start}`, so a chunking-scheme edit (`customChunkSize` 8 → 4) can produce an
+    id that still exists but now covers different measures (a "c9" meaning 9–16,
+    then 9–12), and an id-existence check reads that as continuity.
+    `migrateOrphanedProgress` reattaches whole entries by best overlap; this function
+    catches what that one can't. Keep the measure-position check — simplifying it to
+    "does this id still exist" silently reintroduces the spot-orphaning bug it was
+    built to fix. See [`docs/Algorithms.md`](docs/Algorithms.md#focus-spots-v1).
 - **`Wizard` is create-only.** Editing an existing piece always goes through
   `SettingsTab`, never the wizard.
 - **Piece Map chunk detail is a modal, not inline** — this was a deliberate
   UX fix (inline rendering was invisible below the fold); don't revert it.
 - **Piece Map's grid shows only base practice chunks — this is deliberate,
-  not a bug to "fix" by restoring transitions/combos to it.** Reach those
-  through the chunk-detail modal's "Related chunks" field instead (Pass
-  50). `PieceMapTab` is ordinary (non-revival) Piece Map only, as of Pass
-  87 — Revival's reassessment pass no longer shares this component at all
-  (it used to, via a `sequentialMode` prop that rendered this same grid
-  unfiltered underneath its own modal; that's retired in favor of a
-  dedicated `ReassessSequencePanel`, see the Revival section below), so
-  there's no second caller of this grid to keep in sync with anymore. Since
-  Pass 97 a chunk split in two is drawn beside its other half inside one
-  dashed box — derived live from `piece.chunkSplitPoints`, display only.
+  not a bug to "fix" by restoring transitions/combos to it (Pass 50).** Reach
+  those through the chunk-detail modal's "Related chunks" field instead.
+  `PieceMapTab` is ordinary (non-revival) Piece Map only: Revival's reassessment
+  has its own `ReassessSequencePanel`, so the grid filter is unconditional. A chunk
+  split in two is drawn beside its other half inside one dashed box, derived live
+  from `piece.chunkSplitPoints` (display only).
 - **Section run-throughs must stay a computed-fresh-every-render gate, not
-  a persisted "unlocked" flag.** As of Pass 49, `sectionRunThroughGate`
-  (`lib/chunking.js`) recomputes due/locked state from live session counts
-  on every call — reintroducing any persisted "has this been unlocked"
-  state would silently bring back the exact bug that pass fixed (a
-  run-through that, once available, sat permanently available forever
-  after, whether or not it still made sense). Neither `sectionRunThroughGate`
-  nor `computeSectionRunThroughs` takes a day parameter — both deliberately
-  answer "is this due right now," not "was this due on day N." As of Pass
-  68, the day-scoping instead lives one layer up: `SectionRunThroughPanel`
-  only renders when `isRealToday`, so a browsed past/future day never shows
-  (or lets you log against) today's live due-state. Don't try to fix a
-  future "wrong day" symptom by adding a day parameter to the two functions
-  above — the fix belongs at the display layer, same as this pass. See
+  a persisted "unlocked" flag.** `sectionRunThroughGate` (`lib/chunking.js`)
+  recomputes due/locked state from live session counts on every call (Pass 49);
+  reintroducing any persisted "has this been unlocked" state would silently bring
+  back the exact bug that pass fixed (a run-through that, once available, sat
+  available forever, whether or not it still made sense). The count is of
+  *confirmed* sessions, i.e. `loggedSessions()`-filtered: a skipped Interleaved
+  attempt or an unconfirmed provisional one must not advance the gate
+  (`isSectionLearned` still counts raw `sessions.length`, deliberately; the two now
+  answer different questions). Neither `sectionRunThroughGate` nor
+  `computeSectionRunThroughs` takes a day parameter — both answer "is this due right
+  now," not "was this due on day N." The day-scoping lives one layer up (Pass 68):
+  `SectionRunThroughPanel` only renders when `isRealToday`, so a browsed past/future
+  day never shows (or lets you log against) today's live due-state. Don't try to fix
+  a future "wrong day" symptom by adding a day parameter to the two functions — the
+  fix belongs at the display layer. See
   [`docs/Algorithms.md`](docs/Algorithms.md#section-run-throughs).
 - **`piece.sections` must always have `start <= end` — if you add a second
   way to create or edit sections, normalize it the same way
@@ -262,20 +239,17 @@ chunking, scheduling, and confidence are actually computed, see
   `piece`), never persisted. If something schedule-related needs to persist
   (like the reschedule marker), it goes on `piece` as input data, and the
   derivation recomputes from it.
-- **`countBehindDays`/`isDayFullySwept`/`classifyDayCompletion`
-  (`lib/scheduling.js`) take an optional fourth `chunkById` argument —
-  pass it.** It defaults to `{}` so
-  a caller that omits it degrades gracefully instead of crashing, but
-  degrading means *silently under-detecting* a reschedule sweep (a
-  connector that rode along via a linked practice chunk, rather than being
-  listed directly on the marker, won't be recognized as moved) — the same
-  symptom class Pass 74's follow-up fix exists to prevent, just reintroduced
-  quietly at whichever call site forgets the argument. Every current call
-  site (`ScheduleBanner`, `OverviewTab`, `TimelineTab`, `TodayTab`'s
-  catch-up scan, `MasterAgendaTab`'s two sites, `findStuckBehindPieces`)
-  builds `chunkById` from whatever chunk set it
-  already has in scope — a new call site should do the same rather than
-  relying on the default.
+- **`countBehindDays`/`isDayFullySwept`/`classifyDayCompletion` (`lib/scheduling.js`)
+  take an optional fourth `chunkById` argument — pass it.** It defaults to `{}` so a
+  caller that omits it degrades gracefully instead of crashing, but degrading means
+  *silently under-detecting* a reschedule sweep (a connector that rode along via a
+  linked practice chunk, rather than being listed directly on the marker, won't be
+  recognized as moved) — the same symptom class Pass 74's follow-up fix exists to
+  prevent, just reintroduced quietly at whichever call site forgets the argument. Every
+  current call site (`ScheduleBanner`, `OverviewTab`, `TimelineTab`, `TodayTab`'s
+  catch-up scan, `MasterAgendaTab`'s two sites, `findStuckBehindPieces`) builds
+  `chunkById` from whatever chunk set it already has in scope — a new call site should
+  do the same rather than relying on the default.
 - **A chunk done EARLIER than the rescheduled-remainder day it is placed on isn't
   owed on that day (Pass 117, `classifyDayCompletion`).** Only introductions and
   connectors (never reviews), only on a day at or after the marker's `asOfDay`, only
@@ -288,26 +262,38 @@ chunking, scheduling, and confidence are actually computed, see
   reschedule already moved away never count against it.**
   `classifyDayCompletion` drops every id `movedIdsForDay` reports before
   deciding `"done"`/`"behind"` (nothing left → `"empty"`), and
-  `countBehindDays` is just "how many days classify as `"behind"`." This
-  was a real bug: a day where some tasks were done on time and the rest
-  were moved by a reschedule was neither "fully swept" nor "done," so it
-  read "behind" forever — the "N days behind" banner survived every
-  reschedule, and "Reschedule" clicked again changed nothing (reproduced:
-  14 → 5 → 5 → 5). If you add another "is this day behind/done" check,
-  route it through `classifyDayCompletion` rather than reading `doneDays`
-  against a day's raw id lists, or the same symptom comes back for that
-  surface. See [`docs/Algorithms.md`](docs/Algorithms.md#rescheduling) and
+  `countBehindDays` is just "how many days classify as `"behind"`." The bug this
+  prevents: a day where some tasks were done on time and the rest were moved by a
+  reschedule was neither "fully swept" nor "done," so it read "behind" forever —
+  the "N days behind" banner survived every reschedule, and "Reschedule" changed
+  nothing. If you add another "is this day behind/done" check, route it through
+  `classifyDayCompletion` rather than reading `doneDays` against a day's raw id
+  lists, or the same symptom comes back for that surface. See
+  [`docs/Algorithms.md`](docs/Algorithms.md#rescheduling) and
   [`docs/Decisions.md`](docs/Decisions.md#scheduling).
 - **A key in `piece.progress` may not exist in the chunk set — always
   handle the miss.** `piece.progress` is persisted; the chunk set is
-  re-derived. Three kinds of key won't resolve: `__consolidation__`,
-  `sr_<sectionId>` section run-throughs (deliberately never in
+  re-derived. Four kinds of key won't resolve: `__consolidation__`,
+  `__cold_start__`, `sr_<sectionId>` section run-throughs (deliberately never in
   `generateAllChunks(...).all`, so this is *routine*, not an edge case),
   and ids orphaned when a piece edit regenerated chunk ids. An unguarded
   `chunkById[id].start` on one of these crashed the whole Progress tab
   (Pass 20). Iterating `timeline.days[]` ids instead is safe by
-  construction. See
+  construction. The two synthetic keys are listed in `NON_CHUNK_PROGRESS_KEYS`
+  (`lib/storage.js`, Pass 56): the ladder-state backfill/diff functions read that one
+  list (the first cut checked `__consolidation__` by name in two places and missed
+  the other key), and `computePracticeHistory` (`lib/history.js`) indexes
+  `__cold_start__` sessions off their own `day` field, because that key deliberately
+  carries no `doneDays`. See
   [`docs/Data-Model.md`](docs/Data-Model.md#pieceprogress-keys-are-not-guaranteed-to-exist-in-the-chunk-set).
+- **The Cold-Start check logs to `piece.progress["__cold_start__"]`, deliberately not
+  into `"__consolidation__"`'s sessions (Pass 56):** `computeRevivalTriggers` reads
+  every `"__consolidation__"` session's `stopCount`, and a Cold-Start session has none.
+  It unlocks once `coldStartGateMet` (`lib/coldStart.js`) says every section's own
+  run-through has been logged. Its prompt (`coldStartDueThreshold`, escalating at 3, 7,
+  14, 28, ... days since anything was logged) is a live derivation with no persisted
+  "already shown" flag, the same spirit as `sectionRunThroughGate`. See
+  [`docs/Algorithms.md`](docs/Algorithms.md#cold-start-check).
 - **No regex lookbehind (`(?<=…)`, `(?<!…)`) anywhere in `src/`.** The
   build targets Safari 14, which can't parse it and esbuild can't rewrite
   it — one instance blanks the whole app there, not just one screen.
@@ -319,8 +305,8 @@ chunking, scheduling, and confidence are actually computed, see
   keeps picking them up). `test/copy-style.test.mjs` fails if one appears
   in copy (Pass 80, redone after Pass 104).
 - **Technique data is app-level — never `setPieces`/`updatePiece`.** It
-  lives in `App.jsx`'s `technique` state and its own localStorage key, and
-  every change goes through `updateTechnique` (Pass 100).
+  lives in `App.jsx`'s `technique` state and its own localStorage key
+  (`measureone-technique`), and every change goes through `updateTechnique` (Pass 100).
 - **Logic that needs a regression test belongs in `src/lib/`.** The test
   suite (`npm test`, `node:test`) is lib-level only — there is no harness
   for rendering components, so nothing in `components/` can be tested.
@@ -370,7 +356,6 @@ chunking, scheduling, and confidence are actually computed, see
   fix. If you add a new field to the edit form (`SettingsTab.jsx` or any
   of the shared field-editor components), add it to `EDIT_FORM_FIELDS`
   too. See [`docs/Decisions.md`](docs/Decisions.md#ux).
-
 - **Chunk splitting (Pass 97): three traps.** (1) **Two different
   split-point checks exist and must never be swapped.** `survivingSplitPoints`
   answers the *resize* question ("does the NEW grid already land on this
@@ -393,6 +378,62 @@ chunking, scheduling, and confidence are actually computed, see
   `handleSavePiece`'s null-the-marker behavior. The "midpoint" gives the extra
   measure to the SECOND half (5 → 2+3, `Math.floor`); test the odd count.
   See [`docs/Algorithms.md`](docs/Algorithms.md#splitting-a-chunk-pass-97).
+- **A review arriving late is schedule slack, never a failure.** Only the logged
+  outcome (pass / soft-miss / fail) may ever affect the maintenance ladder, never
+  timing. Before touching scheduling, confidence or the practice-logging UI, read
+  [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built):
+  the ladder is live, not a future replacement to design around.
+- **Leaving Interleaved mode with an unconfirmed provisional session must go
+  through `confirmAndDiscardProvisional` / `guardLeavingInterleaved` (`App.jsx`)**,
+  at every place `activeTab` or `activePieceId` can change (two sidebar controls
+  were missed on the first pass). A new way to navigate away must route through the
+  same function, never an unguarded `setActiveTab`/`setActivePieceId`.
+- **Master Agenda's minutes-mode auto-extension is display-only.**
+  `computeMinutesModeAutoExtend` is also computed in `MasterAgendaTab` so a
+  background piece shows real, current content; nothing is written to storage from
+  that. The real write happens only in the `App.jsx` effect, once that piece is
+  opened (Pass 39).
+- **`AllPiecesTab` confidence uses `elapsedDay` (real, unclamped days), not
+  `getCurrentDay`, on purpose (Pass 42):** a neglected piece keeps reading staler
+  instead of freezing once it falls off its own plan. See
+  [`docs/Decisions.md`](docs/Decisions.md#cross-piece-views) before changing it.
+- **`DIFFICULTY_META`'s labels (Workable / Challenging / Difficult) are display
+  only (Pass 52).** The `difficultyLabel` enum values (`'easy' | 'medium' | 'hard'`)
+  still drive scheduling, confidence and the ladder (`REQUIRED_REPS`, tempo-floor
+  lookups): don't rename them to match.
+- **`handleStartRevival` (`App.jsx`) hardcodes `purpose: null`** rather than reading
+  it from the modal payload (Pass 55): the modal stopped sending that key, and
+  reading it would write revival objects with no `purpose` key at all (`undefined`
+  doesn't survive `JSON.stringify`). `piece.revival.purpose` stays
+  defined-but-always-`null` on the schema, dormant, not removed.
+- **`resolveRequiredReps` has two callers, `ChecklistItem` and `InterleavePanel`
+  (Pass 61).** Change both, or a chunk's 4th/8th/12th Holding review is judged by a
+  different requirement depending on which screen logged it.
+- **Review cost is priced the same way in three places, and they must keep
+  agreeing (Pass 66):** `computeTimeline`'s `minutesFor` (`chunk.effort *
+  EFFORT_TO_MIN`, for reviews as for new chunks), `computeDaysNeededForMinutesPerDay`
+  (review padding `c.effort * REVIEW_TOUCHES_PER_ITEM`, which is 2) and
+  `computeDueReviews`. Underestimating a hard chunk's review in the estimator risks a
+  `scheduleMode: "minutes"` plan not fitting its own daily budget.
+- **`mergeLiveDueReviews` (`lib/maintenance.js`) skips consolidation ("full
+  run-through") days itself** (`if (day.type === "consolidation") return day;`):
+  neither `ConsolidationPanel` nor Master Agenda's card renders `reviewChunkIds` or
+  `minutes` for that day type, so merging a review in there would inflate
+  `day.minutes` with no line item to explain it. Keep the guard in the function, not
+  at the two call sites that rely on it.
+- **The "done on another day" check in `isDayFullySwept` must never apply to
+  `reviewChunkIds` unless `progress[id].nextDueDate` is set (Pass 75).** A genuine
+  Tier 2 review always has one; a Tier 1 "first touch" review (a chunk never logged)
+  never does, and checking `doneDays` alone strips every never-touched chunk's
+  review. A review whose due date has passed is handled centrally by
+  `withLiveReviewStatus` (`lib/scheduling.js`), applied wherever the timeline is
+  built, so every screen gets it.
+- **Show key names through `KeyText.jsx`** (♯/♭ in a tighter font inside one span, so
+  a flex `gap` can't split "E♭" into "E ♭"), and wrap it together with its
+  surrounding words when the parent is a flex row with a gap (buttons are) (Pass 101).
+- **Technique stays out of every schedule path (Pass 102):** no behind-schedule
+  count, `ScheduleBanner`, reschedule dialog or piece-progress code may read it. It
+  isn't part of any piece.
 
 ## Revival
 
@@ -434,1799 +475,335 @@ Several constants driving scheduling and confidence (`EFFORT_TO_MIN`,
 are hand-picked, not derived from any study — see
 [`docs/Research.md`](docs/Research.md) for the full inventory and what
 would need to be true to replace them. There's also no undo history for BPM
-zones or difficulty reassessment. **"This piece is learned" is now
-implemented, as of Pass 39** — `isPieceLearned(piece, chunkSet)`
-(`src/lib/ladder.js`) is a live derivation (every practice chunk's ladder
-`stage` at Holding), not a persisted field on `piece`, so there is still no
-first-class piece-level "learned" *state* to gate other features on. **As
-of Pass 83, "gate revival entry behind maintenance" no longer needs that
-persisted state to fix the actual problem it was raised for**: both "Start
-revival" buttons and all three of `computeRevivalTriggers`' conditions
-(`lib/revival.js`) are now gated on the already-existing live
-`isPlanActuallyComplete` derivation instead of a stored `piece.stage`
-field — see [`docs/Decisions.md`](docs/Decisions.md#revival). The original
-item's *other* half — a manual Settings control to move a piece "finished
-away from the app" into maintenance — **is now built too, in a later
-session, directly on request**: `piece.markedLearnedElsewhere` (Settings'
-"Mark as learned elsewhere") is an unconditional override
-`isPlanActuallyComplete` checks first, ahead of its normal calendar/
-per-chunk logic — so setting it unlocks Archive, "Start revival," and
-every other `isPlanActuallyComplete`-gated behavior at once, with no
-per-surface wiring needed, closing the regression Pass 83's gate had
-otherwise introduced for exactly this piece shape. See
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the full
-resolution. See
-[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented)
-for the "learned" rollup itself.
-**Don't confuse this with Pass 58's `computeOverallConfidence`** (see the
-Roadmap section below) — that's a continuous, always-moving 0–100 stat
-built from `computeConfidence`, deliberately not the same question as
-`isPieceLearned`'s strict "every chunk at Holding" boolean, and the two
-are never read from each other.
+zones or difficulty reassessment. The three `ladderConfig.holding.tempoFloor*` fields
+(retired in Pass 61) are still in the schema and editable in Settings, and do nothing:
+a deliberately flagged loose end.
+
+**"This piece is learned" is a live derivation, not a stored state.**
+`isPieceLearned(piece, chunkSet)` (`src/lib/ladder.js`, Pass 39) is true when every
+practice chunk's ladder `stage` is Holding; nothing is persisted on `piece`. What the
+app gates on instead is `isPlanActuallyComplete`: both "Start revival" buttons and all
+three of `computeRevivalTriggers`' conditions (`lib/revival.js`) read it (Pass 83), and
+`piece.markedLearnedElsewhere` (Settings' "Mark as learned elsewhere") is an
+unconditional override it checks first, so setting it unlocks Archive, "Start revival"
+and every other `isPlanActuallyComplete`-gated behavior at once, with no per-surface
+wiring. See [`docs/Decisions.md`](docs/Decisions.md#revival),
+[`docs/Decisions.md`](docs/Decisions.md#open-questions) and
+[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented).
+
+**Don't confuse `isPieceLearned` with Pass 58's `computeOverallConfidence`**
+(`lib/confidence.js`, with its own manual override `piece.manualOverallConfidence`):
+that is a continuous, always-moving 0–100 stat built from `computeConfidence`,
+deliberately not the same question as `isPieceLearned`'s strict "every chunk at
+Holding" boolean, and the two are never read from each other.
+
+## Accounts, sync and deploys: rules for working on them
+
+**What exists.** An optional, invitation-only account (Supabase). Signed in, this
+browser's pieces and technique library are copied to the account (the first backup,
+Pass 110), every later change goes up by itself (Pass 111), restore / "Get changes" /
+Review bring things back (Pass 112), the person can change their password and sign out
+of all devices (Pass 113), and since Pass 116 the app notices, quietly, that another
+device changed something ("Changes from another device: 3 pieces. Press Get changes.";
+it applies nothing). Live on the real site since Pass 114 (2026-10-10), with the
+owner's account the only one. **Phase 2 is groundwork so far:** the two merge-by-part
+engines (Passes 117 and 118) are built and simulation-tested but nothing calls them for
+the account yet (Pass 119 calls them between tabs of one browser).
+**Decided 2026-10-15, not built:** from Pass 120 other devices' changes are applied
+automatically when the app is opened or returned to, the most recent change winning
+item by item, with practice sessions and scales always kept
+([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When two copies disagree").
+Design: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md); what a person
+sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109) (flows
+10 to 13).
+
+### The account code (Passes 109 to 116)
 
-## Roadmap
-
-See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently
-singled out as "next"; pick from the priority-ordered backlog there. **The
-accounts work is the one thread in motion:** it is mid-Phase 2 (Passes 115 to
-118 are built and live; 119, tabs of one browser, is built), and the passes the docs name next are 120 (wires the
-two merge engines in and applies other devices' changes automatically, the most
-recent change winning item by item: **decided 2026-10-15**), 121 (only what "most
-recent" can't settle) and 122 (deletions); see "Since Pass 119" below and
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) (the "When two copies
-disagree" entry and Pass 118 open item 9 first). The
-Analytics fold-in that used to occupy that slot **shipped in Pass 20**:
-Analytics is gone as a tab and its "Confidence by difficulty" panel lives
-in Progress (the other folded-in panel, "Recurring material payoff", was
-removed outright in Pass 32b — see below). The
-biggest maintenance-ladder item is now **substantially built, not just
-designed**: a continuous Stabilizing/Settling/Holding cadence has replaced
-the old fixed `REVIEW_OFFSETS` review (`computeTimeline` now schedules
-reviews straight off each chunk's live ladder due-date), and "learned" is
-defined as every chunk reaching Holding — **and as of Pass 39, something
-finally queries that roll-up**: `isPieceLearned(piece, chunkSet)`
-(`src/lib/ladder.js`). It's load-bearing, not just a future display label —
-`isPlanActuallyComplete` (`src/lib/scheduling.js`) reads it to decide, for a
-`scheduleMode: "minutes"` piece, whether the plan should keep auto-extending
-itself or finally read as complete; see
-[`docs/Algorithms.md`](docs/Algorithms.md#detecting-that-a-piece-has-run-past-its-plan).
-The live "what's due" query that works beyond the current plan's
-bounded length is built as of Pass 8 (`computeDueReviews` in
-`src/lib/maintenance.js`, surfaced in Master Agenda and the Today tab), as
-is post-run-through logging (stop count / rough-lost flag, Pass 6). The
-"short structured re-learning pass" that consumes `needsRelearning` is
-also now built (Pass 11) — two consecutive Stabilizing fails sets a
-persisted, sticky per-chunk flag that replaces review entirely (zero due
-reviews from either `computeTimeline` or `computeDueReviews` while set),
-exits on 4 consecutive passes or a manual override, reuses the `lost`
-demote-and-pin mechanism under the label "Needs reinforcement," and resets
-`practiceBPM` to `getSuggestedStartingBPM`. A Settings editor for
-`ladderConfig` is built too (Pass 17 — `LadderConfigEditor`, under
-SettingsTab's "Maintenance ladder" panel). Still not built: a
-first-class *persisted* "learned" piece state to gate other features on
-(the roll-up above is a live derivation, not a stored field) — **though as
-of Pass 83, "gate revival entry behind maintenance" no longer needs that
-field to fix the contradiction it was raised over**; see
-[`docs/Decisions.md`](docs/Decisions.md#revival) for what shipped instead
-and [`docs/Decisions.md`](docs/Decisions.md#open-questions) for what's
-still genuinely open (a manual Settings maintenance-transition, and the
-new gap that creates for a piece never fully logged in-app) — a second
-Tier 1 rung, and Stage 5 repertoire rotation.
-If you're about to touch scheduling, confidence,
-or the practice-logging UI, check
-[`docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built)
-first — this mechanism is now live, not a future replacement to design
-around. One invariant from that design worth internalizing early: **a
-review arriving late is schedule slack, never a failure** — only the
-logged outcome (pass/soft-miss/fail) may ever affect the ladder, not
-timing.
-
-**Since Pass 29**, Today's Practice has a fourth view mode, **Interleaved**
-— rotates chunks past Stabilizing, with a "skip" action and a
-**provisional** logging state (a rough auto-classified attempt is saved
-but doesn't touch the ladder until confirmed or discarded) — see
-[`docs/Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29`](docs/Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29).
-Leaving Interleaved mode with an unconfirmed provisional now warns and, on
-confirmation, discards it — gated through one shared function
-(`confirmAndDiscardProvisional`/`guardLeavingInterleaved`, `App.jsx`) at
-every place `activeTab`/`activePieceId` can change, not just the obvious
-ones; two sidebar controls ("Edit piece settings," finishing the "Add new piece"
-wizard) were missed on the first pass and only caught on review — if you
-add another way to navigate away from Interleaved mode, route it through
-that same function rather than adding a new `setActiveTab`/
-`setActivePieceId` call site unguarded. **Since Pass 30**, Piece Map also
-surfaces a live-derived "tempo climbing" nudge (`hasClimbingTempo`,
-`lib/confidence.js`) — no new persisted state, same pattern as the
-existing flag/needsRelearning tile markers.
-
-**Since Pass 31**, `ChecklistItem` no longer shows a per-chunk
-method-suggestion tip line — `suggestMethods()` was removed in favor of
-static instructional copy (a fixed requirement line, "Spaced Repetition"
-in place of "Ladder," and a "Needs more work" checkbox that states what a
-manual fail actually does). Don't reintroduce a dynamic technique
-suggestion by resurrecting that function; it's gone. **Since Pass 38**,
-Overview's "Start/Continue revival" button is a `primary-btn` (was
-`ghost-btn`), and Revival-mode copy was reworked to read less clinically:
-the Revival tab's title-card subheading dropped the purpose/last-played
-recap in favor of a plain "Returning '{piece}' to its former glory," the
-Overview stat cards and first-week list relabel during an active revival
-("revived" instead of "learned," "Revive"/"reconsolidate" instead of
-"Learn new"/"review"), and Master Agenda's revival cards no longer show
-the purpose blurb. The revival-mode UI still does not display when the
-piece was last played anywhere — flagged as a possible follow-up, not
-treated as settled. (This paragraph originally also flagged that
-`revival.purpose` — why the revival was started — had no display surface
-either; moot as of Pass 55, which removed the field from collection
-entirely rather than just from display. See that entry below.)
-
-**Since Pass 32a**, every piece carries a persisted `sortOrder` (number) that
-the sidebar piece switcher and other piece-listing surfaces sort by instead
-of `createdAt`, reorderable via up/down controls on each switcher row.
-Reordering only ever moves a *whole* row — a standalone piece, or an entire
-multi-movement work as one block — never an individual movement within a
-work; movement order inside a work is still `createdAt`-driven
-(`groupPiecesByWork`/`partsOfWork`, `lib/works.js`), untouched by this
-field, and stays visually contiguous "for free" regardless. Existing pieces
-migrate to a `createdAt`-derived default so nothing reshuffles on first
-load. Re-importing a backup gets its own explicit "keep what's here" /
-"use the imported order" choice rather than the usual most-recently-updated
-rule — order is display arrangement, not data an `updatedAt` comparison
-should settle. See [`docs/Data-Model.md`](docs/Data-Model.md#the-piece-object).
-
-**Since Pass 32b**, Progress's "Recurring material payoff" panel (folded in
-from the old Analytics tab back in Pass 20) is gone — a pure removal, along
-with the four variables that only fed it. Recurring material's actual
-scheduling-effort discount (`lib/chunking.js`) and any related confidence
-handling are untouched; only the display panel went.
-
-**Since Pass 36**, the reschedule confirmation dialog (`handleReschedule`,
-`App.jsx`) fixed its "day(s)" pluralization, and — when the remaining work
-doesn't fit the days left — now offers a concrete way out instead of just a
-warning. For a `scheduleMode: "days"` piece: change the target date to a
-suggested one (derived from the same `requiredDays` estimate already
-computed) or reschedule into the existing window. For `scheduleMode:
-"minutes"`: there's no target date to suggest changing (one was never set
-in that mode) and no "cram into what's left" alternative worth offering
-(no calendar deadline to protect there), so it's a single action — extend
-`daysToLearn` to fit, at the same `minutesPerDay`. See the regression note
-above for the reload-persistence fix this required.
-
-**Since Pass 39**, "the calendar ran out" and "the plan is actually
-finished" are no longer the same question anywhere in the app — see the
-new regression note above (`isPlanActuallyComplete`) for the mechanics.
-Built alongside it: `isPieceLearned` (Stage 3's rollup, see the Roadmap
-paragraph above), a `scheduleMode: "minutes"` piece now auto-extends its
-own plan (no dialog, no button — `computeMinutesModeAutoExtend`, applied by
-an effect in `App.jsx` scoped to the active piece) once it's past its own
-day count but not yet learned, and a `scheduleMode: "days"` piece in the
-equivalent state gets a new "Past your target date" prompt on Today's
-Practice instead of silently reading as complete. Master Agenda's per-piece
-day lookup uses the same `isPlanActuallyComplete` check, shows a matching
-card for an affected `"days"`-mode piece instead of quietly dropping it,
-and computes a *display-only* version of the minutes-mode auto-extension so
-a `"minutes"`-mode piece in the background (not the currently-open one)
-still shows real, current content rather than going invisible — nothing is
-written to storage from that computation; the real write only happens via
-the `App.jsx` effect once that piece is actually opened. Master Agenda's
-"Log practice" and "Pick a random piece" buttons now land on Today's
-Practice, not Overview (`switchToPiece` takes an optional target tab).
-
-**Also since Pass 39** (a follow-up round, same session): the single-piece
-reschedule dialog no longer offers "reschedule into current plan days" once
-a piece's target date has *already fully passed* — only "push the target
-date out," since there's no real "current plan days" left to pack into once
-the deadline's already gone (`suggestion.singleChoice`, `App.jsx`). The
-bulk "Reschedule all" button now does the equivalent for its whole batch:
-a `scheduleMode: "days"` piece already past its own plan gets its target
-date pushed out automatically as part of the bulk action, not just repacked
-within a plan length that was never going to fit it
-(`computeReschedulePastPlanExtension`, shared by both the single-piece and
-bulk paths — `lib/scheduling.js`). **A real, pre-existing bug was found
-(not fixed) while verifying this**: a piece that's *already* been
-rescheduled once via "cram into what's left" while fully past its own plan
-can permanently stop being recognized as behind schedule at all, which
-silently drops it from "Reschedule all" forever after — see
-[`docs/Decisions.md`](docs/Decisions.md#scheduling) for the mechanism and
-why only half of the two-part fix shipped this session. **Resolved by
-Pass 70**, for an unrelated reason (the "N days behind" display rework
-needed the same cutoff fix) — see
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the
-after-the-fact confirmation.
-
-**In the same session as Pass 42 (below), several smaller fixes also
-shipped, none individually pass-numbered:** `ChecklistItem`'s practice
-timer now computes elapsed time from a wall-clock timestamp captured at
-the moment "Log practice" is clicked, instead of trusting whatever the
-last per-second tick had left `durationSeconds` at — the old approach
-could undercount by up to a second, more if a `window.confirm` shortfall
-dialog delayed the actual save. The multi-movement summary line
-("N movements, N plans") now sits at the actual bottom edge of the title
-card's content, after Recordings/Documents, correcting where Pass 38 had
-actually left it (under the measure-count line — not the bottom edge;
-those two are not the same spot). `PartSwitcher` no longer renders its own
-`<h3>{workName}</h3>` heading — the hero card's eyebrow already names the
-work, so a multi-movement piece's Overview was showing the same title
-twice, in two different cards. Master Agenda's Learning/Maintenance/Revival
-subtab buttons no longer stretch to the page's full width. Every
-notes-style field's label dropped the "— optional" suffix, everywhere
-`MemoryAnchorField` renders. **Work title is now required, in both the
-Wizard and Settings, whenever "Multiple movements" is selected** — blank
-titles used to silently produce a confusing dead-end (Wizard: piece never
-actually joined the work; Settings: clearing an existing multi-movement
-piece's title silently demoted it out of its work, `ensureWorkId`,
-detaching it from its siblings with no warning). See
-[`docs/Decisions.md`](docs/Decisions.md#multi-movement-works) for the full
-reasoning behind both title-related fixes.
-
-**Since Pass 42**, there's a first, deliberately bounded cross-piece
-summary: `AllPiecesTab` — one row per piece (progress %, confidence %, days
-since last touched, time practiced) plus a total-time-practiced stat,
-reached via a "View all pieces" button on Progress rather than a new
-sidebar entry (same button-triggered-tab pattern `revival` already uses,
-not in `NAV_BASE`). Every number comes from an existing per-piece function
-called once per piece — no new aggregation logic. Confidence deliberately
-uses `elapsedDay` (real, unclamped calendar days) rather than the
-timeline-clamped `getCurrentDay` other screens use for the *active* piece,
-so a neglected piece keeps reading as more stale over time instead of
-freezing once it falls off its own plan — a considered choice, not an
-oversight; see [`docs/Decisions.md`](docs/Decisions.md#cross-piece-views)
-for why, and what switching to `getCurrentDay` would actually cost. Not the
-full "cross-piece repertoire health dashboard" mentioned earlier in this
-file — no lifecycle-state detection — still scoped out; see
-[`docs/Roadmap.md`](docs/Roadmap.md).
-
-**Also since Pass 42** (a same-session follow-up, once the user actually
-tried the page): three additions to `AllPiecesTab`. A "Back to {piece
-name}" button in the header, reusing the same `onSelectPiece` navigation
-the rows already use. "Time practiced" is now **this week only** (Monday
-through today), not all-time — both the per-row column and the header
-total — via two new `lib/utils.js` functions, `startOfWeekISO` and
-`sumPracticeSecondsSince` (no existing helper did week-boundary math). And
-the consistency/streak view named above as explicitly deferred **was
-built after all**, once actually requested: a 14-day cross-piece heatmap
-(`computeCrossPieceConsistency`, `lib/utils.js`) where touching *any*
-piece counts a calendar day as practiced — reads each session's
-`loggedDate` directly rather than the plan-relative day numbers
-`ProgressTab`'s per-piece heatmap uses, since day numbers aren't
-comparable across pieces with different start dates. All three are tested
-at the `lib/` level (`test/utils.test.mjs`), including a DST-boundary
-regression for the Monday calculation.
-
-**In the same session as Pass 43/45 below**, Settings' "Archive piece"
-control (Practice status panel) stopped being unconditional: it's now
-disabled — grayed, with an inline reason and a hover title — until
-`isPlanActuallyComplete(piece, chunkSet, timeline)` says the piece's plan
-is actually finished. Pause is untouched, still available any time, no
-condition attached. A real, deliberately unresolved gap this opened: a
-piece the learner has genuinely abandoned mid-plan (not finished, never
-going to be) has no clean way to archive under this rule — see
-[`docs/Decisions.md`](docs/Decisions.md#lifecycle) for the reasoning and
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the gap.
-`SettingsTab` now receives `chunkSet`/`timeline` as props from `App.jsx`,
-the same way every other tab already does, instead of recomputing them
-locally — an early version of this fix recomputed them locally, before
-being corrected to reuse the existing values.
-
-**Since Pass 43**, Overview has a "Continue learning" shortcut under the
-title card that jumps straight to Today's Practice (`onSelectDay(null)`,
-the same reset-to-real-time path `onJumpToday` already uses) — hidden
-during an active revival (`"Start/Continue revival"` already covers that
-slot in the same area), and relabeled "Continue maintenance" once
-`isPlanActuallyComplete` says the plan is done.
-
-**Since Pass 45**, a new shared `classifyDayCompletion(day, piece,
-currentDay)` (`lib/scheduling.js`) reports `"future" | "done" | "behind" |
-"empty"` for a single timeline day, written once so a future Timeline-tab
-pass can reuse it instead of duplicating the logic. Overview's "first
-week" list uses it: a past day is grayed regardless of which of the three
-non-`"future"` states it's in, but struck through only when genuinely
-`"done"` — an empty/rest day is `"empty"`, not `"done"`, specifically so
-it grays without reading as crossed-off work that never happened (it
-shipped the other way first and was corrected once the struck-through
-"Nothing scheduled" row was pointed out — see
-[`docs/Decisions.md`](docs/Decisions.md#ux)). Today's row also gets a
-"(behind N chunks)" note, reusing `computeScheduleStatus`'s existing
-`missedCount` rather than a new count. Two gaps flagged at the time, not
-fixed in this pass: a consolidation day's logged run-through didn't
-satisfy the per-chunk `doneDays` check `classifyDayCompletion` does (so a
-logged consolidation day still read `"behind"`) — **resolved in a later
-session, on direct request: `classifyDayCompletion` now checks
-`"__consolidation__"`'s own `doneDays` for a consolidation day instead of
-the per-chunk list, see [`docs/Decisions.md`](docs/Decisions.md#scheduling)**
-— and neither this note nor the graying was revival-aware — a piece
-mid-revival could show "(behind N chunks)" against its *original*,
-pre-revival plan, not the revival plan actually being followed. **The
-note half is resolved, also in a later session, on direct request:**
-`OverviewTab` now suppresses it while `isInRevival(piece)`. The "graying"
-half turned out not to be a distinct, separately-suppressable thing —
-Overview/Timeline gray any non-`"future"` day identically, `"behind"` and
-`"empty"` alike, so there's nothing behind-specific to hide beyond the
-text note. See [`docs/Decisions.md`](docs/Decisions.md#open-questions).
-
-**Since Pass 46**, the Timeline tab applies Pass 45's
-`classifyDayCompletion` to every day card: a past day grays out, and a
-fully-done one gets a small, transparent-styled check mark next to its day
-number — a card-grid analog of Pass 45's strikethrough, not literally the
-same treatment, since a card grid reads differently than a text list even
-though the underlying classification is shared. Timeline also gained its
-first reschedule entry point, having had none before, by rendering the
-existing `ScheduleBanner` component rather than building a second
-button/modal pairing.
-
-**Since Pass 47**, Today's Practice has a second way to act on being
-behind: a "Go to Day N" button that jumps to the earliest day with real
-incomplete work, reusing the same `onDayChange` day-navigation Today's
-Practice's own Previous/Next-day controls already use. It's explicitly an
-alternative to rescheduling, not a replacement — on request, it was folded
-into the *same* `ScheduleBanner` the Reschedule button already renders (two
-buttons, one banner, new copy) rather than stacking a second banner
-underneath. `ScheduleBanner` (`components/ScheduleBanner.jsx`) now takes
-two optional props, `earliestBehindDay`/`onDayChange`, passed only by
-Today's Practice — Overview and Timeline are unaffected and still render
-the original single-button banner.
-
-**Since Pass 48**, a day whose entire original task list was swept into a
-reschedule — on both Timeline and Today's Practice (single-day view and
-"View all") — collapses to a plain italic "Tasks rescheduled" line instead
-of re-showing content that's since moved elsewhere. A day with a mix of
-done, still-legitimately-scheduled, and moved items is untouched by this;
-only a day where *every* original item moved collapses. The check has to
-recognize a transition or combo as "moved" too, even though
-`rescheduleMarker.remainingChunkOrder` only ever lists practice-chunk ids —
-a transition/combo id is never itself in that list, even when it genuinely
-rode along with an untouched neighbor into the rescheduled remainder
-(mirrors `getEffectiveTimeline`'s own relocation filter via `linkedIds`,
-rather than a bare list-membership check that would have left almost every
-day past the first showing as "still has real content" purely from this
-id-namespace gap, not from anything actually left behind).
-
-**Two more bugs were found and fixed in the same session, as a direct
-consequence of building the above:**
-- The Pass 47 catch-up button's day search had no way to know a day it
-  found had since been collapsed by Pass 48 — it kept finding the earliest
-  *original* behind day (reliably day 1, once any reschedule has happened),
-  sending the user to a screen with nothing on it. Fixed by having that
-  search skip a day the same collapse check applies to and keep scanning
-  forward.
-- Rescheduling a piece a *second* time used to discard whatever the first
-  reschedule had actually placed for the days in between — see the new
-  regression note above (`rescheduleMarker.previous` chaining,
-  `getEffectiveTimeline`) for the mechanism and fix.
-
-**Since Pass 49**, a single-section run-through no longer unlocks once and
-stays available forever — it's a repeating gate (`sectionRunThroughGate`,
-`lib/chunking.js`): due whenever the section's slowest-progressing chunk's
-*confirmed* session count is odd (1, 3, 5, 7, ... — a flat "+2" step
-forever, matching the pre-existing threshold of 1 for the first unlock),
-gone between thresholds, and shown as a distinct locked/grayed preview row
-on the one day before a chunk's next session would cross it into being
-newly due. "Confirmed" means `loggedSessions()`-filtered — a skipped
-Interleaved attempt or an unconfirmed provisional one must not advance the
-gate, a fix made after the first cut used raw `sessions.length` the same
-way `isSectionLearned` still does (deliberately unchanged; the two
-functions now answer different questions and are allowed to disagree).
-Section-**pair** run-throughs (`kind: "section-transition"`, "Sections
-combined") were untouched by Pass 49 itself — still the original one-time
-"unlock and stay" gate at the time. **Resolved in a later session, on
-direct request:** once a pair clears its own separate first-unlock gate
-(unchanged), it now gets the same repeating due/locked-preview rhythm —
-`sectionPairRunThroughGate` (`lib/chunking.js`), sharing a private helper
-with `sectionRunThroughGate` — see
-[`docs/Decisions.md`](docs/Decisions.md#open-questions). See
-[`docs/Algorithms.md`](docs/Algorithms.md#section-run-throughs) for the
-full mechanics.
-
-**Since Pass 50**, Piece Map's grid shows only base practice chunks
-(`kind: "section"`) — no gaps, m.1 through the piece's last measure, no
-transition/combo tiles. Transitions and combos are reached instead through
-a new "Related chunks" field in the chunk-detail modal: every
-transition/combo (or, symmetrically, base chunk) whose range overlaps the
-selected one, as clickable links that open that chunk's own detail in the
-same modal — including *its* related chunks in turn, so navigating never
-dead-ends. `findRelatedChunks` (`lib/utils.js`) is
-`findComboUnderlyingChunks` (`lib/revival.js`) run in reverse. **The grid
-filter was skipped when `sequentialMode` was set** (Revival's reassessment
-pass, embedded in `RevivalTab` at the time, which walked a deliberately
-different, unfiltered chunk list including transitions via its own
-Previous/Next) — filtering unconditionally would have silently dropped
-transitions from that flow. **As of Pass 87, this no longer applies**:
-`sequentialMode` is gone from `PieceMapTab` entirely (revival's
-reassessment moved to its own dedicated component,
-`ReassessSequencePanel` — see the Revival section below), so there is no
-branch left to preserve here. `PieceMapTab`'s grid filter is now
-unconditional.
-
-**Since Pass 51**, Progress has an "Estimated vs. actual practice time"
-panel: for every item with a logged session in the last N days (same
-trailing window Consistency already uses), a paired-bar comparison of
-estimated time (`effort * EFFORT_TO_MIN`) against actual logged time
-(summed `durationSeconds`, skipped/provisional sessions included — same
-"the time was genuinely spent either way" rule `sumPracticeSeconds`
-already uses). Covers practice chunks, transitions, combos, and
-single-section run-throughs; deliberately excludes the whole-piece
-`"__consolidation__"` run-through (not a real chunk object — no `effort`
-to estimate against) and section-pair run-throughs (a distinct mechanism
-per Pass 49 above). **Section run-throughs don't carry a stored `effort`
-field the way the other three kinds do** — this panel derives one locally
-from the same `measureCount * avgDifficulty` math transitions/combos
-already use, guarded against a section whose range is (or was) backwards,
-see the fix below.
-
-**Also since Pass 51** (a same-session follow-up, found via a critical
-review of the panel above, not a Pass 51 requirement itself): fixed
-`SectionsEditor.jsx` silently accepting a section's `end` before its
-`start` — each start/end `NumberInput` commits independently, so nothing
-previously stopped a section from being saved backwards (e.g. mm. 2–1), no
-validation error, no visual indication anything was wrong. Reproduced
-live: it made `weightedDifficultyFromArray` divide by a zero/negative
-count, producing `NaN` that poisoned *both* bars in the new Progress panel
-for that item, including the otherwise-valid actual-minutes one, via a
-shared denominator. Fixed at the root — `SectionsEditor.jsx` now
-normalizes start/end with the same min/max swap `resizeSections`
-(`lib/utils.js`) already uses for the analogous "total measures changed"
-case — plus a defensive guard in the Progress panel itself for data
-already malformed before that fix existed (an old save, a hand-edited
-import). **If you ever add a second way to create or edit
-`piece.sections`, it must reuse that same normalization** — every consumer
-of section start/end (`weightedDifficultyFromArray`, `chunksBySectionId`,
-section run-through gating, Piece Map) assumes `start <= end` and doesn't
-re-check it.
-
-**Since Pass 52**, `DIFFICULTY_META`'s display labels are Workable /
-Challenging / Difficult, not Easy / Medium / Hard — display only. The
-internal `difficultyLabel` enum values (`'easy' | 'medium' | 'hard'`) are
-unchanged and still drive scheduling/confidence/ladder logic
-(`REQUIRED_REPS`, tempo-floor lookups, etc.) — don't confuse the two, and
-don't rename the enum values to match the new labels.
-
-**Since Pass 53**, `NumberInput` has two new optional props, both
-additive — the commit-on-blur/Enter behavior this component exists for is
-untouched for every consumer that doesn't opt in. `onDraftChange(text)`
-fires on every keystroke with the raw, uncommitted text, for a
-gating-only signal (e.g. "has the user typed *something*") that shouldn't
-wait for blur. `acceptPlaceholderOnTab` (boolean prop) makes tabbing out
-of an empty field commit the shown placeholder as if it had been typed —
-only fires when the placeholder is actually a parseable number, so a
-format hint like "e.g. 10" is never affected. `ChecklistItem`'s reps/BPM
-fields use both: the Log button now gates on `hasRepsDraft && hasBpmDraft`
-(set via `onDraftChange`) instead of the committed `reps`/`bpm` values, so
-it enables the instant you start typing rather than waiting for blur —
-what actually gets logged still reads from the committed state,
-unaffected. This also fixes a real tab-order bug: a disabled button is
-removed from the browser's tab sequence entirely, so the old commit-gated
-Log button being disabled at the moment tab-order was computed could
-overshoot straight into the next card. **Residual, deliberately not
-chased further:** tab order still isn't literally reps→BPM→Log adjacent —
-the "+ Add a note" button and the "Needs more work" checkbox, both always
-enabled, still sit between BPM and Log in DOM order, so two extra stops
-remain even though the "escapes to the next card" failure is gone. Every
-fix considered for full adjacency (manual `tabIndex`, reordering the DOM,
-hiding those two controls from keyboard tab order) costs something not
-authorized by that pass — a visual layout change, or making two currently
-keyboard-reachable controls mouse-only — so it was left as a known,
-reported gap rather than resolved unilaterally. `acceptPlaceholderOnTab`
-is also wired into `InterleavePanel`'s twin reps/BPM fields (same pattern,
-requested separately) — but that panel never got the draft-gating change
-above; its Log button still gates on the committed `reps`/`bpm` values
-directly, which is fine since `NumberInput`'s Tab handler calls `commit()`
-either way.
-
-**Since Pass 54**, `PieceMapTab`'s "Run-through flag" field is hidden
-specifically when `sequentialMode` is true (revival's reassessment pass) —
-`{!sequentialMode && (...)}`, the same scoping precedent Pass 37 already
-established for this shared component. Ordinary (non-revival) Piece Map's
-flag toggle is completely untouched, still cycling
-untouched→rough→lost→untouched. `CONFIDENCE_PRESETS` (`lib/constants.js`)
-is relabeled Shaky/Rough/OK/Solid/Rock solid → Lost/Rough/OK/Comfortable/
-Solid, same five 0/25/50/75/100 values. `RevivalTab`'s reassessment intro
-copy dropped the flagging instructions (nothing left to describe) and
-gained a new opening sentence, "Play through the piece from beginning to
-end." **`computeRevivalPlan`'s flagged-first-then-confidence sort is
-completely unchanged** — it still reads `progress[id].flag` exactly as
-before; this pass only removed one of the two ways that field could get
-set (revival's own reassessment), not the field, the sort, or `RevivalTab`'s
-"Flagged chunks" summary panel below it. **Real, visible consequence, not
-a bug:** since revival's reassessment can no longer set `flag` directly,
-that panel will typically stay empty going forward unless a chunk gets
-flagged separately through ordinary Piece Map outside of revival. A chunk
-rated "Lost" via Quick Rate (`manualConfidence: 0`) still sorts to the
-front of the plan on its own — confidence is the second tiebreaker, and
-0 wins it unassisted. Same-session follow-up: the now-dead `onSetFlag`
-prop threading (`App.jsx` → `RevivalTab` → `PieceMapTab`'s embedded,
-`sequentialMode` instance) was removed, since nothing in that render path
-can call it anymore; `handleSetFlag` itself and ordinary Piece Map's own
-`onSetFlag` wiring are untouched.
-
-**Since Pass 55**, `RevivalEntryModal` no longer asks "What's this
-revival for?" — the `purpose` state, `REVIVAL_PURPOSE_OPTIONS`
-(`lib/constants.js`), and the `disabled={!purpose}` gate on "Begin
-revival" are all gone, so that button is now always clickable, gated on
-nothing. `piece.revival.purpose` itself stays defined-but-always-`null`
-on the schema (`storage.js`'s fallback, `Wizard.jsx`'s `defaultPiece()`)
-rather than being stripped — dormant, not removed, matching this
-codebase's usual migration philosophy for a field nothing reads. **If you
-touch `handleStartRevival` (`App.jsx`):** it hardcodes `purpose: null`
-directly rather than reading it from the modal's payload — it used to
-destructure `purpose` straight through, and once the modal stopped
-sending that key, this would have started writing brand-new revival
-objects with *no* `purpose` key at all (`undefined` doesn't survive
-`JSON.stringify`) rather than an explicit `null`, a real shape
-inconsistency between a freshly-migrated piece and a freshly-started
-revival that was caught and fixed the same session. Same-session
-follow-up, per direct request: both places that collect
-`tempoLadderStartFraction` — `RevivalEntryModal` at revival entry, and
-`RevivalTab`'s "Revival settings" panel mid-revival — now take a straight
-BPM value ("Tempo ladder starting point (BPM)") instead of a percentage
-of target. The fraction is derived from `BPM / targetBPM` on commit; the
-field's own `min`/`max` mirror the old 10%–95%-of-target bounds
-(expressed in BPM) so the result can't land outside that range no matter
-what's typed. Falls back to a flat 60% default with an explanatory
-tip-line when a piece has no `targetBPM` to be a fraction of — typing
-into the field in that state doesn't do anything, by design, not a bug.
-`computeTempoLadder` itself and everything downstream of the stored
-fraction are completely unchanged; only the input widget changed.
-
-**Since Pass 56**, a piece that's had every section's own single-section
-run-through logged at least once (`coldStartGateMet`, `lib/coldStart.js` —
-this one check already implies the whole piece has been covered, no
-separate check needed) gets a periodic, escalating nudge to test itself
-cold: a whole-piece play-through, no warm-up, logged as average BPM +
-free-text notes to a new synthetic `piece.progress["__cold_start__"]` key
-— deliberately **not** folded into `"__consolidation__"`'s sessions, since
-`computeRevivalTriggers` reads every `"__consolidation__"` session's
-`stopCount` indiscriminately and a Cold-Start session has none. The prompt
-escalates at 3, 7, 14, 28, ... days (doubling past 14) since anything was
-logged on the piece at all, computed as a **live derivation with no
-persisted "already shown" flag** (`coldStartDueThreshold`, comparing
-today's crossed threshold against the same computation one day earlier) —
-same "computed fresh every call, never a persisted unlocked flag" spirit
-as `sectionRunThroughGate` above. See
-[`docs/Algorithms.md`](docs/Algorithms.md#cold-start-check). **Two real
-gaps were found and fixed in the same session** — worth knowing if you
-touch synthetic progress keys again: `lib/storage.js`'s ladder-state
-backfill/diff functions now read from a shared `NON_CHUNK_PROGRESS_KEYS`
-list rather than checking `"__consolidation__"` by name in two separate
-places (the first cut missed `"__cold_start__"` from one of the two), and
-`lib/history.js`'s `computePracticeHistory` now also indexes
-`"__cold_start__"` sessions off their own `day` field — that key
-deliberately carries no `doneDays`, which is what the indexing used to
-rely on exclusively, so a logged check never showed up on Progress's
-history list at all until this was fixed.
-
-**Since Pass 57**, Today's Practice also renders a `RandomStartPanel` of
-its own (previously Revival- and Master-Agenda-only) — every practice
-chunk/transition/combo in the current piece with 2+ logged sessions,
-hidden entirely below 2 qualifying entries (matching Master Agenda's own
-threshold for the same component). No changes to `RandomStartPanel`
-itself were needed. **Known, low-severity gap, not fixed**: the pool
-filters on raw `sessions.length`, not `loggedSessions()`-filtered, so a
-chunk with one real session plus a stray Interleaved skip or unconfirmed
-provisional attempt can appear in the pool too, reading as more-practiced
-than it actually is.
-
-**Since Pass 58**, Progress has a piece-level "Overall confidence" stat —
-`computeOverallConfidence(piece, practiceChunks, currentDay)`
-(`lib/confidence.js`), an **effort-weighted** average of `computeConfidence`
-across every practice chunk (confirmed with the user before building, over
-a plain-average alternative — consistent with how this codebase already
-weights everything else time/effort-related via `chunk.effort`), with its
-own manual override field (`piece.manualOverallConfidence`, same
-undefined/null-means-auto escape-hatch precedence as per-chunk
-`manualConfidence`). **This is a continuous stat, not a replacement for
-`isPieceLearned`** (see "Known simplifications" below) — the two answer
-different questions and are deliberately not wired together either
-direction. Same-session follow-up, built once explicitly requested:
-`ColdStartPanel` now shows a short, genuinely optional "how would you rate
-the piece overall right now?" prompt right after a Cold-Start log — five
-quick-tap presets (reusing `PieceMapTab`'s existing revival "Quick rate"
-values) or Skip, which writes nothing at all. Wiring this touched
-`App.jsx` even though it wasn't in that pass's originally-listed
-touched-file set — there's no way to build a working manual-override
-control without a handler that calls `updatePiece`, and every piece
-mutation in this app funnels through one owned by `App.jsx`. See
-[`docs/Decisions.md`](docs/Decisions.md#overall-piece-confidence) for the
-full reasoning on both of those calls.
-
-**Since Pass 59**, `practiceBPM`'s pass/soft-miss step is gap-proportional
-(a "tempo ratchet," `ladderConfig.tempoRatchet`) instead of the old flat
-`bpmSteps` delta, which is now only the fallback for a chunk with no
-`targetBPM` — see
-[`docs/Algorithms.md#tempo-ratchet-pass-59`](docs/Algorithms.md#tempo-ratchet-pass-59).
-A soft-miss now steps tempo *forward*, at half the chunk's own adaptive
-rate (`progress[id].tempoRatchetK`), rather than backward. **Since Pass
-60**, once `practiceBPM` is close enough to `targetBPM`
-(`tempoAchievedThreshold`, default 85%), the step-size calculation
-substitutes a small pinned rate (`maintenanceK`) for that tracked rate at
-the point of use only — the tracked rate itself is never overwritten, so
-there's nothing to restore when a chunk drops back out ("tempo maintenance
-mode," `isInTempoMaintenance`, `lib/ladder.js`). **If you add a new field
-to `chunkLadderState`/`computeLadderAdvance`'s return shape, it is not
-enough to change `lib/ladder.js` alone** — this bit twice in the same
-broader session (`tempoRatchetK` here, `holdingReviewCount` below): the
-field also needs threading through all three of `App.jsx`'s session
-handlers (`handleLogSession`, `handleUnlogSession`,
-`handleConfirmProvisionalSession` — each hand-maintains its own field
-list, not a wholesale spread) and needs a `null`, not a materialized-value,
-backfill default in `storage.js` (`backfillProgressLadderState`,
-`LADDER_STATE_FIELDS`, `mergeProgress`) or a byte-identical re-import
-falsely reads as a conflict. See
-[`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) for the full checklist and
-[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance) for
-both incidents.
-
-**Since Pass 61**, Holding's escalating tempo floor is retired outright —
-`clearsStageFloor`'s Holding branch (`lib/ladder.js`) always returns
-`true` now; meeting the rep requirement is sufficient on its own for a
-Holding pass to count toward interval growth. Stabilizing/Settling are
-unchanged. In its place, a new `progress[id].holdingReviewCount` counts
-every logged Holding review (pass, soft-miss, *or* fail all count),
-resetting on fresh entry into Holding; `resolveRequiredReps`
-(`lib/confidence.js`) now requires one extra clean rep on every 4th review
-since that entry, reverting to baseline otherwise.
-`classifySessionOutcome`'s separate tempo check (`bpm >= practiceBPM`,
-deciding whether a session is a pass at all) is completely untouched — a
-different mechanism from the retired floor. The three old
-`ladderConfig.holding.tempoFloor*` config fields are left in the schema
-and stay directly editable in Settings, doing nothing — a deliberately
-flagged loose end, not cleaned up. `InterleavePanel.jsx`'s own
-`resolveRequiredReps` call needed the identical fix `ChecklistItem.jsx`
-got, or a chunk's 4th/8th/12th Holding review would be judged by a
-different, easier requirement depending on which screen logged it. See
-[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance)
-for the full trace, including the found-and-fixed `App.jsx`/null-default
-bugs.
-
-**Since Pass 66**, `computeDueReviews` (`lib/maintenance.js`) runs
-unconditionally at both call sites (`TodayTab`, `MasterAgendaTab`) instead
-of only once a piece has run out its whole bounded plan — a review overdue
-*inside* an active plan now has a live surface immediately, not just once
-the plan is exhausted. `mergeLiveDueReviews(day, dueItems)`
-(`lib/maintenance.js`) folds the result into a plan day's own
-`reviewChunkIds`, de-duplicated against a review already placed there
-because it's due exactly today. Scoped to real "today" only in both tabs —
-day-nav/date-picker browsing a different day is unaffected. The review's
-original, now-past placement day still reads "behind" via
-`classifyDayCompletion` exactly as before; only the "can I see and act on
-this today" gap closed.
-
-**Same-session follow-up, per direct request:** reviews are now priced by
-difficulty everywhere, not just in `computeDueReviews`. Implementing the
-merge above surfaced a genuine pre-existing inconsistency: `computeTimeline`
-priced a review at a flat 3 minutes regardless of the chunk's own
-difficulty, while `computeDueReviews` already priced one at
-`chunk.effort * EFFORT_TO_MIN` (the same rate new-chunk introduction uses).
-**If you touch review-cost estimation, both of these now agree and must
-keep agreeing:**
-- `computeTimeline`'s `minutesFor` (`lib/scheduling.js`) prices
-  `reviewChunkIds` the same way as `newChunkIds`/`specialChunkIds` —
-  `chunk.effort * EFFORT_TO_MIN` — not a flat per-touch minute figure.
-- `computeDaysNeededForMinutesPerDay` (`lib/scheduling.js`, the
-  `scheduleMode: "minutes"` day-count estimator) prices each chunk's
-  review padding the same way: `c.effort * REVIEW_TOUCHES_PER_ITEM`
-  (`REVIEW_TOUCHES_PER_ITEM = 2`, unchanged from before — only what each
-  touch costs changed), not a flat-minutes constant converted into
-  effort-points. Underestimating a hard chunk's review cost here directly
-  risks a `scheduleMode: "minutes"` plan not actually fitting its own
-  stated daily budget once review load lands on top of introduction — the
-  reason this was worth fixing alongside the display-only case, not
-  deferred.
-- `mergeLiveDueReviews` now folds a merged item's `minutes` into
-  `day.minutes` too (previously left deliberately unmerged, back when the
-  two sides disagreed) — safe now that both sides price a review
-  identically.
-- Two pre-existing regression tests in `test/scheduling.test.mjs` had
-  their expected numbers change as a direct, verified consequence (not a
-  sign either fix was undone) — see their updated comments for the exact
-  before/after math: the Tier 2 same-day-pileup smoothing test (heavier
-  real review cost means the smoothing pass now relocates the full pileup,
-  not just some of it) and the `computeDaysNeededForMinutesPerDay` padding
-  test (the correct day-count padding for that fixture is legitimately
-  larger once review cost stops being under-counted).
-
-**Same-session follow-up, found in a self-review before committing:**
-`mergeLiveDueReviews` (`lib/maintenance.js`) skips consolidation ("full
-run-through") days entirely — `if (day.type === "consolidation") return
-day;`. Neither `TodayTab`'s `ConsolidationPanel` nor `MasterAgendaTab`'s
-card renders `reviewChunkIds` or `minutes` for a consolidation day at all,
-so merging a transition/combo's overdue live-due review in on that day
-type was silently inflating `day.minutes` (and therefore Master Agenda's
-total-planned figure) with no line item anywhere on screen to explain the
-extra time — a real number-doesn't-match-what's-shown bug, not a
-theoretical one, confirmed live in the browser both before and after the
-fix. **If you touch `mergeLiveDueReviews` or either consolidation-day
-render branch:** the guard belongs in `mergeLiveDueReviews` itself, not
-duplicated at each call site, since both callers rely on it unconditionally
-to decide what's safe to merge.
-
-**Since Pass 67**, Today's Practice's "Go to Day N" catch-up button
-(`findEarliestBehindDay`, `TodayTab.jsx`, Pass 47) no longer sits behind a
-second, narrower pre-check (`hasBehindWork`, removed) that only looked at
-practice chunks. The scan itself is now the sole source of truth for both
-whether the button shows and which day it targets — it already handled
-every scheduled item type correctly (transitions, combos, reviews) via
-`classifyDayCompletion`, but a piece with every practice chunk logged and
-only a past transition/review still incomplete used to hide the button
-anyway, since the old pre-check couldn't see anything but practice chunks.
-`ScheduleBanner.jsx` needed no change — it already gated its own button on
-`earliestBehindDay` alone. One side effect worth knowing: this also makes
-the pre-existing, still-open Pass 45 consolidation-day gap (a logged
-run-through still reads `"behind"` — see
-[`docs/Decisions.md`](docs/Decisions.md#ux)) more likely to actually
-surface to a learner, since the old pre-check was accidentally masking it
-whenever every practice chunk was otherwise caught up.
-
-**Since Pass 68**, `SectionRunThroughPanel` only renders on real "today" —
-threaded down via a new `isRealToday` prop from `TodayTab`. Browsing to a
-completed past day (or a future one) used to still show whatever section
-run-through was due *right now*, mislabeled as that day's own status,
-since `sectionRunThroughGate`/`computeSectionRunThroughs` (Pass 49) answer
-"is this due right now" with no day parameter — correct for what they're
-asked, but wrong to display unscoped. Logging one from a past day would
-also have silently attributed the session to `currentDay`, backdating it;
-fixed for free by the same gate, since `currentDay` at render time is now
-always the real current day by construction. Neither of the two `lib/
-chunking.js` functions changed. See
-[`docs/Decisions.md`](docs/Decisions.md#ux) for why the fix is a `useMemo`
-that short-circuits internally plus an early return after it, not a
-literal early return before the `useMemo` call (the latter would violate
-React's rules of hooks, since this component never unmounts across a day
-change).
-
-**Since Pass 69**, Interleaved practice needs two chunks graduated past
-Stabilizing to unlock, not one (`interleaveItems.length < 2`, not
-`=== 0`) — a single chunk can't actually rotate against anything. Its
-rotation duration is graded by the *current* chunk's own difficulty
-(`ROTATION_SECONDS_BY_DIFFICULTY` in `InterleavePanel.jsx`: 2/3/4 minutes
-for easy/medium/hard, "hard" keeping the original flat value) instead of
-a flat 4 minutes for every chunk — fixing this correctly required adding
-`current?.id` to the rotation-trigger effect's dependency array, or a
-mid-session rotation would silently keep checking the previous chunk's
-threshold. **Same-session follow-up, per direct request:** the eligible
-pool (`TodayTab`'s `interleaveItems`) is no longer scoped to whatever the
-currently-viewed day happens to schedule — it's every chunk in the whole
-piece that's graduated past Stabilizing, so a chunk that graduated on an
-earlier day is immediately available, not only once it comes back due.
-This also appears to close an older, separately-flagged gap for free (a
-live-due-only review never showing up in `interleaveItems`) — reasoned
-through, not separately confirmed; see
-[`docs/Decisions.md`](docs/Decisions.md#spaced-repetition--maintenance)
-for both decisions and the confirmed-safe check against `needsRelearning`
-chunks.
-
-**Since Pass 74**, reschedule and the schedule banner anchor to real
-"today" (`realCurrentDay`), never to whichever day Timeline/day-nav
-happens to be browsing (`currentDay`) — see the new "regressions to watch
-for" bullet above for the mechanism. A successful reschedule now also
-resets `dayOverride` to `null` (`App.jsx`), landing the user back on real
-today automatically, the same reset `onJumpToday` already used.
-
-**Since Pass 75**, Week view and Master Agenda apply the same
-"was this day fully swept into a reschedule" collapse Day view and
-Timeline already had (`isDayFullySwept`, `lib/scheduling.js`) — a
-rescheduled day used to still show real, clickable-looking tasks on these
-two surfaces specifically. **Two same-session follow-ups, both found
-during critical review before commit, not shipped as originally scoped:**
-first, `isDayFullySwept` itself had a real gap — it only ever checked the
-*most recent* `rescheduleMarker`, so a task moved by an earlier reschedule
-and then completed before a later one was never recognized as "moved" on
-its original day. The fix is **not** to walk the whole reschedule chain
-(the first fix proposed, and rejected once asked whether that was really
-the most efficient option) — it's simpler and doesn't reference markers
-at all: has this id been done on some day *other* than the one being
-checked? One `doneDays` lookup, same cost regardless of how many times the
-piece has been rescheduled. Second: a review whose due date has passed
-used to sit on its original bounded-timeline day forever, looking like a
-still-open task — this turned out to have nothing to do with rescheduling
-at all (`computeTimeline` has no notion of "today"), fixed centrally via
-`withLiveReviewStatus` (`lib/scheduling.js`), applied once wherever the
-timeline gets built so every screen gets the fix for free. Both follow-ups
-had a real bug caught before shipping, not just an initial pass: the
-"done elsewhere" check must never apply to `reviewChunkIds` the way it can
-to `newChunkIds`/`specialChunkIds` — it only counts an id as stale when
-`piece.progress[id].nextDueDate` is actually set, since a genuine Tier 2
-review always has one but a Tier 1 "first touch" review (a chunk never
-logged at all) never does; checking only `doneDays` wrongly stripped every
-never-touched chunk's first-touch review in testing, before this guard
-existed. See
-[`docs/Decisions.md`](docs/Decisions.md#scheduling) and
-[`docs/Decisions.md`](docs/Decisions.md#open-questions) for the full
-investigation trail on both.
-
-> Passes 76-82 (revival reassessment's difficulty-reassess button and
-> per-chunk assessment timer; Interleaved/revival-plan reassess buttons and
-> a cross-tab timer guard; a fix for Today's Practice showing the wrong
-> plan mid-revival; assorted revival/reassess copy fixes; small UI fixes
-> across FocusPanel, Week view, and Master Agenda; and a "Set new target
-> date" reschedule-dialog button) shipped and were committed before this
-> changelog was brought back up to date — see `git log` for their own
-> commit messages, which have the per-pass detail this file's format would
-> otherwise carry. Not backfilled here to avoid reconstructing history
-> from summary rather than from having actually done the work this
-> session.
-
-**Since Pass 83**, both "Start revival" buttons (`OverviewTab`'s title
-card and its own auto-trigger banner) are disabled, with an explanatory
-title, until the piece's plan is actually complete
-(`isPlanActuallyComplete`) — revival is for a piece already learned, not
-one still mid-learning. Reviewing that live surfaced a real contradiction:
-`computeRevivalTriggers`' three auto-trigger conditions (a rough
-run-through's stop count, a lost flag, 60+ days of silence) didn't check
-plan completion at all, so an unfinished piece could still show "this
-piece might be due for a revival" right next to its own now-disabled
-button. Fixed by gating all three conditions behind the same
-`planComplete` check (a single early return, not three separate guards,
-once it was pointed out mid-session that gating only the staleness
-condition — the literal first ask — left the other two just as capable of
-reproducing the same contradiction) — see
-[`docs/Decisions.md`](docs/Decisions.md#revival) and
-[`docs/Algorithms.md`](docs/Algorithms.md#revival-auto-triggers-pass-7-gated-on-plan-completion-since-pass-83).
-
-A still-unfinished, quiet piece needs its own message instead of
-revival's: new `computeAbandonedPlanReminder` (`lib/scheduling.js`) fires
-for an active, non-revival piece with real practice history that's gone
-14+ days without a session, still with real work left in its plan —
-surfaced as an Overview banner ("No practice logged for '\<piece\>' in N
-days. Would you like to reschedule remaining practice items, or pause this
-plan?") with Reschedule and Pause actions, the latter a new `onPausePiece`
-prop wired to the existing pause handler. The displayed day count steps in
-flat weekly increments (14, 21, 28, ...) rather than creeping up daily.
-Master Agenda gets the equivalent surface for a piece whose entire plan
-calendar has run out with real work left, via a new banner built on that
-file's own pre-existing `needsReschedule` per-piece flag — kept
-independent of the pre-existing "N days behind schedule" banner rather
-than merged into it, since a stuck piece (see the reschedule open question
-above) can read `behindDaysCount === 0` and silently drop out of that
-banner's count. See
-[`docs/Algorithms.md`](docs/Algorithms.md#the-abandoned-plan-reminder-pass-83).
-
-**Since Pass 84**, the "today" tab is relabeled **Daily Practice**
-everywhere it's named — the sidebar nav item (`NAV_BASE`, `App.jsx`) and
-the three reschedule alert/confirm strings that reference it by name. Its
-own `<h1>` now renders only on the real current day (`isRealToday`,
-gating the element the same way Pass 68 gated `SectionRunThroughPanel`),
-disappearing entirely — no empty gap, nothing left in its place — when
-browsing to any other day via day-nav or Timeline; the "Day X of Y" line
-right below it lost its `" (viewing)"` suffix at the same time; that line
-alone still shows on a browsed day, just without the qualifier, since the
-heading's own absence already signals "not today." Every earlier "Since
-Pass N" entry above still says "Today's Practice" — that's accurate
-history (it was called that at the time), not a leftover to fix. Only
-`App.jsx`/`TodayTab.jsx` were touched by the pass itself; two same-session
-follow-ups renamed the remaining user-visible mentions the pass had left
-out of its stated scope — `DayChecklist.jsx`'s two "see Today's Practice"
-stale-review notes, then `ProgressTab.jsx`'s two "check items off in
-Today's Practice" empty-state hints (the second one found only while
-verifying the first) — so those all now say "Daily Practice" too. A
-handful of code-comment-only mentions (`PieceCheckRow.jsx`,
-`ScheduleBanner.jsx`, `lib/chunking.js`, `lib/history.js`,
-`lib/scheduling.js`) are still unrenamed — not user-visible, low priority,
-see [`docs/Decisions.md`](docs/Decisions.md#open-questions).
-
-**Since Pass 85**, `.ghost-btn:disabled` finally has a real visual
-treatment (`{ opacity: 0.45; cursor: not-allowed; }`, `App.jsx` CSS) —
-matching the existing `.primary-btn`/`.danger-btn:disabled` pattern. Before
-this, a disabled ghost-btn looked pixel-identical to an enabled one. A
-quick audit (not just the Interleaved button named in the request) found
-three real sites this affects: the Interleaved practice button
-(`TodayTab.jsx`), Revival reassessment's chunk-nav "Previous" button
-(`PieceMapTab.jsx`, `sequentialMode`), and Settings' "Archive piece"
-button. The Archive button already had a bespoke inline-style workaround
-for this exact gap (`ARCHIVE_LOCKED_STYLE`, `SettingsTab.jsx`) — a
-same-session follow-up removed it once it became redundant, keeping only
-the `title` tooltip text. See
-[`docs/Decisions.md`](docs/Decisions.md#ux) for the full writeup,
-including a live-hover-tested finding worth knowing before touching
-`.ghost-btn` again: an old code comment claimed a disabled ghost-btn still
-shows the brass hover tint as a "harmless quirk" (since `.ghost-btn:hover`
-isn't guarded with `:not(:disabled)`, unlike the other two button
-classes) — a real mouse hover in this session's test browser showed no
-such tint despite `:hover` technically matching, so that quirk doesn't
-reproduce there. Not verified across other browsers, and the un-guarded
-hover rule itself was deliberately left untouched either way.
-
-**Since Pass 87**, Revival's reassessment phase no longer reuses
-`PieceMapTab` at all — the old `sequentialMode` prop (grid hidden behind a
-mode flag, one-chunk detail wrapped in a modal layered over that hidden
-grid, its own Previous/Next/Finish footer and assessment timer) is gone.
-`PieceMapTab` is ordinary (non-revival) Piece Map only now, and is
-meaningfully smaller for it — every sequentialMode-only branch, prop, and
-piece of state (the assessment timer, `bpmOverrideOpen`, the leaving-timer
-guard, `onReassessRange`/`onLogSession`/`onAssessmentTimerRiskChange`/
-`onConfirmLeaveAssessmentTimer`) is gone from this file, not just disabled.
-In its place, a new dedicated component,
-`ReassessSequencePanel` (`components/tabs/revival/`), owns the whole
-reassessment UI: one chunk shown inline in a `.panel` at a time (no grid
-underneath, no modal-over-grid layering), with its own "Reassess" header,
-an "N of M rated" count next to a real per-chunk segmented bar (one small
-gray block per chunk, filled once that chunk is rated — not a smooth
-percentage-width bar), and a small grid-icon button that opens a separate
-"Progress" modal (a real floating overlay, `.modal-overlay`/`.modal`, not
-another grid-under-a-modal) — one square per chunk, difficulty-tinted,
-black-checkmarked once rated, faded when not, hover-only for the measure
-range (no in-cell numbers, one consistent rule regardless of piece size —
-see [`docs/Decisions.md`](docs/Decisions.md#revival)). Clicking a square
-jumps straight to that chunk and closes the modal, through the same
-timer-leaving guard Previous/Next/Finish already use. Every other carried-
-over control (Quick rate, the per-chunk difficulty-reassess panel, Current/
-Target BPM including the override flow, Related chunks, Notes, the
-collapsible Chunk Info stats, the climbing-tempo hint, Previous/Next/
-Finish reassessment) behaves exactly as it did inside `PieceMapTab`'s old
-`sequentialMode` branch — this was a relocation, not a redesign of any of
-those controls. **One pre-existing gap carried over unfixed, not
-introduced by this pass:** the "Clear, resume review" button on a
-`needsRelearning` chunk has been a silent no-op during reassessment since
-before this pass — `RevivalTab` has never threaded an `onClearRelearning`
-handler through to this part of the UI, old `sequentialMode` branch
-included. `ReassessSequencePanel` reproduces this exactly (same
-do-nothing default) rather than silently fixing or silently dropping the
-button — flagged here as a real, pre-existing bug worth a decision, not
-fixed as a drive-by. See
-[`docs/Decisions.md`](docs/Decisions.md#revival) for the full design
-writeup, including why the new panel's visual grid/bar styling is inline
-CSS rather than new `App.jsx` CSS-string rules.
-
-**Same-session follow-up, per direct request — superseded by Pass 88
-below, kept here as accurate history of that session rather than rewritten:**
-the "Revival settings" card (the tempo ladder's starting-BPM field) is gone
-from `RevivalTab` entirely — that value is now collected once, at revival
-entry (`RevivalEntryModal`, unchanged), and from then on is only editable
-from Settings' new "Revival settings" panel (`SettingsTab.jsx`, shown only
-while `isInRevival(piece)`), not from the Revival tab itself. Same
-`onSetTempoLadderFraction` handler (`App.jsx`'s `handleUpdateRevival`),
-just re-threaded to `SettingsTab` instead of `RevivalTab`. **Pass 88 removed
-this Settings panel too, then a later same-session follow-up put it back**
-— see both entries below; net result as of the most recent one, it's in
-Settings, same as described in this paragraph. Also fixed in
-the same pass: `ReassessSequencePanel`'s intro line ("Play through the
-piece from beginning to end...") moved inside the "Reassess" card itself
-instead of sitting as bare, card-less text above it — a visual
-inconsistency with every other section on the tab, introduced by Pass 87
-and caught on review, not shipped as originally designed. And
-`ReassessSequencePanel` now falls back to the list's first chunk
-(`chunks[0]`) if the currently selected chunk's id ever stops resolving,
-instead of silently rendering nothing with no way back in — closes a
-fragility gap Pass 87 flagged but didn't fix.
-
-**Since Pass 88**, Revival is folded entirely into Daily Practice —
-`RevivalTab.jsx` is deleted, there is no `"revival"` `activeTab` value, and
-the sidebar has no Revival nav item at all (the `REVIVAL_NAV_ITEM`/
-`navItems` splice that used to insert one while a revival was active is
-gone; the sidebar is just `NAV_BASE`, always). This matches the precedent
-Interleaved mode already set — a mode reached from *within* a tab, never
-its own nav entry. `handleOpenRevival` (`App.jsx`) still opens the
-start-revival modal for a piece not yet in revival; for a piece already in
-revival it now calls `setActiveTab("today")` instead of `"revival"`, and
-`handleStartRevival` does the same once a fresh revival begins. Every
-existing caller (Overview's "Start/Continue revival" button and its
-`revivalTriggers` banner, both already just calling `onStartRevival`)
-needed no changes — confirmed live, not assumed, since the copy ("Start
-revival"/"Continue revival") reads exactly as true pointing at Today's
-Practice as it did pointing at a dedicated tab.
-
-`TodayTab.jsx` now renders the actual revival content instead of the old
-Pass 78 "set aside, go to Revival" redirect card: while
-`isInRevival(piece)`, it returns a `Revival` header (piece name, "Returning
-to its former glory," "End revival") followed by either
-`ReassessSequencePanel` (while `!revival.reassessmentComplete`) or the
-generated plan (Random start, Flagged chunks, the "Needs another look"
-combo-escalation panel, the day-by-day `revival.plan.days` checklist) —
-all lifted verbatim from the retired `RevivalTab.jsx`, not redesigned. The
-ordinary view (Day/Week/Interleaved/All Tasks selector, `ScheduleBanner`,
-the past-target-date nudge, `FocusPanel`, everything) never renders during
-a revival, same early-return mechanism the old redirect used, just with
-real content instead of a link elsewhere. `TodayTab` gained a `chunkSet`
-prop (the real one from `App.jsx`, replacing a locally-reconstructed
-partial `{ all, practiceChunks }` shape that lacked `.transitions`/
-`.combos` — revival needs both) and several new props
-(`onUpdateBPM`/`onSetManualConfidence`/`onFinishReassessment`/
-`onReopenReassessment`/`onEndRevival`/`onAssessmentTimerRiskChange`/
-`onConfirmLeaveAssessmentTimer`) that used to go straight to `RevivalTab`
-from `App.jsx`; `onOpenRevival` (the redirect button's only consumer) is
-gone, since there's nothing left in `TodayTab` for it to do.
-
-**Resolved, per direct follow-up in the same pass: finishing reassessment
-now generates the plan in the same action, not as a separate manual
-step.** `onFinishReassessment` (`App.jsx`) is now
-`handleUpdateRevival({ reassessmentComplete: true, plan:
-computeRevivalPlan(piece, chunkSet, currentDay) })` — one `updatePiece`
-call, not two. This also covers a redo: `onReopenReassessment` only ever
-sets `reassessmentComplete: false`, so finishing again after a "Redo
-reassessment" runs through the exact same `onFinishReassessment` path and
-computes a fresh plan the same way — verified live by redoing and
-re-finishing a real revival, not just reasoned through. The old
-"Reassessment complete" interstitial panel (rated-count summary, "Redo
-reassessment," "Generate/Regenerate revival plan") is gone — there's no
-state anymore where `reassessmentComplete` is true but `revival.plan` is
-still null, so nothing needs to gate that gap. `handleGenerateRevivalPlan`
-(`App.jsx`) had no caller left and was deleted rather than kept dead.
-**"Redo reassessment" itself wasn't dropped** — relocated to `TodayTab`'s
-new Revival header, next to "End revival," shown only once
-`reassessmentComplete` is true; this placement wasn't specified by the
-request and is a judgment call, flagged as such rather than assumed
-obviously correct. The rated-count summary text that panel also used to
-show ("N of M rated, N flagged rough or lost") has no replacement anywhere
-in the plan view — a deliberate simplification, not an oversight, but
-worth knowing if it's missed.
-
-**Resolved, per direct follow-up at the time: the tempo-ladder-starting-point
-control is gone from the app entirely, not relocated — including out of
-Settings, superseding the same-session follow-up entry just above this
-one, which had put it there one session earlier.** `piece.revival.tempoLadderStartFraction`
-keeps its existing stored value and `?? 0.6` fallback everywhere
-`computeTempoLadder` reads it — only the on-page control to change it
-disappeared. Collection at revival entry (`RevivalEntryModal`) is
-completely unchanged; that's the only place this value is ever set now.
-`onSetTempoLadderFraction` had no caller left (removed from both
-`RevivalTab` and `SettingsTab`) and was deleted from `App.jsx` rather than
-left dead. **Reversed in turn, later the same session, on direct
-request** — see the "six UI adjustments" entry near the end of this
-Roadmap section: the Settings panel is back, `onSetTempoLadderFraction` is
-back. Both this paragraph and the one above it are accurate history of
-what was true when each was written, not a contradiction to resolve —
-just don't take either one, on its own, as describing where this control
-lives *now* without checking the entry that comes after it.
-
-**Confirmed, not assumed:** Master Agenda's Learning/Maintenance/Revival
-piece grouping (`MasterAgendaTab.jsx`'s `subTab === "revival"`) is a filter
-over `revival.active`, not a link to a screen — its "Open piece →" button
-calls `switchToPiece(pieceId)` with no second argument, which defaults to
-`"overview"`. It never referenced the retired `"revival"` `activeTab`
-value and needed no changes; verified live by opening a mid-revival piece
-from that subtab and confirming it lands on Piece Overview, not a blank
-screen. A stale status string in that same subtab ("Reassessment complete
-— plan not generated yet") describes a state that can no longer occur now
-that finishing reassessment always generates a plan in the same step —
-left as-is since `MasterAgendaTab.jsx` isn't touched by this pass; flagged
-for whoever next touches that file.
-
-**Same-session follow-up, per direct request — six UI adjustments to the
-Pass 88 revival flow, none touching data shape or scheduling logic:**
-
-- **The tempo-ladder-starting-point control is back in Settings**,
-  reversing the "gone entirely, not relocated" half of Pass 88's own
-  decision from earlier the same session — put back exactly as it was
-  (same field, same `isInRevival(piece)` gate, same `onSetTempoLadderFraction`
-  wiring) once asked directly. The lesson from Pass 88's own writeup
-  still holds for the *next* time this kind of call gets made: a
-  same-session UI decision can be revisited by a later, more specific
-  request in the same session without it being a sign anything was wrong
-  the first time.
-- **Per-card "Reassess difficulty" buttons are gone from the revival
-  plan's `ChecklistItem` cards** (both the day-by-day list and the "Needs
-  another look" combo-escalation list) — `onReassessRange` is no longer
-  passed to either. In its place, one shared `ReassessPanel` sits at the
-  very bottom of the plan view, exactly mirroring how `DayChecklist`/
-  `DueReviewPanel` already work in ordinary (non-revival) Daily Practice.
-  `RandomStartPanel` moved to sit just above it, also now at the bottom —
-  it used to sit between "Flagged chunks" and "Needs another look."
-  `ChecklistItem`'s own `onReassessRange` opt-in (`components/tabs/
-  today/ChecklistItem.jsx`) is untouched and still works for any future
-  caller that wants a per-item control again; nothing currently passes it.
-- **`ReassessPanel` (`components/tabs/today/ReassessPanel.jsx`) gained an
-  opt-in `compact` prop**, default `false` — every existing caller
-  (ordinary Daily Practice's own bottom panel, the new revival-plan bottom
-  panel above) is unaffected. `compact` drops the wrapping `.panel
-  reassess-panel` card and the collapsed-state explanatory blurb, leaving
-  just a bare "Reassess difficulty" button; the expanded form itself is
-  identical either way. `ReassessSequencePanel` (Pass 87) is the only
-  caller that passes it, and also moved its own reassess control from the
-  middle of the card (right after Quick rate) down to the bottom, right
-  before the Previous/Next/Finish footer.
-- **`ReassessSequencePanel`'s "Log assessed time" button is gone** —
-  stopping the timer now logs it directly (`toggleTimer`, replacing the
-  old separate `logAssessedTime`): starting the timer starts it, stopping
-  it stops *and* logs in one action, since (per direct request) the two
-  were "essentially the same thing" already. Always actually stops
-  (`setTimerRunning(false)` runs unconditionally) even on a near-instant
-  start/stop with nothing worth logging, so the button can never get
-  stuck reading "Stop timer." `hasAssessmentTimerRisk`'s reporting up to
-  `App.jsx` (the cross-tab leaving-guard) is unchanged and, if anything,
-  simpler now — a "stopped but not yet logged" limbo state can no longer
-  happen via this button at all, only via still-running-when-you-navigate-
-  away, which was already covered.
-- **`ReassessSequencePanel`'s Notes field collapses to a "+ Add a note"
-  button when empty**, matching the identical pattern `ChecklistItem`'s
-  own note field already used elsewhere in this app — an always-open empty
-  textarea was eating card space for a field most chunks don't need. Same
-  `noteOpen`-resets-on-chunk-switch pattern the existing `bpmOverrideOpen`
-  state already used in this file.
-
-**Same-session follow-up, per direct request — more small adjustments to
-the same reassessment panel, plus one scope change to what reassessment
-itself covers:**
-
-- **The intro copy dropped "from beginning to end"** — now just "Play
-  through the piece. Rate your confidence on each chunk to set a fresh
-  baseline for practice."
-- **The timer field moved above Quick rate** (previously below it), and
-  its label changed from "Assessment timer" to **"Log time"** — copy
-  only; nothing about `toggleTimer`, `hasAssessmentTimerRisk`, or the
-  cross-tab leaving-guard changed.
-- **The difficulty signal-bar icon next to the chunk header is bigger** —
-  `size={13}` → `size={14}`, matching `.hero-sub`'s own 14px font-size it
-  sits inline with (it read as too small next to the text it labels).
-- **Revival's reassessment sequence now walks base practice chunks
-  only** — a transition (labelled "Review" elsewhere in this same UI) is
-  no longer something you individually Quick-rate during reassessment,
-  raised directly after one showed up mid-sequence. `TodayTab.jsx` gained
-  `revivalBaseChunks` (`chunkSet.practiceChunks`, no transitions) and
-  passes it as `ReassessSequencePanel`'s `chunks`/the `ratedCount` it
-  drives. The broader `revivalItems` (practice chunks + transitions)
-  keeps doing exactly what it did before everywhere else: the generated
-  day-by-day plan (a transition still gets scheduled there for practice),
-  Random start, and the ad hoc "Reassess difficulty" quick-pick panel at
-  the bottom of the plan view.
-- **"Related chunks" was briefly relocated into a new "Chunk Info"
-  dropdown earlier in this same round of changes, then removed outright,
-  same session, on direct follow-up request** ("for now" — read as
-  temporary, not a permanent call that this field has no value here; a
-  future request could bring it back). `ReassessSequencePanel` no longer
-  imports `findRelatedChunks`, computes a `relatedChunks` list, or accepts
-  a `relatedChunkPool` prop; `TodayTab.jsx` no longer passes one.
-  `PieceMapTab`'s own "Related chunks" field (ordinary, non-revival Piece
-  Map) is completely unaffected — a separate render path, never a shared
-  component. See [`docs/Decisions.md`](docs/Decisions.md#revival) for the
-  full writeup.
-
-**Since Pass 89**, `computeTimeline`'s introduction loop feeds on a
-difficulty-first order, not raw measure order —
-`sortPracticeChunksForIntroduction` (`lib/scheduling.js`) sorts a copy of
-`practiceChunks` into 4 tiers before the existing effort-spreading
-placement loop ever sees it (the loop itself, and transitions'/combos' own
-placement, are untouched — only the order chunks are fed in changes): tier
-0 (a chunk whose trouble spots just resolved — no data source yet at the
-time, since the Trouble-spot pass hadn't shipped; **populated as of Pass
-91** by `troubleSpotResolvedIds`, built early specifically so that pass
-didn't need to touch this sort again — see
-[`docs/Algorithms.md`](docs/Algorithms.md#focus-spots-v1)), tier 1 (hard chunks),
-tier 2 (a hard chunk's immediate measure-neighbor, matched the same way
-`generateComboChunks` already defines adjacency — confirmed, not assumed,
-before building), tier 3 (everything else). Deliberate UX consequence: day
-one of a plan no longer necessarily shows the piece's literal opening
-measures. Accepted, not chased: a hard chunk's neighbor's own neighbor
-(one degree further out) stays tier 3. See
-[`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) and
-[`docs/Decisions.md`](docs/Decisions.md#scheduling).
-
-**Since Pass 90**, a single unified daily-workload smoothing pass
-(`smoothOverloadedDays`, `lib/scheduling.js`) replaces what used to be a
-narrower, reviews-only version of the same idea — confirmed before
-building, not guessed at, since running both side by side risked one
-undoing the other's fix on the same day. It runs **twice**: once right
-after chunks are placed (introduction-only, scoped to `frontDays`, before
-transitions/combos/reviews compute anything from `introducedDay` — see the
-new regression note above for why this sequencing is load-bearing), and
-once at the end (transitions + combos + Tier 2 reviews together, Tier 1
-never included). The acceptable load band is scheduleMode-aware — 125%/80%
-of average for `scheduleMode: "days"`, 110%/90% of `minutesPerDay` for
-`scheduleMode: "minutes"` — and a move only happens if it strictly reduces
-total distance outside that band; a move that would just relocate the same
-overshoot elsewhere is declined outright. See
-[`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) rule 5 and
-[`docs/Decisions.md`](docs/Decisions.md#scheduling).
-
-**Same broader session, once rescheduling was checked against Pass 89's
-reorder:** a real bug was found and fixed — see the new regression note
-above (`sortPracticeChunksForIntroduction`'s neighbor check, array index
-vs. measure boundary). Not "rescheduling doesn't apply the new rules" (it
-does; it calls the same `computeTimeline`) — narrower than that, and easy
-to conflate with the broader claim at first.
-
-**Also since Pass 90, on direct request:** Daily Practice (`DayChecklist`)
-can show a read-only card for something genuinely completed on a day whose
-*current* live schedule no longer lists it there — a transition/combo this
-pass's own smoothing relocated, or a review whose due date has since
-advanced past that occurrence. The underlying session record
-(`doneDays`/`sessions[]`) was never actually lost; only the live,
-recomputed-every-render projection had nowhere left to show it.
-`findHistoricalItemsForDay`/`findNextOccurrenceDay` (`lib/history.js`) are
-plain, reusable `lib/` functions — not wired into `DayChecklist`'s own
-state — specifically so a later pass extending this to Week view doesn't
-need to redo the lookup. `ChecklistItem`'s new `historical` prop hides the
-timer, reps/BPM inputs, fail checkbox, log/undo controls, and note
-editing; **same-session follow-up, once seen actually rendered**, it also
-hides the requirement line and the Spaced Repetition line (both answer
-"what's needed going forward," not this card's question) and drops the
-separate `Completed here` tag entirely (sitting on a specific day already
-implies that) — leaving just the "Logged: ..." line and a `Go to next
-scheduled practice (Day N) →` link. Daily Practice only for now — Timeline/
-Week view/Master Agenda don't render individual item cards, only rolled-up
-range badges. See
-[`docs/Algorithms.md`](docs/Algorithms.md#historical-cards-on-daily-practice)
-and [`docs/Decisions.md`](docs/Decisions.md#ux).
-
-**Since Pass 91 (experimental v1),** MeasureOne has a **focus spots**
-mechanism: a specific passage inside a practice chunk that needs slow,
-minutes-based drilling before it's ready for the chunk's normal reps/BPM
-tracking. A spot flagged at Wizard setup time (`fromSetup: true`) holds its
-whole chunk back from introduction entirely — no day, no `introducedDay`,
-transitions/combos touching it excluded too, the whole-piece consolidation
-run-through excluded too; a spot added later from a chunk's own Daily
-Practice card (`fromSetup: false`) never retroactively pulls an
-already-scheduled chunk back off the plan. `focusSpotGate`
-(`lib/scheduling.js`) is the one predicate everything else reads. Resolving
-a chunk's last open spot seeds its `practiceBPM` as the minimum
-`resolvedBpm` across every spot on it. A new "Focus spots" Wizard step (5
-of 7, between Difficulty and Timeline) and a matching Settings panel gate
-whether the "add a spot" affordance is offered at all
-(`piece.troubleSpotsEnabled`); a `FocusSpotsPanel` on Daily Practice shows
-one `FocusSpotCard` per unresolved spot anywhere in the piece, reading
-`piece.progress` directly rather than the current day's schedule. See
-[`docs/Algorithms.md`](docs/Algorithms.md#focus-spots-v1),
-[`docs/Data-Model.md`](docs/Data-Model.md#focus-spots-v1), and
-[`docs/Decisions.md`](docs/Decisions.md#focus-spots-v1).
-
-**A spot's chunk association is anchored to a real, validated measure
-position, not just the chunk id it happens to be nested under.** `position`
-is required (not optional) and validated at both entry points via
-`parseMeasurePosition` (`lib/utils.js` — "24", "24a", or "24-25", checked
-against the piece's own `totalMeasures`); the parsed numbers
-(`startMeasure`/`endMeasure`) are what `reassociateTroubleSpots`
-(`lib/chunking.js`) matches against a chunk's own range to find a spot's
-real current home, rather than trusting the id it's nested under. **This
-matters because chunk ids are just `c${start}`** — a chunking-scheme edit
-can produce an id that still exists but now covers different measures
-entirely (`customChunkSize` 8 → 4 both produce a "c9," just at 9–16 then
-9–12), which reads as pure continuity to `migrateOrphanedProgress`'s
-existence check alone. **If you touch `reassociateTroubleSpots`, keep the
-measure-position match — don't simplify it down to an id-existence check**,
-or this exact bug (a spot silently orphaned by a chunking edit, the thing
-this function was built to fix) comes back. Wired into three places: the
-Wizard, reactively, so the Focus spots step never shows a stale association
-even mid-setup; `App.jsx`'s `handleSavePiece`, chained right after
-`migrateOrphanedProgress`; and `validateAndMigratePiece` unconditionally on
-every load, as a self-healing safety net (guarded on
-`Array.isArray(migrated.measureDifficulty)` specifically, since that field
-was never defaulted in this migration before and calling
-`generatePracticeChunks` without it throws — found by the test suite, not
-assumed safe).
-
-**A focus-spot practice card gates on a minimum practice time before
-either action enables** (`piece.troubleSpotDefaultMinutes`, default 5,
-`min={1}` enforced in both editors) — a countdown timer counts down to
-that target, then flips to counting up past it once met, checked against
-whichever is larger, the running timer or a manually-typed minutes value.
-Closes a real gap found by direct question ("what happens if you log under
-the default"): before this, nothing enforced it at all, and a spot could
-be resolved — permanently seeding the parent chunk's `practiceBPM` — off
-zero seconds of actual drilling.
-
-**Two real bugs were found in critical review, before this was ever
-committed, and both are worth knowing if you touch this feature again:**
-`ChecklistItem`'s leading "mark done" checkmark button sits outside every
-`isPaused`-gated block in that component (the reps/BPM form, the log
-button — all simple conditional rendering — are not the same code path as
-this button), so pausing a chunk mid-practice-session used to leave that
-one control still live; fixed by folding `!isPaused` directly into
-`canLog` itself, the single value the button's `disabled`, tooltip, and
-`submitLog`'s own guard all already read. And the `.checklist-item.paused`
-CSS existed but the class was never actually applied to the element — a
-paused card only ever showed the inline note, never the dashed-border
-visual treatment the CSS was written for.
-
-**"logged today" is "does any session exist for today," never "was the
-most recent action today"** — worth remembering if you build another
-undo control keyed to a boolean like this. `FocusSpotCard`'s own checkbox
-undo first shipped clearing only the *most recent* today-dated session,
-which left it looking stuck checked the moment a second session got logged
-the same day (log some time, come back later, log more — an ordinary
-thing to do), since at least one still matched "today." Found from a
-direct user report of "inconsistent" behavior, not caught in initial
-testing. Fixed by clearing every today-dated session in one click, not
-just the last one — the boolean and the undo action now agree about what
-"today" means.
-
-**Since Pass 92**, the four day-list surfaces (Day view/`DayChecklist`,
-Timeline, Week view, Master Agenda) that each grew their own slightly
-different "there's nothing left to show here" check now share one:
-`classifyDayEmptyState(day, piece, chunkById)` (`lib/scheduling.js`)
-reuses `isDayFullySwept` internally and returns `null` (render normally),
-`"rescheduled"`, or `"empty"`. Every surface now renders exactly one of
-two strings for a non-null result — "Tasks rescheduled" (unchanged) or
-"Nothing scheduled." (period included) — and the staleness-specific notes
-that used to explain a day emptied by a stale review going live elsewhere
-("Now due — see today," "Already due — see Daily Practice") are gone
-outright: that case now reads the same as any other empty day. Timeline
-gained a real empty-day fallback it never had before (it used to render
-no text at all there), and Timeline/Week view stopped special-casing rest
-days with their own "Rest day" label — Interleaved practice and section
-run-throughs stay reachable from Daily Practice regardless of what a day
-has scheduled, so a rest day reads the same as any other empty one now.
-See [`docs/Algorithms.md`](docs/Algorithms.md#timeline--scheduler) (end
-of section) and [`docs/Decisions.md`](docs/Decisions.md#scheduling).
-
-**Since Pass 93**, Settings is two things, not one. The Settings tab
-itself now shows only what isn't about the current piece — "Pieces" (Add
-new piece) and "Backup & restore" — plus a read-only "Current piece
-details" summary sitting directly above a prominent "Edit piece settings"
-button, which is now in the sidebar on every tab (previously Overview
-only). Everything about the current piece lives on that edit page
-instead: the shared field-editor components as before, plus three panels
-that used to apply immediately and are now ordinary draft fields saved
-with "Save changes" — Focus spots, the revival tempo field, and "Mark as
-learned elsewhere" (which now asks for confirmation before marking, since
-it can reclassify a piece's whole schedule state). Only Practice status
-and Delete stayed as an "Applies immediately" group below the Save/
-Discard row, since they still act on the live piece the instant they're
-clicked. Building this surfaced a real, separate data-loss bug — see the
-new "Rules that matter every session" bullet above (`mergeEditedPiece`) —
-fixed in the same pass. See
-[`docs/Architecture.md`](docs/Architecture.md#main-ui-components) (the
-`SettingsTab` row) and [`docs/Decisions.md`](docs/Decisions.md#ux).
-
-**Since Pass 94**, five small UI fixes. One shared CSS rule
-(`.field > .segmented`/`.ghost-btn`/`.primary-btn`/`.danger-btn`,
-`.pairs-list > .ghost-btn`) replaces every per-site inline `alignSelf:
-"flex-start"` patch for a toggle or standalone button that used to
-stretch to its column's full width — text inputs/selects/textareas are
-unaffected, and the sidebar's `.ghost-btn.full` stays intentionally full
-width. "Interleaved practice" is now also the way out of Interleaved
-mode: it reads "Exit interleaved practice" while active and returns to
-Day View through `leaveInterleaved`, so an unconfirmed provisional
-session still gets the warn-and-discard prompt; its "needs two
-qualifying chunks" disable now applies only to entering, not exiting.
-`ScheduleBanner`'s "Go to Day N" button (and its matching "or pick up
-where you left off" sub-copy) is hidden while already browsing that exact
-day. `.modal-foot` gained a gap and wraps, fixing the reschedule dialog's
-buttons touching when all four show. And `LadderConfigEditor` dropped its
-dead "Tempo ratchet" sub-section (the three `ladderConfig.bpmSteps`
-fields) — unreachable UI since Pass 59's gap-proportional `tempoRatchet`
-replaced it as the live mechanism; `bpmSteps` itself is untouched in
-config/storage/`lib/ladder.js`, still live as the no-target-BPM fallback,
-just no longer editable. See
-[`docs/Decisions.md`](docs/Decisions.md#ux) and
-[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
-
-**Since Pass 96**, Piece Map's chunk-detail modal has a Focus spots
-column. The "Run-through flag" label is gone (the button's own text
-already says what it does), and the button moved down to sit directly
-above the Current BPM/Target BPM row — which puts "Related chunks"
-directly under the card details instead, now beside a new "Focus spots"
-field in a two-column row that stacks only once the modal is too narrow
-for both. Each spot links into Daily Practice: an open spot always lands
-on real today, scrolled to its `FocusSpotCard`; a resolved spot lands on
-its chunk's next scheduled day (`findNextScheduledDay`, `lib/history.js`)
-scrolled to its `ChecklistItem`, or shows the same muted "Not currently
-scheduled again within this plan." text `ChecklistItem`'s historical
-cards already use when there isn't one; mid-revival, every spot is plain
-text, no link, since Today's Practice shows neither a day view nor the
-Focus spots panel then. Landing uses one shared mechanism: `onSelectDay`
-(`handleSelectDay`, `App.jsx`) gained an optional `scrollTargetId`
-argument, and a new `scrollToOnArrival` state/effect scrolls to and
-briefly highlights (`.arrival-highlight`, a `box-shadow` pulse — not
-`background`/`border-color`, both already meaningful state on these
-cards) the target once Today's Practice has actually rendered, mirroring
-the existing `focusTargetDateOnSettings` pattern exactly. Display and
-navigation only — adding, resolving, or deleting a spot is still only
-ever done from Daily Practice or the Wizard. See
-[`docs/Algorithms.md`](docs/Algorithms.md#piece-map-focus-spots-linked-to-todays-practice-pass-96)
-and [`docs/Decisions.md`](docs/Decisions.md#focus-spots-v1).
-
-**Since Pass 97**, Daily Practice has a "Split a chunk" panel
-(`SplitChunkPanel`, `components/tabs/today/`), directly below `ReassessPanel`:
-one button per chunk practiced today that's a base chunk of 2+ measures,
-hidden entirely (no empty message) when none qualify and never shown in
-Interleaved mode or during a revival. Clicking one asks a `window.confirm`
-naming the exact result — "Split mm. 9-12 into 9-10 and 11-12? This can't be
-undone." — then splits it at its midpoint. **There is no undo and no merge;
-merging is wanted but deferred** (Roadmap backlog item 6 — the hard part is
-what happens to the halves' history, not the boundary). The mechanism: a new
-persisted `piece.chunkSplitPoints` (extra chunk boundaries layered on the
-uniform grid, merged in by `generatePracticeChunks`, so nothing downstream
-changed); the second half inherits the parent's ladder state/`doneDays`/BPMs/
-confidence/flag (so nothing newly reads as behind) but not `sessions[]`; a
-combo on the reused first-half id starts fresh, and the seam to the next chunk
-carries over only when its measure range is identical. A piece with a
-`rescheduleMarker` keeps it — re-snapshotted, with the second half inserted
-after the parent in every marker in the `previous` chain that lists it.
-**Settings edits**: if only `totalMeasures` changes (chunk step unchanged),
-every still-valid split stays and the added measures just become new chunks
-(16 → 23 adds a 4-measure and a 3-measure chunk); if the chunk size changes,
-splits survive only where the new grid already lands on that measure (4 → 2
-keeps them all, silently; 4 → 3 asks first, naming each split lost). A
-`totalMeasures`/`chunkMode`/`customChunkSize` edit still clears
-`rescheduleMarker`, as it did before. **On every load and after every import**
-`validSplitPoints` also clears any split point the piece's own grid couldn't
-have produced (a mismatched backup import can create one). Piece Map draws a
-split pair inside one dashed box (`computeSplitDisplayGroups`; display only;
-a twice-split chunk is drawn with only one neighbor). **Known open, logged in
-[`docs/Decisions.md`](docs/Decisions.md#open-questions), not fixed:** an
-import can still keep a mismatched split that merely *looks* like a valid
-midpoint; splitting overwrites any coincidentally-orphaned progress at the
-second half's id; a split deep in the maintenance ladder was only unit-tested;
-and the panel can vanish right after a split when the recomputed schedule
-turns both halves into historical cards. Two real mistakes worth knowing about
-are recorded in [`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md) (reusing the
-resize predicate at load time; a review "reproduction" that didn't show what it
-claimed). See [`docs/Algorithms.md`](docs/Algorithms.md#splitting-a-chunk-pass-97)
-and [`docs/Decisions.md`](docs/Decisions.md#splitting-a-chunk-pass-97).
-
-**Since Pass 101**, there's a **Technique page** — daily scales and
-arpeggios, the first visible piece of the Technique practice design
-(Passes 98–100 recorded the design, built the engine, and wired up
-storage; see [`docs/Technique-Practice.md`](docs/Technique-Practice.md)).
-"Technique" sits in `NAV_BASE` right after Master Agenda, with a hairline
-divider (`.nav-divider`) before the piece-scoped items; it goes through the
-same `guardLeavingActiveWork` click path as every other nav item.
-**Technique data is app-level, not part of any piece**: one localStorage
-key of its own (`measureone-technique`, `loadTechniqueFromStorage`/
-`saveTechniqueToStorage`, `lib/storage.js`), held in `App.jsx`'s
-`technique` state, and **never goes through `setPieces` or
-`updatePiece`** — every change goes through `updateTechnique` and the
-`handleTechnique*` handlers. The engine is `lib/technique.js` (pure, no
-clock). The page is `components/tabs/TechniqueTab.jsx`; the pieces it's
-built from are in `components/tabs/technique/`, and **the shared panel is
-`TechniquePanel.jsx`** — standalone on purpose, so Pass 102 can put the
-same component on Master Agenda and Daily Practice (`variant="shared"`).
-Three calls made on direct request while building it, beyond the pass
-card: a check-off can be **undone** (`uncompleteTask`, with an `undo`
-snapshot saved on the task); adding a scale or putting one back in
-rotation **tops up today's list** right away (`topUpDayList`); and the
-Library's summary uses the days-a-week pace sentence. Review fixes in the
-same pass: switching a scale off removes its unfinished task from today's
-list; the walk hint (`walkHint`) hides when the key of the day isn't on
-the list but keeps naming today's key after it's checked off; un-checking
-doesn't bring back a tempo if the check octaves changed since; tempos are
-limited to 30–300; a check-off saved before undo existed shows as
-un-uncheckable instead of silently ignoring clicks; the Library's
-never-checked label reads "Not yet"; and key names render
-through `KeyText.jsx`. Inter has no ♭, and the fallback font drew it with
-a wide blank left side, so "E♭" read as "E ♭". `KeyText` puts ♯/♭ in a
-tighter font (`.tq-acc`) and wraps the name in one span so a flex `gap`
-can't split it. Use it anywhere a key name is shown, and wrap it with its
-surrounding words when the parent is a flex row with a gap (buttons are).
-**Don't use regex lookbehind (`(?<=…)`/`(?<!…)`) anywhere:** the build
-targets Safari 14, which can't read it, and one instance stops the whole
-app loading there. `test/browser-compat.test.mjs` fails if it reappears. Built
-since: the panel on Master Agenda/Daily Practice (Pass 102), piece keys
-(Pass 103), backups (Pass 104) — see below. Still not built: a settings UI
-for scales per day / minutes per scale.
-See [`docs/Architecture.md`](docs/Architecture.md#main-ui-components) and
-[`docs/Decisions.md`](docs/Decisions.md#technique-practice).
-
-**Since Pass 102**, the same `TechniquePanel` (`variant="shared"`, sub-line
-"…Checking one off here counts everywhere it appears.", no walk hint)
-also appears on **Master Agenda** — directly under the Total planned
-banner, above the random-piece button and the Learning/Maintenance/Revival
-switcher — and on **Daily Practice**, right under the page header (normal
-view and the revival view alike). It's one list in `App.jsx` state, so a
-check-off on any screen shows on all of them; the handlers reach both tabs
-as a single `techniquePanelHandlers` prop bundle. Both surfaces show it
-only on the real today (Master Agenda's `selectedDate === today`, Daily
-Practice's `isRealToday`; revival counts as today), only once the saved
-list is today's, and — a call made in this pass, not on the card — only if
-that list has at least one task, so no empty panel shows on every piece's
-page when the library is empty or every scale is switched off (the
-Technique page still shows its own empty states). **Total planned adds
-`minutesPerScale` (5) per task on today's list**, done or not, carried
-over or new, with an "includes Nm technique" line under the number. That
-counts toward the Busy (>60)/Moderate (>30) tier, but never toward "N
-pieces scheduled". A day with scales but no pieces reads **"<tier>:
-technique only"** ("Light: technique only" at the default 15 minutes)
-instead of "Nothing scheduled". Pass 102 shipped this with an em dash to
-match the other Status labels; the Pass 80 redo moved all of them to a
-colon. The visibility/minutes rule
-(`techniqueTodaySummary`) and the Status wording (`agendaStatusLabel`)
-live in `lib/technique.js` with tests, not in the two components. **Technique stays out of every schedule path** — no behind-
-schedule count, `ScheduleBanner`, reschedule dialog or piece-progress
-code reads it (verified unchanged in the browser, reschedule dialog text
-included). Don't wire technique into those: it isn't part of any piece.
-
-**Since Pass 103**, a piece has two optional keys, `homeKey` and
-`otherKeys` (`{ tonic, quality }`, the technique items' shape), edited in
-`BasicsFields` (Wizard and Settings) and on `EDIT_FORM_FIELDS`. Backfilled
-to `null`, never a materialized value. The keys of every **active** piece
-(paused/archived don't count; mid-revival does) — `repertoireKeysFromPieces`,
-`lib/technique.js` — tag matching scales "Repertoire in this key" and pace
-them. **Matched as spelled** (`sameSpelledKey`: a G♭ major piece doesn't tag
-F♯ major), while the pickers show each enharmonic pair as **one** entry
-("F♯/G♭ major", 24 keys, saved as the first spelling; `keyOptionFor`,
-`technique/format.js`). Also: the app-wide font list names Helvetica Neue /
-Segoe UI Symbol after Inter and Fraunces, because neither has ♯/♭ and the
-browser's fallback drew "E♭" as "E ♭". See
-[`docs/Decisions.md`](docs/Decisions.md#technique-practice).
-
-**Since Pass 104**, backups carry the technique library: a separate
-`technique` block (own schema version) beside `pieces`, a "Technique
-library" row in both backup modals, and `mergeImportedTechnique`
-(`lib/storage.js`), which merges and **never removes anything here**. The
-newer checked tempo wins (with its date and check octaves), but an empty
-tempo never replaces a real one. An unreadable block, or unreadable scales
-in it, are reported instead of skipped (`readBackupTechnique`). Old and
-bare-array backups import as before. See
-[`docs/Algorithms.md`](docs/Algorithms.md#import-merge).
-
-**Pass 80 (em dash removal), redone after Pass 104**: no user-facing copy
-uses an em dash anymore. About 125 strings across 30 files were reworked
-one by one (period, comma, colon, or parentheses, whichever read best),
-including Master Agenda's Status labels ("Light: 2 pieces scheduled",
-"Light: technique only"). A lone "—" placeholder became "n/a", and a focus
-spot row in Piece Map's chunk detail now reads "name · m. 24 · Open". The
-original Pass 80 branch (Sep 4) was never merged and had gone stale, so
-this was rebuilt against current `main` rather than rebased. New:
-`test/copy-style.test.mjs` (fails on any em dash the app can show) and the
-house-style rule in
-[`docs/AI-GUIDELINES.md`](docs/AI-GUIDELINES.md#no-em-dashes-in-user-facing-copy).
-Code comments and docs are untouched by design.
-
-**Since Pass 109**, MeasureOne has an optional **account sign-in** (Supabase),
-the first visible piece of the accounts work (Passes 105-108 were groundwork:
-the design in [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md),
-save-only-what-changed, collision-safe ids, the test project). **Signing in
-moves no data yet**: nothing is uploaded or downloaded until Passes 110-112;
-it only says who's signed in. Four things worth knowing:
 - **The app must keep working with the backend unconfigured, and nothing
-  account-related may render then.** `isBackendConfigured()`
-  (`lib/backend.js`) is false when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
-  are missing, which was the live site until go-live (Pass 114, see "Since
-  Pass 114" below), and is still a fresh checkout and `npm test`.
-  `authEnabled` in `App.jsx` gates every account surface: the Account panel,
-  the welcome-screen link, both windows. A new account surface must check it.
-- **Auth state lives in `App.jsx`** (`authSession`, only `{ email, userId }`;
-  the library holds the real session), kept current by one
-  `onAuthStateChange` listener attached by `attachAuthListener`. Never store
-  or log the password (the sign-in and choose-a-password windows keep it in
-  component state only while open).
-- **`lib/backend.js` is the only file that may touch the library, and never
-  through a top-level import** (Design K): the library is a separate ~59 KB
-  download fetched by `loadBackend()` only when needed (a saved session on
-  this device, an invite or reset link in the address, or someone opening
-  sign-in), so a signed-out visitor downloads what they always did. An
-  invitation link is announced by the library only as an ordinary sign-in, so
-  its `type` is read from the address (`authLink`, captured at file load,
-  before the library can remove it).
-- **Two entry points**, plus the links in emails: Settings → Account
-  (`SettingsTab`, after "Backup & restore") and a quiet "Sign in" link on the
-  welcome screen (no pieces yet, so no sidebar). Sign out is this device only
-  (`scope: "local"`) and leaves local data alone. "Forgot password?" always
-  answers the same sentence, and a wrong email and a wrong password get one
-  message, so the forms can't reveal who has an account. See
-  [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
-  and [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#sign-in-behavior-pass-109).
-
-**Since Pass 110**, a signed-in person can press **Back up this device**
-(Settings → Account) to copy this browser's pieces and technique library to
-their account, checked by reading it back. Nothing is kept current
-automatically (Pass 111) and nothing is downloaded into a device (Pass 112)
-yet. Six things worth knowing:
-- **It only ever ADDS. Never make this path change or delete an account
-  row.** `backUpDevice` (`lib/accountSync.js`) inserts the rows the account
-  lacks and nothing else. A row that already exists is compared and reported
-  ("Already in your account and different, left as it is"), never overwritten:
-  that covers a piece that differs, a piece the account marks deleted, and the
-  technique row. The "save only if still at revision N" functions
-  (`changePieceRow`, `changeTechniqueRow`) are built and tested but nothing
-  calls them until Pass 111. The database keeps the revision count
-  (`supabase/migrations/0002_revision_counter.sql`, a trigger); the app only
-  states the revision it expects and never sends one.
-- **Compare as data, never as text** (`sameData`: JSON round trip, then key by
-  key). The database reorders keys; compared as text, none of the 25 real
-  pieces checked matched. `test/accountSync.test.mjs` fails if it's switched
-  to text (re-broken on purpose and confirmed).
-- **A piece that differs gets no device-record entry, on purpose.** The
-  record (`measureone-account-sync`, filed under the account's user id) holds
-  the revision this device last saw and a fingerprint of what it uploaded, only
-  for what matched the read-back. Recording the revision a differing piece has
-  now would let Pass 111 write over it. **Pass 111 must treat "a row exists but
-  this device has no entry for it" as held, never as safe to upload over**, and
-  the technique row follows the same rule.
-- **The first backup to an account asks first; later ones don't.**
-  `handleBackUpDevice` (`App.jsx`) shows the question in the Account panel
-  (`backupAsking`, with Back up / Not now) unless `hasRecordedBackup` says this
-  device already holds a checked backup for that account. **Never make a
-  required step depend on a browser pop-up (`window.confirm`/`alert`):** the
-  first version used one and did nothing on its first real try, most likely
-  because the browser blocked the pop-up (reproduced exactly by making the
-  pop-up answer "No"). The app's other pop-ups have the same weakness (logged
-  in [`docs/Decisions.md`](docs/Decisions.md#open-questions)). The asking is in the handler, not in `backUpDevice`, so a new
-  caller (Pass 111) must ask for itself (logged in
-  [`docs/Decisions.md`](docs/Decisions.md#open-questions)).
-- **What's uploaded is what the app holds**, `pieces` and `technique` from
-  state (after `validateAndMigratePiece`, never the raw stored text), read
-  once when the button is pressed. The backup writes nothing to pieces or
-  technique data; the only thing it writes on this device is the device record.
-- **The running state and the last result live in `App.jsx` (`backup`), not
-  `SettingsTab`**, so leaving Settings doesn't lose them; a result is shown
-  only to the account that asked. `lib/accountSync.js` imports only
-  `lib/backend.js`'s helpers, never the library itself (Design K still holds:
-  the main download grew by about 3.3 KB, the library file is unchanged).
-See [`docs/User-Flows.md`](docs/User-Flows.md#11-backing-up-this-device-optional-pass-110)
-and [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#first-backup-behavior-pass-110).
-
-**Since Pass 111**, once a device's first backup to an account has been
-checked (Pass 110), **every later change is sent to the account by itself**
-while signed in, with a quiet status line in the Account panel and one banner
-only when a piece is held. (Getting things back from the account is Pass 112,
-below.)
-Eight things worth knowing:
-- **Where the upload hooks into the save effects.** In `App.jsx`, one
-  `useEffect` on `[pieces, technique, loaded]` **declared after both save
-  effects** (the `pieces` one via `savePieceChanges`, and the technique one),
-  in the block headed "Keeping the backup current (Pass 111)", so what it
-  looks at is already saved on this device. It only *schedules*: it works out
-  what's waiting (`syncSnapshot`, no network), notes a deleted piece
-  (`noteLocalDeletions`) and restarts a 5-second quiet timer (never more than
-  a minute after the first unsent change). `lib/accountSync.js` decides
-  everything else and is tested; timers and listeners read refs
-  (`syncLatestRef`), never state captured when they were set up. Nothing in it
-  goes through `setPieces`/`updatePiece`, and it never changes pieces or
-  technique on this device: the only thing it writes here is the device record.
-- **It changes an account row only through "save only if still at revision N"**
-  (`changePieceRow`, `changeTechniqueRow`, the new `deletePieceRow`), never an
-  overwrite and never a revision of the app's own. A deleted piece is sent as
-  `deleted_at` set and stays (Design D). **A refusal is not a failure and is
-  never retried:** the row is read again and judged (`judgeRefusal`): the same
-  as this device's copy (another tab, or this device's own earlier upload whose
-  note didn't land) adopts the row's revision; gone is put back; different (or
-  marked deleted) HOLDS the piece, marked in the device record, never uploaded
-  again by this pass, this device's copy untouched, the others keep going. The
-  technique library can be held too. Don't "fix" a held piece by retrying: that
-  is exactly the overwrite the whole design exists to prevent. Settling is
-  Pass 112.
+  account-related may render then.** `isBackendConfigured()` (`lib/backend.js`) is
+  false when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are missing (a fresh
+  checkout, `npm test`). `authEnabled` in `App.jsx` gates every account surface: the
+  Account panel, the welcome-screen link, both windows. A new account surface must
+  check it.
+- **Auth state lives in `App.jsx`** (`authSession`, only `{ email, userId }`; the
+  library holds the real session), kept current by one `onAuthStateChange` listener
+  (`attachAuthListener`). Never store or log the password (the windows keep it in
+  component state only while open). Sign out is this device only (`scope: "local"`)
+  and leaves local data alone. "Forgot password?" always answers the same sentence,
+  and a wrong email and a wrong password get one message, so the forms can't reveal
+  who has an account.
+- **`lib/backend.js` is the only file that may touch the library, and never through
+  a top-level import** (Design K): the library is a separate ~59 KB download fetched
+  by `loadBackend()` only when needed, so a signed-out visitor downloads what they
+  always did. `lib/accountSync.js` imports only `lib/backend.js`'s helpers. An
+  invitation link is announced by the library only as an ordinary sign-in, so its
+  `type` is read from the address (`authLink`, captured at file load).
+- **The first backup only ever ADDS (Pass 110).** `backUpDevice`
+  (`lib/accountSync.js`) inserts the rows the account lacks and nothing else; an
+  existing row (a piece that differs, a piece the account marks deleted, the technique
+  row) is compared and reported, never overwritten. It writes nothing to pieces or
+  technique data; the only thing it writes on this device is the device record
+  (`measureone-account-sync`, filed under the account's user id). **A piece that
+  differs gets no device-record entry, on purpose:** a row that exists with no entry for
+  it is HELD (never uploaded over), and the technique row follows the same rule. The
+  first backup to an account asks first, in the Account panel (`backupAsking`), unless
+  `hasRecordedBackup` says this device already holds a checked backup for that account.
+  The asking lives in the handler (`handleBackUpDevice`), not in `backUpDevice`, so a
+  new caller must ask for itself.
+- **Never make a required step depend on a browser pop-up** (`window.confirm`/`alert`):
+  the first version of the first-backup question used one and did nothing on its first
+  real try, because a blocked pop-up reads as "No". Ask in the page and show results
+  in the page ([`docs/UX-Principles.md`](docs/UX-Principles.md)).
+- **Uploads (Pass 111).** The upload hook is one `useEffect` on `[pieces, technique,
+  loaded]` declared AFTER both save effects (the pieces one via `savePieceChanges`),
+  in the block headed "Keeping the backup current (Pass 111)" in `App.jsx`, so what it
+  looks at is already saved on this device. It only schedules: it works out what's
+  waiting (`syncSnapshot`, no network), notes a deleted piece (`noteLocalDeletions`)
+  and restarts a quiet-period timer (5 seconds, never more than a minute after the
+  first unsent change). Timers and listeners read refs such as `syncLatestRef`, never
+  state captured when they were set up; nothing in it goes through
+  `setPieces`/`updatePiece`; `lib/accountSync.js` decides everything else. Signing out
+  stops a run (`syncGenRef`) and leaves the record alone, so signing back in finds
+  what's waiting by comparing.
+- **An account row changes only through "save only if still at revision N"**
+  (`changePieceRow`, `changeTechniqueRow`, `deletePieceRow`), never an overwrite and
+  never a revision of the app's own (the database counts revisions,
+  `supabase/migrations/0002_revision_counter.sql`). **A refusal is not a failure and is
+  never retried:** the row is read again and judged (`judgeRefusal`). The same as this
+  device's copy, or any fingerprint in `sent` (below), adopts the row's revision; gone
+  is put back; different (or marked deleted) HOLDS the item, marked in the device
+  record, never uploaded again, this device's copy untouched, the others keep going.
+  Don't "fix" a held piece by retrying: that is the overwrite the design exists to
+  prevent.
 - **A deletion counts only if this session SAW the piece leave `pieces`**
-  (`reconcileLocalDeletions`, flag `deletedHere` in the record), never merely
-  "in the record but not in `pieces`". A failed load would otherwise mark the
-  account's copy of everything deleted.
-- **"The same" means the same after a reload** (found in the browser): the app
-  builds a chunk's first practice record without `tier1Done`/`troubleSpots`, and
-  a technique task without `tempo`, and loading adds them, so as-is a reloaded
-  piece looked changed and went up again (an extra revision after most days of
-  practice). `fingerprint`s and comparisons therefore use `canonicalPiece` /
-  `canonicalTechnique` (the load's own `validateAndMigratePiece` /
-  `validateAndMigrateTechnique`, after a JSON round trip), through
-  `pieceFingerprint`/`techniqueFingerprint`/`samePiece`/`sameTechnique`.
-  **Never fingerprint or compare a piece or technique raw in this file.**
-  What's sent is still the app's own copy, and the first backup's read-back of a
-  row it just wrote stays strict (`exact`); a row already there only has to
-  match. Several tests fail if this is switched off (re-broken on purpose and
-  confirmed, for pieces, for the technique library and for the strict read-back). One known blind spot: a field loading would *drop* from the
-  technique library isn't noticed as a change.
-- **Retrying:** a failed attempt leaves things waiting and the next try is 30
-  seconds later, then 2 minutes, then every 10 (`RETRY_GAPS_MS`); the browser's
-  online event retries at once. After two failures in a row the status says the
-  account service isn't answering. The HTTP status of each answer is kept
-  (`status`), because Supabase's errors carry none: 5xx/408/429/no answer count
-  as "not answering", anything else that isn't a refusal leaves that one item
-  waiting while the others go. Signing out stops a run (`syncGenRef`) and leaves
-  the record alone, so signing back in finds what's waiting by comparing.
-- **Nothing here may run, and the library may not be loaded, unless the device
-  is signed in AND its first backup is checked** (`computeWaiting` returns
-  nothing before then; the first backup stays a deliberate, asked-first step).
-  A new caller of the upload must keep that gate. A build with no connection
-  settings (`npm test`, a fresh checkout) has `authEnabled` false and nothing
-  renders; the live site has had them since Pass 114.
-- **Status wording is one line, first match wins** (`describeSyncStatus`): not
-  answering, else the held message, else "N changes waiting to back up", else
-  "Backed up just now". A held piece's line replaces the backed-up one and
-  hides "N changes waiting"; showing both is left for Pass 112 on purpose
-  (decided 2026-10-03). The banner is `.storage-error-banner`
-  reused, shown on every screen while anything is held.
-- **Found, not fixed, for Pass 112:** (1) importing a backup re-stamps each
-  piece's `createdAt`, so a second browser that imports the same file reads
-  every piece as different from the account's. Settling must decide whether
-  that field counts, and should reuse `samePiece`/`sameTechnique`. (2) **A false
-  hold:** if an upload lands but its confirmation is lost, and more is logged
-  before the next attempt, the refusal judge (`judgeRefusal`) sees the account's
-  row (this device's own older version) as different from the current copy and
-  holds the piece as "changed on another device" by mistake. Confirmed with a
-  scratch test; if nothing changed since the lost confirmation it adopts the
-  row correctly (tested). Settling needs "the row is an earlier version of this
-  device's own data" anyway, so build that detection there (for example, keep a
-  fingerprint of what each attempt sent since the last confirmed revision and
-  adopt a row that matches one). Left on purpose, decided 2026-10-03: nobody can
-  reach accounts until Pass 114. (3) The one-line status, above. See
-  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#keeping-the-backup-current-pass-111).
+  (`reconcileLocalDeletions`, flag `deletedHere`), never merely "in the record but not
+  in `pieces`": a failed load would otherwise mark the account's copy of everything
+  deleted. A deleted piece is sent as `deleted_at` set and stays (Design D).
+- **"The same" means the same after a reload.** Never fingerprint or compare a piece or
+  technique raw in `lib/accountSync.js`: use `canonicalPiece` / `canonicalTechnique`
+  through `pieceFingerprint`/`techniqueFingerprint`/`samePiece`/`sameTechnique` (the
+  load's own `validateAndMigrate*` after a JSON round trip), and compare as data, never
+  as text (`sameData`; the database reorders keys, and `test/accountSync.test.mjs` fails
+  if it is switched to text). Why: the app builds a chunk's first practice record
+  without `tier1Done`/`troubleSpots`, and a technique task without `tempo`, and loading
+  adds them, so compared as-is a reloaded piece looked changed and went up again. What's
+  sent is still the app's own copy. `mergeSessionArrays` (`lib/storage.js`) compares
+  sessions by content, key order ignored (Pass 115); anything else that merges data that
+  has been through the database has the same trap. **The technique library's `updatedAt`
+  is left out of `sameTechnique` and `techniqueFingerprint` only**
+  (`techniqueForComparison`); `dayList` and `walkPosition` stay in. Don't compare
+  technique through `canonicalTechnique` directly.
+- **Nothing here may run, and the library may not be loaded, unless the device is
+  signed in AND its first backup is checked** (`computeWaiting` returns nothing
+  before then). A new caller of the upload keeps that gate. Retry timing and status
+  wording live in `lib/accountSync.js` (`RETRY_GAPS_MS`, `describeSyncStatus`; the
+  constants are tracked in [`docs/Research.md`](docs/Research.md#account-sync-timings)).
+  The Account status line shows the held message and the normal line together; "not
+  answering" replaces both. The held banner reuses `.storage-error-banner` and shows on
+  every screen while anything is held.
+- **`sent` and the device record (Pass 115).** An upload attempt first writes the
+  fingerprint of what it's about to send into that item's device-record entry (`sent`,
+  the last 5; `withSentRecorded`), cleared when the account confirms a revision (the
+  `with...Uploaded` functions replace the whole entry). `cleanEntry` drops fields it
+  doesn't know, so a new entry field must be added there too.
+- **Restore, Get changes and Review (Pass 112)** are one flow decided in
+  `lib/accountSync.js` and run by `App.jsx` (`fetchAccountCopy`,
+  `accountRowsToCandidates`, `planAccountMerge`, `applyAccountMerge`, with the import
+  path's own `findMatchingPiece` / `mergeImportedPiece` / `mergeImportedTechnique`;
+  `openAccountFlow` / `applyAccountFlow` / `handleConfirmAccountImport`, shown in the
+  same `ImportPiecesModal` with `source="account"`): a decision rule belongs in the
+  library with a test, never in the component. **The no-ask rule is
+  `canTakeAccountCopyWithoutAsking`:** nothing waiting here AND the account changed it
+  since this device last synced it, by the account's revision, never by a clock
+  (confirmed 2026-10-03). Weakening it would replace work that was never uploaded, and
+  eight tests fail if you do. **Superseded in direction on 2026-10-15:** the owner chose
+  "most recent wins, item by item" and automatic updates. **Don't weaken or remove this
+  rule before Pass 120, which replaces it on purpose;** until then it is what the code
+  does and what its tests pin.
+- **`applyAccountFlow` saves the device record BEFORE any state changes**
+  (`withAccountCopyRecorded`); reverse it and the upload hook sees merged pieces with
+  no record, takes them for new, and holds each one. Combining marks the account's
+  other row deleted (`markOtherCopiesDeleted`, only `deleted_at`, only if still at the
+  revision read), never erases it, and only once this device has made its first
+  backup. A piece the account marks deleted is never a combine target
+  (`walkAccountCandidates` leaves it out of the matching). "Delete it here too"
+  (`handleDeleteHereToo`) is the only way this flow removes anything: the device
+  forgets the piece first (`withPieceDropped`), so no second "deleted" is sent, and
+  deleting the open piece goes through `guardLeavingActiveWork`. Results are shown in
+  the page (`accountNotice`), and `accountFlowBusyRef` makes the automatic upload and a
+  manual backup wait while the flow runs. Restoring onto an EMPTY device is that
+  device's first, checked backup (`becomesChecked`).
+- **Account settings (Pass 113).** Change password is `ChoosePasswordModal` in
+  `mode="change"`, opened by `openChangePassword`. "Require current password when
+  updating" must stay OFF in the Supabase Email provider (it is, on both projects): the
+  app sends no current password, so with it on Change password fails with the generic
+  "Couldn't save your password". "Secure password change" is off too; if it's ever on, a
+  sign-in older than 24 hours gets "For your security, sign in again". "Sign out of all
+  devices" (`handleSignOutAll`) asks in the panel (never a pop-up) and reports honestly
+  (`describeSignOutAll`); other devices keep working until their access token's hour is
+  up. No in-app email change or account deletion (Phase 3): the owner does them in the
+  dashboard.
+- **Noticing other devices (Pass 116).** The check only notices; it applies nothing
+  ("Get changes" is still the only way a change arrives until Pass 120). It reads only
+  `id, revision, deleted_at` from `pieces` (paged like `countLiveAccountPieces`) and
+  only `revision` from `technique`, never the `data` column (`checkAccountChanges`); a
+  test asserts the recorded selects, and the check repeats every few minutes. When it
+  runs is decided in the library (`createAccountChecker`/`checkIsDue`); `App.jsx`'s
+  `requestCheck` only adds the gates that need app state, and a new trigger goes through
+  `requestCheck`, never straight to `checkAccountChanges`. `classifyAccountChanges` is
+  revision-only, and "own upload is never newer" rests on the record taking the revision
+  when the account confirms an upload, so a result is not believed if an upload, backup
+  or "Get changes" ran while it was reading (`checkRowsUsable`). Held pieces go in
+  `held` only, never also `newer`/`deleted`, and a piece this device deleted is never
+  `added`. Keep the light rows (`checkRowsRef`; `refreshSyncInfo` re-sorts them against
+  the device record every time), not the sentence; a failed check shares the uploads'
+  failure count and shows no error of its own.
 
-**Since Pass 112**, a signed-in person can **bring things back from the account**:
-**Restore N pieces** on the welcome screen, **Get changes from your account** in
-the Account panel, and **Review** (banner and Account panel) for a piece held as
-"changed on another device". It's one flow, and it adds nothing to the account
-except marking a duplicate copy deleted. Nothing arrives by itself (Phase 2).
-Ten things worth knowing:
-- **One flow, decided in `lib/accountSync.js`, run by `App.jsx`.**
-  `fetchAccountCopy` reads the rows; `accountRowsToCandidates` skips deleted rows
-  and validates the rest; `planAccountMerge` says what each piece is (new / same /
-  take / ask / combine); `applyAccountMerge` does the merge purely, with the
-  import path's own `findMatchingPiece` / `mergeImportedPiece` /
-  `mergeImportedTechnique`. `openAccountFlow` / `applyAccountFlow` /
-  `handleConfirmAccountImport` / `handleDeleteHereToo` (App.jsx) run it, and the
-  same `ImportPiecesModal` shows it (`source="account"`). A decision rule belongs
-  in the library with a test, never in the component.
-- **The no-ask rule is `canTakeAccountCopyWithoutAsking`: nothing waiting here AND
-  the account changed it since this device last synced it, by the account's
-  revision, never by a clock** (confirmed 2026-10-03). Weakening it (letting it
-  apply with a change waiting) would replace work that was never uploaded, and a
-  test fails eight tests if you do. Anything changed on both sides gets the
-  picker even where import would have settled it by `updatedAt`. **Superseded in
-  direction on 2026-10-15:** the owner chose "most recent wins, item by item" and
-  automatic updates ([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When
-  two copies disagree"). **Don't weaken or remove this rule before Pass 120, which
-  replaces it on purpose;** until then it is what the code does and what its tests
-  pin.
-- **`applyAccountFlow` saves the device record BEFORE any state changes.** The
-  record gets each merged piece at the revision read, with the fingerprint of
-  the account's copy (`withAccountCopyRecorded`); the pieces change after. Reverse
-  it and Pass 111's hook sees merged pieces with no record, takes them for new,
-  and holds each one.
-- **`mergeImportedPiece` dedups sessions by JSON text, so key order matters, and
-  the database returns keys reordered**: without `withComparableSessions` every
-  session in an account merge is kept twice (the first test caught it). The real
-  fix is in `mergeSessionArrays` (`lib/storage.js`, not touched here).
-  **Fixed in Pass 115** (sessions are compared by content and the workaround is
-  gone, see below). Anything else that merges data that has been through the
-  database has the same trap.
-- **A piece from the account keeps the account's created date** (confirmed
-  2026-10-03); a piece that matches except for it is "same", with its date set
-  quietly. A file import still re-stamps. A "take" replaces the piece outright
-  (reschedule marker and all); "ask" and "combine" go through the import merge,
-  which clears the reschedule marker.
-- **Restoring onto an EMPTY device is that device's first, checked backup**
-  (`becomesChecked`, an exception to Design J decided 2026-10-03); a device that
-  already holds pieces is not marked.
-- **Combining marks the account's other row deleted (`markOtherCopiesDeleted`,
-  only `deleted_at`, only if still at the revision read), never erases it**, and
-  only once this device has made its first backup. **A piece here that the account
-  marks deleted is never a combine target** (`walkAccountCandidates` leaves it out
-  of the matching): otherwise the surviving copy would be combined into the stale
-  one and marked deleted too (found in the browser).
-- **"Delete it here too" is the only way this flow removes anything.** The device
-  forgets the piece first (`withPieceDropped`), so no second "deleted" is sent;
-  deleting the open piece goes through `guardLeavingActiveWork`.
-- **Results are shown in the page** (`accountNotice`: the Account panel, or a
-  dismissible banner), never a browser pop-up. `accountFlowBusyRef` makes the
-  automatic upload and a manual backup wait while the flow reads and applies.
-- **Not built, on purpose:** the two items left from Pass 111 (a false hold is
-  still possible; the status line still shows one message; **both fixed in Pass
-  115**, below), an "undelete", and anything arriving by itself. Found, not fixed: two devices that both use the app
-  will often hold each other's technique library (its per-device parts are in the
-  shared row); a name match with a blank composer can combine two different
-  pieces, and a combine the person declines is offered again on every Get changes
-  (nothing remembers "these are different"). See
-  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112)
-  and [`docs/User-Flows.md`](docs/User-Flows.md#12-getting-things-from-your-account-optional-pass-112).
+### The merge engines (Passes 117 and 118; only tabs of one browser call them so far)
 
-**Since Pass 113**, a signed-in person can **change their password** and
-**sign out of all devices** (Settings → Account, a group of its own at the
-bottom of the panel). Neither touches a piece, the technique library or the
-device record. Four things worth knowing:
-- **`ChoosePasswordModal` has a third mode, `mode="change"`**, opened by
-  `openChangePassword` (`App.jsx`); the words and helpers (`describeSignOutAll`
-  and friends) are in `lib/backend.js`, which has no tests.
-- **"Require current password when updating" must stay OFF** in the Supabase
-  Email provider (it is, on both projects): the app sends no current password,
-  so with it on Change password fails with the generic "Couldn't save your
-  password". "Secure password change" is off too; if it's ever on, a sign-in
-  older than 24 hours gets "For your security, sign in again" and a **Sign in
-  again** button.
-- **Sign out of all devices asks in the panel (never a pop-up) and reports
-  honestly** (`handleSignOutAll`): the installed library removes this device's
-  sign-in even when the service couldn't be told, so the result is read back
-  and `describeSignOutAll` says done / signed out here only / still signed in.
-  Other devices keep working until their access token's hour is up.
-- **No in-app email change or account deletion** (Phase 3): the project owner
-  does them in the dashboard, and the "replace the account" steps for an email
-  change have never been rehearsed. See
-  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#account-settings-pass-113)
-  and [`docs/User-Flows.md`](docs/User-Flows.md#13-account-settings-optional-pass-113).
+- **What they are.** `lib/pieceMerge.js` and `lib/techniqueMerge.js` merge two copies
+  **by part**. The device record's entries carry `parts` (a fingerprint per part, never
+  a copy of the data), the base the engines compare against. **A new place that records
+  a piece or the technique library must record its parts**, or that item will "ask". A
+  quiet startup step (`withPartsRecorded`, `App.jsx`) records pieces' parts (an adopted
+  row that is only an earlier version of this device's own piece records none, on
+  purpose); `withTechniquePartsRecorded` is built and tested but `App.jsx` does not call
+  it yet (Pass 120).
+- **What a part is.** Piece: every top-level field except `progress`, `updatedAt` and
+  `lastLoggedAt`, and each `progress` entry on its own (`progress:<id>`). A NEW
+  top-level field is a part automatically; a new field that is derived on load (like
+  `lastLoggedAt`) must be re-derived by the engine or the simulation's invariant 4
+  fails. Technique (`techniquePartKey`): per scale its settings (`starred`, `rotation`,
+  `octaves`, `hands`), its tempo check (tempo, check date, exact time and check octaves,
+  together), practiced dates (each on its own) and last-used date per method; per method
+  its star and switch; custom methods; the settings; the walk; per task its done state
+  and plan. **A new field on a scale, method, setting or task must be given a part
+  (`partsOfCanonical`)**, or a change to it is invisible to a merge and the simulation's
+  per-field checks must learn it. A part holding its default is left out.
+- **`fingerprint` and `canonicalPiece` live in `pieceMerge.js`, `canonicalTechnique` in
+  `techniqueMerge.js`** (re-exported by `accountSync.js`): the engines never import the
+  account code. `canonicalPiece` caches per object and returns a SHARED result: treat
+  it as read-only.
+- **Per part:** changed on one side only, take that side; same value on both,
+  agreement; different values: a piece part is a conflict for that part only (this
+  device's value kept, both listed, never resolved in the engine; `status:
+  "local-only"` returns `local` itself, untouched), a technique part follows a rule per
+  kind. **Pass 120 changes both to "the most recent change wins"**
+  (decided 2026-10-15). Scales and custom methods are never removed by a merge, and an
+  empty tempo never replaces a real one.
+- **Piece engine.** The "travel together" rule: the sides disagree about
+  `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
+  changed progress or the marker: one whole-piece conflict. **The reschedule marker is
+  not a merge rule** (the scheduler reads a chunk done earlier than its remainder day
+  as not owed instead; see the Pass 117 rule above); don't rewrite the marker at merge
+  time, it re-flows every other chunk the marker places. `lastLoggedAt` is recomputed
+  from the merged sessions, and in minutes mode `daysToLearn` is the larger of the two
+  and then reconciled (both forced by invariant 4).
+- **Technique engine.** `lastCheckedAt` (the exact time a tempo was logged) is a stored
+  scale field (in `normalizeTechniqueItem` and the undo snapshot, `lib/storage.js`), set
+  by `completeTask(state, itemId, today, tempo, now)` (`lib/technique.js` has no clock;
+  `App.jsx`'s `handleTechniqueComplete` passes `Date.now()`) and moved with the tempo in
+  `mergeImportedTechnique`. **Any new place that logs a tempo must pass the time**, or
+  that tempo can't win a same-day tie; null means "saved before this existed", never
+  guess it. The walk's advance step is one function, `nextWalkPosition` / `walkStepPast`
+  (`lib/technique.js`), used by `completeTask` and the merge: don't inline it again. The
+  merge steps the walk once (`settleWalk`), only for a step whose completion came from
+  the OTHER side than the walk's value and which still stands where it began: two
+  devices that did the day's task agree on one step, and "advance once per side" breaks
+  that. Don't add a rule that drops an unfinished task of a switched-off scale. A done
+  task puts its scale's day, last practiced date and last-used methods back if the merge
+  left them out. `status: "identical"` means identical BY PARTS, not by fingerprint:
+  Pass 120 must treat it as in sync (record the account's revision, don't upload). No
+  recorded `parts` answers `"ask"` and the caller falls back to
+  `mergeImportedTechnique`.
+- **The simulations are the safety net** (`test/pieceMerge.test.mjs`,
+  `test/techniqueMerge.test.mjs`: seeded two-device runs, invariants checked after every
+  merge). Any change to an engine must keep them green on seeds 1 to 300 (every kind of
+  edit) and 1 to 100 (everyday mix), and a re-break that doesn't fail them means a hole
+  in the simulation. **Run it wider before trusting a change** (copy the test and raise
+  `RUNS`): the technique engine's last bug only showed past seed 2400. Design:
+  [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117) and
+  [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118).
+  Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two copies
+  disagree" and Pass 118 open item 9) before Pass 120.
 
-**Since Pass 114 (2026-10-10), the live site is connected to accounts.** Its
-Vercel **Production** environment has the production Supabase project's two
-settings (`measureone-prod`); Preview and local development keep the test
-project's. The app code didn't change: accounts appear on a site only while
-`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` were present when it was built.
-The owner's own account exists (invited, backed up and restored on a phone on
-2026-10-10) and is the only one. Six things worth knowing:
+### Several tabs of one browser (Pass 119)
+
+Every tab shares one `localStorage` but keeps its own `pieces`. Until Pass 119 the tab
+that saved last silently replaced the other's work and a deleted piece came back
+(reproduced with the real load/save functions). All the deciding is in `lib/tabSync.js`
+(pure, `test/tabSync.test.mjs`); `App.jsx` only schedules it. Rules:
+
+- **`reconcileFromStorage` decides per piece:** nothing; **reload** (through
+  `validateAndMigratePiece`) when nothing is unsaved here; **remove** when another tab
+  deleted it (never written back, even with an unsaved change here); **add**; **merge** by
+  part (Pass 117's engine, base = the copy this tab last saved, this tab winning a
+  same-part conflict); **keep** when it can't be put together. "Unsaved" means different
+  CONTENT, never a different object. A tab's own pending delete beats another tab's
+  change. Storage that can't be read, or an unusable entry, is never a deletion. The
+  technique library follows the same cases with `planTechniqueMerge`'s roles swapped.
+- **The same chunk logged in two tabs is a conflict in the engine** (one chunk's whole
+  progress entry is one part) and it would keep ONE entry whole, dropping a session.
+  `foldConflictedProgress` (`tabSync.js`, not exported) adds the other tab's sessions,
+  done days and focus-spot sessions back (by content; an undo is not undone). **Pass 120
+  meets the same thing with the account's copy: move the fold into `pieceMerge.js` or
+  export it**, or "most recent wins" drops sessions. A grid change in one tab against
+  progress in the other is still a whole-piece conflict (this tab's copy kept, the other
+  side's sessions dropped, console warning only; Decisions.md open item (i)).
+- **The write guard (`guardPieceWrites`, `guardTechniqueWrite`) holds a save when storage
+  moved under it** and the tab reconciles instead (`runTabSync`, via `requestTabSync`). It
+  checks byte-identical text first (0.22 ms on a 180 KB piece; the full comparison is
+  4.5 ms). **Any new place that writes a piece key must pass the guard:** import and
+  "Reschedule all" use `writePieceDirect`. `lastSavedPiecesRef` moves only through the
+  save effect, `settleBaselines` or `writePieceDirect`, **never by assignment from a
+  reconcile**: a reconcile registers a promise (`baselinesFor`) that settles only when the
+  committed state really holds the new copy, and a result is applied only to a copy that
+  is still the one it was worked out from (`applyPiecesResult`). Don't "fix" a held write
+  by writing anyway; it is the overwrite this pass exists to stop.
+- **`isPieceBusy` is the one "in use" test, shared with Pass 120:** an unconfirmed
+  Interleaved attempt, a running reassessment timer, an open settings draft for that
+  piece. Nothing is applied to a busy piece; the change is remembered
+  (`deferredTabSyncRef`) and applied when idle, and its own writes are held while storage
+  has moved (so its in-flight changes aren't on disk until it is idle).
+- **The lease (`createTabLease`):** one tab at a time uploads and looks at the account
+  (`runSync`, `requestCheck`; both re-check `holdsLease()` when they run). Record
+  `measureone-tab-lease` `{ tabId, at }`: heartbeat every 10 s, takeover after 30 s without
+  one (never later than 32 s: every tab looks every 2 s), released on `pagehide`; a tab
+  claims, waits 250 ms and looks again, and **a look during the wait does not cut it
+  short**. Only while signed in to an account service (otherwise no lease key, nothing
+  changes). A tab without it still follows storage. Taking it first does a full catch-up.
+  **Pass 120's automatic apply must run only where `holdsLease()` is true and skip busy
+  pieces.** Not gated, on purpose: the buttons a person presses (Back up, Get changes,
+  Review) and two small device-record writes (`noteLocalDeletions`, startup
+  `withPartsRecorded`).
+- **To check "only one tab uploads" by hand, put two tabs in separate windows side by
+  side** (both visible), and show the Network panel's Method column. Not verified: a
+  browser may slow a tab that is out of sight, which could pass the lease to the visible
+  tab; if requests ever show in both tabs of ONE window, that is the first thing to rule
+  out. The preview check in Safari (2026-10-18) used two windows and passed.
+- **Left open:** no catch-up when a tab regains focus; a few milliseconds of cross-process
+  `localStorage` delay in the guard; a dead holder waits out 30 s; a tab on the old version
+  (a phone left open) ignores all of this until reloaded. Design, checks and the Safari
+  preview results:
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119).
+
+### Deploying and operating (Pass 114 on)
+
 - **A merge to `main` now ships to real accounts.** Anything touching
   `lib/accountSync.js`, `lib/backend.js` or the database must be tried on a
   preview (the test project) first, and a new migration file goes to the test
   project, then to production by hand in its SQL Editor (the app can't run
   it). **Never tick Preview on a production setting, and never put the secret
   key anywhere** (Vercel, `.env.local`, the repo). Deleting the two Production
-  settings and redeploying takes accounts off the live site again.
+  settings and redeploying takes accounts off the live site again. Production has the
+  production project's two settings (`measureone-prod`); Preview and local development
+  keep the test project's. Accounts appear on a site only while
+  `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` were present when it was built. The
+  owner's own account is the only one.
 - **Two things learned shipping Passes 115 to 118 (2026-10-15).** (1) **"Merged" on
   GitHub means merged into that pull request's own base.** A pass built on another
   unmerged pass's branch and merged "separately" lands in that branch, not `main`
-  (116 and 117 sat off `main` for two days). After she says she merged, check
+  (116 and 117 sat off `main` for two days). After the owner says she merged, check
   `git merge-base --is-ancestor <sha> origin/main`, the pull request's base, and that
   a file from the pass exists on `origin/main`. (2) **A change to what
   `canonicalPiece`, `canonicalTechnique` or `techniqueForComparison` return changes
@@ -2240,10 +817,10 @@ The owner's own account exists (invited, backed up and restored on a phone on
   `measureone-measure-one.vercel.app` serve the same deployment, but the
   browser keeps pieces per address and per browser. **The owner's real pieces
   are at `measureone-git-main-measure-one.vercel.app`**; the clean address
-  opens empty (found 2026-10-08). That address is also the production
-  project's Site URL and its only redirect URL. A verification must not write
-  to, or clear, storage at that address in the owner's browser, and "the live
-  site looks empty" usually means another address or another browser.
+  opens empty. That address is also the production project's Site URL and its only
+  redirect URL. A verification must not write to, or clear, storage at that address in
+  the owner's browser, and "the live site looks empty" usually means another address
+  or another browser.
 - **`scripts/check-rls.mjs` is the security check** (37 checks, two throwaway
   accounts created and deleted in the dashboard; it refuses a secret key or an
   account that already holds data, and takes the key and passwords hidden).
@@ -2254,292 +831,150 @@ The owner's own account exists (invited, backed up and restored on a phone on
 - **Invitation and reset links die after one hour** (production's Email OTP
   expiration is 3600 seconds), so an invitation is sent only when its person
   can open it at once.
-- **The way back is in `DEPLOYMENT.md` ("Rolling back")**, with the go-live
-  rollback point (the deployment of `8636cfa`). A change to a Vercel setting
-  only takes effect with a new deployment.
-- **The Free plan applies to both projects:** an idle project pauses after a
-  week (practice is unaffected; restore it in the dashboard) and Supabase keeps
-  no backups of it, **so since 2026-10-12 a free GitHub job copies the production
-  database every day into a separate PRIVATE repository,
-  `Chopinbby/measureone-backups`** (this repository is public: never put data
-  here). Check it by opening that repository's `LAST_BACKUP.txt` (today or
-  yesterday, counts as expected) and its Actions tab. A failed run, a drop in the
-  row counts, or a newest backup over 36 hours old (a second check there) fails a
-  run, and **GitHub emails the owner about failed runs only once the owner has
-  switched on Settings, Notifications, Actions (it appeared off on 2026-10-12; switched
-  on and confirmed that evening by a deliberate failure, whose email landed in Gmail's
-  Updates tab; repeat with limit 0, see that README)**. GitHub's timer is best effort: the job can
-  start hours late, and a skipped day sends no email by itself. It saves only the
-  app's two tables, never Supabase's sign-in tables. Re-run its restore fire drill
-  now and then (`tests/restore-drill.mjs` there). Manual export and the export
-  reminder stay.
-  See
+- **The way back is in `DEPLOYMENT.md` ("Rolling back")**, with the go-live rollback
+  point and the rollback points since. A change to a Vercel setting only takes effect
+  with a new deployment.
+- **The Free plan applies to both projects:** an idle project pauses after a week
+  (practice is unaffected; restore it in the dashboard) and Supabase keeps no backups
+  of it, **so since 2026-10-12 a free GitHub job copies the production database every
+  day into a separate PRIVATE repository, `Chopinbby/measureone-backups`** (this
+  repository is public: never put data here). Check it by opening that repository's
+  `LAST_BACKUP.txt` (today or yesterday counts as expected) and its Actions tab. A
+  failed run, a drop in the row counts, or a newest backup over 36 hours old (a second
+  check there) fails a run, and **GitHub emails the owner about failed runs only once
+  the owner has switched on Settings, Notifications, Actions** (done and confirmed
+  2026-10-12 by a deliberate failure; the email landed in Gmail's Updates tab; repeat
+  with limit 0, see that README). GitHub's timer is best effort: the job can start
+  hours late, and a skipped day sends no email by itself. It saves only the app's two
+  tables, never Supabase's sign-in tables. Re-run its restore fire drill now and then
+  (`tests/restore-drill.mjs` there). Manual export and the export reminder stay. See
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
   and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).
 
-**Since Pass 115**, "same" and "changed" are trustworthy before devices talk by
-themselves. Nothing fetches or applies the account's changes yet (Passes 116,
-120). Four things worth knowing:
-- **An upload attempt first writes the fingerprint of what it's about to send
-  into that item's device-record entry** (`sent`, the last 5; `withSentRecorded`,
-  `lib/accountSync.js`), cleared when the account confirms a revision (the
-  `with...Uploaded` functions replace the whole entry). `judgeRefusal` adopts a
-  refused row that matches the current copy OR anything in `sent`, recording the
-  ROW's fingerprint so the piece stays waiting; anything else is held. This
-  closes the false hold. `cleanEntry` drops fields it doesn't know, so a new
-  entry field must be added there too.
-- **`mergeSessionArrays` (`lib/storage.js`) compares sessions by content, key
-  order ignored.** `withComparableSessions` is gone. File import got the same
-  fix (an identical-but-reordered session is no longer kept twice).
-- **The technique library's `updatedAt` is left out of `sameTechnique` and
-  `techniqueFingerprint` only** (`techniqueForComparison`). `dayList` and
-  `walkPosition` stay in. The fingerprint changed once, so every device uploads
-  its library once after this ships. Don't compare technique through
-  `canonicalTechnique` directly.
-- **The Account status line shows held and the normal line together**; "not
-  answering" still replaces both. See
-  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115).
+## Open threads and what's next
 
-**Since Pass 116**, the app **notices**, quietly, that another device changed
-something, and says so with one added line in the Account panel ("Changes from
-another device: 3 pieces. Press Get changes."). **Nothing is applied**: "Get
-changes from your account" is still the only way a change arrives, and works
-exactly as in Pass 112. Five things worth knowing:
-- **The check reads only `id, revision, deleted_at` from `pieces` (paged like
-  `countLiveAccountPieces`) and only `revision` from `technique`, never the
-  `data` column** (`checkAccountChanges`, `lib/accountSync.js`). A test asserts
-  the recorded selects; keep it that way, because the check repeats every few
-  minutes for as long as the page is open.
-- **When it runs is decided in the library, not in `App.jsx`**:
-  `createAccountChecker` / `checkIsDue` hold the throttle (focus or visible at
-  most once a minute, every 5 minutes on the clock, startup and online always,
-  never hidden, never two at once). `App.jsx`'s `requestCheck` only adds the
-  gates that need app state: signed in, first backup checked, and no upload run,
-  manual backup or "Get changes" running. A new trigger goes through
-  `requestCheck`, never straight to `checkAccountChanges`.
-- **`classifyAccountChanges` is revision-only, and "own upload is never newer"
-  rests on one fact: the record takes the revision when the account confirms an
-  upload.** So a result is not believed if an upload, backup or "Get changes" ran
-  while the check was reading (`checkRowsUsable`, discarded and retried by the
-  next trigger). Held pieces go in `held` only, never also `newer`/`deleted`
-  (they already have their own message). A piece this device deleted is never
-  `added`.
-- **Keep the light rows, not the text.** `App.jsx` keeps the last read
-  (`checkRowsRef`) and `refreshSyncInfo` re-sorts it against the device record
-  every time (`syncSnapshot({ accountRows })`), so the line shrinks on its own
-  after uploads or "Get changes". Don't store the sentence.
-- **A failed check shares the uploads' failure count** (after two in a row the
-  status says "isn't answering") and shows no error of its own; a good check
-  resets the count, otherwise a count raised by checks alone could never clear.
-  Not built, on purpose (see
-  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116)):
-  applying or merging anything (117 to 120), deletions (122), live push.
+See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently singled out as
+"next"; pick from the priority-ordered backlog there. **The accounts work is the one
+thread in motion:** it is mid-Phase 2 (Passes 115 to 118 are built and live; 119, tabs of
+one browser, is built), and the
+passes the docs name next are 120 (wires the two merge engines in and applies other
+devices' changes automatically, the most recent change winning item by item:
+**decided 2026-10-15**), 121 (only what "most recent" can't settle) and 122
+(deletions). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
+copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
+policy and terms, a real email provider, monitoring, in-app change of email and
+account deletion) is separate; see Roadmap.md and Accounts-and-Backend.md. Still not
+built elsewhere: a persisted "learned" state, a second Tier 1 rung and repertoire
+rotation (Stage 5); see
+[`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
 
-**Since Pass 117**, there is an engine for merging two copies of a piece **by
-part** instead of by whole piece (`src/lib/pieceMerge.js`, new), and the device
-record remembers what each part looked like at the last sync. **Nothing uses the
-engine yet**: "Get changes" and Review still go through Phase 1's whole-piece
-import merge (Pass 120 wires the engine in, Pass 121 asks the question, 118 does
-the technique library, 122 deletions; **since 2026-10-15 Pass 120 also applies it
-automatically and "most recent wins" replaces the conflict list, so 121 shrinks to
-what that can't settle**). Seven things worth knowing:
-- **What a part is:** every top-level field except `progress`, `updatedAt` and
-  `lastLoggedAt`, and each `progress` entry on its own (key `progress:<id>`: chunk
-  ids, transition/combo ids, `__consolidation__`, `__cold_start__`, `sr_<sectionId>`).
-  A NEW top-level field is a part automatically; a new field that is derived on
-  load (like `lastLoggedAt`) must be re-derived by the engine or the simulation's
-  invariant 4 fails.
-- **The device record's entry gains `parts`** (`{ part: fingerprint }`, no copy of
-  the piece), written wherever a piece is recorded: a confirmed upload, the first
-  backup, a restore or merge (the parts of the **account's** copy), a refusal adopted
-  as "the same". **A new place that records a piece must record its parts** or that
-  piece will "ask". An adopted row that is only an earlier version of this device's
-  own piece records none, on purpose. A quiet startup step (`withPartsRecorded`,
-  `App.jsx`) records them for pieces that still equal their record.
-- **`fingerprint` and `canonicalPiece` now live in `pieceMerge.js`** (re-exported by
-  `accountSync.js`): the engine never imports the account code, so the account code
-  can import the engine later without a cycle. `canonicalPiece` caches per object and
-  returns a SHARED result: read-only.
-- **Per part:** changed on one side only, take that side; changed on both to the same
-  value, agreement; to different values, a conflict for that part only, this device's
-  value kept and both values listed. **A conflict is never resolved in the engine**
-  (**Pass 120 changes this:** the owner decided on 2026-10-15 that the most recent
-  change wins instead). `status: "local-only"` returns `local` itself (the same
-  object) untouched.
-- **One "travel together" rule:** the sides disagree about
-  `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
-  changed progress or the marker: one **whole-piece** conflict. **The reschedule marker
-  is not a merge rule.** The pass's required test (A reschedules, B logs a chunk the
-  marker lists) left a chunk both listed and done, which the scheduler read as a
-  "behind" day for good; that state can't be reached on one device, so the fix is in
-  the scheduler (`classifyDayCompletion` reads a chunk done EARLIER than its remainder
-  day as not owed; see "Rules that matter"), and the merge asks nothing. Don't rewrite
-  the marker at merge time: it re-flows every other chunk the marker places.
-- **Derived, not chosen:** `lastLoggedAt` is recomputed from the merged sessions (not
-  "the later of the two"), and in `scheduleMode: "minutes"` `daysToLearn` is the larger
-  of the two and then reconciled. Both were forced by invariant 4.
-- **The simulation is the safety net** (`test/pieceMerge.test.mjs`: seeded two-device
-  runs, six invariants after every merge). Any change to the engine must keep it green
-  on seeds 1 to 300, and a re-break that doesn't fail it means a hole in the
-  simulation. See [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117)
-  and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 117, five
-  calls: call 1 was changed at the owner's request on 2026-10-14; calls 2 to 5 were
-  confirmed as built on 2026-10-15).
+## Find things
 
+| Question | Where |
+|---|---|
+| How is the plan scheduled, rescheduled, smoothed? | [`Algorithms.md`](docs/Algorithms.md#timeline--scheduler), [`#rescheduling`](docs/Algorithms.md#rescheduling); `lib/scheduling.js` |
+| Chunking, splitting, section run-throughs, focus spots | [`Algorithms.md`](docs/Algorithms.md#splitting-a-chunk-pass-97), [`#section-run-throughs`](docs/Algorithms.md#section-run-throughs), [`#focus-spots-v1`](docs/Algorithms.md#focus-spots-v1); `lib/chunking.js` |
+| Confidence and the maintenance ladder | [`Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built), [`Algorithms.md`](docs/Algorithms.md); `lib/confidence.js`, `lib/ladder.js`, `lib/maintenance.js` |
+| Revival | [`Algorithms.md`](docs/Algorithms.md#revival); `lib/revival.js`, `TodayTab.jsx` |
+| Technique practice (scales) | [`Technique-Practice.md`](docs/Technique-Practice.md); `lib/technique.js`, `components/tabs/technique/` |
+| Backups, import/export, merging a backup | [`Algorithms.md`](docs/Algorithms.md#import-merge); `lib/storage.js` |
+| Accounts, sync, the device record, the merge engines | [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md); `lib/backend.js`, `lib/accountSync.js`, `lib/pieceMerge.js`, `lib/techniqueMerge.js` |
+| Deploys, rolling back, the live addresses | [`DEPLOYMENT.md`](DEPLOYMENT.md) |
+| What a piece or progress field means | [`Data-Model.md`](docs/Data-Model.md) |
+| Why something was built this way, what was rejected, what is still open | [`Decisions.md`](docs/Decisions.md) ([`#open-questions`](docs/Decisions.md#open-questions)) |
+| What a person clicks through | [`User-Flows.md`](docs/User-Flows.md) |
+| How things should look and behave; the product's rules | [`UX-Principles.md`](docs/UX-Principles.md), [`Product-Principles.md`](docs/Product-Principles.md) |
+| Which constants are hand-picked | [`Research.md`](docs/Research.md) |
+| Terminology | The UI says **Daily Practice**; the tab id and the component are still `today` / `TodayTab`. |
+| Tests | `npm test` (`node:test`; lib-level only, nothing in `components/` is tested) |
 
-**Since Pass 118**, there is an engine for merging two copies of the **technique
-library** by part (`src/lib/techniqueMerge.js`, new), and the device record's
-technique entry remembers what each part looked like at the last sync (`parts`, like a
-piece's). **Nothing uses the engine yet**: backups, restore and "Get changes" still
-merge the library with `mergeImportedTechnique` (`lib/storage.js`; Pass 120 wires the
-engine in; the one change to it is that `lastCheckedAt` moves with the tempo). Unlike a
-piece, the library is **always** mergeable: no conflict list, no question; where both
-sides changed the same octaves, hands or setting to different values the account's value
-is kept and a notice says so (**Pass 120 changes this to "the most recent wins"**,
-decided 2026-10-15). **The user confirmed the pass's calls on 2026-10-15** and
-changed two (below). Nine things worth knowing:
-- **What a part is** (`techniquePartKey`): per scale its settings (`starred`,
-  `rotation`, `octaves`, `hands`), its tempo check (tempo, check date, **the exact time
-  it was logged** and check octaves, **together**), its last practiced date, **each practiced date on its own**, and its
-  last-used date for each method (**one part per scale and method**); per method its star and switch; each custom method; the two
-  settings; the walk; per task on today's list (by date and scale) its done state and
-  its plan. **A part holding its default is left out** (a scale not starred, a task not
-  done, a method with the default entry the app keeps after toggling back), so "no
-  part" and "the default" are the same thing. **A new field on a scale, a method, the
-  settings or a task must be given a part** (`partsOfCanonical`) or a change to it is
-  invisible to a merge, and the simulation's per-field checks must learn it.
-- **Per part:** changed on one side only, take that side (**an undo travels the same
-  way**: it changes the same parts the check-off did); same value on both, agreement;
-  different values, a rule per kind (octaves, hands and the settings: the account's with
-  a notice; the tempo check: newer check date wins, **an empty tempo never replaces a
-  real one**, and on the same date **the one logged later by its exact time** (a time
-  beats none; no time on either: the account's); dates: three-way per date; a method's
-  last-used date: three-way, later date when both changed it (**an earlier "one list per
-  scale, folded" version failed "merging twice gives the same result"**); a task: done on
-  both is done; **undone on one side and done again on the other: whichever device's
-  library changed most recently (`updatedAt`) decides, a tie keeps the completion, and if
-  the undo wins the scale takes that side's tempo check, so the tempo goes back with
-  it**). A yes/no part can't conflict.
-  Scales and custom methods are **never removed**; two scales added apart stay two.
-- **Today's list:** same date merges task by task (a task on one list only is kept if
-  added or changed there, **taken off if the other side took it off and this side left
-  it alone**: "kept always" made a removed task come back on every merge); different
-  dates, the later list wins whole. **Two lists built apart can add up to more than
-  `scalesPerDay`** (open). **Don't add a rule that drops an unfinished task of a
-  switched-off scale**: the app's own undo leaves one, and the rule broke "this device
-  changed nothing, so the merge is exactly the account's library".
-- **The walk's advance step is one function now**, `nextWalkPosition(items,
-  walkPosition)` / `walkStepPast` in `lib/technique.js`, used by `completeTask` and by
-  the merge (a 200-library test pins them together); don't inline it again. The merge
-  steps the walk **once**, only for a step whose completion came from the OTHER side
-  than the walk's value and which still stands where it began (`settleWalk`). **Two
-  devices that did the day's task agree on one step; "advance once per side" breaks it**
-  (re-broken on purpose: 12 tests fail). The first version, using every done task's step
-  note, stepped the walk on a library where both devices already agreed (seed 51).
-- **A done task puts its scale's day, last practiced date and last-used methods back**
-  if the merge left them out (an undo on one side meeting a redo on the other). It only
-  adds.
-- **`lastCheckedAt` (the exact time a tempo was logged) is a stored scale field now**
-  (the user chose "Exact now", 2026-10-15, so the later of two same-day tempos wins by
-  its real time). It lives in `normalizeTechniqueItem` and the undo snapshot
-  (`lib/storage.js`), is set by `completeTask(state, itemId, today, tempo, now)`
-  (`lib/technique.js` has no clock: the caller passes `now`; `App.jsx`'s
-  `handleTechniqueComplete` passes `Date.now()`), and moves with the tempo in
-  `mergeImportedTechnique`. **Any new place that logs a tempo must pass the time**, or
-  that tempo can't win a same-day tie. Empty (null) means "saved before this existed";
-  never guess it. The library's whole fingerprint changed once, so each device uploads
-  its library once after this ships.
-- **`status: "identical"` means identical BY PARTS, not by fingerprint.** A method
-  toggled back leaves a default-holding entry the whole-library fingerprint still sees
-  (`techniqueFingerprint`) and the parts don't. **Pass 120 must treat `"identical"` as in
-  sync** (record the account's revision, don't upload). No recorded `parts` answers
-  `"ask"`; the caller falls back to `mergeImportedTechnique`.
-- **`canonicalTechnique` moved to `techniqueMerge.js`** (re-exported by
-  `accountSync.js`, uncached). The technique entry gets `parts` wherever it is recorded
-  (confirmed upload, first backup, restore or merge: the **account's** copy; an adopted
-  earlier version records none). `withTechniquePartsRecorded` (the startup step for a
-  library recorded before this pass) is built and tested but **`App.jsx` does not call it
-  yet**: one line for Pass 120. 48 scales are 260 parts, 14.5 KB in the record.
-- **The simulation is the safety net** (`test/techniqueMerge.test.mjs`: seeded two-device
-  runs, the invariants checked after every merge, and convergence at the end). Any change
-  to the engine must keep it green on seeds 1 to 300 (every kind of edit) and 1 to 100
-  (everyday mix); it caught four real bugs while this was built (the walk repair above,
-  a removed task coming back, dropped unfinished tasks, a per-scale list of last-used
-  methods that wasn't stable under a second merge). **Run it wider before trusting a
-  change**: the last bug only showed past seed 2400 (copy the test and raise `RUNS`). See
-  [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118),
-  [`docs/Technique-Practice.md`](docs/Technique-Practice.md#on-more-than-one-device-pass-118)
-  and [`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend) (Pass 118, nine calls,
-  confirmed 2026-10-15, and nine open items; the ninth, the first live sighting of a
-  spurious technique hold, is the one to read before Pass 120).
+## What each pass added
 
-**Since Pass 119**, every tab of one browser stays in step, and only one of them does
-the account work. Until then the tab that saved last silently replaced the other's work
-(reproduced with the real load and save functions: a session logged in tab A was gone
-from storage after tab B, never told, logged on another chunk; a piece deleted in A came
-back when B changed its stale copy), and nothing listened for the `storage` event. All
-the deciding is in `src/lib/tabSync.js` (pure, tested in `test/tabSync.test.mjs`);
-`App.jsx` only schedules it. Nine things worth knowing:
-- **`reconcileFromStorage({ inMemory, inStorage, lastSaved })` decides what a tab does
-  about what storage now holds**, per piece: nothing; **reload** it (through
-  `validateAndMigratePiece`) when nothing is unsaved here; **remove** it when another tab
-  deleted it (even with an unsaved change here: never written back); **add** a new one;
-  **merge** by part (Pass 117's engine, base = the copy this tab last saved) when both
-  changed it, this tab's value winning a same-part conflict; **keep** this tab's copy when
-  it can't be put together. "Unsaved" means different CONTENT (the engine's parts), never a
-  different object. A tab's own pending delete beats another tab's change. An unreadable
-  stored entry is never a deletion. The technique library follows the same cases, with
-  `planTechniqueMerge`'s roles swapped (that engine keeps the REMOTE side's value in a
-  conflict; here this tab's is the one to keep).
-- **The engine treats one chunk's whole progress entry as one part, so the same chunk
-  logged in two tabs is a conflict, and the engine keeps ONE entry whole, dropping a
-  session.** `foldConflictedProgress` (`tabSync.js`, not exported) keeps this tab's entry and
-  adds the other tab's sessions, done days and focus-spot sessions added since the last
-  save (by content; an undo is not undone). The ladder state stays this tab's. **Pass 120
-  will meet the same thing with the account's copy: move the fold into `pieceMerge.js` or
-  export it, or "most recent wins" drops sessions.** A grid change in one tab against
-  progress in the other is still a whole-piece conflict: this tab's copy is kept, the other
-  side's sessions are dropped, and it is only logged to the console (Decisions.md open item (i)).
-- **The write-time guard (built, not the cheap option).** Before the pieces save effect writes,
-  `guardPieceWrites` holds back any piece whose stored copy is no longer what this tab last
-  saved or loaded, and the tab reconciles instead (`runTabSync`, via `requestTabSync`); the
-  technique save effect has `guardTechniqueWrite`. It checks byte-identical text first (0.22 ms
-  on a 180 KB piece; the full comparison is 4.5 ms and runs only when storage differs). **Any new
-  place that writes a piece key must pass the guard:** import and "Reschedule all" used to write
-  straight to storage and now go through `writePieceDirect`. `lastSavedPiecesRef` only moves
-  through the save effect, `settleBaselines` or `writePieceDirect`, **never by assignment from a
-  reconcile**: a reconcile registers a promise ("once this tab holds X, X is what it last saved",
-  `baselinesFor`) that settles only when the committed state really holds X, and a result is
-  applied only to a copy that is still the one it was worked out from (`applyPiecesResult`).
-- **`isPieceBusy` is the one "in use" test, shared with Pass 120** (`tabSync.js`): an
-  unconfirmed Interleaved attempt, a running reassessment timer, an open settings draft for
-  that piece. Nothing is applied to a busy piece (reload, merge or removal); the change is
-  remembered (`deferredTabSyncRef`) and applied when it is idle. Its write is held too while
-  storage has moved under it, so changes made to it meanwhile (provisional attempts, in
-  practice) are not on disk until it is idle. Nothing of the other tab's is lost.
-- **The lease** (`createTabLease`): one tab at a time uploads and looks at the account. A record
-  `measureone-tab-lease` = `{ tabId, at }`; the holder writes a heartbeat every 10 s, another tab
-  takes over after 30 s without one (never later than 32 s: every tab looks every 2 s), a closing
-  tab releases it on `pagehide`. A tab claims, waits 250 ms and looks again (no atomic
-  create-if-absent in `localStorage`; the Web Locks API isn't in Safari 14). **Only while signed
-  in to an account service**; signed out or with no connection settings there is no lease key and
-  nothing else changes. `runSync` and `requestCheck` re-check `holdsLease()` when they run (and a run
-  in flight stops between items when the lease is lost); a tab without it still reloads what the
-  holder saves. Taking the lease first does a full catch-up (`runTabSync`), then starts the upload
-  and the look again. **Pass 120's automatic apply must run only where `holdsLease()` is true and
-  must skip busy pieces.**
-- **Not gated by the lease, on purpose:** the buttons a person presses (Back up this device, Get
-  changes, Review), and two small device-record writes in every tab (`noteLocalDeletions`, so a
-  deletion made in a tab without the lease isn't forgotten, and the startup `withPartsRecorded`).
-- **Don't "fix" the guard's hold by writing anyway.** A held write is correct: writing it is exactly
-  the overwrite this pass exists to stop. If something is held forever, the reconcile is deciding
-  differently from the guard, and the two are the same function on purpose.
-- **Re-broken on purpose, and each caught:** the reconcile keeping the older copy and writing a
-  deleted piece back (17 tests fail; the two tabs rewrite each other forever), two tabs able to
-  hold the lease at once (4 fail), and no guard (8 fail, both reproduced bugs among them). A seeded
-  two-tab run (200 seeds committed, 6,000 run) loses no logged session.
-- **Found, left for later:** no catch-up when a tab regains focus (a frozen tab catches up at its
-  next write or when it takes the lease); the guard still has a few milliseconds of cross-process
-  `localStorage` delay to live with; a dead holder is waited out for 30 s (only a page that fires
-  `pagehide` hands it on at once). See
-  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119).
+One line per pass that earlier versions of this file described at length; the detail
+is in `docs/` (start with the Decisions entry for the pass) and in `git log`. **Keep it
+that way:** a new pass adds one line here and its detail goes in `docs/`; a new rule
+goes under "Rules that matter every session" only if forgetting it breaks something
+silently.
+
+- **Pass 29** — Interleaved practice mode on Daily Practice (rotates chunks past
+  Stabilizing; provisional logging). [`Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29)
+- **Pass 30** — Piece Map "tempo climbing" nudge (`hasClimbingTempo`).
+- **Pass 31** — `ChecklistItem` shows static instructional copy instead of a per-chunk
+  method tip.
+- **Pass 32a** — persisted `sortOrder` and a reorderable piece switcher (whole rows only).
+- **Pass 32b** — the "Recurring material payoff" panel was removed from Progress.
+- **Pass 36** — the reschedule dialog offers a concrete way out when the remaining work
+  doesn't fit.
+- **Pass 38** — revival copy softened; "Start/Continue revival" became a primary button.
+- **Pass 39** — `isPlanActuallyComplete` and `isPieceLearned`; minutes-mode plans
+  auto-extend; days-mode pieces get a "Past your target date" prompt.
+- **Pass 42** — `AllPiecesTab` (cross-piece summary, week-only time, 14-day heatmap);
+  work title required for multi-movement works.
+- **Pass 43** — Overview "Continue learning / maintenance" shortcut; Archive gated on a
+  finished plan.
+- **Pass 45** — `classifyDayCompletion` and day states on Overview's first-week list.
+- **Pass 46** — the same day states on the Timeline, plus a reschedule banner there.
+- **Pass 47** — Daily Practice's "Go to Day N" catch-up button.
+- **Pass 48** — a day swept into a reschedule collapses to "Tasks rescheduled";
+  reschedule history chains through `previous`.
+- **Pass 49** — section run-throughs became a repeating due/locked gate.
+- **Pass 50** — Piece Map shows base chunks only; "Related chunks" in the detail modal.
+- **Pass 51** — Progress "Estimated vs. actual practice time"; `piece.sections` kept
+  `start <= end`.
+- **Pass 52** — difficulty display labels Workable / Challenging / Difficult.
+- **Pass 53** — `NumberInput` gained `onDraftChange` and `acceptPlaceholderOnTab`.
+- **Pass 54** — revival presets relabeled (Lost / Rough / OK / Comfortable / Solid).
+- **Pass 55** — the "what's this revival for?" question was removed.
+- **Pass 56** — the Cold-Start check (`__cold_start__`). [`Algorithms.md`](docs/Algorithms.md#cold-start-check)
+- **Pass 57** — `RandomStartPanel` on Daily Practice.
+- **Pass 58** — piece-level "Overall confidence" (`computeOverallConfidence`) with a
+  manual override.
+- **Pass 59** — gap-proportional tempo ratchet. [`Algorithms.md`](docs/Algorithms.md#tempo-ratchet-pass-59)
+- **Pass 60** — tempo maintenance mode near the target tempo.
+- **Pass 61** — Holding's tempo floor retired; `holdingReviewCount`.
+- **Pass 66** — due reviews surface inside active plans (`mergeLiveDueReviews`); reviews
+  priced by difficulty everywhere.
+- **Pass 67** — the "Go to Day N" scan is the single source for whether the button shows.
+- **Pass 68** — section run-throughs render only on real today.
+- **Pass 69** — Interleaved needs two graduated chunks, grades its rotation by
+  difficulty, and draws from the whole piece.
+- **Pass 74** — reschedule anchors to `realCurrentDay`.
+- **Pass 75** — Week view and Master Agenda collapse swept days; `withLiveReviewStatus`.
+- **Passes 76 to 82** — revival reassessment and small UI work (see `git log`).
+- **Pass 83** — revival gated on plan completion; the abandoned-plan reminder.
+  [`Algorithms.md`](docs/Algorithms.md#the-abandoned-plan-reminder-pass-83)
+- **Pass 84** — the "today" tab is called **Daily Practice** everywhere it is named.
+- **Pass 85** — `.ghost-btn:disabled` got a real visual treatment.
+- **Pass 87** — `ReassessSequencePanel`: revival reassessment left Piece Map.
+- **Pass 88** — Revival folded into Daily Practice (no tab of its own).
+- **Pass 89** — difficulty-first introduction order (`sortPracticeChunksForIntroduction`).
+- **Pass 90** — unified workload smoothing (`smoothOverloadedDays`); read-only historical
+  cards. [`Algorithms.md`](docs/Algorithms.md#historical-cards-on-daily-practice)
+- **Pass 91** — focus spots, experimental v1. [`Algorithms.md`](docs/Algorithms.md#focus-spots-v1)
+- **Pass 92** — shared `classifyDayEmptyState` on every day-list surface.
+- **Pass 93** — Settings split into a landing page and an edit page; `mergeEditedPiece`.
+- **Pass 94** — five small UI fixes (shared button-width rule, Exit interleaved, and more).
+- **Pass 96** — Piece Map's chunk detail links focus spots into Daily Practice (display
+  and navigation only: spots are still added, resolved and deleted only from Daily
+  Practice or the Wizard).
+- **Pass 97** — the "Split a chunk" panel. [`Algorithms.md`](docs/Algorithms.md#splitting-a-chunk-pass-97)
+- **Pass 101** — the Technique page (daily scales and arpeggios): `TechniqueTab.jsx`, in
+  `NAV_BASE`.
+- **Pass 102** — the shared `TechniquePanel` on Master Agenda and Daily Practice (when it
+  shows and the Status wording are `techniqueTodaySummary` / `agendaStatusLabel`,
+  `lib/technique.js`).
+- **Pass 103** — piece keys (`homeKey`, `otherKeys`) tag matching scales.
+- **Pass 104** — backups carry the technique library. (Pass 80, redone after this:
+  no em dashes in app copy.)
+- **Pass 109** — optional account sign-in (Supabase).
+- **Pass 110** — "Back up this device": a first backup, checked by reading it back.
+- **Pass 111** — every later change goes up by itself.
+- **Pass 112** — restore, "Get changes" and Review.
+- **Pass 113** — change password; sign out of all devices.
+- **Pass 114** — the live site connected to accounts (2026-10-10).
+- **Pass 115** — "same" and "changed" made trustworthy (`sent` fingerprints).
+- **Pass 116** — the app notices, quietly, that another device changed something.
+- **Pass 117** — the merge-by-part engine for a piece (not yet called).
+- **Pass 118** — the merge-by-part engine for the technique library (not yet called).
+- **Pass 119** — tabs of one browser stay in step; only one does the account work.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119)

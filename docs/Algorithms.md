@@ -3491,8 +3491,8 @@ Map component, sharing (and conditionally hiding) most of its markup; that
 sharing is gone. `PieceMapTab` no longer accepts `sequentialMode`,
 `initialSelectedId`, `onFinishSequential`, or `hideHeader` at all.
 `onFinishReassessment` (`App.jsx`) computes and stores the revival plan in
-the same call as of Pass 88 — see that pass's entry in `CLAUDE.md`'s
-Roadmap section for the mechanics; nothing about this panel's own props or
+the same call as of Pass 88 — see [Decisions.md](Decisions.md#revival)
+for the mechanics; nothing about this panel's own props or
 behavior changed to make that true, it's purely a change to what its
 `onFinishReassessment` callback does.
 

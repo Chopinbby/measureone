@@ -196,10 +196,11 @@ this stat is a display rollup of the existing hand-tuned
 > maintenance-mode pinning mentioned in the backlog item below, Holding's
 > tempo-floor retirement, revival reassessment's difficulty-reassess
 > button and per-chunk timer, Interleaved-mode refinements, and more —
-> see `git log` and [CLAUDE.md](../CLAUDE.md)'s own changelog for what
+> see `git log` and the one-line pass list in [CLAUDE.md](../CLAUDE.md) for what
 > actually landed) but this "Since Pass N" list wasn't kept current
-> through that stretch. Not backfilled here — see the equivalent note in
-> [CLAUDE.md](../CLAUDE.md) for why. Treat a jump in pass numbers below as
+> through that stretch. Not backfilled here, to avoid reconstructing history
+> from a summary rather than from having done the work (CLAUDE.md's pass list
+> does the same for Passes 76 to 82). Treat a jump in pass numbers below as
 > a documentation gap, not evidence that nothing happened in between.
 
 **Since Pass 83**, both "Start revival" entry points (`OverviewTab`'s
@@ -240,8 +241,8 @@ entry for the gap.
 > than once before settling back in Settings; per-card reassess buttons
 > replaced by one shared bottom panel; the reassessment sequence itself
 > narrowed to base practice chunks only, not transitions). See
-> [CLAUDE.md](../CLAUDE.md)'s own changelog and
-> [Decisions.md](Decisions.md#revival) for the full detail this list
+> [Decisions.md](Decisions.md#revival) (and the one-line entries in
+> [CLAUDE.md](../CLAUDE.md)'s pass list) for the full detail this list
 > wasn't kept current enough to carry — same gap, same reason, as the note
 > above.
 
@@ -322,7 +323,6 @@ chunk" panel below Reassess; confirm-and-no-undo; history copied to the
 second half, not double-counted; reschedule history preserved; a split pair
 drawn together on Piece Map), with rules for what a later Settings edit or a
 mismatched backup import does to existing splits. See
-[CLAUDE.md](../CLAUDE.md)'s own changelog and
 [Decisions.md](Decisions.md#scheduling),
 [Decisions.md](Decisions.md#ux), and
 [Decisions.md](Decisions.md#focus-spots-v1) for the full detail (Passes

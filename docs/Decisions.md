@@ -7959,6 +7959,52 @@ what it rules out.
   (iv) **A wrong device clock** is not guarded against; the account's own order of
   arrival could break a near tie. Not designed.
 
+- **Pass 119 — every tab of one browser stays in step, and one does the account work
+  (2026-10-16 to 2026-10-18).** `lib/tabSync.js` (new), `App.jsx`, and the docs; merged as
+  pull request #71. The design and the checks are
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119).
+  The card named the cases and left the rest to the build, so these are the calls made
+  that a reader might not expect. **The card's own questions were answered by the build;
+  the others below were not put to the owner and are logged for her to overrule.**
+  1. **The write-time guard was built, not the cheaper "rely on the event" option** (the
+     card said "say which you built and why"). The event alone leaves a gap of a few
+     milliseconds, and a tab frozen in the background gets no event at all. The guard is
+     the same function as the event handler, so the two can't disagree. A first version
+     cost about 4.5 ms per save on a heavy piece (180 KB, 1,600 sessions), so a
+     byte-for-byte check of the stored text runs first (0.22 ms).
+  2. **A tab's own unsaved delete beats another tab's change, and another tab's delete
+     beats this tab's unsaved change.** Neither side's change to a piece that is being
+     deleted is worth keeping, and the opposite rule brings back a piece the person just
+     deleted, which is the bug the pass fixes.
+  3. **In a same-part conflict this tab's value is kept** (the card: "keep this tab's
+     copy"). The technique engine keeps the *remote* side's value, so the roles are
+     swapped for tabs.
+  4. **The same chunk logged in both tabs keeps both tabs' sessions** (`tabSync.js`
+     folds them). Pass 117's engine treats one chunk's whole progress entry as one part and
+     would keep one side whole, dropping a session. The fold is **for tabs only**: it is
+     not in `pieceMerge.js` (not on the card's list) and the account path does not use it.
+  5. **A piece in use is not touched by another tab, and its own writes are held while
+     storage has moved under it.** Writing would overwrite the other tab; merging would be
+     applying. The cost, accepted: changes made to that piece while it is in use
+     (provisional attempts, in practice) are not on disk until it is idle.
+  6. **The lease:** a heartbeat every 10 s, takeover after 30 s without one, every tab
+     looks every 2 s (a takeover is never later than 32 s; it was 5 s and measured at 35 s
+     in the browser). Only while signed in. **The buttons a person presses (Back up, Get
+     changes, Review) are not gated** (they asked for them), **and two device-record writes
+     stay in every tab** (noting a deletion, and the startup parts recording), so a delete
+     made in a tab without the lease is not forgotten. Web Locks was ruled out by the card
+     (not in Safari 14).
+  7. **Import and "Reschedule all" were routed through the guard** (`writePieceDirect`).
+     Not on the card's list, but both write a piece straight to storage and a guard they
+     bypass is a hole.
+  8. **Two flaws were found in a pre-commit review and fixed:** storage that can't be read
+     at all was read as "every piece was deleted", and a lease claim could be confirmed
+     before its 250 ms wait was over. Each has a test that fails without its fix.
+  9. **Checked on the real preview, in Safari, with the test account (2026-10-18):** only
+     one window sent uploads and looks; the window that did not hold the lease still heard
+     and saved what was logged there; closing the holder let the other window take over
+     and upload.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -8408,6 +8454,39 @@ oversight to silently fix; surface it instead.
      item** ([When two copies disagree](#open-questions), below): that **subsumes (a)**
      (a refused upload is merged and sent again instead of held, so there is nothing to
      re-judge), and leaves (b), (c) and (d) standing.
+- **Several tabs of one browser (Pass 119): what is still open (logged 2026-10-18; the
+  first two are not built, the rest are known limits).** Design:
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119).
+  1. **A chunk-grid change in one tab against progress in the other can't be put
+     together.** The engine's "travel together" case (the same as open item (i) under
+     "When two copies disagree"). For tabs this tab's copy is kept, so the other side's
+     sessions, keyed by the old chunk ids, are dropped; it is reported in the console
+     only. A few milliseconds of window, but not settled. **Owner:** the owner's call
+     (re-home by measure position, or hold).
+  2. **The session fold is not shared.** `foldConflictedProgress` (`tabSync.js`, not
+     exported) keeps both sides' sessions when the same chunk is logged in two tabs. The
+     account path does not use it (Pass 120 holds a conflicting part instead; Pass 121
+     decides). If 121 chooses "most recent wins" for a chunk entry it must move the fold
+     into `pieceMerge.js` or sessions are dropped.
+  3. **A piece in use has changes not on disk until it is idle** (decision 5 above).
+  4. **No catch-up when a tab regains focus.** A frozen background tab catches up at its
+     next write or when it takes the lease.
+  5. **The guard still has the cross-process delay of `localStorage` itself** (a tab can
+     read a copy a few milliseconds old).
+  6. **A dead lease holder is waited out for 30 s;** only a page that fires `pagehide`
+     hands it on at once (a page closed by a test harness does not fire it).
+  7. **If storage is full, the lease heartbeat can't be written, so no tab uploads.** The
+     status line still says "N changes waiting", so it is not fully silent.
+  8. **The first technique save after opening a tab is still unconditional** (nothing to
+     compare with yet), so two tabs opened at the same instant could clash. Both write
+     almost the same data.
+  9. **A tab on the old version (a phone left open) ignores the lease and the tab rules
+     until it is reloaded.** The revision rule still catches a clash.
+  10. **Not verified:** whether a browser slows a tab that is out of sight enough to pass
+      the lease to the visible tab; typing into a practice card (reps, notes) at the
+      moment another tab's change arrives; Safari on an iPhone.
+  11. **Pass 117 open items 1 (a resize against a difficulty edit) and 3 (revival)** are
+      now reachable through a tab merge, in a millisecond-wide collision. Still open.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

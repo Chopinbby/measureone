@@ -31,10 +31,10 @@ import { ensureWorkId } from "./works";
 // The comparing primitives live in pieceMerge.js (Pass 117), which the account
 // code imports and never the other way round; they're re-exported from here so
 // everything that already imports them from this file is unchanged.
-import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints } from "./pieceMerge";
+import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints, planPieceMerge } from "./pieceMerge";
 // The same for the technique library (Pass 118): lib/techniqueMerge.js owns its
 // canonical form and its parts, and is imported here and never the other way.
-import { canonicalTechnique, techniquePartFingerprints } from "./techniqueMerge";
+import { canonicalTechnique, techniquePartFingerprints, planTechniqueMerge } from "./techniqueMerge";
 
 export { fingerprint, canonicalPiece, piecePartFingerprints, canonicalTechnique, techniquePartFingerprints };
 
@@ -287,6 +287,16 @@ export function emptyAccountRecord() {
 // How many of an item's most recent upload attempts are remembered (`sent`).
 export const MAX_SENT = 5;
 
+const MAX_CONFLICTS = 200;
+const CONFLICT_KINDS = ["field", "progress", "whole-piece"];
+const printOrNull = (v) => (typeof v === "string" ? v : null);
+function cleanConflicts(list) {
+  return list
+    .filter((c) => isObject(c) && typeof c.part === "string" && CONFLICT_KINDS.includes(c.kind))
+    .slice(0, MAX_CONFLICTS)
+    .map((c) => ({ part: c.part, kind: c.kind, local: printOrNull(c.local), remote: printOrNull(c.remote), base: printOrNull(c.base) }));
+}
+
 function cleanEntry(e) {
   if (!isObject(e)) return null;
   const out = {};
@@ -295,6 +305,13 @@ function cleanEntry(e) {
     out.fingerprint = e.fingerprint;
   }
   if (e.held === true) out.held = true;
+  // Pass 120: the parts that conflicted when an automatic update held this piece,
+  // kept for the question Pass 121 will ask. Fingerprints only (never a copy of the
+  // data): the values are read again from the account's copy when it is wanted.
+  if (out.held && Array.isArray(e.conflicts)) {
+    const conflicts = cleanConflicts(e.conflicts);
+    if (conflicts.length) out.conflicts = conflicts;
+  }
   if (e.deletedHere === true && out.revision !== undefined) out.deletedHere = true;
   if (Array.isArray(e.sent)) {
     const sent = e.sent.filter((x) => typeof x === "string").slice(-MAX_SENT);
@@ -337,6 +354,9 @@ export function readDeviceRecord(storage) {
         technique: cleanEntry(a.technique),
         checkedAt: Number.isFinite(a.checkedAt) ? a.checkedAt : null,
         syncedAt: Number.isFinite(a.syncedAt) ? a.syncedAt : null,
+        // Pass 120: "Update automatically from other devices". Kept only when on, so
+        // a record that never had the switch reads exactly as before.
+        ...(a.autoUpdate === true ? { autoUpdate: true } : {}),
       };
     });
     return { version: ACCOUNT_SYNC_VERSION, accounts };
@@ -364,7 +384,13 @@ export function withBackupRecorded(deviceRecord, userId, { pieces, technique, ch
     version: ACCOUNT_SYNC_VERSION,
     accounts: {
       ...(deviceRecord && deviceRecord.accounts ? deviceRecord.accounts : {}),
-      [userId]: { pieces: { ...before.pieces, ...pieces }, technique: technique || before.technique, checkedAt, syncedAt: before.syncedAt },
+      [userId]: {
+        pieces: { ...before.pieces, ...pieces },
+        technique: technique || before.technique,
+        checkedAt,
+        syncedAt: before.syncedAt,
+        ...(before.autoUpdate ? { autoUpdate: true } : {}),
+      },
     },
   };
 }
@@ -669,8 +695,12 @@ export function nextFailureCount(failures, outcome) {
 
 function changeAccount(deviceRecord, userId, change) {
   const before = accountRecordFor(deviceRecord, userId);
+  // `autoUpdate` (Pass 120) must be carried over here: every upload goes through this
+  // function, and a draft that forgot it would switch the person's choice off.
   const draft = { pieces: { ...before.pieces }, technique: before.technique, checkedAt: before.checkedAt, syncedAt: before.syncedAt };
+  if (before.autoUpdate) draft.autoUpdate = true;
   change(draft);
+  if (draft.autoUpdate === false) delete draft.autoUpdate;
   return {
     version: ACCOUNT_SYNC_VERSION,
     accounts: { ...(deviceRecord && deviceRecord.accounts ? deviceRecord.accounts : {}), [userId]: draft },
@@ -708,9 +738,26 @@ export function withSentRecorded(deviceRecord, userId, item, print) {
 
 // The account moved on without this device: nothing is uploaded for it until
 // something settles it. Whatever the entry knew about the revision is kept.
-export function withPieceHeld(deviceRecord, userId, id) {
+export function withPieceHeld(deviceRecord, userId, id, conflicts = null) {
   return changeAccount(deviceRecord, userId, (a) => {
-    a.pieces[id] = { ...(a.pieces[id] || {}), held: true };
+    const entry = { ...(a.pieces[id] || {}), held: true };
+    // Pass 120: an automatic update that finds parts changed differently on both
+    // sides holds the piece and keeps which parts, for Pass 121.
+    if (Array.isArray(conflicts) && conflicts.length) entry.conflicts = cleanConflicts(conflicts);
+    else delete entry.conflicts;
+    a.pieces[id] = entry;
+  });
+}
+
+// Pass 120: the switch "Update automatically from other devices". On this device
+// only (it is in the device record, never in the account) and OFF unless chosen.
+export function autoUpdateOn(deviceRecord, userId) {
+  return accountRecordFor(deviceRecord, userId).autoUpdate === true;
+}
+
+export function withAutoUpdate(deviceRecord, userId, on) {
+  return changeAccount(deviceRecord, userId, (a) => {
+    a.autoUpdate = !!on;
   });
 }
 
@@ -992,10 +1039,21 @@ function judgeRefusal(item, local, row, sent) {
 //                      should be retried later; refused ones are held, not failed.
 //   status "stopped" : reason "connection" (the rest stays waiting), "signed-out",
 //                      or "cancelled" (the caller signed out mid-run).
-export async function syncWaitingChanges({ pieces, technique, userId, getClient = loadBackend, storage, now = Date.now, isCancelled = () => false }) {
+//
+// Pass 120: `skipPieceIds` / `skipTechnique` leave named items waiting this run,
+// untouched and not counted: a piece that has to be merged with a newer copy
+// from the account first but can't be yet (it is in use) must not be sent, or it
+// would be refused and held. Everything else goes up as usual.
+export async function syncWaitingChanges({ pieces, technique, userId, getClient = loadBackend, storage, now = Date.now, isCancelled = () => false, skipPieceIds = [], skipTechnique = false }) {
   const result = { status: "done", reason: null, uploaded: 0, resolved: 0, newlyHeld: [], failed: 0, remaining: 0 };
   const accountNow = () => accountRecordFor(readDeviceRecord(storage), userId);
-  const planNow = () => computeWaiting({ pieces, technique, accountRecord: accountNow() });
+  const skip = new Set(skipPieceIds || []);
+  const planNow = () => {
+    const w = computeWaiting({ pieces, technique, accountRecord: accountNow() });
+    if (skip.size === 0 && !skipTechnique) return w;
+    const items = w.items.filter((i) => !(i.kind === "technique" ? skipTechnique : skip.has(i.id)));
+    return { ...w, items, count: w.count - (w.items.length - items.length) };
+  };
   const stopped = (reason) => ({ ...result, status: "stopped", reason, remaining: planNow().count });
 
   const first = planNow();
@@ -1223,6 +1281,40 @@ export async function fetchAccountCopy({ userId, getClient = loadBackend }) {
   return { status: "ok", rows: { pieces: read.pieces, technique: read.technique } };
 }
 
+// Pass 120: only the rows an automatic update is about: these pieces by id (a
+// page of ids at a time, so the address stays short) and, when asked, the
+// technique row. Same shape and reasons as fetchAccountCopy; never throws.
+export async function fetchChangedAccountRows({ userId, ids = [], technique = false, getClient = loadBackend }) {
+  try {
+    const client = await getClient();
+    if (!client) return { status: "stopped", reason: "connection" };
+    const session = await client.auth.getSession();
+    const sessionUser = session && session.data && session.data.session && session.data.session.user;
+    if (!sessionUser || sessionUser.id !== userId) {
+      return { status: "stopped", reason: session && session.error && isConnectionProblem(session.error) ? "connection" : "signed-out" };
+    }
+    const pieces = [];
+    for (let i = 0; i < ids.length; i += PAGE_SIZE) {
+      const { data, error } = await client
+        .from("pieces")
+        .select("id, revision, deleted_at, data")
+        .eq("user_id", userId)
+        .in("id", ids.slice(i, i + PAGE_SIZE));
+      if (error) return { status: "stopped", reason: reasonFor(error) };
+      (data || []).forEach((r) => pieces.push(r));
+    }
+    let trow = null;
+    if (technique) {
+      const t = await client.from("technique").select("revision, data").eq("user_id", userId);
+      if (t.error) return { status: "stopped", reason: reasonFor(t.error) };
+      trow = (t.data && t.data[0]) || null;
+    }
+    return { status: "ok", rows: { pieces, technique: trow } };
+  } catch (e) {
+    return { status: "stopped", reason: reasonFor(e) };
+  }
+}
+
 // How many live (not marked deleted) pieces the account holds, without
 // downloading any piece data: the welcome screen's "Restore 12 pieces" button.
 //   { status: "ok", count } or { status: "stopped", reason }
@@ -1278,10 +1370,16 @@ export function describeRestoreButton(count) {
 
 // A window regaining focus (or the page becoming visible) starts a check at
 // most this often; and while the page stays visible a check is due this often.
+// Pass 120 (decided by the owner, 2026-10-15): every MINUTE, not every five, so
+// a change made on another device shows up (or, with "Update automatically from
+// other devices" on, arrives) in about a minute. Each check reads only ids,
+// revision numbers and deleted dates, about 3 KB.
 export const CHECK_FOCUS_GAP_MS = 60 * 1000;
-export const CHECK_EVERY_MS = 5 * 60 * 1000;
+export const CHECK_EVERY_MS = 60 * 1000;
 // How often the page asks "is a check due?" (a local clock look, no request).
-export const CHECK_TICK_MS = 60 * 1000;
+// Quarter of CHECK_EVERY_MS: a look every minute would, with timer drift, space
+// checks one to two minutes apart instead of about one.
+export const CHECK_TICK_MS = 15 * 1000;
 
 // The light read. Same shape and reasons as the other reads, and like them it
 // never throws:
@@ -1374,7 +1472,7 @@ export function classifyAccountChanges({ rows, accountRecord, localPieceIds }) {
 //   "startup" (sign-in is known) and "online" (the connection came back): always
 //   "focus" (the window regained focus, or the page became visible): at most
 //   once a minute, so the two events a return to the window can fire make one request
-//   "interval" (the page asked on its own clock): every 5 minutes
+//   "interval" (the page asked on its own clock): every minute (CHECK_EVERY_MS)
 // A clock that moved back makes a check due rather than hiding it for an hour.
 export function checkIsDue({ trigger, now, lastStartedAt }) {
   if (trigger === "startup" || trigger === "online") return true;
@@ -1441,6 +1539,66 @@ export function describeAccountChanges(changes) {
   if (changes.techniqueNewer) parts.push("the technique library");
   if (parts.length === 0) return null;
   return `Changes from another device: ${parts.join(" and ")}. Press Get changes.`;
+}
+
+/* ---- automatic updates (Pass 120) --------------------------------- */
+
+// What an automatic update is about, from the last check (classifyAccountChanges):
+// the pieces the account holds at a higher revision, the ones it holds that this
+// device doesn't, and the technique row if it is newer. With the switch OFF
+// nothing is ever a target, so the app behaves exactly as after Pass 116: it
+// notices (describeAccountChanges) and "Get changes" is the way in. Pieces held
+// as "changed on another device", pieces with no recorded revision (needsReview)
+// and pieces deleted elsewhere are never targets.
+export function autoUpdateTargets({ deviceRecord, userId, changes }) {
+  if (!changes || !autoUpdateOn(deviceRecord, userId)) return { on: false, pieceIds: [], technique: false };
+  return { on: true, pieceIds: [...changes.added, ...changes.newer].sort(), technique: !!changes.techniqueNewer };
+}
+
+// Merge BEFORE upload. A piece with a change waiting here and a newer copy in the
+// account would be refused by "save only if still at revision N" and held. With
+// the switch on, the upload run first brings the account's copy in (merging the
+// parts, or holding the piece if a part conflicts) and only then sends the merged
+// result. Given the last check and what this device holds, these are the pieces
+// (and whether the technique library) for which that has to happen first.
+export function needsMergeBeforeUpload({ pieces, technique, accountRecord, changes }) {
+  const none = { pieceIds: [], technique: false };
+  if (!changes) return none;
+  const entries = (accountRecord && accountRecord.pieces) || {};
+  const have = pieces || {};
+  const pieceIds = (changes.newer || []).filter((id) => hasOwn(have, id) && !nothingWaitingHere(have[id], entries[id]));
+  const tentry = accountRecord && accountRecord.technique;
+  const techniqueFirst = !!changes.techniqueNewer && !!technique && !!tentry && typeof tentry.fingerprint === "string" && techniqueFingerprint(technique) !== tentry.fingerprint;
+  return { pieceIds, technique: techniqueFirst };
+}
+
+export const PIECE_UPDATED_NOTE = "This piece was updated from another device.";
+
+function andList(names, cap = 3) {
+  const shown = names.slice(0, cap);
+  const more = names.length - shown.length;
+  if (more > 0) return `${shown.join(", ")} and ${more} more`;
+  if (shown.length <= 1) return shown.join("");
+  return `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`;
+}
+
+// The Account panel's line after an automatic update, or null when nothing was
+// changed here. `names` are the pieces that were added, replaced or merged.
+//   "Updated from another device: Ballade No. 1, and the technique library."
+export function describeAutoUpdate({ names = [], technique = false }) {
+  const pieces = [...new Set(names)];
+  if (pieces.length === 0 && !technique) return null;
+  const list = pieces.length > 0 ? andList(pieces) : "";
+  const text = pieces.length > 0 ? (technique ? `${list}, and the technique library` : list) : "the technique library";
+  return `Updated from another device: ${text}.`;
+}
+
+// The line while a change waits for a piece to be free:
+//   "Changes to Ballade No. 1 will be applied when you're done with it."
+export function describeAutoPending(names = []) {
+  const list = [...new Set(names)];
+  if (list.length === 0) return null;
+  return `Changes to ${andList(list)} will be applied when you're done with ${list.length === 1 ? "it" : "them"}.`;
 }
 
 // The account's rows as import candidates:
@@ -1529,6 +1687,29 @@ export function withPieceDropped(deviceRecord, userId, id) {
 
 /* ---- planning ------------------------------------------------------ */
 
+// Pass 120, automatic updates only: a piece changed on both sides, with a
+// recorded base (the fingerprint of each part as last synced), goes to Pass 117's
+// engine instead of a question.
+//   kind "merge"    every part merges cleanly: `merged` is the piece to keep
+//   kind "conflict" a part (or the whole piece) was changed differently on both
+//                   sides: nothing is merged, `conflicts` lists which parts
+//                   (fingerprints only), to be held until Pass 121 asks
+//   kind "same"     nothing of the account's changes anything here
+//   kind "ask"      the engine can't tell (no usable base): left as it always was
+function engineVerdict(local, remote, baseParts) {
+  const plan = planPieceMerge({ local, remote, base: baseParts });
+  if (plan.status === "merged") return { kind: "merge", merged: plan.merged };
+  if (plan.status === "conflicts" || plan.status === "whole-piece-conflict") {
+    const conflicts =
+      plan.status === "whole-piece-conflict"
+        ? [{ part: "chunk layout and practice", kind: "whole-piece", local: null, remote: null, base: null }]
+        : plan.conflicts.map((c) => ({ part: c.part, kind: c.kind, local: c.localFingerprint, remote: c.remoteFingerprint, base: c.baseFingerprint }));
+    return { kind: "conflict", conflicts };
+  }
+  if (plan.status === "identical" || plan.status === "local-only") return { kind: "same" };
+  return { kind: "ask" };
+}
+
 // Walks the account's pieces in order against this device's, the way the
 // import path does, so two account rows with the same name collapse into one
 // piece here (the second is a "combine" with the first).
@@ -1543,7 +1724,7 @@ export function withPieceDropped(deviceRecord, userId, id) {
 //                    deleted (otherRow)
 // A piece this device deleted whose deletion hasn't gone up yet is skipped
 // (listed in skippedDeletedHere), never brought back.
-function walkAccountCandidates({ candidates, localPieces, accountRecord, only = null }) {
+function walkAccountCandidates({ candidates, localPieces, accountRecord, only = null, automatic = false }) {
   const entries = (accountRecord && accountRecord.pieces) || {};
   // A piece here that the account marks deleted is never what another copy is
   // combined into: it's the extra copy that was marked deleted when two were
@@ -1576,6 +1757,7 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
       if (samePiece(match, c.piece)) items.push({ ...base, kind: "same", matchId: match.id });
       else if (sameOnceDatesMatch) items.push({ ...base, kind: "same", matchId: match.id, alignCreatedAt: true });
       else if (canTakeAccountCopyWithoutAsking({ localPiece: match, entry, row: c })) items.push({ ...base, kind: "take", matchId: match.id });
+      else if (automatic && entry && entry.parts) items.push({ ...base, ...engineVerdict(match, c.piece, entry.parts), matchId: match.id });
       else items.push({ ...base, kind: "ask", matchId: match.id });
       return;
     }
@@ -1587,10 +1769,10 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
 // What the flow would do, without doing it: per account piece, a kind (above);
 // the pieces still here that the account marks deleted ("Deleted on another
 // device"); the rows that couldn't be read; and the technique row.
-export function planAccountMerge({ candidates, localPieces, localTechnique = null, accountRecord }) {
+export function planAccountMerge({ candidates, localPieces, localTechnique = null, accountRecord, automatic = false }) {
   const local = localPieces || {};
   const entries = (accountRecord && accountRecord.pieces) || {};
-  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord });
+  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, automatic });
   const deletedElsewhere = ((candidates && candidates.deleted) || [])
     .filter((d) => hasOwn(local, d.id))
     .map((d) => ({ id: d.id, revision: d.revision, name: pieceName(local[d.id]), hasUnsyncedChanges: !nothingWaitingHere(local[d.id], entries[d.id]) }));
@@ -1634,6 +1816,20 @@ export function planNeedsQuestion(plan) {
 //   counts, skippedDeletedHere, becomesChecked (restoring onto an empty device
 //   counts as this device's first, checked backup: everything on it came from
 //   this account)
+//
+// `automatic` (Pass 120, "Update automatically from other devices") changes WHAT
+// is done, never HOW: the same function, the same entries, the same record. It
+// applies by itself only what needs no decision: new pieces, pieces that already
+// match, a clean newer copy, a piece changed on both sides whose every part
+// merges cleanly (Pass 117's engine, "merge"), and the technique library (Pass
+// 118's engine where a base is recorded). It never applies by itself:
+//   - a piece with a conflicting part: HELD (out.held, with its conflicts), this
+//     device's copy untouched; Review settles it as it always has
+//   - a piece the engine can't judge ("ask") or one matched by name under another
+//     id ("combine"): left for the person (out.needsYou)
+//   - a piece that is already held, and anything deleted elsewhere
+// and a piece named in `busyIds` (in use right now) is DEFERRED (out.deferred):
+// nothing about it is recorded or changed, so the next run finds it again.
 export function applyAccountMerge({
   candidates,
   localPieces,
@@ -1644,15 +1840,23 @@ export function applyAccountMerge({
   orderChoice = "existing",
   includeTechnique = true,
   now = Date.now(),
+  automatic = false,
+  busyIds = [],
 }) {
   const local = localPieces || {};
   const prior = (accountRecord && accountRecord.pieces) || {};
   const only = selectedIds ? new Set(selectedIds) : null;
-  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, only });
+  const busy = new Set(busyIds || []);
+  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, only, automatic });
   const next = { ...local };
   const entries = {};
   const markDeleted = [];
   const counts = { added: 0, took: [], merged: [], combined: [], same: 0, aligned: 0, clearedHeld: 0 };
+  const deferred = [];
+  const held = [];
+  const needsYou = [];
+  const names = { added: [], took: [], merged: [] };
+  const updatedIds = []; // existing pieces whose copy here was replaced or merged
   let firstNewId = null;
 
   const mergeInto = (existing, d) => {
@@ -1668,15 +1872,42 @@ export function applyAccountMerge({
   };
 
   items.forEach((d, index) => {
+    if (automatic) {
+      // Never by itself (see above). A held piece waits for Review.
+      if (d.held) return;
+      if (d.kind === "ask" || d.kind === "combine") {
+        needsYou.push({ id: d.id, name: d.name, kind: d.kind });
+        return;
+      }
+      if (d.kind === "conflict") {
+        held.push({ id: d.id, name: d.name, conflicts: d.conflicts });
+        return;
+      }
+      // In use right now: not even recorded, so the next run finds it again.
+      if (busy.has(d.id) && d.kind !== "new") {
+        deferred.push({ id: d.id, name: d.name });
+        return;
+      }
+    }
     // The account's copy as read: its revision, fingerprint and (Pass 117) the
     // fingerprint of each of its parts: the state this device is now synced to.
     const rowEntry = { revision: d.revision, fingerprint: pieceFingerprint(d.piece), parts: piecePartFingerprints(d.piece) };
-    if (d.kind === "new") {
+    if (d.kind === "merge") {
+      // Every part merged cleanly. What this device holds beyond the account's
+      // copy goes up as an ordinary change, "only if still at revision N". A piece
+      // that comes from the account keeps the account's created date.
+      next[d.id] = Number.isFinite(d.piece.createdAt) ? { ...d.merged, createdAt: d.piece.createdAt } : d.merged;
+      entries[d.id] = rowEntry;
+      counts.merged.push(d.name);
+      names.merged.push(d.name);
+      updatedIds.push(d.id);
+    } else if (d.kind === "new") {
       const createdAt = Number.isFinite(d.piece.createdAt) ? d.piece.createdAt : now + index;
       next[d.id] = validateAndMigratePiece({ ...d.piece, createdAt });
       entries[d.id] = rowEntry;
       if (!firstNewId) firstNewId = d.id;
       counts.added += 1;
+      names.added.push(d.name);
     } else if (d.kind === "same") {
       if (d.alignCreatedAt) {
         next[d.id] = { ...next[d.id], createdAt: d.piece.createdAt };
@@ -1688,6 +1919,8 @@ export function applyAccountMerge({
       next[d.id] = { ...d.piece };
       entries[d.id] = rowEntry;
       counts.took.push(d.name);
+      names.took.push(d.name);
+      updatedIds.push(d.id);
     } else if (d.kind === "ask") {
       const merged = mergeInto(next[d.id], d);
       // A piece that comes from the account keeps the account's created date.
@@ -1706,8 +1939,14 @@ export function applyAccountMerge({
 
   let technique = null;
   const t = candidates && candidates.technique;
-  if (includeTechnique && t && t.technique && localTechnique) {
+  const techniqueEntry = accountRecord && accountRecord.technique;
+  // An automatic update leaves a library that is held for Review.
+  const techniqueHeldBack = automatic && !!(techniqueEntry && techniqueEntry.held);
+  if (includeTechnique && t && t.technique && localTechnique && !techniqueHeldBack) {
     const merged = mergeImportedTechnique(localTechnique, t.technique);
+    // Automatic: Pass 118's engine where a base is recorded (the import merge,
+    // which never asks, where it isn't).
+    if (automatic) merged.technique = mergeTechniqueFromAccount(localTechnique, t.technique, techniqueEntry && techniqueEntry.parts);
     technique = {
       value: merged.technique,
       // Only a merge that actually changed something is written back: writing
@@ -1731,7 +1970,46 @@ export function applyAccountMerge({
     counts,
     skippedDeletedHere,
     becomesChecked: Object.keys(local).length === 0 && counts.added > 0,
+    // Pass 120 (automatic only; empty otherwise)
+    deferred,
+    held,
+    needsYou,
+    names,
+    updatedIds,
   };
+}
+
+// Pass 120: an automatic update plans from the pieces this device held a moment
+// ago. If one of them has been replaced since (an update React had not applied
+// yet), the plan is stale for that piece. This redoes it against the copy that
+// is there NOW, so a newer change is never overwritten: a clean merge from the
+// recorded base is used, and anything else (a conflict, no base) leaves the
+// current copy alone and says so, so the caller can hold the piece.
+//   { piece, held: null | conflicts }
+export function reapplyOnto({ current, accountPiece, baseParts }) {
+  if (!baseParts || Object.keys(baseParts).length === 0) return { piece: current, held: [{ part: "chunk layout and practice", kind: "whole-piece", local: null, remote: null, base: null }] };
+  const verdict = engineVerdict(current, accountPiece, baseParts);
+  if (verdict.kind === "merge") {
+    return { piece: Number.isFinite(accountPiece.createdAt) ? { ...verdict.merged, createdAt: accountPiece.createdAt } : verdict.merged, held: null };
+  }
+  if (verdict.kind === "same") return { piece: current, held: null };
+  return { piece: current, held: verdict.conflicts || [{ part: "chunk layout and practice", kind: "whole-piece", local: null, remote: null, base: null }] };
+}
+
+// Pass 120: the technique library after an automatic update. Pass 118's engine
+// where the record holds a base for it; where it doesn't, or the engine can't
+// tell, the import merge that never asks and never removes anything. Never throws.
+export function mergeTechniqueFromAccount(localTechnique, accountTechnique, baseParts) {
+  try {
+    if (baseParts && Object.keys(baseParts).length > 0) {
+      const plan = planTechniqueMerge({ local: localTechnique, remote: accountTechnique, base: baseParts });
+      if (plan.status === "merged") return plan.merged;
+      if (plan.status === "identical" || plan.status === "local-only") return localTechnique;
+    }
+  } catch (e) {
+    /* fall back to the import merge */
+  }
+  return mergeImportedTechnique(localTechnique, accountTechnique).technique;
 }
 
 // The device record after a merge: each merged piece (and the technique library)

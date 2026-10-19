@@ -54,11 +54,16 @@ device changed something (it applies nothing); and Passes 117 and 118 built the
 two engines that will merge a piece and the technique library part by part
 (see [Merging by part](#merging-by-part-pass-117) and
 [The technique library by part](#the-technique-library-by-part-pass-118)).
-**Nothing calls the engines yet (Pass 120), and changes still don't arrive by
-themselves:** "Get changes" and Review still merge with the import path's own
-functions. **Decided 2026-10-15 (not built):** from Pass 120 other devices' changes
-are applied automatically and the most recent change wins item by item (Decided 6
-below). See [Pass plan](#pass-plan).
+**Since Pass 120 changes from other devices can arrive by themselves, behind a
+switch that is OFF by default** ("Update automatically from other devices" in the
+Account panel; see [Changes from other devices arrive by
+themselves](#changes-from-your-other-devices-arrive-by-themselves-pass-120)). With it
+off the app behaves exactly as after Pass 116: it notices, and "Get changes" and
+Review are the way in, still merging with the import path's own functions. With it
+on, pieces that need no decision are brought in by themselves using the two engines;
+a piece with a conflicting part is held. **Decided 2026-10-15, only partly built:**
+"the most recent change wins item by item" (Decided 6 below) is not built: Pass 120
+holds a conflicting part for Pass 121 instead. See [Pass plan](#pass-plan).
 
 ## Decided
 
@@ -271,8 +276,8 @@ Manual export and the export reminder stay throughout Phase 1
 ([SOW §6](SOW-Accounts-and-Sync.md#6-risks-and-things-that-could-go-wrong),
 risk 1).
 
-**Phase 2 — multi-device sync, and what happens offline** (begun; nothing arrives
-by itself yet):
+**Phase 2 — multi-device sync, and what happens offline** (begun; since Pass 120
+changes can arrive by themselves, behind a switch that is off by default):
 - **115** "Same" and "changed" you can trust: a lost confirmation no longer reads
   as a conflict, sessions are compared by content, the technique library's
   last-changed time is not a change, and the status line shows both messages.
@@ -289,14 +294,17 @@ by itself yet):
 - **119** Keep every tab of one browser in step, and let only one do the account
   work. Built; see [Several tabs of one browser](#several-tabs-of-one-browser-pass-119).
   Nothing is applied from the account; it is the same-browser half of the problem.
-- **120** (named in the docs, not built) wires both engines in and, **by the owner's
-  decision of 2026-10-15** (Decided 6), applies other devices' changes automatically
-  when the app is opened or returned to, the most recent change winning item by item;
-  a refused upload is merged and sent again instead of held. It uses the busy test
-  and the lease Pass 119 built. **121**, which was to ask
-  when two copies really disagree, is left with only what "most recent" can't settle
-  (the open items under "When two copies disagree" in
-  [Decisions.md](Decisions.md#open-questions)); **122** deletions.
+- **120** Changes from your other devices arrive by themselves, **switched off by
+  default**. Built; see [Changes from other devices arrive by
+  themselves](#changes-from-your-other-devices-arrive-by-themselves-pass-120). Uses the
+  busy test and the lease Pass 119 built, and the two engines; also made the check run
+  every minute (decided 2026-10-15). **What it does not do** (deferred): ask about a
+  conflicting part (121), deletions, remembered answers and combines (122), turning the
+  switch on by default (124), live push. **The 2026-10-15 decision "the most recent
+  change wins, item by item" is therefore not built yet:** a conflicting part is held.
+- **121** is what is left once Pass 120 holds a conflicting part: the question (or the
+  rule that settles it). The held entry already keeps which parts conflicted. **122**
+  deletions, remembered answers and combines.
 - After those: what happens offline.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
@@ -1107,8 +1115,9 @@ change arrives.
   seconds after, so an upload that is waiting goes first); the window regaining
   focus or the page becoming visible, **at most once a minute** (a return to
   the window fires both events; they make one request); the browser's online
-  event, at once; and every five minutes while the page is visible (the page
-  asks once a minute whether one is due, which is only a look at the clock).
+  event, at once; and **every minute** while the page is visible (the page asks
+  every 15 seconds whether one is due, which is only a look at the clock; **Pass 116
+  shipped five minutes and a minute-long look, Pass 120 changed both**).
   The throttle lives in `createAccountChecker`, so every trigger meets the same
   rule and two checks never run at once; `checkIsDue` is the rule. Signed out,
   or on a build with no account service, no timer starts any request and the
@@ -1478,6 +1487,161 @@ service: tabs stay in step, no lease key, no account request. **Not seen on the 
    the holder noticing it by event.
 7. **A dead holder is waited out** (30 seconds); only a page that fires `pagehide` hands it on
    at once. A page closed by a test harness doesn't fire it.
+
+## Changes from your other devices arrive by themselves (Pass 120)
+
+A switch in the Account panel, **"Update automatically from other devices"**, **off by
+default**. With it off nothing in this section happens and the app behaves exactly as
+after Pass 116 (it notices, and Get changes is the way in). With it on, what the check
+finds is brought in without a button, in about a minute. The deciding is in
+`lib/accountSync.js` (tested); `App.jsx` schedules it.
+
+**What was built**
+
+- **The switch is on this device only.** It lives in the device record, per account
+  (`accounts[userId].autoUpdate`, kept only while on, so an old record and a switched-off
+  one read the same), never in the account. `autoUpdateOn` / `withAutoUpdate`. **Every
+  function that rebuilds an account's entry must carry it over** (`changeAccount`,
+  `withBackupRecorded`): every upload goes through them, and one that forgot it would
+  switch the person's choice off on the next upload. A test updates the record every way
+  there is and checks it stays. The switch is offered once this device's first backup is
+  checked (the check that drives it only runs then).
+- **The check runs every minute** (decided by the owner, 2026-10-15): `CHECK_EVERY_MS`
+  60 s (was 5 minutes) and `CHECK_TICK_MS` 15 s (was a minute; a look every minute would,
+  with timer drift, space checks one to two minutes apart). Focus and the online event
+  keep their rules (at most once a minute; always). It applies with the switch on or off,
+  since the same check drives Pass 116's line. Cost, checked 2026-10-15 on
+  supabase.com/pricing: a check reads only ids, revision numbers and deleted dates, about
+  3 KB; the Free plan lists unlimited API requests and 5 GB of data out a month, so a
+  device open and visible for hours a day uses well under 1%, and the Free plan never bills.
+- **One apply step.** After a usable check `runAutoUpdate` (App.jsx) works out the targets
+  (`autoUpdateTargets`: the pieces the account holds at a higher revision, the ones it
+  holds that this device doesn't, and the technique row if newer; **never** a held piece,
+  one deleted elsewhere, or one with no recorded revision), fetches **only those rows'
+  data** (`fetchChangedAccountRows`: `id in (...)`, 50 ids a page; the technique row only if
+  newer) and calls **`applyAccountFlow({ automatic: true })`, the same function Get changes
+  uses** (there is no second one). It saves the device record BEFORE any piece changes
+  (Pass 112). It runs only in the tab that holds the lease (the check does).
+- **What applies by itself, and what never does** (`applyAccountMerge`, `automatic`):
+
+  | the piece is | result |
+  |---|---|
+  | only in the account | added |
+  | already the same | recorded |
+  | unchanged here, newer in the account (the Pass 112 no-ask rule) | the account's copy is taken |
+  | changed on both sides and **every part merges cleanly** (Pass 117's engine, base = the recorded `parts`) | merged; the account's copy is recorded and what is held beyond it goes up as an ordinary change |
+  | changed on both sides with a **conflicting part** (or a grid change against progress) | **held**: this device's copy untouched, the conflicting parts kept in the record entry (`conflicts`, fingerprints only) for Pass 121; the red banner and **Review work exactly as today** |
+  | changed on both sides, but the engine can't tell (no recorded base) | left for the person (Get changes) |
+  | the same piece under another name | **never by itself**: a combine is always asked |
+  | already held | left for Review |
+  | deleted elsewhere | **listed as today** ("Changes from another device: 1 piece. Press Get changes."); nothing is removed |
+  | the technique library | merged by Pass 118's engine where a base is recorded, the import merge (which never asks) where not; a held library waits for Review |
+
+  **Get changes and Review do not use the engines** (the `automatic` flag is off), so
+  they ask exactly what they always asked.
+- **Merge before upload.** With the switch on, an upload run (`runSync`) first takes **one
+  fresh light look** at the account, and if that brings anything in, stops there: the
+  merged result goes up in the next run, after the usual quiet period. Then a piece that
+  still has a change waiting here and a newer copy in the account (`needsMergeBeforeUpload`)
+  is left out of the run instead of being sent to be refused (`syncWaitingChanges` takes
+  `skipPieceIds`), and the rest go up. A refusal is still judged and held, as the last
+  safety net. **Why a fresh look and not only "the latest check":** that check can be a minute
+  old. Two devices that log within a few seconds of each other would then upload without
+  knowing, the second would be refused and held, and the "merges quietly" case would end
+  in a red banner. With the fresh look the second device sees the first's upload, merges,
+  and uploads the merged result once (seen in the browser, below). **Cost:** one extra
+  3 KB read per upload run while the switch is on (an upload run follows a quiet period
+  after a change, not a timer).
+- **Safe moments.** A piece **in use** is not touched, using Pass 119's shared busy test
+  (`isPieceBusy`): an unconfirmed Interleaved attempt, a running reassessment timer, an open
+  Edit piece settings draft for that piece. Its change is **deferred**: not applied, and
+  **not recorded**, so the next run finds it again. It is applied when the person is done
+  (an effect on those states). **A running practice timer and half-typed reps and BPM on
+  that piece's checklist cards survive the piece being replaced** (checked in the browser;
+  cards are keyed by chunk and role, so a card that keeps its place keeps its own state,
+  also when the other tab logged that very chunk), so they are **not** in the busy test.
+  What was not tried: a change that moves a card (a reschedule, a role change), which would
+  remount it.
+- **A plan that went stale** (the piece was replaced between planning and applying, which
+  Pass 119's tab sync can cause) is redone against the copy that is there now
+  (`reapplyOnto`): a clean merge is used; anything else leaves the current copy alone and
+  holds the piece. A newer change is never overwritten.
+- **Telling the person.** The Account panel says **"Updated from another device: Ballade
+  No. 1, and the technique library."** (dismissible; never a page-wide banner, unlike Get
+  changes' result). Only if the piece that is OPEN changed, one quiet line at the top of
+  the page: **"This piece was updated from another device."** (dismissible; it goes when
+  another piece is opened). While a change waits for a piece in use, the panel says
+  **"Changes to Ballade No. 1 will be applied when you're done with it."** **Proposed in the
+  card, to be confirmed by the owner.**
+- **Pieces left for the person are not re-fetched every minute:** they are remembered at the
+  account revision they were left at.
+- **Startup records the technique library's parts too** (`withTechniquePartsRecorded`: Pass
+  118 built the step and left the call for this pass), so there is a base to merge from.
+
+**Checked.** `test/accountSync.test.mjs`, 208 tests (33 new): the switch (default off,
+per account, kept through every record update, round trip, junk reads as off); held
+conflicts kept and dropped; which rows are targets (switch off: none); each kind of item
+(taken, merged, held, left for the person, a combine, deferred while in use and applied when
+free); the technique library with and without a base; merge before upload end to end through
+the fake database (one upload, at the account's revision, with both sides' sessions, never
+held, and the same piece uploaded without merging first IS refused and held); the skip
+list; the stale plan; fetching only the named rows; the words; and, with a fake clock, an
+interval check due after one minute and not five, a visible page making about one check a
+minute (with timer drift) and a hidden one none. **Re-broken on purpose, and each caught:**
+applying while a piece is in use (1 test fails), uploading before merging (2 fail), and the
+switch ignored (1 fails). In the browser (the real app against a throwaway local stand-in
+for the account service, two different browser addresses as two devices, a made-up saved
+session, nothing typed): the switch is off on a restored device and on after the panel's
+checkbox; **a change on one device arrived on the other by itself, with no button, after 62
+and 79 seconds** (the design bound is about 80: a 5 s quiet period, a 60 s interval and a
+15 s tick), fetching only `id=in.(p1)` and not the other piece, with both notes shown; **two
+devices logging different chunks within a second of each other merged quietly (no refusal,
+no hold, one upload each) and both ended with identical stored data** (compared as data, key
+order aside; there is no committed "compare script" from Pass 112 to use); **the same chunk
+on both was held with `progress:c9` kept as the conflict, nothing lost on either side, and
+Review then worked as before** (all three sessions, uploaded); **a piece deleted on one
+device was only listed on the other, nothing removed**; **a piece with its settings draft
+open did not change (and was not recorded) until the draft was discarded, then arrived within
+6 seconds**; **with the switch off the other device only noticed, fetched no data, and Get
+changes still worked**; signed out, and with no account service: no request, no lease key,
+no switch. **Not seen on the real preview with the real test project** (the card's "Yours"
+checks) and **not tried: an unconfirmed Interleaved attempt** (it needs two graduated
+chunks), so the "in use" state exercised was the settings draft (all three go through the
+same test).
+
+**For later passes** (found here, not decided):
+
+1. **The "will be applied when you're done" line cannot be seen for the one busy state
+   that is easy to cause.** While a settings draft is open the Settings tab shows the edit
+   form, not the Account panel, and the other busy states stop the person leaving Daily
+   Practice without a prompt that ends them. The line is built and tested, but it is
+   effectively reachable only briefly. The owner may want it somewhere else (on the edit
+   page, or as the quiet line at the top).
+2. **A piece held by a REFUSAL (Pass 111) is not settled automatically**; only a piece the
+   update itself found conflicting is held with `conflicts`. The fresh look before an upload
+   makes a refusal a millisecond-wide race, so this should be rare. If it isn't, held-by-
+   refusal pieces could go through the same engine.
+3. **Pass 121 starts from a recorded list:** `accounts[userId].pieces[id].conflicts`
+   (`{ part, kind, local, remote, base }`, fingerprints). The values are read again from the
+   account's copy when the question is asked.
+4. **The fold Pass 119 wrote** (same chunk logged on two devices) is not used here: that case
+   is a conflict and is held. If Pass 121 decides "most recent wins" for a chunk entry, it
+   must move `foldConflictedProgress` (`lib/tabSync.js`) into `lib/pieceMerge.js`, or
+   sessions would be dropped.
+5. **A grid change in one place against practice in the other is held too** (the card
+   doesn't say; it is the engine's whole-piece conflict, and holding is the only safe
+   answer), listed as "chunk layout and practice".
+6. **A "Get changes" click in the fraction of a second an automatic run is reading does
+   nothing** (the run holds the same busy flag). Not seen outside a test.
+7. **Pass 117 open items 1 (a resize against a difficulty edit) and 3 (revival) are now
+   reachable on a real account**, not only between tabs. A resize against a difficulty
+   edit is a conflict on `measureDifficulty`, so it is held, never merged into an
+   inconsistent piece; a revival start against practice on another device merges part by
+   part and has never been run through the engine.
+8. **`docs/Research.md`** (not on this pass's list) still says "every 5 minutes" and "every
+   60 seconds" for the check and the clock look.
+9. **The technique engine's conflict rule is unchanged** ("the account's value wins" for
+   octaves, hands and settings): Pass 120 only calls it.
 
 ## Setup (test project)
 

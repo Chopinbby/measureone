@@ -718,8 +718,9 @@ row stays). Design:
    reached). It opens the modal below.
 2. **Get changes, any time.** Settings → **Account** → **Get changes from your
    account**. Since Pass 116 the Account panel also says when there is something
-   to get (see the status lines below); it only notices, and nothing arrives until
-   you press the button.
+   to get (see the status lines below); it only notices, and **nothing arrives until
+   you press the button, unless you turned on "Update automatically from other
+   devices"** (Pass 120, section 14 below; it is off unless you choose it).
 3. **Review, for a piece held as "changed on another device".** The red banner
    and the Account panel show **Review** while anything is held. It looks only at
    what's held.
@@ -853,3 +854,58 @@ for the dashboard steps to change an email or delete an account by hand.
    signed out by then: the library does that even when it couldn't tell the
    service.) If this device somehow stayed signed in, it says nothing was changed and
    to try again.
+
+## 14. Updating automatically from other devices (optional, Pass 120)
+
+**Only on sites connected to an account service, signed in, once this device's first
+backup is checked.** Under the buttons in the Account panel there is one checkbox,
+**Update automatically from other devices**, **off by default**, and a line that says
+what it does. The choice is for this device only (it is kept in this browser, not in
+your account), so each device decides for itself.
+
+**Off (what you get unless you choose otherwise).** Nothing changes from before: about
+once a minute the app looks at your account and, if another device changed something, the
+Account panel says so ("Changes from another device: 3 pieces. Press Get changes.").
+Nothing arrives until you press **Get changes from your account**, which asks what it
+always asked.
+
+**On.** The same look, about once a minute while this page is open, and then what needs no
+decision is brought in by itself, with no button:
+1. A piece another device added, or changed while you hadn't, simply arrives.
+2. A piece changed in **both** places arrives merged **if the changes don't overlap**
+   (different chunks, a note on one side and a tempo on the other). Whatever your device
+   holds beyond your account's copy goes up as usual a few seconds later.
+3. The technique library is merged the same way.
+4. **What never arrives by itself:** a piece changed in both places where the **same**
+   thing was changed (for example the same chunk practiced on both devices at once). It
+   is **held**: your device keeps its own copy untouched, nothing is lost on either side,
+   and the red banner "1 piece changed on another device" with **Review** appears, exactly
+   as before. **Review** then asks as it always did. A piece **deleted on another device**
+   is only listed ("Changes from another device: 1 piece. Press Get changes."), never
+   removed. A piece that may be the same one under a different name is always asked.
+5. **A piece you are in the middle of waits.** If you have an unconfirmed Interleaved
+   attempt, a reassessment timer running, or Edit piece settings open for that piece,
+   another device's change to it is not applied until you are done (confirm or discard the
+   attempt, stop the timer, save or discard the settings). Your half-typed reps and BPM
+   and a running practice timer on a checklist card are not disturbed when a piece is
+   updated. The Account panel then says "Changes to Ballade No. 1 will be applied when
+   you're done with it." (you will mostly see it only briefly: the Settings tab shows the
+   edit form while a settings draft is open).
+
+**What you are told** (proposed; to be confirmed)
+- In the Account panel, a line you can dismiss: **"Updated from another device: Ballade
+  No. 1, and the technique library."**
+- If the piece that is **open** changed, one quiet blue line at the top of the page, which
+  you can dismiss and which goes when you open another piece: **"This piece was updated
+  from another device."** No other piece makes a banner.
+
+**Two devices practicing at the same moment.** Before an upload goes up the app takes one
+light look at your account first. If the other device has just uploaded, yours merges its
+changes in and uploads the merged result once, a few seconds later; you see no refusal and
+no banner when the two changed different parts.
+
+**Turning it off again** stops all of this at once (what is waiting for a piece is
+forgotten); the next look only notices, and Get changes works as before.
+
+**Signed out, or on a site with no account service:** there is no checkbox and nothing
+changes.

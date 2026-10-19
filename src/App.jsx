@@ -111,6 +111,8 @@ import {
   describeHeldBanner,
   // Merging by part (Pass 117): the quiet startup step only
   withPartsRecorded,
+  // ... and the technique library's twin (Pass 118), called from Pass 120
+  withTechniquePartsRecorded,
   // Noticing that another device changed something (Pass 116)
   CHECK_TICK_MS,
   createAccountChecker,
@@ -132,6 +134,19 @@ import {
   withPieceDropped,
   markOtherCopiesDeleted,
   describeAccountMergeResult,
+  // Changes from other devices arrive by themselves (Pass 120)
+  classifyAccountChanges,
+  autoUpdateOn,
+  withAutoUpdate,
+  withPieceHeld,
+  autoUpdateTargets,
+  needsMergeBeforeUpload,
+  fetchChangedAccountRows,
+  mergeTechniqueFromAccount,
+  reapplyOnto,
+  describeAutoUpdate,
+  describeAutoPending,
+  PIECE_UPDATED_NOTE,
 } from "./lib/accountSync";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
@@ -342,6 +357,27 @@ export default function App() {
   const [accountFlowBusy, setAccountFlowBusy] = useState(false);
   const accountFlowBusyRef = useRef(false);
   const [accountNotice, setAccountNotice] = useState(null);
+  // Changes from other devices arrive by themselves (Pass 120, lib/accountSync.js).
+  // `autoUpdate` mirrors the switch in the device record (shown in the Account
+  // panel); `autoNotice` is the panel's "Updated from another device: ..." line
+  // ({ text } or null); `autoPending` names the pieces whose change is waiting for
+  // the person to be done with them; `pieceUpdatedNote` is the id of the OPEN piece
+  // an automatic update changed (the one quiet line at the top of the page).
+  // `autoPendingIdsRef` is the same waiting set as ids, `autoRunningRef` stops two
+  // runs overlapping, and `lateHeldRef` collects pieces an apply found changed
+  // under it that must be held (saved by an effect once the state has settled).
+  const [autoUpdate, setAutoUpdate] = useState(false);
+  const [autoNotice, setAutoNotice] = useState(null);
+  const [autoPending, setAutoPending] = useState([]);
+  const [pieceUpdatedNote, setPieceUpdatedNote] = useState(null);
+  const autoPendingIdsRef = useRef(new Set());
+  // Pieces an automatic update had to leave for the person (it can't tell how to
+  // put the two copies together, or it may be the same piece under another name),
+  // with the account revision they were left at: not fetched again until the
+  // account's copy changes, instead of every minute.
+  const autoLeftForYouRef = useRef(new Map());
+  const autoRunningRef = useRef(false);
+  const lateHeldRef = useRef(new Map());
   const [welcomeAccountCount, setWelcomeAccountCount] = useState(null);
   const accountDeletedHereRef = useRef([]);
   const [storageError, setStorageError] = useState(false);
@@ -655,8 +691,11 @@ export default function App() {
     const { pieces: latestPieces, technique: latestTechnique, userId } = syncLatestRef.current;
     if (!authEnabled || !userId) {
       setSyncInfo((prev) => (prev === NO_SYNC_INFO ? prev : NO_SYNC_INFO));
+      setAutoUpdate(false);
       return null;
     }
+    // The switch lives in the device record (another tab may have changed it).
+    setAutoUpdate(autoUpdateOn(readDeviceRecord(), userId));
     const lastRead = checkRowsRef.current;
     const snap = syncSnapshot({
       pieces: latestPieces,
@@ -688,17 +727,19 @@ export default function App() {
   /* ---------------------------------------------------------------- */
   /*  Noticing that another device changed something (Pass 116).       */
   /*  A light read (ids, revisions, deleted marks; never a piece's     */
-  /*  data) that only NOTICES: nothing is applied, and "Get changes"   */
-  /*  works exactly as before. It runs only while signed in and only   */
-  /*  once this device's first backup is checked; never while the page */
-  /*  is hidden, and never while an upload, a manual backup or "Get    */
-  /*  changes" is running. Triggers: startup (once sign-in is known),  */
-  /*  the window regaining focus or the page becoming visible (at most */
-  /*  once a minute), the browser coming back online, and every five   */
-  /*  minutes while the page is visible. A failed check counts toward  */
-  /*  the same "isn't answering" count the uploads use and shows no    */
-  /*  error of its own. When it runs and what it means are decided in  */
-  /*  lib/accountSync.js, and tested.                                  */
+  /*  data) that NOTICES. With "Update automatically from other        */
+  /*  devices" OFF (the default) it applies nothing, and "Get changes" */
+  /*  works exactly as before; ON, what it finds is brought in by      */
+  /*  runAutoUpdate (Pass 120, below). It runs only while signed in    */
+  /*  and only once this device's first backup is checked; never while */
+  /*  the page is hidden, and never while an upload, a manual backup   */
+  /*  or "Get changes" is running. Triggers: startup (once sign-in is  */
+  /*  known), the window regaining focus or the page becoming visible  */
+  /*  (at most once a minute), the browser coming back online, and     */
+  /*  every minute while the page is visible (Pass 120; it was five).  */
+  /*  A failed check counts toward the same "isn't answering" count    */
+  /*  the uploads use and shows no error of its own. When it runs and  */
+  /*  what it means are decided in lib/accountSync.js, and tested.     */
   /* ---------------------------------------------------------------- */
 
   const scheduleCheck = (delayMs, trigger) => {
@@ -731,10 +772,15 @@ export default function App() {
     // Rows read while an upload, a backup or "Get changes" was changing the
     // record could already include this device's own upload without the
     // record knowing yet, which would read as "newer": don't believe them.
+    let usable = false;
     if (out.result.status === "ok" && checkRowsUsable({ recordBefore, recordNow: accountRecordFor(readDeviceRecord(), userId), busy: isBusy() })) {
       checkRowsRef.current = { userId, rows: out.result.rows };
+      usable = true;
     }
     refreshSyncInfo();
+    // Pass 120: with the switch on, what the check found is brought in now.
+    const updated = usable ? await runAutoUpdate("check") : null;
+    return { applied: !!(updated && updated.applied) };
   };
 
   // One upload run: send what's waiting (the library does it, one item at a
@@ -757,6 +803,43 @@ export default function App() {
       syncRerunRef.current = true; // go again when this one ends
       return;
     }
+    // Pass 120: MERGE BEFORE UPLOAD. With "Update automatically from other
+    // devices" on, a piece that has a change waiting here and a newer copy in the
+    // account (as the last check saw it) would be refused and held. So the
+    // account's copy is brought in first (the parts merged, or the piece held if a
+    // part conflicts) and the merged result goes up in the next round, after the
+    // usual quiet period. A piece that can't be merged yet (it is in use, or the
+    // account couldn't be read) is left out of this run, not sent to be refused.
+    // A refusal is still judged and held, as the last safety net.
+    let skipPieceIds = [];
+    let skipTechnique = false;
+    // "The latest check" has to be CURRENT: another device may have uploaded in the
+    // seconds since the last one, and an upload made without knowing would be
+    // refused and held. So, with the switch on, one light look at the account comes
+    // first (never the data: ids, revisions, deleted dates, about 3 KB). If it
+    // brought something in, this run stops and the merged result goes up in the
+    // next one, after the usual quiet period.
+    if (autoUpdateOn(readDeviceRecord(), userId)) {
+      const looked = await requestCheck("startup");
+      if (looked && looked.applied) return;
+    }
+    const mergeRecord = readDeviceRecord();
+    const lastRead = checkRowsRef.current;
+    if (lastRead && lastRead.userId === userId && autoUpdateOn(mergeRecord, userId)) {
+      const accountRecord = accountRecordFor(mergeRecord, userId);
+      const changes = classifyAccountChanges({ rows: lastRead.rows, accountRecord, localPieceIds: Object.keys(latestPieces) });
+      const first = needsMergeBeforeUpload({ pieces: latestPieces, technique: latestTechnique, accountRecord, changes });
+      if (first.pieceIds.length > 0 || first.technique) {
+        // Pieces already known to be waiting for the person are not asked about again.
+        const unresolved = first.pieceIds.filter((id) => !autoPendingIdsRef.current.has(id));
+        if (unresolved.length > 0 || first.technique) {
+          const done = await runAutoUpdate("before-upload");
+          if (done && done.applied) return;
+        }
+        skipPieceIds = first.pieceIds;
+        skipTechnique = first.technique;
+      }
+    }
     const snap = syncSnapshot({ pieces: latestPieces, technique: latestTechnique, userId });
     if (!snap.firstBackupDone || snap.waiting === 0) {
       syncPendingSinceRef.current = null;
@@ -773,6 +856,8 @@ export default function App() {
         technique: latestTechnique,
         userId,
         isCancelled: () => syncGenRef.current !== generation || !holdsLease(),
+        skipPieceIds,
+        skipTechnique,
       });
     } catch (e) {
       // syncWaitingChanges reports its own failures; this is only a last resort.
@@ -847,8 +932,11 @@ export default function App() {
   // lib/pieceMerge.js, isn't wired into the app).
   useEffect(() => {
     if (!authEnabled || !loaded) return;
-    const { record, recorded } = withPartsRecorded(readDeviceRecord(), pieces);
-    if (recorded > 0) saveDeviceRecord(record);
+    const withPieces = withPartsRecorded(readDeviceRecord(), pieces);
+    // Pass 120: the technique library's parts too (Pass 118 built the step and left
+    // the call for this pass), so an automatic update has a base to merge from.
+    const withBoth = technique ? withTechniquePartsRecorded(withPieces.record, technique) : { record: withPieces.record, recorded: 0 };
+    if (withPieces.recorded > 0 || withBoth.recorded > 0) saveDeviceRecord(withBoth.record);
   }, [loaded]);
 
   // Signing in, or the app starting with a saved sign-in: work out what's
@@ -918,9 +1006,11 @@ export default function App() {
     };
   }, []);
 
-  // Every five minutes while the page is visible (Pass 116): the page asks
-  // once a minute whether a check is due, which costs no request; the checker
-  // only lets one through when five minutes have passed since the last.
+  // Every minute while the page is visible (Pass 116, shortened from five in
+  // Pass 120): the page asks every CHECK_TICK_MS (15 seconds) whether a check
+  // is due, which costs no request; the checker only lets one through when a
+  // minute has passed since the last. Asking more often than the interval is
+  // what keeps timer drift from spacing checks one to two minutes apart.
   useEffect(() => {
     if (!authEnabled) return;
     const id = setInterval(() => requestCheck("interval"), CHECK_TICK_MS);
@@ -1267,6 +1357,11 @@ export default function App() {
     setAccountNotice(null);
     setWelcomeAccountCount(null);
     accountDeletedHereRef.current = [];
+    // ... and so does what an automatic update (Pass 120) said and is waiting on.
+    setAutoNotice(null);
+    setAutoPending([]);
+    autoPendingIdsRef.current = new Set();
+    setPieceUpdatedNote(null);
     if (importSource === "account") {
       setImportCandidates(null);
       setImportTechnique(null);
@@ -1738,22 +1833,47 @@ export default function App() {
   // Does the merge and everything that goes with it. The device record is saved
   // BEFORE any state changes, so the automatic upload (Pass 111) never sees
   // merged pieces without their entries and mistakes them for new ones.
-  const applyAccountFlow = async ({ mode, userId, candidates, selectedIds, ladderChoices, orderChoice, includeTechnique }) => {
-    const { pieces: localPieces, technique: localTechnique } = syncLatestRef.current;
+  //
+  // Pass 120: ONE apply step for both ways in. `automatic` is "Update
+  // automatically from other devices": the same merge, the same entries, the same
+  // record, but only what needs no decision is applied (see applyAccountMerge in
+  // lib/accountSync.js); a piece with a conflicting part is held, a piece in
+  // `busyIds` waits, and the result is told in the Account panel (and, if it is
+  // the open piece, one quiet line) instead of the Get changes result lines.
+  // Returns { applied } so the caller knows whether anything was recorded.
+  const applyAccountFlow = async ({ mode, userId, candidates, selectedIds, ladderChoices, orderChoice, includeTechnique, automatic = false, busyIds = [] }) => {
+    // The newest committed copies (Pass 119's refs), not the last effect's.
+    const localPieces = piecesRef.current;
+    const localTechnique = techniqueRef.current;
     const record = accountRecordFor(readDeviceRecord(), userId);
-    const out = applyAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record, selectedIds, ladderChoices, orderChoice, includeTechnique });
-    saveDeviceRecord(
-      withAccountCopyRecorded(readDeviceRecord(), userId, {
-        entries: out.entries,
-        technique: out.technique ? out.technique.entry : null,
-        checkedAt: out.becomesChecked ? Date.now() : null,
-      })
-    );
+    const out = applyAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record, selectedIds, ladderChoices, orderChoice, includeTechnique, automatic, busyIds });
+    let nextRecord = withAccountCopyRecorded(readDeviceRecord(), userId, {
+      entries: out.entries,
+      technique: out.technique ? out.technique.entry : null,
+      checkedAt: out.becomesChecked ? Date.now() : null,
+    });
+    // A piece changed differently on both sides is held, with which parts (Pass 121 asks).
+    out.held.forEach((h) => {
+      nextRecord = withPieceHeld(nextRecord, userId, h.id, h.conflicts);
+    });
+    saveDeviceRecord(nextRecord);
     const changedIds = Object.keys(out.pieces).filter((id) => out.pieces[id] !== localPieces[id]);
     if (changedIds.length > 0) {
       setPieces((prev) => {
         const next = { ...prev };
         changedIds.forEach((id) => {
+          // Automatic only: if the piece was replaced since the plan was made (an
+          // update React hadn't applied yet), redo this piece against the copy that
+          // is there now, so a newer change is never overwritten; what can't be
+          // merged cleanly is left alone and held (saved by the effect below).
+          if (automatic && prev[id] !== localPieces[id]) {
+            const theirs = (candidates.pieces.find((c) => c.id === id) || {}).piece;
+            if (!prev[id] || !theirs) return;
+            const again = reapplyOnto({ current: prev[id], accountPiece: theirs, baseParts: record.pieces[id] && record.pieces[id].parts });
+            next[id] = again.piece;
+            if (again.held) lateHeldRef.current.set(id, again.held);
+            return;
+          }
           next[id] = out.pieces[id];
         });
         return next;
@@ -1764,13 +1884,26 @@ export default function App() {
     }
     if (out.technique && out.technique.changed) {
       const accountTechnique = candidates.technique.technique;
-      updateTechnique((t) => withTopUp(mergeImportedTechnique(t, accountTechnique).technique));
+      const baseParts = record.technique && record.technique.parts;
+      updateTechnique((t) => withTopUp(automatic ? mergeTechniqueFromAccount(t, accountTechnique, baseParts) : mergeImportedTechnique(t, accountTechnique).technique));
     }
     refreshSyncInfo();
     // Whatever this device holds beyond the account's copy is now an ordinary
     // change waiting: send it after the usual quiet period. (Nothing in state may
     // have changed, so the effect that normally schedules this might not run.)
     if (accountRecordFor(readDeviceRecord(), userId).checkedAt != null) scheduleSync(SYNC_QUIET_MS);
+    const applied = Object.keys(out.entries).length > 0 || !!out.technique || out.held.length > 0;
+    if (automatic) {
+      // Told quietly, in the Account panel; never the page-wide banner Get changes uses.
+      const text = describeAutoUpdate({ names: [...out.names.added, ...out.names.took, ...out.names.merged], technique: !!(out.technique && out.technique.changed) });
+      if (text) setAutoNotice({ text });
+      autoPendingIdsRef.current = new Set(out.deferred.map((d) => d.id));
+      setAutoPending(out.deferred.map((d) => d.name));
+      // Only if the piece that is OPEN changed: one quiet line at the top of the page.
+      const openId = busyCtxRef.current && busyCtxRef.current.activePieceId;
+      if (openId && out.updatedIds.includes(openId)) setPieceUpdatedNote(openId);
+      return { applied, needsYou: out.needsYou };
+    }
     // The other copy of a combined piece is marked deleted only once this device
     // has made its first backup: until then the combined piece can't go up to
     // replace it, and marking it would leave the account with no live copy.
@@ -1800,7 +1933,127 @@ export default function App() {
       deletedHere.forEach((n) => lines.push({ text: `Deleted "${n}" here too.` }));
     }
     setAccountNotice({ lines });
+    return { applied };
   };
+
+  // Pass 120: brings in what the last check found, when the switch is on. Runs in
+  // the tab that holds the lease only (the check does), reads ONLY the rows that
+  // changed, and goes through applyAccountFlow, the same step Get changes uses.
+  // Pieces in use wait (the shared busy test, lib/tabSync.js) and are applied when
+  // the person is done with them (the effect below). Returns null when nothing ran,
+  // else { applied }. Never throws.
+  const runAutoUpdate = async (reason) => {
+    const { userId, loaded: isLoaded } = syncLatestRef.current;
+    if (!authEnabled || !userId || !isLoaded || !holdsLease()) return null;
+    if (backupRunningRef.current || accountFlowBusyRef.current || autoRunningRef.current) return null;
+    const lastRead = checkRowsRef.current;
+    if (!lastRead || lastRead.userId !== userId) return null;
+    const deviceRecord = readDeviceRecord();
+    const changes = classifyAccountChanges({
+      rows: lastRead.rows,
+      accountRecord: accountRecordFor(deviceRecord, userId),
+      localPieceIds: Object.keys(piecesRef.current),
+    });
+    const targets = autoUpdateTargets({ deviceRecord, userId, changes });
+    const accountRevision = Object.fromEntries(((lastRead.rows && lastRead.rows.pieces) || []).map((r) => [r.id, r.revision]));
+    targets.pieceIds = targets.pieceIds.filter((id) => autoLeftForYouRef.current.get(id) !== accountRevision[id]);
+    if (!targets.on) {
+      // switched off: nothing waits for anything
+      if (autoPendingIdsRef.current.size > 0) {
+        autoPendingIdsRef.current = new Set();
+        setAutoPending([]);
+      }
+      return null;
+    }
+    if (targets.pieceIds.length === 0 && !targets.technique) {
+      if (autoPendingIdsRef.current.size > 0) {
+        autoPendingIdsRef.current = new Set();
+        setAutoPending([]);
+      }
+      return null;
+    }
+    autoRunningRef.current = true;
+    accountFlowBusyRef.current = true; // so an upload, a check or a manual flow waits for this
+    try {
+      const got = await fetchChangedAccountRows({ userId, ids: targets.pieceIds, technique: targets.technique });
+      if (syncLatestRef.current.userId !== userId) return null; // signed out, or another account, meanwhile
+      if (got.status !== "ok") return null; // the next check brings it again
+      if (!autoUpdateOn(readDeviceRecord(), userId)) return null; // switched off while reading
+      const candidates = accountRowsToCandidates(got.rows);
+      const busyIds = busyPieceIds(Object.keys(piecesRef.current), busyCtxRef.current);
+      const result = await applyAccountFlow({
+        mode: "auto",
+        userId,
+        candidates,
+        selectedIds: null,
+        ladderChoices: {},
+        orderChoice: "existing",
+        includeTechnique: targets.technique,
+        automatic: true,
+        busyIds,
+      });
+      // what was left for the person is not asked about again at this revision
+      (result.needsYou || []).forEach((n) => {
+        const c = candidates.pieces.find((x) => x.id === n.id);
+        if (c) autoLeftForYouRef.current.set(n.id, c.revision);
+      });
+      return result;
+    } catch (e) {
+      console.warn("MeasureOne: an automatic update didn't go through.", e && e.message);
+      return null;
+    } finally {
+      // A moment later, so the state this just set has been committed before an
+      // upload or a check looks at it.
+      setTimeout(() => {
+        accountFlowBusyRef.current = false;
+        autoRunningRef.current = false;
+      }, 100);
+    }
+  };
+
+  // The Account panel's switch. Stored in the device record only (never in the
+  // account), off unless chosen. Turning it on looks right away, so a change
+  // already waiting arrives in seconds rather than at the next minute.
+  const handleSetAutoUpdate = (on) => {
+    if (!authEnabled || !authSession) return;
+    saveDeviceRecord(withAutoUpdate(readDeviceRecord(), authSession.userId, !!on));
+    setAutoUpdate(!!on);
+    if (!on) {
+      autoPendingIdsRef.current = new Set();
+      setAutoPending([]);
+    } else {
+      requestCheck("startup");
+    }
+  };
+
+  // A piece that was in use is free now (an Interleaved attempt confirmed or
+  // discarded, a reassessment timer stopped, the settings draft saved or
+  // discarded): bring in what waited for it.
+  useEffect(() => {
+    if (!loaded || autoPendingIdsRef.current.size === 0) return;
+    const stillBusy = busyPieceIds([...autoPendingIdsRef.current], busyCtxRef.current);
+    if (stillBusy.length < autoPendingIdsRef.current.size) runAutoUpdate("idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, activePieceId, interleaveRisk, assessmentTimerRisk, settingsEditing, editDraft ? editDraft.id : null]);
+
+  // Pieces an apply found changed under it that couldn't be merged cleanly are
+  // held now that the state has settled (see applyAccountFlow).
+  useEffect(() => {
+    if (lateHeldRef.current.size === 0 || !authSession) return;
+    const late = [...lateHeldRef.current.entries()];
+    lateHeldRef.current = new Map();
+    let rec = readDeviceRecord();
+    late.forEach(([id, conflicts]) => {
+      rec = withPieceHeld(rec, authSession.userId, id, conflicts);
+    });
+    saveDeviceRecord(rec);
+    refreshSyncInfo();
+  }, [pieces]);
+
+  // The quiet line on the open piece goes away when another piece is opened.
+  useEffect(() => {
+    if (pieceUpdatedNote && pieceUpdatedNote !== activePieceId) setPieceUpdatedNote(null);
+  }, [activePieceId, pieceUpdatedNote]);
 
   // mode: "restore" (the welcome screen), "changes" (the Account panel's "Get
   // changes from your account"), or "review" (a piece held as changed on another
@@ -3491,6 +3744,20 @@ export default function App() {
         </div>
       )}
 
+      {authSession && piece && pieceUpdatedNote === piece.id && (
+        // Pass 120: only when an automatic update changed the piece that is OPEN.
+        // One quiet line, dismissible; it goes when another piece is opened.
+        <div className="export-reminder-banner" role="status">
+          <CloudDownload size={18} />
+          <div>
+            <p className="export-reminder-title">{PIECE_UPDATED_NOTE}</p>
+          </div>
+          <button className="export-reminder-dismiss" aria-label="Dismiss" onClick={() => setPieceUpdatedNote(null)}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {exportReminderDue && !exportReminderDismissed && pieceList.length > 0 && (
         <div className="export-reminder-banner">
           <Download size={18} />
@@ -3851,6 +4118,11 @@ export default function App() {
                 accountBusy={accountFlowBusy}
                 accountNotice={authSession ? accountNotice : null}
                 onDismissAccountNotice={() => setAccountNotice(null)}
+                autoUpdate={autoUpdate}
+                onSetAutoUpdate={handleSetAutoUpdate}
+                autoUpdateNotice={authSession && autoNotice ? autoNotice.text : null}
+                onDismissAutoUpdateNotice={() => setAutoNotice(null)}
+                autoPendingText={authSession && autoUpdate ? describeAutoPending(autoPending) : null}
                 onChangePassword={openChangePassword}
                 signOutAllAsking={signOutAllAsking && !!authSession}
                 onAskSignOutAll={() => setSignOutAllAsking(true)}

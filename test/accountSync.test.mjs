@@ -102,7 +102,17 @@ import {
   describeAutoPending,
   PIECE_UPDATED_NOTE,
   reapplyOnto,
+  // Pass 121
+  heldConflicts,
+  heldIdsWithConflicts,
+  buildSettleQuestions,
+  planSettle,
+  answeredAll,
+  describeKept,
+  describeSettleResult,
 } from "../src/lib/accountSync.js";
+import { planPieceMerge, WHOLE_PIECE_PART } from "../src/lib/pieceMerge.js";
+import { generateAllChunks } from "../src/lib/chunking.js";
 
 const memoryStorage = () => {
   const m = new Map();
@@ -3134,5 +3144,330 @@ describe("the check runs every minute, and the page asks often enough (Pass 120)
   test("a page that is hidden makes none", async () => {
     const { count } = await countChecks({ visible: false, minutes: 10 });
     assert.equal(count, 0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Pass 121: a held piece asks one plain question per conflicting     */
+/*  part, and the answers are applied through the one apply step.      */
+/* ------------------------------------------------------------------ */
+
+describe("settling a held piece, one question at a time (Pass 121)", () => {
+  const NOW = Date.parse("2026-10-19T12:00:00Z");
+  const DASH = "\u2013"; // formatRange's en dash: "mm. 1\u20134"
+  const base = pieceOf("p1", { targetDate: "2026-10-20" });
+  const edited = (p, patch) => validateAndMigratePiece({ ...viaJson(p), ...patch, updatedAt: (p.updatedAt || 0) + 1000 });
+  // The same chunk practiced differently on both devices, and the target date changed on both.
+  const mine = edited(withMore(base, 2), { targetDate: "2026-11-01" });
+  const theirs = edited(withMore(base, 3), { targetDate: "2026-11-15" });
+  const tech = viaJson(technique);
+
+  // The device record as Pass 120 leaves it for a piece it held: synced at revision 1, held,
+  // with the conflicting parts listed (fingerprints only).
+  const heldDevice = (local = mine, remote = theirs) => {
+    const device = { version: 1, accounts: { [USER]: autoRec({ p1: syncedAs(base, 1) }) } };
+    const out = runAuto({ local: { p1: local }, rows: [[remote, 2]], record: accountRecordFor(device, USER) });
+    return out.held.reduce((r, h) => withPieceHeld(r, USER, h.id, h.conflicts), device);
+  };
+  const candidatesOf = (remote = theirs, revision = 2) => accountRowsToCandidates({ pieces: [acctRow(remote, revision)], technique: null });
+  const planFor = (over = {}) =>
+    planSettle({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: accountRecordFor(heldDevice(), USER), now: NOW, ...over });
+  const apply = (answers, { local = mine, remote = theirs, device = heldDevice() } = {}) =>
+    applyAccountMerge({
+      candidates: candidatesOf(remote),
+      localPieces: { p1: local },
+      localTechnique: tech,
+      accountRecord: accountRecordFor(device, USER),
+      selectedIds: ["p1"],
+      includeTechnique: false,
+      settle: { p1: answers },
+    });
+
+  test("reading a held piece's conflicts: the list Pass 120 recorded, for a held piece only", () => {
+    const rec = accountRecordFor(heldDevice(), USER);
+    assert.deepEqual(heldConflicts(rec, "p1").map((c) => c.part), ["progress:c1", "targetDate"]);
+    assert.deepEqual(heldConflicts(rec, "nope"), []);
+    assert.deepEqual(heldIdsWithConflicts(rec), ["p1"]);
+    // held by a refused upload: no list, so it is not one of these (it keeps the whole-piece picker)
+    const alsoRefused = withPieceHeld(heldDevice(), USER, "p2");
+    assert.equal(accountRecordFor(alsoRefused, USER).pieces.p2.held, true);
+    assert.deepEqual(heldIdsWithConflicts(accountRecordFor(alsoRefused, USER)), ["p1"]);
+    // a hold that was cleared took its list with it
+    const cleared = withAccountCopyRecorded(heldDevice(), USER, { entries: { p1: syncedAs(theirs, 2) } });
+    assert.deepEqual(heldIdsWithConflicts(accountRecordFor(cleared, USER)), []);
+  });
+
+  test("EVERY conflict becomes exactly one question, in a steady order (fields first, then practice)", () => {
+    const rec = accountRecordFor(heldDevice(), USER);
+    const plan = planFor();
+    assert.deepEqual(plan.fallbackIds, []);
+    assert.equal(plan.items.length, 1);
+    const item = plan.items[0];
+    assert.equal(item.status, "questions");
+    const live = planPieceMerge({ local: mine, remote: theirs, base: rec.pieces.p1.parts }).conflicts.map((c) => c.part).sort();
+    const recorded = heldConflicts(rec, "p1").map((c) => c.part).sort();
+    assert.deepEqual(item.questions.map((q) => q.part).sort(), live, "one per conflict the engine finds today");
+    assert.deepEqual(item.questions.map((q) => q.part).sort(), recorded, "and the same ones that were recorded when it was held");
+    assert.equal(new Set(item.questions.map((q) => q.part)).size, item.questions.length, "none twice");
+    assert.deepEqual(item.questions.map((q) => q.part), ["targetDate", "progress:c1"]);
+  });
+
+  test("the proposed wording, word for word: a chunk's practice record, and any other part", () => {
+    const [dateQ, chunkQ] = planFor().items[0].questions;
+    assert.equal(dateQ.text, "Target date: Nov 1 on this device, Nov 15 on your other device.");
+    assert.deepEqual(dateQ.options.map((o) => [o.value, o.label]), [["local", "This device's"], ["remote", "The other device's"]]);
+    assert.equal(chunkQ.text, `You practiced mm. 1${DASH}4 on both devices since you last synced.`);
+    assert.deepEqual(chunkQ.options.map((o) => [o.value, o.label]), [["both", "Both devices' sessions"], ["local", "This device's"], ["remote", "The other device's"]]);
+    assert.equal(chunkQ.options[0].recommended, true, "'both' is the recommended one");
+    assert.equal(chunkQ.options.filter((o) => o.recommended).length, 1);
+    [dateQ, chunkQ].forEach((q) => assert.equal(/\u2014/.test(JSON.stringify(q)), false, "no em dash in anything the person reads"));
+  });
+
+  test("dates carry the year only when it isn't this year; long values get a line each", () => {
+    const farther = edited(base, { targetDate: "2027-01-05", notes: "x".repeat(70) });
+    const differently = edited(base, { targetDate: "2026-11-01", notes: "y".repeat(70) });
+    const device = heldDevice(differently, farther);
+    const q = planSettle({ candidates: candidatesOf(farther), localPieces: { p1: differently }, accountRecord: accountRecordFor(device, USER), now: NOW }).items[0].questions;
+    assert.equal(q.find((x) => x.part === "targetDate").text, "Target date: Nov 1 on this device, Jan 5, 2027 on your other device.");
+    const notes = q.find((x) => x.part === "notes").text.split("\n");
+    assert.equal(notes.length, 3, "a heading line, then one line per device");
+    assert.match(notes[0], /^Notes is different on the two devices\.$/);
+    assert.match(notes[1], /^This device: "y+\.\.\."$/, "a long value is cut short with dots, never the whole paragraph");
+    assert.match(notes[2], /^Your other device: "x+\.\.\."$/);
+    assert.ok(notes[1].length < 80);
+  });
+
+  test("a field nobody wrote a label for still reads as a sentence; practice keys and chunk kinds are named", () => {
+    const pure = buildSettleQuestions({
+      plan: { status: "conflicts", conflicts: [{ part: "fooBarBaz", kind: "field", field: "fooBarBaz", local: 1, remote: 2 }] },
+      piece: mine,
+      year: 2026,
+    });
+    assert.equal(pure[0].text, "Foo bar baz: 1 on this device, 2 on your other device.");
+    // each side has sessions the other lacks, which is what 'since you last synced' means here
+    const entry = (n, start) => ({ doneDays: [1], sessions: Array.from({ length: n }, (_, i) => ({ day: 1, loggedAt: start + i, bpm: 60 + i })) });
+    const nameOf = (id, local, remote) =>
+      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: `progress:${id}`, kind: "progress", id, local, remote }] }, piece: mine, year: 2026 })[0];
+    assert.equal(nameOf("__consolidation__", entry(2, 10), entry(3, 100)).text, "You practiced the full run-through on both devices since you last synced.");
+    assert.equal(nameOf("__cold_start__", entry(2, 10), entry(3, 100)).title, "Practice record: the cold-start check");
+    assert.equal(nameOf("sr_s1", entry(2, 10), entry(3, 100)).title, "Practice record: the run-through of A", "a section by its name");
+    const transition = generateAllChunks(mine).all.find((c) => c.kind === "transition");
+    assert.match(nameOf(transition.id, entry(2, 10), entry(3, 100)).title, /^Practice record: the transition at mm\. /);
+    assert.equal(nameOf("c999", entry(2, 10), entry(3, 100)).title, "Practice record: a chunk that is no longer in the plan");
+  });
+
+  test("numbers worked out from a conflicting target date are not a question of their own: the date's question says they follow it, and the answer settles all three", () => {
+    const here = edited(base, { targetDate: "2026-11-01", daysToLearn: 16, minutesPerDay: 20 });
+    const there = edited(base, { targetDate: "2026-11-15", minutesPerDay: 10 });
+    const device = heldDevice(here, there);
+    assert.deepEqual(heldConflicts(accountRecordFor(device, USER), "p1").map((c) => c.part).sort(), ["minutesPerDay", "targetDate"], "the engine does report the minutes as a conflict");
+    const plan = planSettle({ candidates: candidatesOf(there), localPieces: { p1: here }, accountRecord: accountRecordFor(device, USER), now: NOW });
+    const questions = plan.items[0].questions;
+    assert.deepEqual(questions.map((q) => q.part), ["targetDate"], "...but only the date is asked");
+    assert.equal(questions[0].detail, "Days to learn and minutes per day follow the target date you keep.");
+    const remote = apply({ targetDate: "remote" }, { local: here, remote: there, device });
+    assert.deepEqual(remote.settledIds, ["p1"], "nothing is left open");
+    assert.deepEqual([remote.pieces.p1.targetDate, remote.pieces.p1.daysToLearn, remote.pieces.p1.minutesPerDay], ["2026-11-15", 21, 10], "their date with THEIR days and minutes");
+    const local = apply({ targetDate: "local" }, { local: here, remote: there, device });
+    assert.deepEqual([local.pieces.p1.targetDate, local.pieces.p1.daysToLearn, local.pieces.p1.minutesPerDay], ["2026-11-01", 16, 20], "this device's date with this device's days and minutes");
+    // a question builder handed the engine's plan directly asks the same
+    const live = planPieceMerge({ local: here, remote: there, base: accountRecordFor(device, USER).pieces.p1.parts });
+    assert.deepEqual(buildSettleQuestions({ plan: live, piece: here, year: 2026 }).map((q) => q.part), ["targetDate"]);
+  });
+
+  test("a list of three things that follow the date reads as a list; two values that read alike are said to differ in detail", () => {
+    const q = buildSettleQuestions({
+      plan: {
+        status: "conflicts",
+        conflicts: [{ part: "targetDate", kind: "field", field: "targetDate", local: "2026-11-01", remote: "2026-11-15" }],
+        linkedToDate: ["daysToLearn", "minutesPerDay", "rescheduleMarker"],
+      },
+      piece: mine,
+      year: 2026,
+    })[0];
+    assert.equal(q.detail, "Days to learn, minutes per day and reschedule follow the target date you keep.");
+    const same = buildSettleQuestions({
+      plan: { status: "conflicts", conflicts: [{ part: "rescheduleMarker", kind: "field", field: "rescheduleMarker", local: { asOfDay: 3, a: 1 }, remote: { asOfDay: 3, a: 2 } }] },
+      piece: mine,
+      year: 2026,
+    })[0];
+    assert.equal(same.text, "Reschedule: rescheduled on day 3 on both devices, but the two plans differ in detail.");
+  });
+
+  test("when only one side added sessions there is no 'both'; when one side removed the record, only the two", () => {
+    const shared = { day: 1, loggedAt: 10, bpm: 60 };
+    const one = { doneDays: [1], sessions: [shared, { day: 2, loggedAt: 20, bpm: 70 }] };
+    const other = { doneDays: [1], sessions: [shared], flag: "rough" };
+    const q = buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local: one, remote: other }] }, piece: mine, year: 2026 })[0];
+    assert.equal(q.text, `The practice record for mm. 1${DASH}4 was changed differently on the two devices.`);
+    assert.equal(q.detail, "Sessions: 2 on this device, 1 on your other device.");
+    assert.deepEqual(q.options.map((o) => o.value), ["local", "remote"]);
+    const gone = buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local: one, remote: undefined }] }, piece: mine, year: 2026 })[0];
+    assert.equal(gone.text, `The practice record for mm. 1${DASH}4 is on this device, but your other device no longer has it.`);
+    assert.deepEqual(gone.options.map((o) => o.value), ["local", "remote"]);
+  });
+
+  test("the whole-piece conflict is one question, with what each choice leaves out said plainly", () => {
+    const grid = edited(base, { chunkMode: "custom", customChunkSize: 8 });
+    const logged = withMore(base, 3);
+    const device = heldDevice(grid, logged);
+    assert.deepEqual(heldConflicts(accountRecordFor(device, USER), "p1").map((c) => [c.part, c.kind]), [[WHOLE_PIECE_PART, "whole-piece"]]);
+    const plan = planSettle({ candidates: candidatesOf(logged), localPieces: { p1: grid }, accountRecord: accountRecordFor(device, USER), now: NOW });
+    const q = plan.items[0].questions;
+    assert.equal(q.length, 1);
+    assert.equal(q[0].part, WHOLE_PIECE_PART);
+    assert.deepEqual(q[0].options.map((o) => o.value), ["local", "remote"]);
+    assert.match(q[0].options[0].hint, /other device are left out/);
+    assert.match(q[0].options[1].hint, /this device are left out/);
+    // and an answer applies as the whole piece of that side
+    const kept = apply({ [WHOLE_PIECE_PART]: "remote" }, { local: grid, remote: logged, device });
+    assert.deepEqual(kept.settledIds, ["p1"]);
+    assert.equal(kept.pieces.p1.customChunkSize, logged.customChunkSize);
+  });
+
+  test("nothing left to decide: 'ready', which still waits for the person to say go", () => {
+    // the account has not moved since this device last synced: only this device's changes remain
+    const plan = planSettle({ candidates: candidatesOf(base, 2), localPieces: { p1: mine }, accountRecord: accountRecordFor(heldDevice(), USER), now: NOW });
+    assert.equal(plan.items[0].status, "ready");
+    assert.deepEqual(plan.items[0].questions, []);
+    assert.equal(plan.items[0].reason, "local-only");
+  });
+
+  test("a piece it can't ask about goes back to the whole-piece picker: no account row, a deleted row, no recorded base", () => {
+    const rec = accountRecordFor(heldDevice(), USER);
+    const none = planSettle({ candidates: accountRowsToCandidates({ pieces: [], technique: null }), localPieces: { p1: mine }, accountRecord: rec, now: NOW });
+    assert.deepEqual([none.items.length, none.fallbackIds], [0, ["p1"]]);
+    const deleted = planSettle({ candidates: accountRowsToCandidates({ pieces: [acctRow(theirs, 3, { deleted_at: "2026-10-18T00:00:00Z" })], technique: null }), localPieces: { p1: mine }, accountRecord: rec, now: NOW });
+    assert.deepEqual([deleted.items.length, deleted.fallbackIds], [0, ["p1"]]);
+    const noBase = { version: 1, accounts: { [USER]: autoRec({ p1: { revision: 1, fingerprint: pieceFingerprint(base), held: true, conflicts: [{ part: "name", kind: "field", local: "a", remote: "b", base: "c" }] } }) } };
+    const asked = planSettle({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: accountRecordFor(noBase, USER), now: NOW });
+    assert.deepEqual([asked.items.length, asked.fallbackIds], [0, ["p1"]], "the engine can't tell without a base");
+  });
+
+  test("a piece held without a list is not planned here at all, and the picker's rows can leave a settled one out", () => {
+    const device = withPieceHeld({ version: 1, accounts: { [USER]: autoRec({ p2: syncedAs(pieceOf("p2"), 1) }) } }, USER, "p2");
+    const plan = planSettle({ candidates: accountRowsToCandidates({ pieces: [acctRow(pieceOf("p2", { name: "Other" }), 2)], technique: null }), localPieces: { p2: pieceOf("p2") }, accountRecord: accountRecordFor(device, USER), now: NOW });
+    assert.deepEqual([plan.items, plan.fallbackIds], [[], []]);
+    const both = withPieceHeld(heldDevice(), USER, "p2");
+    const all = accountRowsToCandidates({ pieces: [acctRow(theirs, 2), acctRow(pieceOf("p2"), 2)], technique: null });
+    const recBoth = accountRecordFor(both, USER);
+    assert.deepEqual(restrictCandidatesToHeld(all, recBoth).pieces.map((c) => c.id).sort(), ["p1", "p2"]);
+    assert.deepEqual(restrictCandidatesToHeld(all, recBoth, ["p1"]).pieces.map((c) => c.id), ["p2"], "p1 had its questions, so the picker leaves it out");
+  });
+
+  test("planning changes nothing: not the record, not the pieces, not the rows it was handed", () => {
+    const device = heldDevice();
+    const rec = accountRecordFor(device, USER);
+    const candidates = candidatesOf();
+    const local = { p1: mine };
+    const snapshot = JSON.stringify({ device, rec, candidates, local });
+    const first = planSettle({ candidates, localPieces: local, accountRecord: rec, now: NOW });
+    const second = planSettle({ candidates, localPieces: local, accountRecord: rec, now: NOW });
+    assert.equal(JSON.stringify({ device, rec, candidates, local }), snapshot);
+    assert.deepEqual(first, second);
+    assert.equal(local.p1, mine);
+  });
+
+  test("'both devices' sessions' for the chunk and 'this device's' date: every session, the days added, that date, a one-time record", () => {
+    const out = apply({ "progress:c1": "both", targetDate: "local" });
+    assert.deepEqual(out.settledIds, ["p1"]);
+    assert.deepEqual(out.unsettled, []);
+    assert.deepEqual(durations(out.pieces.p1), [90, 90, 120], "the base session and one from each device");
+    assert.deepEqual(out.pieces.p1.progress.c1.doneDays, [1, 2, 3]);
+    assert.equal(out.pieces.p1.targetDate, "2026-11-01");
+    assert.deepEqual(out.entries.p1, { revision: 2, fingerprint: pieceFingerprint(theirs), parts: piecePartFingerprints(theirs) }, "the account's copy as read: what this device is now synced to");
+  });
+
+  test("'the other device's' for both: exactly their record and their date, nothing of this device's, and nothing left to send", () => {
+    const out = apply({ "progress:c1": "remote", targetDate: "remote" });
+    assert.deepEqual(out.pieces.p1.progress.c1, canonicalPiece(theirs).progress.c1);
+    assert.equal(out.pieces.p1.targetDate, "2026-11-15");
+    const rec = accountRecordFor(withAccountCopyRecorded(heldDevice(), USER, { entries: out.entries }), USER);
+    assert.equal(computeWaiting({ pieces: out.pieces, technique: null, accountRecord: rec }).count, 0, "it IS the account's copy");
+  });
+
+  test("'this device's' for both: exactly this device's record and date, which then goes up as an ordinary change", () => {
+    const out = apply({ "progress:c1": "local", targetDate: "local" });
+    assert.deepEqual(out.pieces.p1.progress.c1, canonicalPiece(mine).progress.c1);
+    assert.equal(out.pieces.p1.targetDate, "2026-11-01");
+    const rec = accountRecordFor(withAccountCopyRecorded(heldDevice(), USER, { entries: out.entries }), USER);
+    assert.equal(computeWaiting({ pieces: out.pieces, technique: null, accountRecord: rec }).count, 1);
+  });
+
+  test("answering clears the hold and its list (the account's copy is recorded in their place)", () => {
+    const out = apply({ "progress:c1": "both", targetDate: "remote" });
+    const rec = accountRecordFor(withAccountCopyRecorded(heldDevice(), USER, { entries: out.entries }), USER);
+    assert.equal(rec.pieces.p1.held, undefined);
+    assert.equal(rec.pieces.p1.conflicts, undefined);
+    assert.equal(rec.pieces.p1.revision, 2);
+    assert.deepEqual(heldIdsWithConflicts(rec), []);
+  });
+
+  test("'Decide later' changes nothing: no answers, or only some, apply nothing and the record is exactly as it was", () => {
+    [{}, { "progress:c1": "both" }, { targetDate: "remote" }, { "progress:c1": "yes", targetDate: "no" }].forEach((answers) => {
+      const before = heldDevice();
+      const out = apply(answers, { device: before });
+      assert.deepEqual(out.settledIds, [], JSON.stringify(answers));
+      assert.deepEqual(out.unsettled.map((u) => u.id), ["p1"]);
+      assert.equal(out.pieces.p1, mine, "the very same piece object");
+      assert.deepEqual(out.entries, {});
+      const after = withAccountCopyRecorded(before, USER, { entries: out.entries });
+      assert.deepEqual(accountRecordFor(after, USER), accountRecordFor(before, USER), "still held, the list still there");
+    });
+  });
+
+  test("an answer for a conflict that has since gone is ignored, and a new conflict that appeared is NOT settled by a guess", () => {
+    // while the person decided, this device changed the notes too and so did the other one
+    const moved = edited(mine, { notes: "changed here meanwhile" });
+    const remoteMoved = edited(theirs, { notes: "changed there meanwhile" });
+    const out = apply({ "progress:c1": "both", targetDate: "local" }, { local: moved, remote: remoteMoved });
+    assert.deepEqual(out.settledIds, []);
+    assert.deepEqual(out.unsettled.map((u) => u.status), ["conflicts"], "notes is a question nobody was asked");
+    assert.equal(out.pieces.p1, moved);
+  });
+
+  test("the words: what was kept, and the result in the page", () => {
+    const questions = planFor().items[0].questions;
+    assert.equal(answeredAll(questions, {}), false);
+    assert.equal(answeredAll(questions, { targetDate: "remote" }), false);
+    assert.equal(answeredAll(questions, { targetDate: "both", "progress:c1": "both" }), false, "'both' is not an option for a date");
+    assert.equal(answeredAll(questions, { targetDate: "remote", "progress:c1": "both" }), true);
+    const answers = { targetDate: "remote", "progress:c1": "both" };
+    assert.deepEqual(describeKept(questions, answers), ["the other device's target date", `both devices' sessions for mm. 1${DASH}4`]);
+    assert.deepEqual(describeSettleResult({ settled: [{ name: "Etude", kept: describeKept(questions, answers) }] }).map((l) => l.text), [
+      `Settled Etude: kept the other device's target date and both devices' sessions for mm. 1${DASH}4.`,
+      "Anything here that your account doesn't have yet goes up by itself in a few seconds.",
+    ]);
+    assert.deepEqual(describeSettleResult({ settled: [{ name: "Etude", kept: [] }] })[0].text, "Etude is up to date with your other device.");
+    const bad = describeSettleResult({ unsettled: [{ name: "Etude" }] });
+    assert.equal(bad.length, 1);
+    assert.equal(bad[0].problem, true);
+    assert.match(bad[0].text, /^Etude changed again while you were deciding, so nothing was changed and it is still held\./);
+  });
+
+  test("end to end through the fake database: settled, the piece goes up ONCE at the account's revision with every session, and is never held", async () => {
+    const storage = memoryStorage();
+    // the technique library is in sync, so the only thing that can go up is the piece
+    saveDeviceRecord(
+      withAccountCopyRecorded(heldDevice(), USER, { entries: {}, technique: { revision: 1, fingerprint: techniqueFingerprint(tech), parts: techniquePartFingerprints(tech) } }),
+      storage
+    );
+    const fake = syncFake({ pieceRows: [pieceRow(theirs, { user_id: USER, revision: 2 })], techniqueRows: [{ user_id: USER, data: reorder(viaJson(tech)), revision: 1 }] });
+    // the person answers; the one apply step records the account's copy FIRST, then the piece changes
+    const out = apply({ "progress:c1": "both", targetDate: "local" }, { device: readDeviceRecord(storage) });
+    saveDeviceRecord(withAccountCopyRecorded(readDeviceRecord(storage), USER, { entries: out.entries }), storage);
+    const result = await runSync(out.pieces, tech, fake, storage);
+    assert.equal(result.uploaded, 1);
+    assert.deepEqual(result.newlyHeld, []);
+    const writes = fake.writes();
+    assert.equal(writes.length, 1, "one upload");
+    assert.deepEqual(writes[0].filters.filter(([c]) => c === "revision"), [["revision", 2]], "only if the account is still where it was read");
+    const row = fake.rows.pieces.find((r) => r.id === "p1");
+    assert.equal(row.revision, 3);
+    assert.deepEqual(durations(row.data), [90, 90, 120], "every session from both devices, in the account");
+    assert.equal(row.data.targetDate, "2026-11-01");
+    const rec = recordOf(storage);
+    assert.equal(rec.pieces.p1.held, undefined);
+    assert.equal(computeWaiting({ pieces: out.pieces, technique: tech, accountRecord: rec }).count, 0);
   });
 });

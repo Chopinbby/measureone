@@ -25,9 +25,12 @@
 /*  Per part: unchanged on both sides, nothing to do; changed on one   */
 /*  side only, take that side's value; changed on both to the same     */
 /*  value, agreement; changed on both to different values, a CONFLICT  */
-/*  for that part only. A conflict is never resolved here: the merged  */
-/*  piece keeps THIS device's value for it and the result lists it     */
-/*  with both values (Pass 121 asks the person).                       */
+/*  for that part only. The engine never DECIDES a conflict: the       */
+/*  merged piece keeps THIS device's value for it and the result lists */
+/*  it with both values. Pass 121 asks the person, and passes the      */
+/*  answers back in as `choices`: only then is a conflict settled, and */
+/*  only the way the person said ("local", "remote", or, for a         */
+/*  chunk's practice record, "both" = every session from both sides).  */
 /*                                                                     */
 /*  This file also owns the primitives the account code compares with  */
 /*  (fingerprint, canonicalPiece), so that the engine never has to     */
@@ -35,7 +38,7 @@
 /*  engine without a cycle. lib/accountSync.js re-exports them.        */
 /* ------------------------------------------------------------------ */
 
-import { validateAndMigratePiece } from "./storage";
+import { validateAndMigratePiece, mergeSessionArrays } from "./storage";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
 
 /* ------------------------------------------------------------------ */
@@ -215,6 +218,132 @@ function sameFingerprints(a, b) {
   return true;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Settling a conflict: the person's answer, applied (Pass 121)       */
+/* ------------------------------------------------------------------ */
+
+// The one conflict that is about the whole piece rather than a part of it: a
+// change to the chunk grid on one device against practice (or a reschedule) on
+// the other. It has no part key of its own in the fingerprints, so this is the
+// label the device record and the question use for it.
+export const WHOLE_PIECE_PART = "chunk layout and practice";
+
+// In a days-mode schedule the target date is the one thing a person sets. "Days to
+// learn" and "minutes per day" are worked out FROM it whenever it is edited (Settings,
+// Schedule), and so is the reschedule marker (handleSavePiece takes a fresh one on a
+// schedule-only edit), so on whichever device the date was changed these changed with
+// it. Merged one at a time they can come out as one device's date with the other
+// device's days or plan, a piece that doesn't add up. So when the person settles a
+// conflict over the target date these follow that answer as a unit and are not asked
+// about separately (planPieceMerge, `linkedToDate`). Only then: with no answer, or no
+// conflict over the date, they are merged and listed exactly as every other part.
+// (A reschedule made on purpose, with no date change, is not touched by any of this.)
+export const DATE_LINKED_FIELDS = ["daysToLearn", "minutesPerDay", "rescheduleMarker"];
+
+// What a person can answer for one conflicting part. "local" keeps this device's
+// value and "remote" takes the other device's. "both" exists only for a chunk's
+// practice record, where the two sides' sessions can be added together.
+export function isValidChoice(kind, choice) {
+  if (choice === "local" || choice === "remote") return true;
+  return choice === "both" && kind === "progress";
+}
+
+// When a session happened, as a number we can compare, or null if it doesn't say.
+function sessionTime(s) {
+  if (!isObject(s)) return null;
+  if (Number.isFinite(s.loggedAt)) return s.loggedAt;
+  if (typeof s.loggedDate === "string") {
+    const t = Date.parse(s.loggedDate);
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
+}
+
+// The time of a chunk's latest JUDGED session, or null. A skipped attempt or an
+// unconfirmed Interleaved one (utils.js, loggedSessions) never moves the ladder,
+// so it can't make one side's ladder state the later one.
+function latestJudgedSessionTime(entry) {
+  let latest = null;
+  const sessions = isObject(entry) && Array.isArray(entry.sessions) ? entry.sessions : [];
+  sessions.forEach((s) => {
+    if (!isObject(s) || s.skipped || s.provisional) return;
+    const t = sessionTime(s);
+    if (t !== null && (latest === null || t > latest)) latest = t;
+  });
+  return latest;
+}
+
+// Sessions are kept "most recent last" (docs/Data-Model.md), and every session the
+// app logs says when. Added together they are put back in that order; if any
+// session doesn't say when, nobody guesses and the order the union came in stays.
+function inLoggedOrder(sessions) {
+  if (!sessions.every((s) => isObject(s) && Number.isFinite(s.loggedAt))) return sessions;
+  return sessions
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => a.s.loggedAt - b.s.loggedAt || a.i - b.i)
+    .map((x) => x.s);
+}
+
+function unionDoneDays(a, b) {
+  const days = [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])].filter((d) => Number.isFinite(d));
+  return [...new Set(days)].sort((x, y) => x - y);
+}
+
+// Focus spots (a chunk's `troubleSpots`) hold logged practice time of their own.
+// A spot only one side has is kept; a spot both sides have keeps the leading
+// side's own fields and gets both sides' sessions.
+function unionSpots(lead, follow) {
+  if (!Array.isArray(lead) && !Array.isArray(follow)) return lead;
+  const first = Array.isArray(lead) ? lead : [];
+  const second = Array.isArray(follow) ? follow : [];
+  const out = first.map((spot) => {
+    const twin = isObject(spot) ? second.find((s) => isObject(s) && s.id === spot.id) : null;
+    if (!twin) return spot;
+    return { ...spot, sessions: inLoggedOrder(mergeSessionArrays(spot.sessions || [], twin.sessions || [])) };
+  });
+  second.forEach((s) => {
+    if (isObject(s) && !first.some((f) => isObject(f) && f.id === s.id)) out.push(s);
+  });
+  return out;
+}
+
+// "Both devices' sessions" for one chunk's practice record (Pass 121). The same
+// chunk was practiced on both devices, so the engine can't tell which record is
+// "the" record; the person said keep both. So:
+//   sessions   every session either side holds, a session both hold counted once
+//              (compared by content, key order ignored: Pass 115's comparison)
+//   doneDays   the days practiced on either side
+//   focus spots' own sessions, the same way
+//   everything else in the record (the ladder state: stage, due date, tempo, the
+//   passes counted so far; but also a rating or a flag) comes from the side whose
+//   latest judged session is LATER. A tie, or no dated session on either side,
+//   goes to this device (`mine`).
+// What it cannot do is replay the sessions to rebuild the ladder state exactly:
+// that is a later pass's job (Pass 121, "Deliberately deferred"). A session one
+// side had undone comes back if the other side still holds it: there is no
+// "before" copy here to tell an undo from a session the other side never saw.
+// Returns a plain JSON value, or undefined when neither side has the entry.
+export function unionProgressEntries(mine, theirs) {
+  const a = isObject(mine) ? mine : null;
+  const b = isObject(theirs) ? theirs : null;
+  if (!a && !b) return undefined;
+  if (!a) return toJsonValue(b);
+  if (!b) return toJsonValue(a);
+  const ta = latestJudgedSessionTime(a);
+  const tb = latestJudgedSessionTime(b);
+  const otherIsLater = tb !== null && (ta === null || tb > ta);
+  const lead = otherIsLater ? b : a;
+  const follow = otherIsLater ? a : b;
+  const out = {
+    ...lead,
+    sessions: inLoggedOrder(mergeSessionArrays(a.sessions || [], b.sessions || [])),
+    doneDays: unionDoneDays(a.doneDays, b.doneDays),
+  };
+  const spots = unionSpots(lead.troubleSpots, follow.troubleSpots);
+  if (spots !== undefined) out.troubleSpots = spots;
+  return toJsonValue(out);
+}
+
 // What planPieceMerge returns:
 //   status  "identical"           both sides hold the same parts; nothing to do
 //           "local-only"          the remote copy hasn't changed since the base:
@@ -241,11 +370,29 @@ function sameFingerprints(a, b) {
 //   fromLocal    parts kept from this device (changed here only)
 //   agreed       parts both sides changed to the same value
 //   derived      parts the merge re-derived instead of choosing (see below)
+//   settled      [{ part, kind: "field"|"progress"|"whole-piece", choice }]: the
+//                conflicts the caller's `choices` settled (Pass 121); [] without any
+//   unusedChoices  the parts named in `choices` that were not (or no longer) in
+//                conflict, so nothing was applied for them
+//   linkedToDate  (days-mode schedules, only when the target date IS in conflict) the
+//                numbers worked out from the date that changed on either side
+//                (DATE_LINKED_FIELDS). They are listed in `conflicts` or merged as
+//                ever until the date is answered; once it is, they follow it as a unit
+//                and drop out of `conflicts`, so a question about them is never needed
 //   reason       for "ask": "no-base" | "different-ids" | "not-pieces"
 //
 // `base` is the entry's `parts` ({ key: fingerprint }). `local` and `remote`
 // are pieces in any shape the app holds them; both are read in the form
 // loading would give them, and the merged piece is built in that form.
+//
+// `choices` (Pass 121, optional): the person's answers, { [part]: "local" |
+// "remote" | "both" }, keyed by a conflict's `part` (or WHOLE_PIECE_PART for the
+// whole-piece conflict, where only "local" and "remote" mean anything: the whole
+// piece of that side is kept and the other side's changes go with it). A conflict
+// with a valid answer is settled that way; one without stays in `conflicts` and
+// keeps this device's value, exactly as when no `choices` are given. So the status
+// is "merged" only when every conflict was answered, and a partial set of answers
+// changes nothing the caller should apply. Without `choices` nothing differs.
 //
 // Two stamps are not parts. updatedAt is the later of the two. lastLoggedAt is
 // recomputed from the merged sessions (the later of the two unless that date
@@ -258,7 +405,7 @@ function sameFingerprints(a, b) {
 // reschedule's extension as a floor. So it is taken like any part when one side
 // changed it, the larger when both did, and the whole schedule is reconciled
 // once more at the end.
-export function planPieceMerge({ local, remote, base }) {
+export function planPieceMerge({ local, remote, base, choices = null }) {
   const result = (status, extra = {}) => ({
     status,
     merged: local,
@@ -268,9 +415,13 @@ export function planPieceMerge({ local, remote, base }) {
     fromLocal: [],
     agreed: [],
     derived: [],
+    settled: [],
+    unusedChoices: [],
+    linkedToDate: [],
     reason: null,
     ...extra,
   });
+  const answers = isObject(choices) ? choices : {};
 
   if (!isObject(local) || !isObject(remote)) return result("ask", { reason: "not-pieces" });
   if (local.id !== remote.id) return result("ask", { reason: "different-ids" });
@@ -300,6 +451,22 @@ export function planPieceMerge({ local, remote, base }) {
   const structureVsProgress =
     (structureChangedL.length > 0 && progressChangedR.length > 0) || (structureChangedR.length > 0 && progressChangedL.length > 0);
   if (structureVsProgress) {
+    const whole = answers[WHOLE_PIECE_PART];
+    if (whole === "local" || whole === "remote") {
+      // Pass 121: the person chose which WHOLE piece to keep. The two can't be put
+      // together part by part (the other side's progress is keyed by ids from a grid
+      // that no longer exists), so everything on the other side goes with it.
+      const kept = { ...(whole === "local" ? L : R) };
+      const lt0 = timestamp(local);
+      const rt0 = timestamp(remote);
+      if (lt0 || rt0) kept.updatedAt = Math.max(lt0, rt0);
+      else delete kept.updatedAt;
+      return result("merged", {
+        merged: toJsonValue(kept),
+        settled: [{ part: WHOLE_PIECE_PART, kind: "whole-piece", choice: whole }],
+        unusedChoices: Object.keys(answers).filter((k) => k !== WHOLE_PIECE_PART),
+      });
+    }
     return result("whole-piece-conflict", {
       wholePiece: {
         reason: "structure-and-progress",
@@ -308,6 +475,7 @@ export function planPieceMerge({ local, remote, base }) {
         local: toJsonValue(L),
         remote: toJsonValue(R),
       },
+      unusedChoices: Object.keys(answers),
     });
   }
 
@@ -326,8 +494,11 @@ export function planPieceMerge({ local, remote, base }) {
   });
 
   // Which schedule mode the merged piece ends up in: the remote's if only the
-  // remote changed it, this device's otherwise (a conflict keeps this device's).
-  const modeAfter = fromRemote.includes("scheduleMode") ? R.scheduleMode : L.scheduleMode;
+  // remote changed it, or if the person settled a conflict over it that way; this
+  // device's otherwise (an unsettled conflict keeps this device's).
+  const modeFromRemote =
+    fromRemote.includes("scheduleMode") || (conflictKeys.includes("scheduleMode") && answers.scheduleMode === "remote");
+  const modeAfter = modeFromRemote ? R.scheduleMode : L.scheduleMode;
   const derived = [];
   let daysToLearnFromRemote = false;
   if (modeAfter === "minutes" && (changedL("daysToLearn") || changedR("daysToLearn"))) {
@@ -340,6 +511,32 @@ export function planPieceMerge({ local, remote, base }) {
     derived.push("daysToLearn");
     daysToLearnFromRemote = changedR("daysToLearn") && (!changedL("daysToLearn") || (R.daysToLearn || 0) > (L.daysToLearn || 0));
   }
+
+  // Pass 121: the numbers worked out from a conflicting target date (DATE_LINKED_FIELDS).
+  // Answered, they follow that answer and are taken out of every list below, so what
+  // was merged one by one a moment ago cannot pair one device's date with the other's.
+  const dateLinkable = modeAfter === "days" && conflictKeys.includes("targetDate");
+  const linkedToDate = dateLinkable ? DATE_LINKED_FIELDS.filter((k) => changedL(k) || changedR(k)) : [];
+  const dateAnswer = dateLinkable && isValidChoice("field", answers.targetDate) ? answers.targetDate : null;
+  if (dateAnswer) {
+    [conflictKeys, fromLocal, fromRemote, agreed].forEach((list) => {
+      linkedToDate.forEach((k) => {
+        const i = list.indexOf(k);
+        if (i >= 0) list.splice(i, 1);
+      });
+    });
+  }
+
+  // Pass 121: the person's answers, for the parts that really are in conflict. A part
+  // with no valid answer stays a conflict and keeps this device's value, as ever.
+  const settled = [];
+  const stillOpen = [];
+  conflictKeys.forEach((k) => {
+    const kind = isProgressPart(k) ? "progress" : "field";
+    if (isValidChoice(kind, answers[k])) settled.push({ part: k, kind, choice: answers[k] });
+    else stillOpen.push(k);
+  });
+  const unusedChoices = Object.keys(answers).filter((k) => !conflictKeys.includes(k));
 
   const merged = { ...L };
   const progress = isObject(L.progress) ? { ...L.progress } : {};
@@ -356,6 +553,18 @@ export function planPieceMerge({ local, remote, base }) {
   };
   fromRemote.forEach(takeFromRemote);
   if (daysToLearnFromRemote) takeFromRemote("daysToLearn");
+  if (dateAnswer === "remote") linkedToDate.forEach(takeFromRemote); // "this device's": already in `merged`
+  settled.forEach(({ part, choice }) => {
+    if (choice === "remote") {
+      takeFromRemote(part);
+    } else if (choice === "both") {
+      const id = part.slice(PROGRESS_PART_PREFIX.length);
+      const joined = unionProgressEntries(isObject(L.progress) ? L.progress[id] : undefined, isObject(R.progress) ? R.progress[id] : undefined);
+      if (joined === undefined) delete progress[id];
+      else progress[id] = joined;
+    }
+    // "local": this device's value is already in `merged`
+  });
   merged.progress = progress;
 
   const lt = timestamp(local);
@@ -370,7 +579,7 @@ export function planPieceMerge({ local, remote, base }) {
   // Copies, so nothing a caller does to a result can reach the shared
   // canonical forms (an absent part stays undefined).
   const copy = (v) => (v === undefined ? undefined : toJsonValue(v));
-  const conflicts = conflictKeys.map((k) => ({
+  const conflicts = stillOpen.map((k) => ({
     part: k,
     kind: isProgressPart(k) ? "progress" : "field",
     ...(isProgressPart(k) ? { id: k.slice(PROGRESS_PART_PREFIX.length) } : { field: k }),
@@ -388,5 +597,8 @@ export function planPieceMerge({ local, remote, base }) {
     fromLocal: sorted(fromLocal),
     agreed: sorted(agreed),
     derived: sorted(derived),
+    settled,
+    unusedChoices,
+    linkedToDate,
   });
 }

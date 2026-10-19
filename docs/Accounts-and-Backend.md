@@ -61,9 +61,10 @@ themselves](#changes-from-your-other-devices-arrive-by-themselves-pass-120)). Wi
 off the app behaves exactly as after Pass 116: it notices, and "Get changes" and
 Review are the way in, still merging with the import path's own functions. With it
 on, pieces that need no decision are brought in by themselves using the two engines;
-a piece with a conflicting part is held. **Decided 2026-10-15, only partly built:**
+a piece with a conflicting part is held, and Review (Pass 121) asks about each conflicting
+part, one plain question at a time. **Decided 2026-10-15, only partly built:**
 "the most recent change wins item by item" (Decided 6 below) is not built: Pass 120
-holds a conflicting part for Pass 121 instead. See [Pass plan](#pass-plan).
+holds a conflicting part and Pass 121 asks the person about it instead. See [Pass plan](#pass-plan).
 
 ## Decided
 
@@ -302,8 +303,10 @@ changes can arrive by themselves, behind a switch that is off by default):
   conflicting part (121), deletions, remembered answers and combines (122), turning the
   switch on by default (124), live push. **The 2026-10-15 decision "the most recent
   change wins, item by item" is therefore not built yet:** a conflicting part is held.
-- **121** is what is left once Pass 120 holds a conflicting part: the question (or the
-  rule that settles it). The held entry already keeps which parts conflicted. **122**
+- **121** A piece held with a recorded list of conflicting parts asks one plain question per
+  part in Review, instead of the whole-piece picker. Built; see [Settling a held piece, one
+  question at a time](#settling-a-held-piece-one-question-at-a-time-pass-121). It asks; it does
+  not decide: **the 2026-10-15 "most recent wins" decision is still not built.** **122**
   deletions, remembered answers and combines.
 - After those: what happens offline.
 
@@ -1630,11 +1633,14 @@ same test).
    refusal pieces could go through the same engine.
 3. **Pass 121 starts from a recorded list:** `accounts[userId].pieces[id].conflicts`
    (`{ part, kind, local, remote, base }`, fingerprints). The values are read again from the
-   account's copy when the question is asked.
+   account's copy when the question is asked. **Built in Pass 121** (the list decides which
+   pieces are asked about; the questions themselves are made again from the two copies).
 4. **The fold Pass 119 wrote** (same chunk logged on two devices) is not used here: that case
    is a conflict and is held. If Pass 121 decides "most recent wins" for a chunk entry, it
    must move `foldConflictedProgress` (`lib/tabSync.js`) into `lib/pieceMerge.js`, or
-   sessions would be dropped.
+   sessions would be dropped. **Pass 121 did not move it** (`tabSync.js` was outside its
+   list): it wrote `unionProgressEntries` in `lib/pieceMerge.js` for the "both devices'
+   sessions" answer, so there are now two implementations of "keep both".
 5. **A grid change in one place against practice in the other is held too** (the card
    doesn't say; it is the engine's whole-piece conflict, and holding is the only safe
    answer), listed as "chunk layout and practice".
@@ -1650,8 +1656,8 @@ same test).
 9. **The technique engine's conflict rule is unchanged** ("the account's value wins" for
    octaves, hands and settings): Pass 120 only calls it. **Its notices are dropped** (Pass
    118 open item 7): when both devices changed the same octaves, hands or setting, this
-   device's value is replaced by the account's and nothing says so. Pass 121's "most
-   recent wins" replaces the rule; whether to say so then is its call.
+   device's value is replaced by the account's and nothing says so. Pass 121 did not build
+   "most recent wins" (it asks about pieces), so this rule and the missing notice are as they were.
 
 **Found in Pass 120's own review (2026-10-19), P2, not fixed:**
 
@@ -1683,6 +1689,146 @@ same test).
 15. **App.jsx's wiring has no automated test** (nothing in `components/` or `App.jsx` can be
     run by `npm test`): the fresh look, the idle re-run, the late hold and the switch's
     effects were seen in a browser against a stand-in service, not on the real preview.
+
+## Settling a held piece, one question at a time (Pass 121)
+
+A piece the automatic update held because **both devices changed the same thing** (Pass 120
+records which parts, in the device record) used to be settled in Review with the whole-piece
+picker. It now asks one plain question per conflicting part. Everything else about Review is
+as before.
+
+**What was built**
+
+- **Which pieces.** Held, with a recorded list (`heldConflicts` / `heldIdsWithConflicts`). A
+  piece held **without** a list (a refused upload, an import), a file import, and the technique
+  library keep the whole-piece picker (`ImportPiecesModal`), exactly as before. `planSettle`
+  also hands back `fallbackIds`: pieces with a list it can't ask about (the account's row is
+  gone, deleted or unreadable, or there is no recorded base), which go to the picker too. When
+  both kinds are held the questions run first, then the picker opens for the rest
+  (`finishSettleFlow`, `restrictCandidatesToHeld(..., exclude)`): a piece that had its turn,
+  "Decide later" included, is never shown in the picker, and what was settled stays at the top
+  of the result (`leadLines`).
+- **The questions are made again when Review opens.** `planSettle` (pure, in
+  `lib/accountSync.js`) runs Pass 117's engine on this device's copy and the account's copy as
+  they are now, against the base recorded when the piece was last synced. The recorded list
+  only decides **which pieces** are asked about, so a conflict that has since gone is not asked
+  and one that appeared is. **Every conflict becomes exactly one question**, in a steady order
+  (ordinary fields by name, then practice records in the order of the piece), with one
+  exception, below.
+- **The wording** (`buildSettleQuestions`). A chunk's practice record: "You practiced mm. 1–4
+  on both devices since you last synced." with **Both devices' sessions** (recommended) / This
+  device's / The other device's. Any other part: "Target date: Nov 1 on this device, Nov 15 on
+  your other device." with This device's / The other device's. Devices have no names, so always
+  "this device" and "your other device". **Proposed in the card, to be confirmed.** Additions
+  to it: a line under each answer saying what it leaves out, a "Recommended" tag, a note when
+  the two sides of a practice record are not both "new practice" ("The practice record for
+  mm. 1–4 was changed differently on the two devices.", no "both" answer), the year on a date
+  when it isn't this year, a line each for long values, readable names for fields nobody
+  labelled, and "...on both devices, but the two plans differ in detail" for two values that
+  read alike (a reschedule "on day 3" on both). The whole-piece conflict (a grid change on one
+  device, practice or a reschedule on the other) is one question with two answers: this
+  device's whole piece or the other device's; each says what it leaves out.
+- **What each answer does** (`planPieceMerge`'s new `choices` input, `lib/pieceMerge.js`).
+  "This device's" keeps this device's value; "the other device's" takes theirs; "both devices'
+  sessions" (`unionProgressEntries`) keeps every session from both sides, a session both hold
+  counted once (compared by content, key order ignored: Pass 115's comparison), puts them back
+  in the order they were logged, unions the days practiced and the focus spots' own sessions,
+  and takes **everything else in the chunk's record** (the ladder state, the tempo, but also a
+  rating or a flag) from the side whose **latest judged session is later**. A skipped or
+  unconfirmed attempt doesn't move the ladder, so it doesn't count; a tie, or no dated
+  session on either side, goes to this device. **It does not replay the sessions to rebuild the
+  ladder** (deliberately deferred), and **a session one side had undone comes back** if the
+  other side still holds it: there is no "before" copy to tell an undo from a session the other
+  side never saw. Without `choices` the engine's result is exactly what it was.
+- **Numbers worked out from the target date follow it** (`DATE_LINKED_FIELDS`). Found in the
+  browser, not in the card: in a days-mode schedule the target date is the one thing a person
+  sets; days to learn and minutes per day are worked out from it, and the reschedule marker is
+  taken fresh, whenever it is saved. So a date changed differently on two devices conflicts on
+  **all of them**, and an answer about the date alone gave a piece that didn't add up (this
+  device's date with the other device's days: reproduced). So when the **date** is in
+  conflict (days mode only) these go with the date the person keeps and are **not asked
+  about**; the date's question says so ("Days to learn and reschedule follow the target date
+  you keep."). With no answer, or no conflict over the date, they are ordinary parts, and a
+  reschedule made on purpose with no date change is untouched. **This is a judgement call
+  beyond the card and the one place a conflict does not become its own question.**
+- **One apply step, again.** An answer goes through `applyAccountFlow({ mode: "settle", settle:
+  { [id]: answers } })` -> `applyAccountMerge({ settle })` -> `planPieceMerge({ choices })`
+  (there is no second apply step). The device record is saved first with the account's copy
+  as read, which takes the held mark and its list with it; whatever this device then holds
+  beyond that copy goes up as an ordinary change, "only if still at revision N". **Only when
+  the answers settle every conflict is anything applied.** If an answer is missing, or a new
+  conflict appeared while the person was deciding, the piece and the record are exactly as
+  they were (`unsettled`; the page says "changed again while you were deciding, so nothing was
+  changed and it is still held").
+- **Nothing happens until the last answer.** Opening Review, choosing an option, Next, Back,
+  Decide later and the close button change nothing (the lib's planning is pure; apply with
+  missing answers returns the very same piece and an empty record change; in the browser the
+  stored data was byte-for-byte identical, apart from the tab lease's heartbeat). **Decide later**
+  leaves the piece held and moves on to the next piece, and the next Review asks again.
+- **The screen** (`components/SettleConflictModal.jsx`): the piece's name, "Question 2 of 3"
+  (and "Piece 1 of 2"), the question, the answers as radio rows, **Decide later**, **Back**,
+  **Next** and, on the last question, **Settle this piece**. A piece with nothing left to
+  decide shows "Bring it up to date?" with the same buttons. After settling, the page says, for
+  example: "Settled Etude No. 3: kept the other device's target date and both devices' sessions
+  for mm. 1–4." and "Anything here that your account doesn't have yet goes up by itself in a
+  few seconds." Settings' account panel got matching wording (the switch's help text and a line
+  under Review).
+
+**Checked.** `test/pieceMerge.test.mjs` (55 tests) and `test/accountSync.test.mjs` (232), 1368
+in all. Each answer for a chunk (both: sessions and days unioned, the ladder from the later
+session, a tie to this device; this device's; the other's), an ordinary field, partial and
+stale answers, the whole-piece conflict, the date-linked numbers (days, minutes, marker; not in
+minutes mode), 150 seeded pairs of copies settled a random valid way (every answer applied
+exactly as given, only the answered parts changed, stable after a reload), every conflict one
+question with the wording word for word, "Decide later" changing nothing, and an end-to-end
+run through the fake database (the settled piece goes up once, at the account's revision,
+with every session, and is never held). **Re-broken on purpose, 44 ways, all caught,** once
+five weak tests were tightened or added (a side with no judged session, focus spots when the
+leading side has fewer, two schedule-mode cases, and the date rule outside days mode). Required
+by the card: taking the ladder state from the **earlier** session under "both" fails 5 tests. In the
+browser (the real app against a throwaway local stand-in for the account service with a
+"pretend it's down" switch, two browser addresses as two devices, a made-up saved sign-in,
+both devices offline while they changed things): the same chunk logged differently and the
+target date changed differently on each device was held on the second device with its list
+recorded; **Review opened on a question and changed nothing; settled with "both devices'
+sessions", "this device's" and "the other device's" (each with the date either way), the
+storage of the settling device held exactly that side's sessions (or every session under
+"both"), the account's row got the same, and the other device picked it up by itself and ended
+identical (the whole piece compared as data: every key, three copies, revision 11)**; Back kept
+its answers; **Decide later and the close button left storage byte-identical, the piece still
+held with its three recorded conflicts, and the next Review asked again**; a piece held
+**without** a list opened the old picker; a piece with a list **and** one without went
+questions first, then the picker's quiet "Cleared..." with "Settled..." kept on top; signed
+out, and a build with no account service configured: nothing changes (no Account panel, no
+"Sign in", no banner, no sync keys, no console errors). The console showed only the pretend
+outage's 503s. **Not seen:** the card's "Yours" checks on the real preview with the real test
+project; the "ready" step (nothing left to decide) and signing out in the middle of the
+questions, in a browser (both are unit-tested or simple).
+
+**Found, for decisions** (none acted on beyond what is said above):
+
+1. **A date edit rewrites more than the date**, see above. The rule built here is the narrow
+   one (only when the date itself is in conflict, days mode only). The wider question, whether
+   days to learn and minutes per day should be derived rather than stored parts at all, is
+   Pass 117's engine design and was not touched.
+2. **A piece held by a refused upload gets no questions.** In my own browser run one of seven
+   conflicts was held that way (no recorded list) and fell through to the old picker. It is
+   Pass 120's for-later item 2; it is now more visible, because the questions only help
+   automatic holds. Routing refusal-held pieces through the engine would give them questions
+   too.
+3. **Pass 117 open item 2 is untouched:** `sortOrder` and `createdAt` can conflict (two devices
+   that each reorder the piece list), and the person would now be asked "Place in your piece
+   list: 2 on this device, 4 on your other device". The engine never conflicting on those two,
+   as proposed there, would remove that question.
+4. **"Both" is not "most recent wins".** It is a choice the person makes for a chunk; nothing
+   decides for them, and nothing is remembered ("always keep both" is Pass 122's).
+5. **The whole-piece question is lossy by nature** (the other side's changes go with it), and
+   re-homing progress by measure position, as Settings does on one device, is still open
+   (Decisions.md, "When two copies disagree", open item (i)).
+6. **`docs/Decisions.md` was not on this pass's list**, so its decisions are recorded here and in
+   CLAUDE.md only; it needs an entry for: the questions and their wording, the "both" rule
+   (later judged session, tie to this device, no replay), the date-linked numbers, and the
+   fallback to the picker.
 
 ## Setup (test project)
 

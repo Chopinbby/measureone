@@ -723,7 +723,9 @@ row stays). Design:
    devices"** (Pass 120, section 14 below; it is off unless you choose it).
 3. **Review, for a piece held as "changed on another device".** The red banner
    and the Account panel show **Review** while anything is held. It looks only at
-   what's held.
+   what's held. **A piece that the automatic update held because both devices changed
+   the same thing is asked about one question at a time (flow 15, Pass 121);** any other
+   held piece (a refused upload, an imported file) opens the window described below.
 
 **The status lines in the Account panel** (Passes 111, 115 and 116). One quiet
 line sits under the buttons, and the first of these that applies is shown:
@@ -880,7 +882,8 @@ decision is brought in by itself, with no button:
    thing was changed (for example the same chunk practiced on both devices at once). It
    is **held**: your device keeps its own copy untouched, nothing is lost on either side,
    and the red banner "1 piece changed on another device" with **Review** appears, exactly
-   as before. **Review** then asks as it always did. A piece **deleted on another device**
+   as before. **Review** then asks one plain question for each thing that was changed in both
+   places (flow 15). A piece **deleted on another device**
    is only listed ("Changes from another device: 1 piece. Press Get changes."), never
    removed. A piece that may be the same one under a different name is always asked.
 5. **A piece you are in the middle of waits.** If you have an unconfirmed Interleaved
@@ -909,3 +912,55 @@ forgotten); the next look only notices, and Get changes works as before.
 
 **Signed out, or on a site with no account service:** there is no checkbox and nothing
 changes.
+
+## 15. Settling a piece changed in the same place on both devices (optional, Pass 121)
+
+**Only on sites connected to an account service, signed in.** It is the second half of flow 14:
+when "Update automatically from other devices" finds a piece that **both** devices changed in
+the same place (the same chunk practiced on both, or the same setting changed on both), it
+can't merge the two for you, so it **holds** the piece: your device keeps its own copy,
+nothing is lost on either side, and the red banner "1 piece changed on another device" with
+**Review** appears (also under the Account buttons in Settings). Pressing **Review** now asks
+**one plain question for each thing that was changed on both**, instead of the whole-piece
+window. Design:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121).
+
+**What you see.** A window with the piece's name and "Question 1 of 2" (and "Piece 1 of 2" if
+several pieces are waiting). The first line says the piece was changed on both of your devices
+and that nothing changes until you settle the last question. Then one question and its
+answers. Devices have no names, so it is always "this device" and "your other device":
+
+- **A chunk you practiced on both devices:** "You practiced mm. 1–4 on both devices since you
+  last synced." You keep **Both devices' sessions** (recommended: every session from both is
+  kept, and the rest of the record, such as tempo and next review, follows whichever device
+  practiced last), **This device's** (sessions logged on your other device are left out), or
+  **The other device's** (sessions logged on this device are left out).
+- **Any other setting:** "Target date: Nov 1 on this device, Nov 15 on your other device." You
+  keep **This device's** or **The other device's**. For the target date it also says that days
+  to learn and the reschedule follow the date you keep, so you are not asked about them.
+- **A chunk layout changed on one device while practice was logged on the other:** one
+  question, **This device's piece** or **The other device's piece**. The two can't be put
+  together, so whichever you don't keep, its changes are left out; the answers say so.
+
+**Moving through it.** Choosing an answer changes nothing. **Next** goes to the next question,
+**Back** to the one before (your answer is still there), and the last button reads **Settle this
+piece**. **Decide later** leaves the piece exactly as it is, still held, and moves on to the
+next waiting piece (the next time you press Review it asks again). The **×** does the same for
+everything. **Nothing is changed until you press Settle this piece.**
+
+**What happens when you settle.** Your answers are put together with everything the two
+copies already agreed on, the piece is brought up to date with your account, and whatever your
+device holds beyond your account's copy goes up by itself a few seconds later. The red banner
+goes away. The page says, for example: "Settled Etude No. 3: kept the other device's target date
+and both devices' sessions for mm. 1–4." If the piece changed again while you were deciding,
+nothing is changed and it says so ("...changed again while you were deciding, so nothing was
+changed and it is still held. Press Review to look at it again.").
+
+**Other held things.** A piece held for another reason (an upload that was refused, a file you
+imported), and the technique library, still open the window from flow 12, exactly as before.
+If both kinds are waiting, the questions come first and that window follows.
+
+**Signed out, or on a site with no account service:** none of this appears.
+
+**Not covered yet:** deleting a piece on one device while practicing it on the other, and
+remembering an answer ("always keep both"): see Roadmap.md and Accounts-and-Backend.md.

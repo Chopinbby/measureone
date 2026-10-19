@@ -509,7 +509,8 @@ owner's account the only one. **Phase 2:** the two merge-by-part engines (Passes
 118) are called between tabs of one browser (Pass 119) and, since Pass 120, by an
 automatic update from other devices that is **off by default**. **Decided 2026-10-15,
 only partly built:** the most recent change winning item by item, with practice sessions
-and scales always kept (Pass 120 holds a conflicting part for Pass 121 instead)
+and scales always kept (Pass 120 holds a conflicting part and Pass 121 asks the person about it
+instead, so "most recent wins" is still not built)
 ([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When two copies disagree").
 Design: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md); what a person
 sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109) (flows
@@ -617,8 +618,9 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   eight tests fail if you do. **Superseded in direction on 2026-10-15:** the owner chose
   "most recent wins, item by item" and automatic updates. Pass 120 built the automatic
   updates and KEPT this rule (a clean newer copy still applies under it), adding Pass
-  117's engine beside it for a piece changed on both sides. **"Most recent wins" is not
-  built (Pass 121); don't weaken or remove this rule until it replaces it on purpose.**
+  117's engine beside it for a piece changed on both sides; Pass 121 asks about a conflicting
+  part instead of deciding it. **"Most recent wins" is still not built; don't weaken or remove
+  this rule until something replaces it on purpose.**
 - **`applyAccountFlow` saves the device record BEFORE any state changes**
   (`withAccountCopyRecorded`); reverse it and the upload hook sees merged pieces with
   no record, takes them for new, and holds each one. Combining marks the account's
@@ -690,8 +692,9 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   device's value kept, both listed, never resolved in the engine; `status:
   "local-only"` returns `local` itself, untouched), a technique part follows a rule per
   kind. **Pass 120 did not change this** (an automatic update holds a conflicting piece
-  part instead of resolving it); "the most recent change wins" (decided 2026-10-15) is
-  still to be built, Pass 121. Scales and custom methods are never removed by a merge,
+  part instead of resolving it, and Pass 121 asks the person, see below); "the most recent
+  change wins" (decided 2026-10-15) is still not built. Scales and custom methods are never
+  removed by a merge,
   and an empty tempo never replaces a real one.
 - **Piece engine.** The "travel together" rule: the sides disagree about
   `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
@@ -730,7 +733,7 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117) and
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118).
   Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two copies
-  disagree" and Pass 118 open items 7 and 9) before Pass 121.
+  disagree" and Pass 118 open items 7 and 9) before changing how a conflict is settled.
 
 ### Several tabs of one browser (Pass 119)
 
@@ -811,7 +814,8 @@ default** (Pass 124 may change that). **With it off the app behaves exactly as a
   changed on both sides whose every part merges cleanly (Pass 117's engine, base = the
   entry's recorded `parts`), the technique library (`mergeTechniqueFromAccount`). **Never by
   itself:** a piece with a conflicting part (it is HELD, its conflicts kept in the record
-  entry for Pass 121, Review as today), the engine unable to tell ("ask"), a piece matched by
+  entry; Review asks about it one question at a time, Pass 121), the engine unable to tell
+  ("ask"), a piece matched by
   name under another id ("combine"), an already held piece, anything deleted elsewhere (listed
   as today).
 - **Merge before upload.** With the switch on `runSync` takes one fresh light look first (the
@@ -851,7 +855,58 @@ default** (Pass 124 may change that). **With it off the app behaves exactly as a
   settled automatically; a hidden page skips the fresh look before an upload; two upload
   runs can overlap during it; a piece waiting because it is in use is downloaded again every
   minute; a failed automatic update leaves only a console line; `App.jsx`'s wiring has no
-  automated test; Pass 121's fold decision; `docs/Research.md` still says five minutes.
+  automated test; `docs/Research.md` still says five minutes.
+
+### Settling a held piece, one question at a time (Pass 121)
+
+Review used to hand every held piece to the whole-piece picker (`ImportPiecesModal`). A
+piece held WITH a recorded list of conflicting parts (Pass 120 records it) now gets one plain
+question per conflicting part instead; everything else is unchanged. Rules:
+
+- **Which pieces:** `heldIdsWithConflicts` (held, with `conflicts` in the device record). A
+  piece held without a list (a refused upload, an import), a file import and the technique
+  library keep the picker, exactly as before. `planSettle` also hands back `fallbackIds` it
+  can't ask about (no readable account row, no recorded base) and they go to the picker too.
+  When both kinds are held the questions run first, then `finishSettleFlow` opens the picker
+  for the rest (`restrictCandidatesToHeld(..., exclude)` leaves out the pieces that had their
+  turn, "Decide later" ones included) and keeps what was settled at the top of the result
+  (`leadLines`).
+- **The questions are made again when Review opens**, from the account's copy as it is now
+  (`planSettle` re-runs the engine with the recorded base; pure). The recorded list only
+  decides WHICH pieces go this way. **Every conflict is one question** (`buildSettleQuestions`),
+  except the numbers that follow a conflicting target date (below).
+- **One apply step, again.** An answer goes through `applyAccountFlow({ mode: "settle", settle:
+  { [id]: answers } })` -> `applyAccountMerge({ settle })` -> `planPieceMerge({ choices })`. The
+  record is saved first and the held mark and its list go with it (the account's copy is
+  recorded in their place); what the device holds beyond it uploads as an ordinary change.
+  **Only when the answers settle EVERY conflict is anything applied;** otherwise (an answer
+  missing, or a new conflict appeared since the questions were asked) the piece and the record
+  are exactly as they were (`unsettled`). Don't write a second apply step.
+- **Opening Review, choosing an option, Next, Back, Decide later and Close change nothing**
+  (unit-tested; seen in the browser as byte-identical storage). Only the last answer of a
+  piece applies it.
+- **"Both devices' sessions"** is `unionProgressEntries` (`lib/pieceMerge.js`): the sessions,
+  the days practiced and focus spots' own sessions are unioned by content (Pass 115's
+  comparison); everything else in the chunk's record (the ladder state, tempo, but also a
+  rating or flag) comes from the side whose latest JUDGED session is later (a skipped or
+  unconfirmed attempt doesn't move the ladder, so it doesn't count), a tie to this device.
+  It does not replay sessions to rebuild the ladder, and a session one side had undone comes
+  back if the other still holds it. A **whole-piece conflict** has two answers only: this
+  device's whole piece or the other's.
+- **Numbers worked out from the target date follow it** (`DATE_LINKED_FIELDS`: days to learn,
+  minutes per day, the reschedule marker). In a days-mode schedule a date edit regenerates
+  them, so when the DATE is in conflict they go with the date the person keeps and are not
+  asked about (the date's question says so). Found in the browser: taking one device's date
+  with the other's days gave a piece that didn't add up. With no answer, or no conflict over
+  the date, they are ordinary parts (`linkedToDate` in `planPieceMerge`'s result).
+- **The wording is proposed and to be confirmed:** the two sentences are the pass card's; the
+  hints under each option, the "Recommended" tag and the whole-piece sentence are additions.
+- **Left open:** a piece held by a REFUSAL gets no questions (Pass 120 for-later item 2; it
+  happened in my own browser run); `foldConflictedProgress` (`tabSync.js`) and
+  `unionProgressEntries` are two implementations of "keep both"; the "ready" step (nothing
+  left to decide) was not seen in the browser; no remembered answers, no deletions (Pass 122).
+  Design and checks:
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121).
 
 ### Deploying and operating (Pass 114 on)
 
@@ -923,9 +978,10 @@ See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently singled
 "next"; pick from the priority-ordered backlog there. **The accounts work is the one
 thread in motion:** it is mid-Phase 2 (Passes 115 to 118 are built and live; 119, tabs of
 one browser, and 120, automatic updates behind a switch that is off by default, are built),
-and the passes the docs name next are 121 (the question for a conflicting part, which Pass
-120 holds; the owner's 2026-10-15 "most recent wins" decision is not built yet), 122
-(deletions, remembered answers, combines) and 124 (turning the switch on by default). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
+and 121 (a held piece asks one plain question per conflicting part in Review) is built; the
+passes the docs name next are 122 (deletions, remembered answers, combines) and 124 (turning
+the switch on by default). The owner's 2026-10-15 "most recent wins" decision is still not
+built. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
 policy and terms, a real email provider, monitoring, in-app change of email and
 account deletion) is separate; see Roadmap.md and Accounts-and-Backend.md. Still not
@@ -1046,3 +1102,7 @@ silently.
 - **Pass 120** — changes from other devices arrive by themselves, behind a switch that is
   off by default; the check runs every minute.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)
+- **Pass 121** — a piece held with recorded conflicts asks one plain question per conflicting
+  part in Review ("both devices' sessions", this device's, the other device's); "Decide later"
+  changes nothing.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121)

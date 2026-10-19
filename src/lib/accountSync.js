@@ -2278,7 +2278,13 @@ const FIELD_INFO = {
 
 function describeFieldValue(field, value, year) {
   const info = FIELD_INFO[field] || {};
-  if (field === "createdAt" && Number.isFinite(value)) return shortDate(new Date(value).toISOString().slice(0, 10), year) || "not set";
+  if (field === "createdAt" && Number.isFinite(value)) {
+    try {
+      return shortDate(new Date(value).toISOString().slice(0, 10), year) || "not set";
+    } catch (e) {
+      return "not set"; // a number no date can hold: say so rather than fail the whole question
+    }
+  }
   if (value === undefined || value === null) return (info.format && info.format(value)) || "not set";
   if (info.date) {
     const d = shortDate(value, year);

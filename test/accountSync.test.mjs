@@ -3275,6 +3275,13 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.deepEqual(buildSettleQuestions({ plan: live, piece: here, year: 2026 }).map((q) => q.part), ["targetDate"]);
   });
 
+  test("a number no date can hold does not break the question, and a real created date reads as a date", () => {
+    const ask = (local, remote) =>
+      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "createdAt", kind: "field", field: "createdAt", local, remote }] }, piece: mine, year: 2026 })[0].text;
+    assert.equal(ask(Date.parse("2026-10-03T12:00:00Z"), 9e18), "Date added: Oct 3 on this device, not set on your other device.");
+    assert.equal(ask(Date.parse("2026-10-03T12:00:00Z"), Date.parse("2026-10-05T12:00:00Z")), "Date added: Oct 3 on this device, Oct 5 on your other device.");
+  });
+
   test("a list of three things that follow the date reads as a list; two values that read alike are said to differ in detail", () => {
     const q = buildSettleQuestions({
       plan: {

@@ -262,7 +262,7 @@ export function SettingsTab({
                       Review
                     </button>
                     <p className="wizard-hint" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                      Review shows what was changed on both devices and asks what to keep, one question at a time. Nothing changes until you answer, and Decide later leaves it as it is.
+                      Review shows what was changed in both places and lets you choose what to keep. Nothing changes until you confirm.
                     </p>
                   </div>
                 )}

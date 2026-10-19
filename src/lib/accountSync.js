@@ -1947,6 +1947,15 @@ export function applyAccountMerge({
     // Automatic: Pass 118's engine where a base is recorded (the import merge,
     // which never asks, where it isn't).
     if (automatic) merged.technique = mergeTechniqueFromAccount(localTechnique, t.technique, techniqueEntry && techniqueEntry.parts);
+    const accountParts = techniquePartFingerprints(t.technique);
+    // Automatic only (Pass 118 open item 5, owner Pass 120): the library kept here can
+    // equal the account's BY PARTS and still differ by whole-library fingerprint (a
+    // method switched on and off again leaves an entry holding the defaults: no part,
+    // but a different fingerprint). Those are the same library, so the record keeps the
+    // fingerprint of the one kept and nothing reads as waiting. Recording the account's
+    // fingerprint instead made this device upload its own version, the other device do
+    // the same, and the two trade the library back and forth while both were open.
+    const inSyncByParts = automatic && sameData(techniquePartFingerprints(merged.technique), accountParts);
     technique = {
       value: merged.technique,
       // Only a merge that actually changed something is written back: writing
@@ -1955,7 +1964,7 @@ export function applyAccountMerge({
       stats: merged.stats,
       // The account's copy as read, with (Pass 118) the fingerprint of each of
       // its parts, like a piece's entry above.
-      entry: { revision: t.revision, fingerprint: techniqueFingerprint(t.technique), parts: techniquePartFingerprints(t.technique) },
+      entry: { revision: t.revision, fingerprint: techniqueFingerprint(inSyncByParts ? merged.technique : t.technique), parts: accountParts },
       clearedHeld: !!(accountRecord && accountRecord.technique && accountRecord.technique.held),
     };
     if (technique.clearedHeld) counts.clearedHeld += 1;

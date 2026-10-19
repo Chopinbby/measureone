@@ -8387,14 +8387,23 @@ oversight to silently fix; surface it instead.
      apart. Pass 120 must treat `"identical"` as in sync (record the account's revision,
      don't upload) rather than expect the fingerprints to match, or a harmless extra
      upload ping-pongs between devices. Pinned by a test. **Owner:** Pass 120.
+     **Status 2026-10-19: met, but only after Pass 120's own review.** Pass 120 first
+     shipped without it and, with the switch on, two such devices re-uploaded the library
+     to each other (account revision 2 to 10 in eight rounds, nothing changing). Fixed in
+     `applyAccountMerge` (an automatic apply records the fingerprint of the library it keeps
+     when that equals the account's by parts); three tests, two of which fail without it.
   6. **`App.jsx` does not record technique parts at startup yet.** `withTechniquePartsRecorded`
      is built and tested; calling it is one line beside the startup step for pieces
      (`withPartsRecorded`), and `App.jsx` was outside this pass's list. Until it is
      called, a library recorded before this pass gets its parts at its next confirmed
-     upload and the engine answers `"ask"` for it. **Owner:** Pass 120.
+     upload and the engine answers `"ask"` for it. **Owner:** Pass 120. **Status
+     2026-10-19: done** (the startup step in `App.jsx` calls it).
   7. **The merge's notices have nowhere to show.** `notices` carries the sentence to
      show (and which scale or setting it is about); nothing displays it. **Owner:** Pass
-     120 (where the merge is called) or 121 (where the question is asked).
+     120 (where the merge is called) or 121 (where the question is asked). **Status
+     2026-10-19: still open.** Pass 120 calls the merge and drops `notices`, so a value of
+     this device's that the account's replaced (octaves, hands, a setting) is replaced with
+     no message. Pass 121's "most recent wins" changes the rule they describe.
   8. **The device record grew again.** 260 parts, 14.5 KB, for the owner's 48 scales, on top
      of the pieces' 50 KB: about 65 KB written whole on every confirmed upload (the
      earlier "revisit if the record starts to matter" note, item 6 of the Pass 117 list
@@ -8487,6 +8496,27 @@ oversight to silently fix; surface it instead.
       moment another tab's change arrives; Safari on an iPhone.
   11. **Pass 117 open items 1 (a resize against a difficulty edit) and 3 (revival)** are
       now reachable through a tab merge, in a millisecond-wide collision. Still open.
+- **Changes from other devices arrive by themselves (Pass 120): what is still open
+  (logged 2026-10-19, from the pass's own review).** The pass is built and live behind a
+  switch that is off by default; the full list, with how each was seen, is under "For later
+  passes" in [Accounts-and-Backend.md](Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120).
+  **One real bug was found and fixed in the review** (not left open): with the switch on,
+  two devices whose technique libraries were the same by parts but not by fingerprint
+  re-uploaded the library to each other without end (Pass 118 open item 5, which named
+  Pass 120 as owner, had been dropped). Still open, none touching stored data:
+  1. **A hidden page skips the fresh look before an upload**, so a refusal and a hold are
+     still possible when both devices are busy on one piece within a minute.
+  2. **Two upload runs can overlap** during the fresh look (a focus or online event in that
+     gap); expected harmless, not run.
+  3. **A piece waiting because it is in use is downloaded again every minute.**
+  4. **A failed automatic update leaves only a console line** (the "Press Get changes" line
+     stays).
+  5. **A stale plan that ends in a conflict is held a moment late** (needs a log, a
+     conflict and an upload start inside ~100 ms).
+  6. **App.jsx's wiring has no automated test;** not seen on the real preview.
+  7. **Pass 118 open items 2 (two lists add up to more than `scalesPerDay`), 7 (the
+     technique merge's notices) and 9 (a hold that re-judges itself)** are untouched and
+     reachable on a real account now that the engines are called.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

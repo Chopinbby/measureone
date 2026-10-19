@@ -2824,6 +2824,73 @@ describe("the technique library in an automatic update (Pass 120)", () => {
     assert.equal(apply(L0, theirs, { ...tEntry(L0), held: true }).technique, null);
     assert.equal(apply(L0, theirs, tEntry(L0), { includeTechnique: false }).technique, null);
   });
+
+  // Pass 118 open item 5 (owner: Pass 120). The engine calls two libraries "identical" when
+  // their PARTS match, and a method switched on and off again leaves an entry that holds the
+  // defaults: no part, but a different whole-library fingerprint. If the record then keeps the
+  // ACCOUNT's fingerprint, this device's own library reads as a change waiting, it uploads, the
+  // other device does exactly the same, and the two trade the library back and forth (found in
+  // the Pass 120 review: revision 2 to 10 in eight rounds, nothing ever changing).
+  const switchedOnAndOff = (t) => validateAndMigrateTechnique(viaJson({ ...t, methodState: { ...t.methodState, eyes: { starred: false, enabled: true } } }));
+  // What this device would send after the update: the record as the apply leaves it, read the way
+  // an upload run reads it.
+  const waitingAfter = (localT, out, entry) => {
+    const before = { version: 1, accounts: { [USER]: autoRec({}, { technique: entry }) } };
+    const after = withAccountCopyRecorded(before, USER, { entries: out.entries, technique: out.technique.entry, checkedAt: null });
+    return computeWaiting({ pieces: {}, technique: out.technique.changed ? out.technique.value : localT, accountRecord: accountRecordFor(after, USER) });
+  };
+
+  test("identical by parts but a different fingerprint is IN SYNC: nothing waits to be sent, in either direction [regression, Pass 118 open item 5]", () => {
+    const plain = lib([item("a")]);
+    const toggled = switchedOnAndOff(plain);
+    assert.notEqual(techniqueFingerprint(plain), techniqueFingerprint(toggled), "the premise: only the whole-library fingerprint tells them apart");
+    assert.deepEqual(techniquePartFingerprints(plain), techniquePartFingerprints(toggled), "...and no part does");
+    // this device holds the plain one, the account now holds the other
+    const a = apply(plain, toggled, tEntry(plain));
+    assert.equal(a.technique.changed, false, "nothing to bring in");
+    assert.equal(a.technique.entry.revision, 2, "the account's revision is recorded");
+    assert.equal(waitingAfter(plain, a, tEntry(plain)).count, 0, "and nothing is sent back");
+    // and the other way round, which is the second half of the loop
+    const b = apply(toggled, plain, tEntry(toggled));
+    assert.equal(b.technique.changed, false);
+    assert.equal(waitingAfter(toggled, b, tEntry(toggled)).count, 0);
+  });
+
+  test("two devices that differ only that way never trade uploads: eight rounds, the account's revision stays put [regression, Pass 118 open item 5]", () => {
+    const plain = lib([item("a")]);
+    const toggled = switchedOnAndOff(plain);
+    const printed = (t, revision) => ({ revision, fingerprint: techniqueFingerprint(t), parts: techniquePartFingerprints(t) });
+    // the account holds A's library at revision 2; B last synced `plain` at revision 1
+    const account = { revision: 2, lib: toggled };
+    const devices = { A: { lib: toggled, entry: printed(toggled, 2) }, B: { lib: plain, entry: printed(plain, 1) } };
+    const uploads = [];
+    ["B", "A", "B", "A", "B", "A", "B", "A"].forEach((who) => {
+      const d = devices[who];
+      // a check finds the account ahead: bring it in (automatic), as runAutoUpdate does
+      if (d.entry.revision < account.revision) {
+        const out = runAuto({ local: {}, rows: [], record: autoRec({}, { technique: d.entry }), localTechnique: d.lib, techniqueRow: { revision: account.revision, data: reorder(viaJson(account.lib)) } });
+        const before = { version: 1, accounts: { [USER]: autoRec({}, { technique: d.entry }) } };
+        d.entry = accountRecordFor(withAccountCopyRecorded(before, USER, { entries: out.entries, technique: out.technique.entry, checkedAt: null }), USER).technique;
+        if (out.technique.changed) d.lib = out.technique.value;
+      }
+      // then whatever is waiting goes up, "only if still at the revision this device knows"
+      if (computeWaiting({ pieces: {}, technique: d.lib, accountRecord: autoRec({}, { technique: d.entry }) }).count > 0) {
+        account.revision += 1;
+        account.lib = d.lib;
+        d.entry = printed(d.lib, account.revision);
+        uploads.push(who);
+      }
+    });
+    assert.deepEqual(uploads, [], "nobody sends anything");
+    assert.equal(account.revision, 2);
+  });
+
+  test("a real change this device made is still sent, even when the account's library also differs by that kind of entry", () => {
+    const plain = lib([item("a")]);
+    const starred = lib([item("a", { starred: true })]);
+    const out = apply(starred, switchedOnAndOff(plain), tEntry(plain));
+    assert.equal(waitingAfter(starred, out, tEntry(plain)).count, 1, "the starred scale is the account's to receive");
+  });
 });
 
 describe("merge before upload (Pass 120)", () => {

@@ -1280,9 +1280,15 @@ What this pass changes about the account code:
 - **"The same by parts" is not "the same fingerprint".** A method switched on and off
   again leaves an entry holding the defaults; the parts call that the same as no entry
   (so two such libraries are `"identical"`), but the whole-library fingerprint
-  (`techniqueFingerprint`) still tells them apart. **Pass 120 must read `"identical"` as
+  (`techniqueFingerprint`) still tells them apart. **Pass 120 reads `"identical"` as
   in sync** (record the account's revision, don't upload) rather than expect the
-  fingerprints to match; a test pins the difference so it can't be missed.
+  fingerprints to match; a test pins the difference so it can't be missed. **Pass 120
+  first shipped without this** (found in its own review, 2026-10-19): `applyAccountMerge`
+  recorded the account's fingerprint, so the device's own library read as a change
+  waiting, uploaded, and the other device did the same: the account's revision went 2 to
+  10 in eight rounds with nothing changing. Now an automatic apply records the
+  fingerprint of the library it keeps when that equals the account's by parts
+  (`inSyncByParts`); three tests pin it, two of which fail without the line.
 - **Size.** For the owner's real library (48 scales, the 2026-10-10 export): **260
   parts, 14,805 bytes** in the device record, on top of the pieces' 50 KB (Pass 117).
   Computing them takes about 1 ms and one merge about 2 ms. The main download grew
@@ -1589,7 +1595,8 @@ list; the stale plan; fetching only the named rows; the words; and, with a fake 
 interval check due after one minute and not five, a visible page making about one check a
 minute (with timer drift) and a hidden one none. **Re-broken on purpose, and each caught:**
 applying while a piece is in use (1 test fails), uploading before merging (2 fail), and the
-switch ignored (1 fails). In the browser (the real app against a throwaway local stand-in
+switch ignored (1 fails); the review re-broke 20 rules one at a time and 19 were caught (the
+one that was not: the account's created date on a merged piece, a cosmetic gap). In the browser (the real app against a throwaway local stand-in
 for the account service, two different browser addresses as two devices, a made-up saved
 session, nothing typed): the switch is off on a restored device and on after the panel's
 checkbox; **a change on one device arrived on the other by itself, with no button, after 62
@@ -1641,7 +1648,41 @@ same test).
 8. **`docs/Research.md`** (not on this pass's list) still says "every 5 minutes" and "every
    60 seconds" for the check and the clock look.
 9. **The technique engine's conflict rule is unchanged** ("the account's value wins" for
-   octaves, hands and settings): Pass 120 only calls it.
+   octaves, hands and settings): Pass 120 only calls it. **Its notices are dropped** (Pass
+   118 open item 7): when both devices changed the same octaves, hands or setting, this
+   device's value is replaced by the account's and nothing says so. Pass 121's "most
+   recent wins" replaces the rule; whether to say so then is its call.
+
+**Found in Pass 120's own review (2026-10-19), P2, not fixed:**
+
+10. **A page that is hidden skips the fresh look before an upload.** The look is a check, and
+    checks never run hidden. Log a session and switch tabs within the 5 s quiet period and
+    the upload goes out on the last check's knowledge (up to a minute old). If the other
+    device uploaded in that minute the upload is refused and the piece is held (safe, nothing
+    lost, Review settles it). Rare: it needs both devices busy on one piece within a minute.
+11. **Two upload runs can overlap during the fresh look.** `syncRunningRef` is set after the
+    look, so a second trigger in that gap (the window regaining focus, the browser coming
+    back online) starts a second run that passes the guard too. Expected to be harmless (the
+    revision rule refuses the second upload, and `sent` adopts it as this device's own), but
+    not run. A re-check of `syncRunningRef` after the look would close it.
+12. **A piece that waits because it is in use is downloaded again every minute** until it is
+    free (only the deferred piece, not the account): only a piece left for the person is
+    remembered at its revision (`autoLeftForYouRef`), a deferred one is not. An hour-long
+    Interleaved session is about 60 downloads of one piece.
+13. **A failed automatic update leaves only a console line.** The Account panel's "Changes
+    from another device... Press Get changes" line stays (it is recomputed from the last
+    check), so it is not invisible, but nothing says the automatic path failed. A piece
+    whose data cannot be read is fetched every minute for the same reason.
+14. **A stale plan that ends in a conflict is held a moment late.** If a log lands in the
+    same instant as an apply (`prev[id] !== localPieces[id]`) and the redo finds a conflict,
+    the record says "synced" until the effect that holds the piece runs. An upload starting
+    in that gap would send this device's copy over the account's. Needs the log, the
+    conflict and an upload start inside the same ~100 ms. `reapplyOnto` itself is unit-tested;
+    this gap is not, and was never seen. A fix is to write the hold with the record when the
+    plan is made, which needs the stale check to move before the record is saved.
+15. **App.jsx's wiring has no automated test** (nothing in `components/` or `App.jsx` can be
+    run by `npm test`): the fresh look, the idle re-run, the late hold and the switch's
+    effects were seen in a browser against a stand-in service, not on the real preview.
 
 ## Setup (test project)
 

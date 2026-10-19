@@ -615,9 +615,10 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   since this device last synced it, by the account's revision, never by a clock
   (confirmed 2026-10-03). Weakening it would replace work that was never uploaded, and
   eight tests fail if you do. **Superseded in direction on 2026-10-15:** the owner chose
-  "most recent wins, item by item" and automatic updates. **Don't weaken or remove this
-  rule before Pass 120, which replaces it on purpose;** until then it is what the code
-  does and what its tests pin.
+  "most recent wins, item by item" and automatic updates. Pass 120 built the automatic
+  updates and KEPT this rule (a clean newer copy still applies under it), adding Pass
+  117's engine beside it for a piece changed on both sides. **"Most recent wins" is not
+  built (Pass 121); don't weaken or remove this rule until it replaces it on purpose.**
 - **`applyAccountFlow` saves the device record BEFORE any state changes**
   (`withAccountCopyRecorded`); reverse it and the upload hook sees merged pieces with
   no record, takes them for new, and holds each one. Combining marks the account's
@@ -642,10 +643,12 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   up. No in-app email change or account deletion (Phase 3): the owner does them in the
   dashboard.
 - **Noticing other devices (Pass 116).** The check only notices; it applies nothing
-  ("Get changes" is still the only way a change arrives until Pass 120). It reads only
+  by itself unless the person turned on Pass 120's switch (below); otherwise "Get changes"
+  is the way a change arrives. It reads only
   `id, revision, deleted_at` from `pieces` (paged like `countLiveAccountPieces`) and
   only `revision` from `technique`, never the `data` column (`checkAccountChanges`); a
-  test asserts the recorded selects, and the check repeats every few minutes. When it
+  test asserts the recorded selects, and the check repeats every minute (Pass 120; it
+  was five). When it
   runs is decided in the library (`createAccountChecker`/`checkIsDue`); `App.jsx`'s
   `requestCheck` only adds the gates that need app state, and a new trigger goes through
   `requestCheck`, never straight to `checkAccountChanges`. `classifyAccountChanges` is
@@ -686,9 +689,10 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   agreement; different values: a piece part is a conflict for that part only (this
   device's value kept, both listed, never resolved in the engine; `status:
   "local-only"` returns `local` itself, untouched), a technique part follows a rule per
-  kind. **Pass 120 changes both to "the most recent change wins"**
-  (decided 2026-10-15). Scales and custom methods are never removed by a merge, and an
-  empty tempo never replaces a real one.
+  kind. **Pass 120 did not change this** (an automatic update holds a conflicting piece
+  part instead of resolving it); "the most recent change wins" (decided 2026-10-15) is
+  still to be built, Pass 121. Scales and custom methods are never removed by a merge,
+  and an empty tempo never replaces a real one.
 - **Piece engine.** The "travel together" rule: the sides disagree about
   `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
   changed progress or the marker: one whole-piece conflict. **The reschedule marker is
@@ -710,8 +714,11 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   devices that did the day's task agree on one step, and "advance once per side" breaks
   that. Don't add a rule that drops an unfinished task of a switched-off scale. A done
   task puts its scale's day, last practiced date and last-used methods back if the merge
-  left them out. `status: "identical"` means identical BY PARTS, not by fingerprint:
-  Pass 120 must treat it as in sync (record the account's revision, don't upload). No
+  left them out. `status: "identical"` means identical BY PARTS, not by fingerprint,
+  and is treated as in sync (`applyAccountMerge` records the fingerprint of the library
+  it keeps when that equals the account's by parts, so nothing reads as waiting). Pass
+  120 first shipped without this and, with the switch on, two devices re-uploaded the
+  library to each other indefinitely; found in its own review, pinned by a test. No
   recorded `parts` answers `"ask"` and the caller falls back to
   `mergeImportedTechnique`.
 - **The simulations are the safety net** (`test/pieceMerge.test.mjs`,
@@ -723,7 +730,7 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117) and
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118).
   Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two copies
-  disagree" and Pass 118 open item 9) before Pass 120.
+  disagree" and Pass 118 open items 7 and 9) before Pass 121.
 
 ### Several tabs of one browser (Pass 119)
 
@@ -833,10 +840,18 @@ default** (Pass 124 may change that). **With it off the app behaves exactly as a
   same chunk is held with nothing lost, a deletion is only listed, a piece with a settings
   draft open waits and then arrives within seconds, switch off only notices.
   **Not seen on the real preview, and not tried with an unconfirmed Interleaved attempt.**
+- **Found and fixed in the pass's own review (2026-10-19):** with the switch on, two devices
+  whose technique libraries were the same by parts but not by fingerprint re-uploaded the
+  library to each other without end (the "identical" note under the merge engines). A
+  test that only used the SAME library on both sides could not have seen it; a device
+  simulation (eight rounds) did.
 - **Left open** (details in
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)):
   the "applied when you're done" line is rarely visible; a piece held by a REFUSAL is not
-  settled automatically; Pass 121's fold decision; `docs/Research.md` still says five minutes.
+  settled automatically; a hidden page skips the fresh look before an upload; two upload
+  runs can overlap during it; a piece waiting because it is in use is downloaded again every
+  minute; a failed automatic update leaves only a console line; `App.jsx`'s wiring has no
+  automated test; Pass 121's fold decision; `docs/Research.md` still says five minutes.
 
 ### Deploying and operating (Pass 114 on)
 

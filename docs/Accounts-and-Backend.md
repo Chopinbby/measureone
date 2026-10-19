@@ -286,14 +286,17 @@ by itself yet):
   reschedule places it on is not owed there).
 - **118** The same for the technique library. Built, **nothing uses it yet**; see
   [The technique library by part](#the-technique-library-by-part-pass-118).
+- **119** Keep every tab of one browser in step, and let only one do the account
+  work. Built; see [Several tabs of one browser](#several-tabs-of-one-browser-pass-119).
+  Nothing is applied from the account; it is the same-browser half of the problem.
 - **120** (named in the docs, not built) wires both engines in and, **by the owner's
   decision of 2026-10-15** (Decided 6), applies other devices' changes automatically
   when the app is opened or returned to, the most recent change winning item by item;
-  a refused upload is merged and sent again instead of held. **121**, which was to ask
+  a refused upload is merged and sent again instead of held. It uses the busy test
+  and the lease Pass 119 built. **121**, which was to ask
   when two copies really disagree, is left with only what "most recent" can't settle
   (the open items under "When two copies disagree" in
-  [Decisions.md](Decisions.md#open-questions)); **122** deletions. There is no Pass
-  119 in these docs.
+  [Decisions.md](Decisions.md#open-questions)); **122** deletions.
 - After those: what happens offline.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
@@ -1300,6 +1303,181 @@ What this pass changes about the account code:
   changes" or anything automatic (120), showing the notices (120), a per-device setting
   for scales per day, trimming a merged list down to `scalesPerDay`, combining two
   scales added apart for the same key, and any change to how backups merge the library.
+
+## Several tabs of one browser (Pass 119)
+
+Every tab of one browser shares one `localStorage` but keeps its own copy of the pieces
+in memory. Until this pass nothing noticed another tab's writes, and two tabs on the
+account's sign-in each ran the automatic upload and the look at what other devices
+changed. This is the same-browser half of "two copies disagree"; it touches nothing in the
+account.
+
+**Confirmed first (2026-10-16), before any change.** (1) By reading the code: nothing in
+`src/` listened for the `storage` event (the only listeners were `online`, `focus` and
+`visibilitychange`). (2) By a scratch reproduction, using the real `loadPiecesFromStorage`
+and `savePieceChanges` against a fake in-memory storage (no real data): two tabs open the
+same piece; one logs a session; the other, not told, logs a session on another chunk;
+storage then held only the second tab's session, the first was gone. And: one tab deletes
+the piece; the other logs on its stale copy; the deleted piece was written back into
+storage. Both are the failures the rest of this pass closes.
+
+**What was built** (`lib/tabSync.js`, plain functions; `App.jsx` only schedules them):
+
+- **The decision, `reconcileFromStorage({ inMemory, inStorage, lastSaved })`**, for
+  pieces and for the technique library. `lastSaved` is what this tab last saved or loaded
+  (`lastSavedPiecesRef`, and a new `lastSavedTechniqueRef`). "Unsaved change" always means
+  different **content** (Pass 117's parts), never a different object, so a no-op update
+  that only moved `updatedAt` is not a change. Per piece:
+  - storage as this tab left it: nothing to do;
+  - changed in storage, nothing unsaved here: **reload** it, through
+    `validateAndMigratePiece` as a normal load does;
+  - gone from storage (another tab deleted it): **remove** it here too, and never write it
+    back. This holds even when this tab has an unsaved change to it;
+  - new in storage: **add** it;
+  - changed in both: **merge** by part with Pass 117's engine, **base = the copy this tab
+    last saved**; this tab's value wins where both changed the same part (it keeps its
+    copy), and the conflict is listed in the result;
+  - this tab deleted a piece that another tab changed (the delete not written yet): **the
+    delete wins**, nothing resurrects it;
+  - an entry in storage that can't be read, or isn't a usable piece, is never treated as a
+    deletion; **nor is storage that can't be read at all** (found in the pre-commit review:
+    it would have removed every piece from the screen).
+- **Two tabs logging on the SAME chunk would have lost a session.** Pass 117's engine treats
+  one chunk's whole progress entry, its sessions included, as one part, so the same chunk
+  logged in both tabs is a conflict and the engine keeps one side's entry whole. For a
+  conflicted progress entry `tabSync.js` therefore keeps this tab's entry **and adds the
+  sessions, done days and focus-spot sessions the other tab added since the last save**
+  (compared by content, ordered by `loggedAt`). Anything one side removed since then stays
+  removed (an undo is not undone). The entry's ladder state (stage, due date, tempo) stays
+  this tab's: it is derived from the sessions, and rebuilding it is not this pass's job.
+  Found by reading the engine's result for the pass's own scenario; **Pass 120 meets the same
+  thing** (see "For later passes").
+- **The technique library** uses `planTechniqueMerge` with the roles swapped (storage as
+  "local", this tab as "remote"), because that engine keeps the *remote* side's value where
+  both changed the same thing and here this tab's unsaved choice is the one to keep.
+- **The write-time guard: built (the recommended option), not the cheap one.** Before a tab
+  writes a piece, `guardPieceWrites` runs the same decision on the pieces about to be written;
+  anything that would reload, remove, merge or be deferred is **held**: not written, and the
+  tab reconciles instead. The storage event alone leaves a gap of a few milliseconds (an
+  event not yet delivered, or never delivered to a tab that was frozen in the background)
+  in which the second tab's write would overwrite the first's. **What it costs, measured:**
+  a first version parsed, migrated and fingerprinted the stored piece on every save, which
+  took about **4.5 ms** for a heavy piece (180 KB, 1,600 sessions), not the 0.1 ms an earlier
+  pass measured for a normal one. Almost every save finds storage exactly as this tab wrote it,
+  and then the stored text is byte-for-byte `JSON.stringify` of the copy last saved, so that
+  is checked first (**0.22 ms** for the same piece, about what the save's own `stringify`
+  costs) and the full comparison runs only when the text differs: another tab wrote, or the
+  copy was loaded rather than saved (once). It is the same decision as the event handler's, so
+  the two can't disagree. The technique library has the same guard (`guardTechniqueWrite`).
+  **Two direct writers go through it too:** importing a backup and "Reschedule all" write
+  piece keys straight to storage before their state is set; both now go through one small
+  helper (`writePieceDirect`, `App.jsx`), which leaves the write to the save effect (and so
+  to the merge) when another tab changed that piece.
+- **How a result is applied (`App.jsx`, `runTabSync`).** One function, whoever asks: another
+  tab's `storage` event, the guard holding a write, a piece that was in use becoming idle,
+  or this tab taking the lease (a full catch-up). It reads storage, asks the library, and
+  applies the answer through the usual setters; it never writes: the save effects do, after
+  the result has landed, and a copy adopted as-is is not written back. Two details that
+  matter: the "last saved" copy only moves when the committed state really holds the new
+  copy (`settleBaselines`: a promise per piece, kept until it is true), so a result that
+  couldn't be applied can't let a later write slip past; and a result is applied only to a
+  copy that is still the one it was worked out from (`applyPiecesResult`), so an update React
+  hadn't applied yet is never overwritten. A piece the other tab deleted takes its screens
+  with it (the open piece switches to another, or the welcome screen); a piece that arrives
+  on the welcome screen becomes the open piece.
+- **The busy test (`isPieceBusy`, `busyPieceIds`), built once in `lib/tabSync.js` for Pass 120
+  to import.** A piece is in use while: an unconfirmed Interleaved attempt exists
+  (`interleaveRisk`), a reassessment timer is running (`assessmentTimerRisk`), or the Edit
+  piece settings draft is open for it (`settingsEditing` with `editDraft.id`). The first two
+  belong to the active piece. **Nothing is applied to a busy piece, whatever it would be**
+  (reload, merge, removal): the change is remembered (`deferredTabSyncRef`) and applied when
+  it is idle (an effect on those states). **Its write is held too** while storage has moved
+  under it, because writing would overwrite the other tab's change and merging would be
+  applying. The cost: if this tab closes or crashes while a piece is busy and storage has
+  moved, what was changed on that piece in the meantime (provisional attempts, in
+  practice) was never saved. Nothing of the other tab's is lost.
+- **The lease: one tab does the account work.** `createTabLease`: a record in `localStorage`
+  (`measureone-tab-lease`, `{ tabId, at }`). The holder writes a heartbeat **every 10
+  seconds**; any tab may take it over once it has gone **30 seconds** without one; a closing
+  tab removes it at once (`pagehide`). Every tab looks every **2 seconds** (a takeover is
+  never later than 30 + 2 + 0.25 seconds). `localStorage` has no atomic "create if absent",
+  so a tab claims (writes its id), waits 250 ms and looks again; only if the record still
+  names it does it believe it holds the lease (two tabs that claim at once: the last write
+  stands). **A look that arrives during the wait (a storage event, the tab becoming visible)
+  does not cut it short**: found in the pre-commit review, where it let two tabs briefly
+  believe they both held the lease. A lease stamped in the future (a clock set back) is not honored. The Web Locks API
+  is not used (not in Safari 14, the build target). **Only while signed in to an account
+  service**: signed out, or in a build with no connection settings, there is no lease key, no
+  timer and nothing else changes.
+  - **What a tab without the lease does not do:** the automatic upload (`runSync`, and
+    `isCancelled` between items so a run in flight stops when the lease is lost) and the look
+    at what other devices changed (`requestCheck`). Both re-check the lease at the moment they
+    run (`holdsNow`), not a flag. **It still reloads what the holder saves** (the `storage`
+    listener is in every tab).
+  - **Taking the lease** first catches up with storage (a full `runTabSync`, because this tab
+    may have missed events), then starts the upload and the look again. Losing it stops what
+    this tab had going.
+  - **Not gated, on purpose:** the buttons a person presses (Back up this device, Get changes,
+    Review) work in any tab: they asked for them. And two small writes to the device record
+    stay in every tab: noting a deletion (`noteLocalDeletions`: a tab without the lease that
+    deletes a piece must still record it, or a later Get changes would bring the piece back)
+    and the startup `withPartsRecorded`. Both are a read and a write in one synchronous step.
+- **Pass 120 reads `holdsLease()` and the busy test.** Pass 120's automatic apply must run only
+  in the tab that holds the lease and must skip busy pieces; both are in place for it.
+
+**Checked.** `test/tabSync.test.mjs`, 72 tests: the busy test; every decision above (including
+a deletion, a change in both, the same chunk in both, a grid change against progress and a busy
+piece); applying and settling; the guard; two tabs sharing one storage through the real
+`savePieceChanges` (a model of the few lines of glue `App.jsx` runs); a seeded run of two tabs
+logging on random chunks with events arriving at once, late or never (200 seeds committed, 6,000
+run: no logged session is ever lost and both tabs and storage end up the same); and the lease
+against a fake clock (one holder, a takeover only at 30 seconds, an old holder that wakes late, a
+claim at the same moment, a release on close, a clock set back, storage that throws). **Re-broken on
+purpose, and each caught:** the reconcile keeping the older copy and writing it back (17 tests fail, the
+two tabs rewrite each other forever); two tabs able to hold the lease at once (4 fail). In the
+browser (the real app, two tabs of one browser on a scratch origin, real clicks): a session logged in
+one tab appeared in the other without a reload, with the ladder state; a session logged in the second
+right after kept the first's; a real race (the second tab's event listener switched off, then the
+same chunk logged in both) left all three sessions in storage and 22 minutes in both tabs; a piece
+deleted in one tab left the other (its settings draft open, so it waited, then left when the draft
+was discarded) and did not come back when the other tab wrote; a piece added in one tab appeared in
+the other; a scale added to the technique library appeared in the other tab. With a local stand-in for the
+account service (a made-up saved session, nothing typed): the first tab took the lease and uploaded;
+a second tab made no account request in 25 seconds; a session logged in the second tab was uploaded
+by the first ("only if still at revision 1"); with the holder gone without releasing, the second tab
+took over **30.6 seconds after the last heartbeat** and then looked and uploaded itself; a holder that
+navigated away handed it over in 0.5 seconds. Signed out (account build) and with no account
+service: tabs stay in step, no lease key, no account request. **Not seen on the real test project.**
+
+**For later passes** (found here, not decided):
+
+1. **Pass 117's engine merges one chunk's whole progress entry as one part, so two devices that
+   log on the same chunk conflict.** That is the common case on a real two-device day, not an
+   edge. Pass 120's "most recent wins, item by item" applied to that part would drop one side's
+   sessions, which the same decision says must always be kept. `foldConflictedProgress`
+   (`lib/tabSync.js`, not exported) does the right thing for tabs; Pass 120 needs the same fold,
+   so it should be moved into `lib/pieceMerge.js` (not touched here) or exported.
+2. **A grid change in one tab against progress in the other can't be put together**
+   (the engine's "travel together" case, Decisions.md open item (i)). For tabs this tab's copy is
+   kept, so the other side's sessions (keyed by the old chunk ids) are dropped; it is reported in
+   the console only (a visible notice is deferred). It needs a window of a few milliseconds
+   (a save of Settings' structure fields in one tab against an undelivered log in the other),
+   but the answer is not settled.
+3. **The technique engine's conflict rule is "the account's value wins".** Pass 120's "most recent
+   wins" replaces it; tabs already use the swapped roles.
+4. **No catch-up when a tab regains focus.** A tab frozen in the background that missed events
+   catches up at its next write (the guard) or when it takes the lease. Adding one on
+   `visibilitychange` would be a few lines; it was left out of this pass's list.
+5. **The write guard still has a gap** of the cross-process delay of `localStorage` itself
+   (a tab can read a copy a few milliseconds old); the event, the guard and the next catch-up
+   shrink it, they don't close it. It was the "rare same-piece race" the cheaper option accepts;
+   this one is rarer.
+6. **Writes to the device record in a tab without the lease** (noting a deletion, the startup
+   parts) are a read and a write in one synchronous step, so a clash with the holder's write is
+   very unlikely, not impossible. Gating them would make a deletion in a follower tab depend on
+   the holder noticing it by event.
+7. **A dead holder is waited out** (30 seconds); only a page that fires `pagehide` hands it on
+   at once. A page closed by a test harness doesn't fire it.
 
 ## Setup (test project)
 

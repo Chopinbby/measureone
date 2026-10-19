@@ -48,7 +48,8 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   current, can be restored or brought back with "Get changes", and the app notices
   when another device changed something. **Changes still never arrive by
   themselves, and nothing merges two devices' copies part by part yet:** the
-  engines exist (Passes 117 and 118) but nothing calls them. See "Accounts, sync
+  engines exist (Passes 117 and 118) but nothing calls them for the account (since
+  Pass 119 tabs of ONE browser use them between themselves). See "Accounts, sync
   and deploys" below.
 - No React Router — navigation is a simple `activeTab` string in state.
 
@@ -84,7 +85,7 @@ MeasureOne.jsx/
     ├── lib/            # pure functions: chunking, scheduling, confidence,
     │                   # revival, storage, technique, shared constants/utils,
     │                   # and the account code (backend.js, accountSync.js,
-    │                   # pieceMerge.js, techniqueMerge.js) — no JSX
+    │                   # pieceMerge.js, techniqueMerge.js, tabSync.js) — no JSX
     └── components/     # everything with JSX: NumberInput, Wizard, field
                          # editors (fields/), and every tab (tabs/)
 ```
@@ -506,7 +507,8 @@ of all devices (Pass 113), and since Pass 116 the app notices, quietly, that ano
 device changed something ("Changes from another device: 3 pieces. Press Get changes.";
 it applies nothing). Live on the real site since Pass 114 (2026-10-10), with the
 owner's account the only one. **Phase 2 is groundwork so far:** the two merge-by-part
-engines (Passes 117 and 118) are built and simulation-tested but nothing calls them.
+engines (Passes 117 and 118) are built and simulation-tested but nothing calls them for
+the account yet (Pass 119 calls them between tabs of one browser).
 **Decided 2026-10-15, not built:** from Pass 120 other devices' changes are applied
 automatically when the app is opened or returned to, the most recent change winning
 item by item, with practice sessions and scales always kept
@@ -657,7 +659,7 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   the device record every time), not the sentence; a failed check shares the uploads'
   failure count and shows no error of its own.
 
-### The merge engines (Passes 117 and 118; nothing calls them yet)
+### The merge engines (Passes 117 and 118; only tabs of one browser call them so far)
 
 - **What they are.** `lib/pieceMerge.js` and `lib/techniqueMerge.js` merge two copies
   **by part**. The device record's entries carry `parts` (a fingerprint per part, never
@@ -724,6 +726,66 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118).
   Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two copies
   disagree" and Pass 118 open item 9) before Pass 120.
+
+### Several tabs of one browser (Pass 119)
+
+Every tab shares one `localStorage` but keeps its own `pieces`. Until Pass 119 the tab
+that saved last silently replaced the other's work and a deleted piece came back
+(reproduced with the real load/save functions). All the deciding is in `lib/tabSync.js`
+(pure, `test/tabSync.test.mjs`); `App.jsx` only schedules it. Rules:
+
+- **`reconcileFromStorage` decides per piece:** nothing; **reload** (through
+  `validateAndMigratePiece`) when nothing is unsaved here; **remove** when another tab
+  deleted it (never written back, even with an unsaved change here); **add**; **merge** by
+  part (Pass 117's engine, base = the copy this tab last saved, this tab winning a
+  same-part conflict); **keep** when it can't be put together. "Unsaved" means different
+  CONTENT, never a different object. A tab's own pending delete beats another tab's
+  change. Storage that can't be read, or an unusable entry, is never a deletion. The
+  technique library follows the same cases with `planTechniqueMerge`'s roles swapped.
+- **The same chunk logged in two tabs is a conflict in the engine** (one chunk's whole
+  progress entry is one part) and it would keep ONE entry whole, dropping a session.
+  `foldConflictedProgress` (`tabSync.js`, not exported) adds the other tab's sessions,
+  done days and focus-spot sessions back (by content; an undo is not undone). **Pass 120
+  meets the same thing with the account's copy: move the fold into `pieceMerge.js` or
+  export it**, or "most recent wins" drops sessions. A grid change in one tab against
+  progress in the other is still a whole-piece conflict (this tab's copy kept, the other
+  side's sessions dropped, console warning only; Decisions.md open item (i)).
+- **The write guard (`guardPieceWrites`, `guardTechniqueWrite`) holds a save when storage
+  moved under it** and the tab reconciles instead (`runTabSync`, via `requestTabSync`). It
+  checks byte-identical text first (0.22 ms on a 180 KB piece; the full comparison is
+  4.5 ms). **Any new place that writes a piece key must pass the guard:** import and
+  "Reschedule all" use `writePieceDirect`. `lastSavedPiecesRef` moves only through the
+  save effect, `settleBaselines` or `writePieceDirect`, **never by assignment from a
+  reconcile**: a reconcile registers a promise (`baselinesFor`) that settles only when the
+  committed state really holds the new copy, and a result is applied only to a copy that
+  is still the one it was worked out from (`applyPiecesResult`). Don't "fix" a held write
+  by writing anyway; it is the overwrite this pass exists to stop.
+- **`isPieceBusy` is the one "in use" test, shared with Pass 120:** an unconfirmed
+  Interleaved attempt, a running reassessment timer, an open settings draft for that
+  piece. Nothing is applied to a busy piece; the change is remembered
+  (`deferredTabSyncRef`) and applied when idle, and its own writes are held while storage
+  has moved (so its in-flight changes aren't on disk until it is idle).
+- **The lease (`createTabLease`):** one tab at a time uploads and looks at the account
+  (`runSync`, `requestCheck`; both re-check `holdsLease()` when they run). Record
+  `measureone-tab-lease` `{ tabId, at }`: heartbeat every 10 s, takeover after 30 s without
+  one (never later than 32 s: every tab looks every 2 s), released on `pagehide`; a tab
+  claims, waits 250 ms and looks again, and **a look during the wait does not cut it
+  short**. Only while signed in to an account service (otherwise no lease key, nothing
+  changes). A tab without it still follows storage. Taking it first does a full catch-up.
+  **Pass 120's automatic apply must run only where `holdsLease()` is true and skip busy
+  pieces.** Not gated, on purpose: the buttons a person presses (Back up, Get changes,
+  Review) and two small device-record writes (`noteLocalDeletions`, startup
+  `withPartsRecorded`).
+- **To check "only one tab uploads" by hand, put two tabs in separate windows side by
+  side** (both visible), and show the Network panel's Method column. Not verified: a
+  browser may slow a tab that is out of sight, which could pass the lease to the visible
+  tab; if requests ever show in both tabs of ONE window, that is the first thing to rule
+  out. The preview check in Safari (2026-10-18) used two windows and passed.
+- **Left open:** no catch-up when a tab regains focus; a few milliseconds of cross-process
+  `localStorage` delay in the guard; a dead holder waits out 30 s; a tab on the old version
+  (a phone left open) ignores all of this until reloaded. Design, checks and the Safari
+  preview results:
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119).
 
 ### Deploying and operating (Pass 114 on)
 
@@ -793,7 +855,8 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
 
 See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently singled out as
 "next"; pick from the priority-ordered backlog there. **The accounts work is the one
-thread in motion:** it is mid-Phase 2 (Passes 115 to 118 are built and live), and the
+thread in motion:** it is mid-Phase 2 (Passes 115 to 118 are built and live; 119, tabs of
+one browser, is built), and the
 passes the docs name next are 120 (wires the two merge engines in and applies other
 devices' changes automatically, the most recent change winning item by item:
 **decided 2026-10-15**), 121 (only what "most recent" can't settle) and 122
@@ -913,3 +976,5 @@ silently.
 - **Pass 116** — the app notices, quietly, that another device changed something.
 - **Pass 117** — the merge-by-part engine for a piece (not yet called).
 - **Pass 118** — the merge-by-part engine for the technique library (not yet called).
+- **Pass 119** — tabs of one browser stay in step; only one does the account work.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119)

@@ -220,11 +220,19 @@ MeasureOne.jsx/
     │   │                                  # account code imports it). Nothing in the
     │   │                                  # app calls the merge yet (Pass 120 does).
     │   │                                  # Algorithms.md#merging-by-part-pass-117
-    │   └── techniqueMerge.js              # Pass 118: the same for the technique
-    │                                      # library (planTechniqueMerge), plus
-    │                                      # canonicalTechnique and
-    │                                      # techniquePartFingerprints. Same status.
-    │                                      # Algorithms.md#merging-the-technique-library-by-part-pass-118
+    │   ├── techniqueMerge.js              # Pass 118: the same for the technique
+    │   │                                  # library (planTechniqueMerge), plus
+    │   │                                  # canonicalTechnique and
+    │   │                                  # techniquePartFingerprints. Same status.
+    │   │                                  # Algorithms.md#merging-the-technique-library-by-part-pass-118
+    │   └── tabSync.js                     # Pass 119: several tabs of one browser.
+    │                                      # reconcileFromStorage (what a tab does about
+    │                                      # what another tab wrote, built on the two merge
+    │                                      # engines), the write-time guard, the busy
+    │                                      # test (isPieceBusy, shared with Pass 120) and
+    │                                      # the lease (createTabLease: one tab does the
+    │                                      # account work). Pure; App.jsx schedules it.
+    │                                      # Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119
     └── components/
         ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
         │   ScheduleBanner.jsx, Sparkline.jsx,
@@ -344,7 +352,9 @@ library.
   never be written. A failed write isn't marked saved, so it's retried on
   the next change, and `storageError` still means "this run had a failed
   write". Import and "Reschedule all" still also save their pieces directly
-  (a harmless second write). Before Pass 106 the effect re-saved every
+  (since Pass 119 through `writePieceDirect`, which passes the same guard
+  as the effect and records the piece as saved, so it isn't written a second
+  time). Before Pass 106 the effect re-saved every
   piece on every change; **measured, in a later session, at
   generously-scaled synthetic data** (100 pieces × 1,600 logged sessions
   each, ~20MB), that full re-save took ~48ms — see
@@ -353,6 +363,29 @@ library.
   pieces to an account copy, which Pass 111 now does — see "Account sign-in
   and the automatic backup" below and
   [Accounts-and-Backend.md](Accounts-and-Backend.md).
+  **Since Pass 119 two or more tabs of one browser stay in step.** Every
+  tab shares one `localStorage` but keeps its own `pieces`, and until then a
+  tab saved over whatever another tab had written (and brought a piece the
+  other had deleted back). Now: (1) the save effect (and the technique
+  one) is preceded by a **write guard** (`guardPieceWrites`,
+  `lib/tabSync.js`): a piece whose stored copy is no longer what this tab
+  last saved or loaded is not written; the tab reconciles instead.
+  `lastSavedPiecesRef` therefore means "what storage held when this tab last
+  looked", and only moves through the save effect, the reconcile
+  (`settleBaselines`) or `writePieceDirect`. (2) A `storage` listener
+  (pieces' and the technique library's keys only; the active piece id is
+  per tab on purpose) calls `runTabSync`, the one function that reads storage,
+  asks `reconcileFromStorage` what to do (reload, add, remove, or merge by part with
+  Pass 117's engine, never dropping either side's sessions) and applies it
+  through `setPieces`/`setTechnique`; it never writes, the save effects do.
+  (3) A piece **in use** (an unconfirmed Interleaved attempt, a running
+  reassessment timer, an open settings draft; `isPieceBusy`) is never
+  changed by another tab until idle. (4) A **lease** in `localStorage`
+  (`createTabLease`) lets one tab at a time upload and look at the account;
+  the others still follow storage. **If you add another place that writes a
+  piece key, it must pass the guard** (or go through state and the save
+  effect). See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119).
 - `handleSavePiece` (`SettingsTab`'s "Save changes") additionally runs
   `migrateOrphanedProgress(piece, updated)` (`lib/chunking.js`, a later
   session) before persisting — reattaches any `piece.progress` entry whose

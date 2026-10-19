@@ -90,6 +90,17 @@ export function SettingsTab({
   accountBusy = false,
   accountNotice = null,
   onDismissAccountNotice,
+  // Changes from other devices arrive by themselves (Pass 120). `autoUpdate` is
+  // the switch "Update automatically from other devices" (on this device only,
+  // off unless chosen); `onSetAutoUpdate(on)` changes it. `autoUpdateNotice` is
+  // the last "Updated from another device: ..." line (text or null, dismissible
+  // here), and `autoPendingText` the line that says a change is waiting for the
+  // person to be done with a piece. The app does the work (App.jsx).
+  autoUpdate = false,
+  onSetAutoUpdate,
+  autoUpdateNotice = null,
+  onDismissAutoUpdateNotice,
+  autoPendingText = null,
   // Account settings (Pass 113). "Change password" opens a window (App.jsx).
   // "Sign out of all devices" asks first, here in the panel (signOutAllAsking),
   // never as a browser pop-up. signOutNotice is the last result ({ text,
@@ -190,6 +201,28 @@ export function SettingsTab({
                     <LogOut size={14} /> Sign out
                   </button>
                 </div>
+                {/* Pass 120: off unless chosen, on this device only (it is kept in the
+                    device record, never in the account). Offered once this device's
+                    first backup is checked, because the look at the account that
+                    drives it only runs then. */}
+                {syncActive && onSetAutoUpdate && (
+                  <div style={{ marginTop: 14 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 500, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={autoUpdate}
+                        onChange={(e) => onSetAutoUpdate(e.target.checked)}
+                        disabled={backupRunning || accountBusy}
+                      />
+                      Update automatically from other devices
+                    </label>
+                    <p className="wizard-hint" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                      {autoUpdate
+                        ? "On: about once a minute while this page is open, changes from your other devices are brought in by themselves. A piece changed in both places is merged when the changes don't overlap. Anything that overlaps, anything deleted elsewhere, and a piece that may be the same one under another name are left for you. A piece you're in the middle of waits until you're done with it. This choice is for this device only."
+                        : "Off: changes from your other devices are noticed and listed here, and you bring them in with Get changes from your account. Turn this on to have them arrive by themselves. This choice is for this device only."}
+                    </p>
+                  </div>
+                )}
                 {syncStatus && (
                   <p
                     role="status"
@@ -203,6 +236,25 @@ export function SettingsTab({
                   <p role="status" className="wizard-hint" style={{ margin: "8px 0 0", fontSize: 13 }}>
                     {accountChangesText}
                   </p>
+                )}
+                {autoPendingText && (
+                  <p role="status" className="wizard-hint" style={{ margin: "8px 0 0", fontSize: 13 }}>
+                    {autoPendingText}
+                  </p>
+                )}
+                {autoUpdateNotice && (
+                  <div role="status" style={{ margin: "8px 0 0", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <p className="tq-ok" style={{ margin: 0, fontSize: 13 }}>
+                      {autoUpdateNotice}
+                    </p>
+                    {onDismissAutoUpdateNotice && (
+                      <div>
+                        <button type="button" className="link-btn" onClick={onDismissAutoUpdateNotice}>
+                          Dismiss
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {heldCount > 0 && (
                   <div style={{ margin: "10px 0 0" }}>

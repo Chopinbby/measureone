@@ -46,10 +46,9 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   connected to an account service (the live site too, since Pass 114): signed in,
   this browser's pieces and technique library are copied to the account and kept
   current, can be restored or brought back with "Get changes", and the app notices
-  when another device changed something. **Changes still never arrive by
-  themselves, and nothing merges two devices' copies part by part yet:** the
-  engines exist (Passes 117 and 118) but nothing calls them for the account (since
-  Pass 119 tabs of ONE browser use them between themselves). See "Accounts, sync
+  when another device changed something. **Changes from other devices arrive by
+  themselves only if the person turns on a switch that is OFF by default (Pass 120);**
+  otherwise they are noticed and "Get changes" is the way in. See "Accounts, sync
   and deploys" below.
 - No React Router — navigation is a simple `activeTab` string in state.
 
@@ -506,16 +505,15 @@ Review bring things back (Pass 112), the person can change their password and si
 of all devices (Pass 113), and since Pass 116 the app notices, quietly, that another
 device changed something ("Changes from another device: 3 pieces. Press Get changes.";
 it applies nothing). Live on the real site since Pass 114 (2026-10-10), with the
-owner's account the only one. **Phase 2 is groundwork so far:** the two merge-by-part
-engines (Passes 117 and 118) are built and simulation-tested but nothing calls them for
-the account yet (Pass 119 calls them between tabs of one browser).
-**Decided 2026-10-15, not built:** from Pass 120 other devices' changes are applied
-automatically when the app is opened or returned to, the most recent change winning
-item by item, with practice sessions and scales always kept
+owner's account the only one. **Phase 2:** the two merge-by-part engines (Passes 117 and
+118) are called between tabs of one browser (Pass 119) and, since Pass 120, by an
+automatic update from other devices that is **off by default**. **Decided 2026-10-15,
+only partly built:** the most recent change winning item by item, with practice sessions
+and scales always kept (Pass 120 holds a conflicting part for Pass 121 instead)
 ([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When two copies disagree").
 Design: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md); what a person
 sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109) (flows
-10 to 13).
+10 to 14).
 
 ### The account code (Passes 109 to 116)
 
@@ -617,9 +615,10 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   since this device last synced it, by the account's revision, never by a clock
   (confirmed 2026-10-03). Weakening it would replace work that was never uploaded, and
   eight tests fail if you do. **Superseded in direction on 2026-10-15:** the owner chose
-  "most recent wins, item by item" and automatic updates. **Don't weaken or remove this
-  rule before Pass 120, which replaces it on purpose;** until then it is what the code
-  does and what its tests pin.
+  "most recent wins, item by item" and automatic updates. Pass 120 built the automatic
+  updates and KEPT this rule (a clean newer copy still applies under it), adding Pass
+  117's engine beside it for a piece changed on both sides. **"Most recent wins" is not
+  built (Pass 121); don't weaken or remove this rule until it replaces it on purpose.**
 - **`applyAccountFlow` saves the device record BEFORE any state changes**
   (`withAccountCopyRecorded`); reverse it and the upload hook sees merged pieces with
   no record, takes them for new, and holds each one. Combining marks the account's
@@ -644,10 +643,12 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   up. No in-app email change or account deletion (Phase 3): the owner does them in the
   dashboard.
 - **Noticing other devices (Pass 116).** The check only notices; it applies nothing
-  ("Get changes" is still the only way a change arrives until Pass 120). It reads only
+  by itself unless the person turned on Pass 120's switch (below); otherwise "Get changes"
+  is the way a change arrives. It reads only
   `id, revision, deleted_at` from `pieces` (paged like `countLiveAccountPieces`) and
   only `revision` from `technique`, never the `data` column (`checkAccountChanges`); a
-  test asserts the recorded selects, and the check repeats every few minutes. When it
+  test asserts the recorded selects, and the check repeats every minute (Pass 120; it
+  was five). When it
   runs is decided in the library (`createAccountChecker`/`checkIsDue`); `App.jsx`'s
   `requestCheck` only adds the gates that need app state, and a new trigger goes through
   `requestCheck`, never straight to `checkAccountChanges`. `classifyAccountChanges` is
@@ -659,7 +660,7 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   the device record every time), not the sentence; a failed check shares the uploads'
   failure count and shows no error of its own.
 
-### The merge engines (Passes 117 and 118; only tabs of one browser call them so far)
+### The merge engines (Passes 117 and 118; called by tabs of one browser and by Pass 120's automatic update)
 
 - **What they are.** `lib/pieceMerge.js` and `lib/techniqueMerge.js` merge two copies
   **by part**. The device record's entries carry `parts` (a fingerprint per part, never
@@ -688,9 +689,10 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   agreement; different values: a piece part is a conflict for that part only (this
   device's value kept, both listed, never resolved in the engine; `status:
   "local-only"` returns `local` itself, untouched), a technique part follows a rule per
-  kind. **Pass 120 changes both to "the most recent change wins"**
-  (decided 2026-10-15). Scales and custom methods are never removed by a merge, and an
-  empty tempo never replaces a real one.
+  kind. **Pass 120 did not change this** (an automatic update holds a conflicting piece
+  part instead of resolving it); "the most recent change wins" (decided 2026-10-15) is
+  still to be built, Pass 121. Scales and custom methods are never removed by a merge,
+  and an empty tempo never replaces a real one.
 - **Piece engine.** The "travel together" rule: the sides disagree about
   `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
   changed progress or the marker: one whole-piece conflict. **The reschedule marker is
@@ -712,8 +714,11 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   devices that did the day's task agree on one step, and "advance once per side" breaks
   that. Don't add a rule that drops an unfinished task of a switched-off scale. A done
   task puts its scale's day, last practiced date and last-used methods back if the merge
-  left them out. `status: "identical"` means identical BY PARTS, not by fingerprint:
-  Pass 120 must treat it as in sync (record the account's revision, don't upload). No
+  left them out. `status: "identical"` means identical BY PARTS, not by fingerprint,
+  and is treated as in sync (`applyAccountMerge` records the fingerprint of the library
+  it keeps when that equals the account's by parts, so nothing reads as waiting). Pass
+  120 first shipped without this and, with the switch on, two devices re-uploaded the
+  library to each other indefinitely; found in its own review, pinned by a test. No
   recorded `parts` answers `"ask"` and the caller falls back to
   `mergeImportedTechnique`.
 - **The simulations are the safety net** (`test/pieceMerge.test.mjs`,
@@ -725,7 +730,7 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-by-part-pass-117) and
   [`docs/Algorithms.md`](docs/Algorithms.md#merging-the-technique-library-by-part-pass-118).
   Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two copies
-  disagree" and Pass 118 open item 9) before Pass 120.
+  disagree" and Pass 118 open items 7 and 9) before Pass 121.
 
 ### Several tabs of one browser (Pass 119)
 
@@ -786,6 +791,67 @@ that saved last silently replaced the other's work and a deleted piece came back
   (a phone left open) ignores all of this until reloaded. Design, checks and the Safari
   preview results:
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119).
+
+### Changes from other devices arrive by themselves (Pass 120)
+
+A switch in the Account panel, **"Update automatically from other devices", OFF by
+default** (Pass 124 may change that). **With it off the app behaves exactly as after Pass
+116** (it notices; Get changes is the way in). Rules:
+
+- **The switch is in the device record, per account** (`accounts[userId].autoUpdate`, kept
+  only while on), never in the account. **Every function that rebuilds an account's entry
+  (`changeAccount`, `withBackupRecorded`) must carry it over**, or the next upload switches
+  the person's choice off; a test pins it.
+- **One apply step.** `runAutoUpdate` (App.jsx) fetches ONLY the changed rows
+  (`fetchChangedAccountRows`) and calls `applyAccountFlow({ automatic: true })`, **the same
+  function Get changes uses; do not write a second.** The record is saved before any piece
+  changes (Pass 112). `automatic` changes WHAT is done (`applyAccountMerge`), never how.
+  Get changes and Review **do not use the engines**; only `automatic` does.
+- **By itself:** new pieces, "same", a clean newer copy (the Pass 112 no-ask rule), a piece
+  changed on both sides whose every part merges cleanly (Pass 117's engine, base = the
+  entry's recorded `parts`), the technique library (`mergeTechniqueFromAccount`). **Never by
+  itself:** a piece with a conflicting part (it is HELD, its conflicts kept in the record
+  entry for Pass 121, Review as today), the engine unable to tell ("ask"), a piece matched by
+  name under another id ("combine"), an already held piece, anything deleted elsewhere (listed
+  as today).
+- **Merge before upload.** With the switch on `runSync` takes one fresh light look first (the
+  latest check can be a minute old, and two devices logging seconds apart would then be
+  refused and held), stops if it brought anything in (the merged result goes up next
+  round), and leaves a piece that still can't be merged out of the run
+  (`needsMergeBeforeUpload`, `skipPieceIds`) rather than sending it to be refused. A refusal
+  is still judged and held as the last safety net. **Don't send a piece whose merge was
+  deferred: it will be refused.**
+- **A piece in use waits** (`isPieceBusy`, Pass 119): the change is not applied and **not
+  recorded**, so the next run finds it again; an effect applies it when idle. **Never record
+  an account copy for a piece you didn't apply it to:** the record would say "synced" while
+  this device holds an older copy, and the next upload would overwrite the account's newer
+  one. Running practice timers and half-typed reps/BPM on a card survive the piece being
+  replaced (cards are keyed by chunk and role), so they are NOT in the busy test.
+- **Notes are quiet:** the Account panel's "Updated from another device: ..." line (never the
+  page-wide banner Get changes uses), one line at the top only if the OPEN piece changed, and
+  the "will be applied when you're done" line (proposed, to be confirmed).
+- **The check runs every minute** (`CHECK_EVERY_MS` 60 s, `CHECK_TICK_MS` 15 s so drift can't
+  space checks 1 to 2 minutes apart), with the switch on or off. Each check is about 3 KB of
+  ids, revisions and deleted dates; the Free plan has unlimited API requests.
+- **Re-broken on purpose, each caught:** applying while a piece is in use (1 test fails),
+  uploading before merging (2), the switch ignored (1). Seen in a browser against a local
+  stand-in service (two addresses as two devices): arrives by itself in 62 and 79 s, only
+  the changed row fetched, different chunks merge quietly with identical stored data, the
+  same chunk is held with nothing lost, a deletion is only listed, a piece with a settings
+  draft open waits and then arrives within seconds, switch off only notices.
+  **Not seen on the real preview, and not tried with an unconfirmed Interleaved attempt.**
+- **Found and fixed in the pass's own review (2026-10-19):** with the switch on, two devices
+  whose technique libraries were the same by parts but not by fingerprint re-uploaded the
+  library to each other without end (the "identical" note under the merge engines). A
+  test that only used the SAME library on both sides could not have seen it; a device
+  simulation (eight rounds) did.
+- **Left open** (details in
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)):
+  the "applied when you're done" line is rarely visible; a piece held by a REFUSAL is not
+  settled automatically; a hidden page skips the fresh look before an upload; two upload
+  runs can overlap during it; a piece waiting because it is in use is downloaded again every
+  minute; a failed automatic update leaves only a console line; `App.jsx`'s wiring has no
+  automated test; Pass 121's fold decision; `docs/Research.md` still says five minutes.
 
 ### Deploying and operating (Pass 114 on)
 
@@ -856,11 +922,10 @@ that saved last silently replaced the other's work and a deleted piece came back
 See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently singled out as
 "next"; pick from the priority-ordered backlog there. **The accounts work is the one
 thread in motion:** it is mid-Phase 2 (Passes 115 to 118 are built and live; 119, tabs of
-one browser, is built), and the
-passes the docs name next are 120 (wires the two merge engines in and applies other
-devices' changes automatically, the most recent change winning item by item:
-**decided 2026-10-15**), 121 (only what "most recent" can't settle) and 122
-(deletions). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
+one browser, and 120, automatic updates behind a switch that is off by default, are built),
+and the passes the docs name next are 121 (the question for a conflicting part, which Pass
+120 holds; the owner's 2026-10-15 "most recent wins" decision is not built yet), 122
+(deletions, remembered answers, combines) and 124 (turning the switch on by default). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
 policy and terms, a real email provider, monitoring, in-app change of email and
 account deletion) is separate; see Roadmap.md and Accounts-and-Backend.md. Still not
@@ -974,7 +1039,10 @@ silently.
 - **Pass 114** — the live site connected to accounts (2026-10-10).
 - **Pass 115** — "same" and "changed" made trustworthy (`sent` fingerprints).
 - **Pass 116** — the app notices, quietly, that another device changed something.
-- **Pass 117** — the merge-by-part engine for a piece (not yet called).
-- **Pass 118** — the merge-by-part engine for the technique library (not yet called).
+- **Pass 117** — the merge-by-part engine for a piece.
+- **Pass 118** — the merge-by-part engine for the technique library.
 - **Pass 119** — tabs of one browser stay in step; only one does the account work.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119)
+- **Pass 120** — changes from other devices arrive by themselves, behind a switch that is
+  off by default; the check runs every minute.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)

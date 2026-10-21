@@ -110,6 +110,7 @@ import {
   answeredAll,
   describeKept,
   describeSettleResult,
+  describeSettleRereadProblem,
 } from "../src/lib/accountSync.js";
 import { planPieceMerge, WHOLE_PIECE_PART } from "../src/lib/pieceMerge.js";
 import { generateAllChunks } from "../src/lib/chunking.js";
@@ -3314,7 +3315,7 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.deepEqual(gone.options.map((o) => o.value), ["local", "remote"]);
   });
 
-  test("the whole-piece conflict is one question, with what each choice leaves out said plainly", () => {
+  test("the whole-piece conflict is one question, with what each choice removes said plainly (and flagged, so the summary can repeat it)", () => {
     const grid = edited(base, { chunkMode: "custom", customChunkSize: 8 });
     const logged = withMore(base, 3);
     const device = heldDevice(grid, logged);
@@ -3324,8 +3325,9 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.equal(q.length, 1);
     assert.equal(q[0].part, WHOLE_PIECE_PART);
     assert.deepEqual(q[0].options.map((o) => o.value), ["local", "remote"]);
-    assert.match(q[0].options[0].hint, /other device are left out/);
-    assert.match(q[0].options[1].hint, /this device are left out/);
+    assert.equal(q[0].options[0].hint, "Practice and changes made on your other device will be removed, from your account too. This can't be undone.");
+    assert.equal(q[0].options[1].hint, "Practice and changes made on this device will be removed. This can't be undone.");
+    assert.deepEqual(q[0].options.map((o) => o.removes), [true, true]);
     // and an answer applies as the whole piece of that side
     const kept = apply({ [WHOLE_PIECE_PART]: "remote" }, { local: grid, remote: logged, device });
     assert.deepEqual(kept.settledIds, ["p1"]);
@@ -3430,6 +3432,7 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     const out = apply({ "progress:c1": "both", targetDate: "local" }, { local: moved, remote: remoteMoved });
     assert.deepEqual(out.settledIds, []);
     assert.deepEqual(out.unsettled.map((u) => u.status), ["conflicts"], "notes is a question nobody was asked");
+    assert.deepEqual(out.unsettled.map((u) => u.reason), ["changed"], "said as 'it moved on', not as 'it is gone'");
     assert.equal(out.pieces.p1, moved);
   });
 
@@ -3450,6 +3453,187 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.equal(bad.length, 1);
     assert.equal(bad[0].problem, true);
     assert.match(bad[0].text, /^Etude changed again while you were deciding, so nothing was changed and it is still held\./);
+  });
+
+  test("an answer that removes sessions says so, with the number, and is flagged; keeping both removes none", () => {
+    const [, chunkQ] = planFor().items[0].questions; // one extra session on each device
+    const opt = (q, v) => q.options.find((o) => o.value === v);
+    assert.equal(opt(chunkQ, "local").hint, "The session logged on your other device will be removed, from your account too. This can't be undone.");
+    assert.equal(opt(chunkQ, "remote").hint, "The session logged on this device will be removed. This can't be undone.");
+    assert.equal(opt(chunkQ, "local").removes, true);
+    assert.equal(opt(chunkQ, "remote").removes, true);
+    assert.equal(opt(chunkQ, "both").removes, undefined, "keeping both removes no session");
+    assert.equal(chunkQ.target, `mm. 1${DASH}4`, "what the summary names the record by");
+    // more than one: counted, and each side's own number
+    const moreHere = withMore(withMore(base, 2), 4);
+    const device = heldDevice(moreHere, theirs);
+    const q = planSettle({ candidates: candidatesOf(theirs), localPieces: { p1: moreHere }, accountRecord: accountRecordFor(device, USER), now: NOW }).items[0].questions.find((x) => x.part === "progress:c1");
+    assert.equal(opt(q, "local").hint, "The session logged on your other device will be removed, from your account too. This can't be undone.");
+    assert.equal(opt(q, "remote").hint, "The 2 sessions logged on this device will be removed. This can't be undone.");
+    assert.equal(/\u2014/.test(JSON.stringify(q)), false, "no em dash");
+  });
+
+  test("an answer that would remove nothing says nothing: the other side only changed the rest of the record, or has no record", () => {
+    const shared = { day: 1, loggedAt: 10, bpm: 60 };
+    const one = { doneDays: [1], sessions: [shared, { day: 2, loggedAt: 20, bpm: 70 }, { day: 3, loggedAt: 30, bpm: 80 }] };
+    const other = { doneDays: [1], sessions: [shared], flag: "rough" };
+    const ask = (local, remote) => buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local, remote }] }, piece: mine, year: 2026 })[0];
+    const hints = (q) => q.options.map((o) => [o.value, o.hint || null, !!o.removes]);
+    assert.deepEqual(hints(ask(one, other)), [
+      ["local", null, false],
+      ["remote", "The 2 sessions logged on this device will be removed. This can't be undone.", true],
+    ]);
+    assert.deepEqual(hints(ask(one, undefined)), [
+      ["local", null, false],
+      ["remote", "The 3 sessions logged on this device will be removed. This can't be undone.", true],
+    ]);
+    assert.deepEqual(hints(ask(undefined, other)), [
+      ["local", "The session logged on your other device will be removed, from your account too. This can't be undone.", true],
+      ["remote", null, false],
+    ]);
+  });
+
+  test("a practice record that is not a list of sessions does not break the question", () => {
+    const ask = (local, remote) => buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local, remote }] }, piece: mine, year: 2026 })[0];
+    const q = ask({ sessions: "x", doneDays: 3 }, { sessions: 7 });
+    assert.equal(q.text, `The practice record for mm. 1${DASH}4 was changed differently on the two devices.`);
+    assert.equal(q.detail, "Sessions: 0 on this device, 0 on your other device.");
+  });
+
+  test("difficulty ratings are counted in the singular where there is one measure", () => {
+    const ask = (local, remote) =>
+      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "measureDifficulty", kind: "field", field: "measureDifficulty", local, remote }] }, piece: mine, year: 2026 })[0].text;
+    assert.equal(ask([1, 3, 1], [1, 1, 1]), "Difficulty ratings: 1 difficult measure on this device, every measure workable on your other device.");
+    assert.equal(ask([1, 3, 3], [2, 1, 1]), "Difficulty ratings: 2 difficult measures on this device, 1 challenging measure on your other device.");
+    assert.equal(ask([3, 2], [1, 1]), "Difficulty ratings: 1 difficult and 1 challenging measures on this device, every measure workable on your other device.");
+  });
+
+  test("settling never brings back a piece this device deleted meanwhile, never combines by name, and never marks a row in the account deleted", () => {
+    const answers = { "progress:c1": "both", targetDate: "local" };
+    const settleOnly = (localPieces, device = heldDevice()) =>
+      applyAccountMerge({
+        candidates: candidatesOf(),
+        localPieces,
+        localTechnique: tech,
+        accountRecord: accountRecordFor(device, USER),
+        selectedIds: ["p1"],
+        includeTechnique: false,
+        settle: { p1: answers },
+      });
+    // deleted here while the questions were open (the device record not yet told)
+    const deleted = settleOnly({});
+    assert.deepEqual(deleted.pieces, {}, "not put back");
+    assert.deepEqual([deleted.entries, deleted.settledIds, deleted.markDeleted], [{}, [], []]);
+    assert.deepEqual(deleted.unsettled.map((u) => [u.id, u.name, u.reason]), [["p1", "Piece p1", "gone"]]);
+    // deleted here and already noted in the record: also said, not silently dropped
+    const noted = heldDevice();
+    noted.accounts[USER].pieces.p1.deletedHere = true;
+    const notedOut = settleOnly({}, noted);
+    assert.deepEqual(notedOut.pieces, {});
+    assert.deepEqual(notedOut.unsettled.map((u) => u.reason), ["gone"]);
+    // the same piece under another id on this device (matched by name): that is a combine, which settling never does
+    const renamed = { ...viaJson(mine), id: "q9" };
+    const combined = settleOnly({ q9: renamed });
+    assert.deepEqual(combined.markDeleted, [], "no row in the account is marked deleted");
+    assert.deepEqual(Object.keys(combined.pieces), ["q9"]);
+    assert.equal(combined.pieces.q9, renamed, "the piece that is here is untouched");
+    assert.deepEqual(combined.unsettled.map((u) => u.reason), ["gone"]);
+    // a piece that is in the answers but was never read from the account at all
+    const noRow = applyAccountMerge({ candidates: accountRowsToCandidates({ pieces: [], technique: null }), localPieces: { p1: mine }, localTechnique: tech, accountRecord: accountRecordFor(heldDevice(), USER), selectedIds: ["p1"], includeTechnique: false, settle: { p1: answers } });
+    assert.deepEqual(noRow.unsettled.map((u) => [u.id, u.reason]), [["p1", "gone"]]);
+    assert.equal(noRow.pieces.p1, mine);
+  });
+
+  test("a piece that already matches by the time the answers come is 'up to date', not 'settled'", () => {
+    const out = apply({ "progress:c1": "both", targetDate: "local" }, { local: theirs, remote: theirs });
+    assert.deepEqual([out.settledIds, out.upToDateIds, out.unsettled], [[], ["p1"], []]);
+    assert.deepEqual(out.entries.p1.revision, 2, "the account's copy is recorded, clearing the hold");
+  });
+
+  test("a clean newer copy by the time the answers come (nothing of this device's is waiting) is taken, and reported as 'up to date'", () => {
+    // this device's copy is exactly what it last synced; the account has moved on since
+    const out = apply({ "progress:c1": "both", targetDate: "local" }, { local: base, remote: theirs, device: { version: 1, accounts: { [USER]: autoRec({ p1: { ...syncedAs(base, 1), held: true } }) } } });
+    assert.deepEqual([out.settledIds, out.upToDateIds, out.unsettled], [[], ["p1"], []]);
+    assert.equal(out.pieces.p1.targetDate, theirs.targetDate, "the account's copy came in");
+    assert.equal(out.entries.p1.revision, 2);
+  });
+
+  test("only the pieces asked about are reported on: an answer for a piece that was not selected is not counted as gone", () => {
+    const out = applyAccountMerge({
+      candidates: candidatesOf(),
+      localPieces: { p1: mine },
+      localTechnique: tech,
+      accountRecord: accountRecordFor(heldDevice(), USER),
+      selectedIds: ["p1"],
+      includeTechnique: false,
+      settle: { p1: { "progress:c1": "both", targetDate: "local" }, p2: { name: "local" } },
+    });
+    assert.deepEqual(out.settledIds, ["p1"]);
+    assert.deepEqual(out.unsettled, [], "p2 was not part of this step");
+  });
+
+  test("a failure while preparing a piece's questions sends it to the whole-piece picker and names it, rather than failing", () => {
+    const rec = accountRecordFor(heldDevice(), USER);
+    const broken = {
+      get p1() {
+        throw new Error("a stored value this device cannot read");
+      },
+    };
+    const plan = planSettle({ candidates: candidatesOf(), localPieces: broken, accountRecord: rec, now: NOW });
+    assert.deepEqual(plan.items, []);
+    assert.deepEqual(plan.fallbackIds, ["p1"]);
+    assert.deepEqual(plan.errored, [{ id: "p1", name: "Piece p1" }]);
+    // an ordinary piece the engine merely cannot judge is a fallback, but not an error
+    const noBase = { version: 1, accounts: { [USER]: autoRec({ p1: { revision: 1, fingerprint: pieceFingerprint(base), held: true, conflicts: [{ part: "name", kind: "field", local: "a", remote: "b", base: "c" }] } }) } };
+    const calm = planSettle({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: accountRecordFor(noBase, USER), now: NOW });
+    assert.deepEqual([calm.fallbackIds, calm.errored], [["p1"], []]);
+    // and asking about just one piece leaves the others alone
+    const withTwo = withPieceHeld(heldDevice(), USER, "p2", [{ part: "name", kind: "field", local: "a", remote: "b", base: "c" }]);
+    assert.deepEqual(planSettle({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: accountRecordFor(withTwo, USER), now: NOW, ids: ["p1"] }).fallbackIds, []);
+    assert.deepEqual(planSettle({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: accountRecordFor(withTwo, USER), now: NOW }).fallbackIds, ["p2"], "...which is not so when no piece is named");
+    // one piece's questions failing to be built does not take the other pieces down with it
+    const other = pieceOf("p2", { name: "Other" });
+    const otherTheirs = edited(withMore(other, 3), { notes: "there" });
+    const otherMine = edited(withMore(other, 2), { notes: "here" });
+    const twoDevice = { version: 1, accounts: { [USER]: autoRec({ p1: syncedAs(base, 1), p2: syncedAs(other, 1) }) } };
+    const twoRun = runAuto({ local: { p1: mine, p2: otherMine }, rows: [[theirs, 2], [otherTheirs, 2]], record: accountRecordFor(twoDevice, USER) });
+    const twoHeld = twoRun.held.reduce((r, h) => withPieceHeld(r, USER, h.id, h.conflicts), twoDevice);
+    const failsForP1 = ({ plan, piece, year }) => {
+      if (piece === mine) throw new Error("this one cannot be built");
+      return buildSettleQuestions({ plan, piece, year });
+    };
+    const mixed = planSettle({
+      candidates: accountRowsToCandidates({ pieces: [acctRow(theirs, 2), acctRow(otherTheirs, 2)], technique: null }),
+      localPieces: { p1: mine, p2: otherMine },
+      accountRecord: accountRecordFor(twoHeld, USER),
+      now: NOW,
+      build: failsForP1,
+    });
+    assert.deepEqual(mixed.items.map((i) => i.id), ["p2"], "the other piece is still asked about");
+    assert.deepEqual(mixed.fallbackIds, ["p1"]);
+    assert.deepEqual(mixed.errored, [{ id: "p1", name: "Piece p1" }]);
+  });
+
+  test("the result in the page says WHY nothing was changed: it moved on, it is gone, or something failed; and which pieces fell back", () => {
+    const text = (u) => describeSettleResult({ unsettled: [u] }).map((l) => l.text);
+    assert.deepEqual(text({ name: "Etude", reason: "changed" }), ["Etude changed again while you were deciding, so nothing was changed and it is still held. Press Review to look at it again."]);
+    assert.deepEqual(text({ name: "Etude" }), text({ name: "Etude", reason: "changed" }), "no reason given reads as 'changed'");
+    assert.deepEqual(text({ name: "Etude", reason: "gone" }), ["Etude is no longer waiting to be settled here (it may have been deleted, or settled in another window), so nothing was changed."]);
+    assert.deepEqual(text({ name: "Etude", reason: "error" }), ["Something went wrong while settling Etude, so nothing was changed and it is still held. Press Review to try again."]);
+    ["changed", "gone", "error"].forEach((reason) => assert.equal(describeSettleResult({ unsettled: [{ name: "Etude", reason }] })[0].problem, true));
+    const fell = describeSettleResult({ fallback: [{ name: "Etude" }, { name: "Nocturne" }] });
+    assert.deepEqual(fell.map((l) => l.text), ["Etude and Nocturne couldn't be asked about one question at a time, so they went through the whole-piece choice instead."]);
+    assert.equal(describeSettleResult({ fallback: [{ name: "Etude" }] })[0].text, "Etude couldn't be asked about one question at a time, so it went through the whole-piece choice instead.");
+    [
+      ...text({ name: "E", reason: "gone" }),
+      ...text({ name: "E", reason: "error" }),
+      ...fell.map((l) => l.text),
+      describeSettleRereadProblem("connection"),
+      describeSettleRereadProblem("signed-out"),
+      describeSettleRereadProblem("other"),
+    ].forEach((t) => assert.equal(/\u2014/.test(t), false, `no em dash: ${t}`));
+    assert.equal(describeSettleRereadProblem("connection"), "Nothing was changed. Couldn't reach the account service. Check your connection and try again. You can also choose Decide later.");
+    assert.match(describeSettleRereadProblem("signed-out"), /^Nothing was changed\. You're signed out\./);
   });
 
   test("end to end through the fake database: settled, the piece goes up ONCE at the account's revision with every session, and is never held", async () => {

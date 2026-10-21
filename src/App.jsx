@@ -149,10 +149,10 @@ import {
   PIECE_UPDATED_NOTE,
   // Settling a held piece one question at a time (Pass 121)
   planSettle,
-  answeredAll,
-  describeKept,
   describeSettleResult,
+  describeSettleRereadProblem,
 } from "./lib/accountSync";
+import { startSettle, settleChoose, settleBack, settleNext, settleView, keptPhrases, rereadSettleItem } from "./lib/settleFlow";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { SettleConflictModal } from "./components/SettleConflictModal";
@@ -363,8 +363,10 @@ export default function App() {
   // Pass 121: Review asks about a piece held WITH recorded conflicts one question at a
   // time (lib/accountSync.js planSettle), not with the whole-piece picker above.
   // null, or { userId, items: [{ id, name, revision, status, questions, candidate }],
-  // index, step, answers, results: { settled: [{ name, kept }], unsettled: [{ name }] } }.
-  // Holding it changes nothing: only the last answer of a piece applies that piece.
+  // index, state, results: { settled: [{ name, kept }], unsettled: [{ name, reason }],
+  // fallback: [{ name }] } }. `state` is the walk through the current piece's screens
+  // (lib/settleFlow.js: the first screen, each question, the summary), plain data.
+  // Holding it changes nothing: only the summary's button applies a piece.
   const [settleFlow, setSettleFlow] = useState(null);
   const [accountFlowBusy, setAccountFlowBusy] = useState(false);
   const accountFlowBusyRef = useRef(false);
@@ -1924,7 +1926,7 @@ export default function App() {
     }
     // Settling a held piece (Pass 121): told by the settle flow itself, once it has
     // gone through every piece, not by the Get changes result lines.
-    if (settle) return { applied: Object.keys(out.entries).length > 0, unsettled: out.unsettled };
+    if (settle) return { applied: Object.keys(out.entries).length > 0, unsettled: out.unsettled, settledIds: out.settledIds, upToDateIds: out.upToDateIds };
     // The other copy of a combined piece is marked deleted only once this device
     // has made its first backup: until then the combined piece can't go up to
     // replace it, and marking it would leave the account with no live copy.
@@ -2114,17 +2116,19 @@ export default function App() {
       }
       if (mode === "review" && !opts.exclude) {
         const settlePlan = planSettle({ candidates: all, localPieces, accountRecord: record });
+        // A piece whose questions could not be prepared goes through the picker, and says so.
+        const fallback = settlePlan.errored.map((e) => ({ name: e.name }));
         if (settlePlan.items.length > 0) {
           setSettleFlow({
             userId,
             items: settlePlan.items.map((i) => ({ ...i, candidate: all.pieces.find((c) => c.id === i.id) })),
             index: 0,
-            step: 0,
-            answers: {},
-            results: { settled: [], unsettled: [] },
+            state: startSettle(settlePlan.items[0]),
+            results: { settled: [], unsettled: [], fallback },
           });
           return;
         }
+        if (fallback.length > 0) opts = { ...opts, leadLines: [...(opts.leadLines || []), ...describeSettleResult({ fallback })] };
       }
       const candidates = mode === "review" ? restrictCandidatesToHeld(all, record, opts.exclude || []) : all;
       const plan = planAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record });
@@ -2251,7 +2255,7 @@ export default function App() {
   /* ---------------------------------------------------------------- */
 
   const settleItem = settleFlow ? settleFlow.items[settleFlow.index] : null;
-  const settleQuestion = settleItem && settleItem.questions[settleFlow.step] ? settleItem.questions[settleFlow.step] : null;
+  const settleCurrent = settleFlow && settleItem ? settleView(settleItem, settleFlow.state) : null;
 
   // Every piece has had its turn. What else is still held (a refused upload, the
   // technique library, a piece Review could not ask about) goes through the
@@ -2268,16 +2272,18 @@ export default function App() {
   };
 
   const advanceSettleFlow = (flow, results) => {
-    if (flow.index + 1 < flow.items.length) setSettleFlow({ ...flow, index: flow.index + 1, step: 0, answers: {}, results });
-    else finishSettleFlow(flow, results);
+    if (flow.index + 1 < flow.items.length) {
+      setSettleFlow({ ...flow, index: flow.index + 1, state: startSettle(flow.items[flow.index + 1]), results });
+    } else finishSettleFlow(flow, results);
   };
 
   const handleSettleAnswer = (value) => {
-    if (!settleFlow || !settleQuestion) return;
-    setSettleFlow({ ...settleFlow, answers: { ...settleFlow.answers, [settleQuestion.part]: value } });
+    if (!settleFlow || !settleItem || accountFlowBusyRef.current) return;
+    setSettleFlow({ ...settleFlow, state: settleChoose(settleItem, settleFlow.state, value) });
   };
   const handleSettleBack = () => {
-    if (settleFlow && settleFlow.step > 0) setSettleFlow({ ...settleFlow, step: settleFlow.step - 1 });
+    if (!settleFlow || !settleItem || accountFlowBusyRef.current) return;
+    setSettleFlow({ ...settleFlow, state: settleBack(settleItem, settleFlow.state) });
   };
   const handleSettleDecideLater = () => {
     if (settleFlow && !accountFlowBusyRef.current) advanceSettleFlow(settleFlow, settleFlow.results);
@@ -2288,12 +2294,12 @@ export default function App() {
   const handleSettleNext = async () => {
     const flow = settleFlow;
     if (!flow || !settleItem || accountFlowBusyRef.current) return;
-    if (settleQuestion && flow.step < settleItem.questions.length - 1) {
-      setSettleFlow({ ...flow, step: flow.step + 1 });
+    const step = settleNext(settleItem, flow.state);
+    if (!step.applies) {
+      if (step.state !== flow.state) setSettleFlow({ ...flow, state: step.state });
       return;
     }
-    // The last question answered (or nothing was left to ask): the one moment anything is applied.
-    if (!answeredAll(settleItem.questions, flow.answers)) return;
+    // The summary's button (or "Bring it up to date"): the one moment anything is applied.
     if (!authSession || flow.userId !== authSession.userId) {
       setSettleFlow(null);
       setAccountNotice({ lines: [{ text: "You signed out, so nothing was changed." }] });
@@ -2302,34 +2308,65 @@ export default function App() {
     accountFlowBusyRef.current = true;
     setAccountFlowBusy(true);
     let results = flow.results;
+    let stay = null; // set when the person stays on this piece: asked again, or the account could not be read
+    let item = settleItem;
     try {
-      const out = await applyAccountFlow({
-        mode: "settle",
-        userId: flow.userId,
-        candidates: {
-          pieces: [settleItem.candidate],
-          deleted: [],
-          unreadable: [],
-          technique: { technique: null, revision: null, unreadable: false, skippedItems: 0 },
-        },
-        selectedIds: [settleItem.id],
-        ladderChoices: {},
-        orderChoice: "existing",
-        includeTechnique: false,
-        settle: { [settleItem.id]: flow.answers },
-      });
-      results =
-        out.applied && out.unsettled.length === 0
-          ? { ...results, settled: [...results.settled, { name: settleItem.name, kept: describeKept(settleItem.questions, flow.answers) }] }
-          : { ...results, unsettled: [...results.unsettled, { name: settleItem.name }] };
+      // The account may have moved on while the person decided (another device logged
+      // practice, or changed what is being decided). Read the row again; the answers are
+      // applied only if they still mean what they meant, else the questions start over.
+      const got = await fetchChangedAccountRows({ userId: flow.userId, ids: [item.id] });
+      if (syncLatestRef.current.userId !== flow.userId) {
+        setSettleFlow(null);
+        setAccountNotice({ lines: [{ text: "You signed out, so nothing was changed." }] });
+        return;
+      }
+      if (got.status !== "ok") {
+        stay = { ...flow, state: { ...flow.state, notice: describeSettleRereadProblem(got.reason) } };
+      } else {
+        const verdict = rereadSettleItem({ item, rows: got.rows, localPieces: piecesRef.current, accountRecord: accountRecordFor(readDeviceRecord(), flow.userId) });
+        if (verdict.outcome === "gone") {
+          results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: "gone" }] };
+        } else if (verdict.outcome === "again") {
+          stay = { ...flow, items: flow.items.map((it, i) => (i === flow.index ? verdict.item : it)), state: startSettle(verdict.item, verdict.notice) };
+        } else {
+          item = verdict.item;
+          const out = await applyAccountFlow({
+            mode: "settle",
+            userId: flow.userId,
+            candidates: {
+              pieces: [item.candidate],
+              deleted: [],
+              unreadable: [],
+              technique: { technique: null, revision: null, unreadable: false, skippedItems: 0 },
+            },
+            selectedIds: [item.id],
+            ladderChoices: {},
+            orderChoice: "existing",
+            includeTechnique: false,
+            settle: { [item.id]: flow.state.answers },
+          });
+          if (out.unsettled.length > 0) {
+            results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: out.unsettled[0].reason || "changed" }] };
+          } else if (out.applied) {
+            // "Kept ..." only for a piece the answers were really applied to; a piece that
+            // already matched by now is just up to date.
+            const kept = out.settledIds.includes(item.id) ? keptPhrases(item, flow.state) : [];
+            results = { ...results, settled: [...results.settled, { name: item.name, kept }] };
+          } else {
+            results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: "error" }] };
+          }
+        }
+      }
     } catch (e) {
       console.warn("MeasureOne: settling a piece didn't go through.", e && e.message);
-      results = { ...results, unsettled: [...results.unsettled, { name: settleItem.name }] };
+      results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: "error" }] };
+      stay = null;
     } finally {
       accountFlowBusyRef.current = false;
       setAccountFlowBusy(false);
     }
-    advanceSettleFlow(flow, results);
+    if (stay) setSettleFlow(stay);
+    else advanceSettleFlow(flow, results);
   };
 
   // Editing state lives here, not inside SettingsTab, so switching tabs
@@ -4321,16 +4358,12 @@ export default function App() {
           unreadableCount={importAccount ? importAccount.unreadable : 0}
         />
       )}
-      {settleFlow && settleItem && (
+      {settleFlow && settleItem && settleCurrent && (
         <SettleConflictModal
           pieceName={settleItem.name}
           pieceNumber={settleFlow.index + 1}
           pieceCount={settleFlow.items.length}
-          question={settleQuestion}
-          stepNumber={settleFlow.step + 1}
-          stepCount={Math.max(settleItem.questions.length, 1)}
-          answer={settleQuestion ? settleFlow.answers[settleQuestion.part] || null : null}
-          isLast={settleFlow.step >= settleItem.questions.length - 1}
+          view={settleCurrent}
           busy={accountFlowBusy}
           onAnswer={handleSettleAnswer}
           onBack={handleSettleBack}

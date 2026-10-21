@@ -1,36 +1,26 @@
 import { X, Check } from "lucide-react";
 
-// Pass 121: the question a held piece asks when BOTH devices changed the same
-// thing. One question at a time, in plain words; the words themselves are made in
-// lib/accountSync.js (buildSettleQuestions, with tests), this only shows them.
+// Pass 121: the screens a held piece goes through when BOTH devices changed the same
+// thing. This only DRAWS what lib/settleFlow.js (settleView) says: which screen it is,
+// the question and its options, the summary, the buttons. The words are made in
+// lib/accountSync.js and lib/settleFlow.js, with tests; nothing here decides anything.
 //
-// question: { part, title, text, detail?, options: [{ value, label, hint?,
-// recommended? }] }, or null for a piece with nothing left to decide (the "ready"
-// step, which still waits for the person to say go: opening Review changes nothing
-// by itself). `answer` is the option chosen so far for THIS question. Choosing an
-// option changes nothing either; "Next" moves on, and only the last "Settle this
-// piece" (or "Bring it up to date") applies anything. "Decide later" leaves the piece
-// held and exactly as it is; Back goes to the previous question of the same piece.
-export function SettleConflictModal({
-  pieceName,
-  pieceNumber = 1,
-  pieceCount = 1,
-  question = null,
-  stepNumber = 1,
-  stepCount = 1,
-  answer = null,
-  isLast = true,
-  busy = false,
-  onAnswer,
-  onBack,
-  onNext,
-  onDecideLater,
-  onClose,
-}) {
+// view: { stage: "bulk" | "question" | "recap" | "ready", notice, intro, stepLabel,
+// primaryLabel, canNext, canBack, applies, question, answer, recap }
+//   bulk / question  a question to answer ({ part, kind, title, text, detail?, options:
+//                    [{ value, label, hint?, recommended? }] }) and the value chosen so far.
+//                    Choosing an option changes nothing, and neither does Next.
+//   recap            what will be kept, and what will be removed. The button here is the
+//                    ONE moment anything is applied (the caller reads the account again
+//                    first, in case it moved on).
+//   ready            nothing left to decide; still waits for the person to say go.
+// "Decide later" leaves the piece held and exactly as it is.
+export function SettleConflictModal({ pieceName, pieceNumber = 1, pieceCount = 1, view, busy = false, onAnswer, onBack, onNext, onDecideLater, onClose }) {
   const where = [];
-  if (question) where.push(`Question ${stepNumber} of ${stepCount}`);
+  if (view.stepLabel) where.push(view.stepLabel);
   if (pieceCount > 1) where.push(`Piece ${pieceNumber} of ${pieceCount}`);
-  const primaryLabel = !question ? "Bring it up to date" : isLast ? "Settle this piece" : "Next";
+  const question = view.question;
+  const recap = view.recap;
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settle-title">
@@ -51,12 +41,16 @@ export function SettleConflictModal({
           </button>
         </div>
         <div className="modal-body">
-          {question ? (
+          {view.notice && (
+            <p className="wizard-hint import-warning" role="status" style={{ marginTop: 0 }}>
+              {view.notice}
+            </p>
+          )}
+          <p className="wizard-hint" style={{ marginTop: 0 }}>
+            {view.intro}
+          </p>
+          {question && (
             <>
-              <p className="wizard-hint" style={{ marginTop: 0 }}>
-                This piece was changed on both of your devices since you last synced. Nothing changes until you settle the
-                last question, and Decide later leaves it exactly as it is.
-              </p>
               {/* an ordinary field's sentence starts with its own name, so the heading would say it twice */}
               {!question.text.startsWith(question.title) && <p style={{ fontWeight: 600, margin: "0 0 4px", fontSize: 14 }}>{question.title}</p>}
               <p style={{ margin: "0 0 14px", fontSize: 15, lineHeight: 1.5, whiteSpace: "pre-line" }}>{question.text}</p>
@@ -65,12 +59,12 @@ export function SettleConflictModal({
                   {question.detail}
                 </p>
               )}
-              <div role="radiogroup" aria-label="What to keep">
+              <div role="radiogroup" aria-label={question.kind === "bulk" ? "How to settle them" : "What to keep"}>
                 <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
-                  Keep:
+                  {question.kind === "bulk" ? "Choose:" : "Keep:"}
                 </p>
                 {question.options.map((o, i) => {
-                  const chosen = answer === o.value;
+                  const chosen = view.answer === o.value;
                   return (
                     <label
                       key={o.value}
@@ -114,31 +108,42 @@ export function SettleConflictModal({
                 })}
               </div>
             </>
-          ) : (
+          )}
+          {recap && (
             <>
-              <p className="wizard-hint" style={{ marginTop: 0 }}>
-                Nothing is left to decide for this piece: the copy on this device and the copy in your account fit together
-                now.
-              </p>
-              <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5 }}>
-                Bring it up to date? Whatever is only here goes up to your account afterwards.
-              </p>
+              <p style={{ fontWeight: 600, margin: "0 0 6px", fontSize: 14 }}>You are keeping:</p>
+              <ul style={{ margin: "0 0 14px", paddingLeft: 20, fontSize: 15, lineHeight: 1.5 }}>
+                {recap.keeps.map((text, i) => (
+                  <li key={i}>{text}</li>
+                ))}
+              </ul>
+              {recap.warnings.length > 0 && (
+                <div className="wizard-hint import-warning" role="note" style={{ marginBottom: 0 }}>
+                  <p style={{ fontWeight: 600, margin: "0 0 4px" }}>Please check before you settle:</p>
+                  <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.5 }}>
+                    {recap.warnings.map((text, i) => (
+                      <li key={i}>{text}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           )}
+          {view.stage === "ready" && <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5 }}>Bring it up to date? Whatever is only here goes up to your account afterwards.</p>}
         </div>
         <div className="modal-foot">
           <button className="ghost-btn" onClick={onDecideLater} disabled={busy}>
             Decide later
           </button>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {question && stepNumber > 1 && (
+            {view.canBack && (
               <button className="ghost-btn" onClick={onBack} disabled={busy}>
                 Back
               </button>
             )}
-            <button className="primary-btn" onClick={onNext} disabled={busy || (!!question && !answer)}>
-              {(isLast || !question) && <Check size={15} />}
-              {busy ? "Working..." : primaryLabel}
+            <button className="primary-btn" onClick={onNext} disabled={busy || !view.canNext}>
+              {view.applies && <Check size={15} />}
+              {busy ? "Working..." : view.primaryLabel}
             </button>
           </div>
         </div>

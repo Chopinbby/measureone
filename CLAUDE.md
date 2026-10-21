@@ -84,7 +84,8 @@ MeasureOne.jsx/
     ├── lib/            # pure functions: chunking, scheduling, confidence,
     │                   # revival, storage, technique, shared constants/utils,
     │                   # and the account code (backend.js, accountSync.js,
-    │                   # pieceMerge.js, techniqueMerge.js, tabSync.js) — no JSX
+    │                   # pieceMerge.js, techniqueMerge.js, tabSync.js, settleFlow.js)
+    │                   # — no JSX
     └── components/     # everything with JSX: NumberInput, Wizard, field
                          # editors (fields/), and every tab (tabs/)
 ```
@@ -881,10 +882,39 @@ question per conflicting part instead; everything else is unchanged. Rules:
   recorded in their place); what the device holds beyond it uploads as an ordinary change.
   **Only when the answers settle EVERY conflict is anything applied;** otherwise (an answer
   missing, or a new conflict appeared since the questions were asked) the piece and the record
-  are exactly as they were (`unsettled`). Don't write a second apply step.
+  are exactly as they were (`unsettled`, each with a `reason`: "changed", "gone" or "error", and
+  the page says which). Don't write a second apply step.
+- **Settling acts only on what it was asked about.** In settle mode `applyAccountMerge` skips
+  any piece whose walk kind isn't "settle", "same" or "take" (`SETTLE_KINDS`): it never adds a
+  piece this device no longer has (a piece deleted in another tab used to be brought back and
+  reported as settled), never combines by name and so never marks an account row deleted. A
+  requested piece it didn't reach is `unsettled` with reason "gone", not dropped.
 - **Opening Review, choosing an option, Next, Back, Decide later and Close change nothing**
-  (unit-tested; seen in the browser as byte-identical storage). Only the last answer of a
-  piece applies it.
+  (unit-tested; seen in the browser as byte-identical storage). Only the summary's button (or
+  "Bring it up to date") applies a piece, and `settleNext(...).applies` is true from nowhere else.
+- **The walk through a piece's screens is plain data in `lib/settleFlow.js`** (tested in
+  `test/settleFlow.test.mjs`): `startSettle`, `settleChoose`, `settleNext`, `settleBack`,
+  `settleView`. `App.jsx` calls them and `SettleConflictModal` draws `settleView`'s result; put
+  any new "what comes next" rule there, not in the component. Screens: a **first screen** when
+  `BULK_MIN` (3) or more practice-record questions offer "both" ("Both devices' sessions for all
+  N" / "Decide each one"; it is a shortcut to the same answers), the questions, then the
+  **summary** (what is kept, one line for the first screen's group; in a red box what the chosen
+  answers **remove**, from the options flagged `removes`), then the apply. Nothing is chosen
+  for the person.
+- **The account is read again at the summary's button** (`rereadSettleItem`,
+  `fetchChangedAccountRows` for that one id), because the questions were made when Review opened
+  and a stale row made the settled piece's upload be refused and the piece held again with no
+  list. Planned afresh from the row and this device's copy as they are NOW: the same questions
+  (`sameSettleQuestions`, down to the numbers in the hints) apply the answers to the NEW row (the
+  record takes the new revision); different questions start the walk over with a note and apply
+  nothing; a row that is gone is "gone". **If the account can't be read, nothing is applied** and
+  the summary stays with a message (applying to a copy that may be old is what this exists to
+  stop). Don't make "same questions" looser: a changed number of sessions that would be removed
+  is a different question.
+- **What an answer removes is said plainly and counted** (`removalHint`): keeping this device's
+  record removes the other device's sessions from the account too; keeping the other's removes
+  this device's, which the account never had. Nothing is said when no session would go. The
+  whole-piece answers are always flagged `removes`.
 - **"Both devices' sessions"** is `unionProgressEntries` (`lib/pieceMerge.js`): the sessions,
   the days practiced and focus spots' own sessions are unioned by content (Pass 115's
   comparison); everything else in the chunk's record (the ladder state, tempo, but also a
@@ -899,12 +929,20 @@ question per conflicting part instead; everything else is unchanged. Rules:
   asked about (the date's question says so). Found in the browser: taking one device's date
   with the other's days gave a piece that didn't add up. With no answer, or no conflict over
   the date, they are ordinary parts (`linkedToDate` in `planPieceMerge`'s result).
-- **The wording is proposed and to be confirmed:** the two sentences are the pass card's; the
-  hints under each option, the "Recommended" tag and the whole-piece sentence are additions.
+- **The wording is partly proposed:** the two sentences are the pass card's; the hints under each
+  option, the "Recommended" tag and the whole-piece sentence are additions. **Confirmed
+  2026-10-21:** "removed" for what an answer throws away, and the first screen.
+- **`planSettle` never throws** (a piece it fails on is in `errored` and goes to the picker, and
+  the page says so); it takes `build` so a test can make one fail.
 - **Left open:** a piece held by a REFUSAL gets no questions (Pass 120 for-later item 2; it
   happened in my own browser run); `foldConflictedProgress` (`tabSync.js`) and
-  `unionProgressEntries` are two implementations of "keep both"; the "ready" step (nothing
-  left to decide) was not seen in the browser; no remembered answers, no deletions (Pass 122).
+  `unionProgressEntries` are two implementations of "keep both"; **size and schedule travel
+  together is not done** (a resize on one device against a difficulty edit on the other still
+  gives a piece whose measure count and difficulty list disagree; practice days per week and
+  minutes per day could too, not run), proposed as its own pass; no remembered answers, no
+  deletions (Pass 122); `App.jsx`'s `handleSettleNext` (the re-read and the result lines) has no
+  automated test: it was checked in a browser against a stand-in service (every outcome except a
+  failed question build and the "error" message).
   Design and checks:
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121).
 
@@ -1103,6 +1141,8 @@ silently.
   off by default; the check runs every minute.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)
 - **Pass 121** — a piece held with recorded conflicts asks one plain question per conflicting
-  part in Review ("both devices' sessions", this device's, the other device's); "Decide later"
+  part in Review ("both devices' sessions", this device's, the other device's), with a first
+  screen for many practice records at once and a summary (including what would be removed)
+  before anything is applied; the account is read again at the last step; "Decide later"
   changes nothing.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121)

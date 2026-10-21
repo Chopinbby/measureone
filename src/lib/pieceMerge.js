@@ -284,6 +284,10 @@ function inLoggedOrder(sessions) {
     .map((x) => x.s);
 }
 
+// A list, or an empty one for anything else: a stored value that is not a list (damaged
+// or hand-edited data) must not make the union throw, only read as having none.
+const listOf = (v) => (Array.isArray(v) ? v : []);
+
 function unionDoneDays(a, b) {
   const days = [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])].filter((d) => Number.isFinite(d));
   return [...new Set(days)].sort((x, y) => x - y);
@@ -299,7 +303,7 @@ function unionSpots(lead, follow) {
   const out = first.map((spot) => {
     const twin = isObject(spot) ? second.find((s) => isObject(s) && s.id === spot.id) : null;
     if (!twin) return spot;
-    return { ...spot, sessions: inLoggedOrder(mergeSessionArrays(spot.sessions || [], twin.sessions || [])) };
+    return { ...spot, sessions: inLoggedOrder(mergeSessionArrays(listOf(spot.sessions), listOf(twin.sessions))) };
   });
   second.forEach((s) => {
     if (isObject(s) && !first.some((f) => isObject(f) && f.id === s.id)) out.push(s);
@@ -336,7 +340,7 @@ export function unionProgressEntries(mine, theirs) {
   const follow = otherIsLater ? a : b;
   const out = {
     ...lead,
-    sessions: inLoggedOrder(mergeSessionArrays(a.sessions || [], b.sessions || [])),
+    sessions: inLoggedOrder(mergeSessionArrays(listOf(a.sessions), listOf(b.sessions))),
     doneDays: unionDoneDays(a.doneDays, b.doneDays),
   };
   const spots = unionSpots(lead.troubleSpots, follow.troubleSpots);

@@ -1010,6 +1010,26 @@ describe("both devices' sessions for one chunk (Pass 121)", () => {
     assert.equal(unionProgressEntries(entryOf([sess(1, 1)], { troubleSpots: null }), entryOf([sess(2, 2)], { troubleSpots: null })).troubleSpots, null);
   });
 
+  test("a stored value that is not a list (damaged or hand-edited data) reads as having none, and never makes the union throw", () => {
+    const real = entryOf([sess(1, 100)], early);
+    // a side whose sessions or days are not lists keeps the other side's, and invents nothing
+    const damaged = { sessions: "not a list", doneDays: 3, stage: "stabilizing" };
+    const out = unionProgressEntries(real, damaged);
+    assert.deepEqual(out.sessions.map((s) => s.loggedAt), [100]);
+    assert.deepEqual(out.doneDays, [1]);
+    const flipped = unionProgressEntries(damaged, real);
+    assert.deepEqual(flipped.sessions.map((s) => s.loggedAt), [100]);
+    // both sides damaged: an empty record, not an exception
+    const both = unionProgressEntries({ sessions: "x", doneDays: 3 }, { sessions: 7, doneDays: "y" });
+    assert.deepEqual([both.sessions, both.doneDays], [[], []]);
+    // a focus spot whose own sessions are not a list
+    const spot = (sessions) => ({ id: "a", name: "a", position: "9", sessions, resolved: false });
+    const spots = unionProgressEntries(entryOf([sess(1, 100)], { troubleSpots: [spot("x")] }), entryOf([sess(2, 200)], { troubleSpots: [spot(5)] })).troubleSpots;
+    assert.deepEqual(spots.map((x) => x.sessions), [[]]);
+    // and a piece that is not an object at all is still "no record"
+    assert.equal(unionProgressEntries("junk", 5), undefined);
+  });
+
   test("only a chunk's practice record can be answered 'both'", () => {
     assert.equal(isValidChoice("progress", "both"), true);
     assert.equal(isValidChoice("field", "both"), false);

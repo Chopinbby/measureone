@@ -147,9 +147,15 @@ import {
   describeAutoUpdate,
   describeAutoPending,
   PIECE_UPDATED_NOTE,
+  // Settling a held piece one question at a time (Pass 121)
+  planSettle,
+  describeSettleResult,
+  describeSettleRereadProblem,
 } from "./lib/accountSync";
+import { startSettle, settleChoose, settleBack, settleNext, settleView, keptPhrases, rereadSettleItem } from "./lib/settleFlow";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
+import { SettleConflictModal } from "./components/SettleConflictModal";
 import { Wizard } from "./components/Wizard";
 
 import { OverviewTab } from "./components/tabs/OverviewTab";
@@ -354,6 +360,14 @@ export default function App() {
   // browser pop-up, which some browsers block).
   const [importSource, setImportSource] = useState("file");
   const [importAccount, setImportAccount] = useState(null);
+  // Pass 121: Review asks about a piece held WITH recorded conflicts one question at a
+  // time (lib/accountSync.js planSettle), not with the whole-piece picker above.
+  // null, or { userId, items: [{ id, name, revision, status, questions, candidate }],
+  // index, state, results: { settled: [{ name, kept }], unsettled: [{ name, reason }],
+  // fallback: [{ name }] } }. `state` is the walk through the current piece's screens
+  // (lib/settleFlow.js: the first screen, each question, the summary), plain data.
+  // Holding it changes nothing: only the summary's button applies a piece.
+  const [settleFlow, setSettleFlow] = useState(null);
   const [accountFlowBusy, setAccountFlowBusy] = useState(false);
   const accountFlowBusyRef = useRef(false);
   const [accountNotice, setAccountNotice] = useState(null);
@@ -1362,6 +1376,7 @@ export default function App() {
     setAutoPending([]);
     autoPendingIdsRef.current = new Set();
     setPieceUpdatedNote(null);
+    setSettleFlow(null);
     if (importSource === "account") {
       setImportCandidates(null);
       setImportTechnique(null);
@@ -1841,12 +1856,17 @@ export default function App() {
   // `busyIds` waits, and the result is told in the Account panel (and, if it is
   // the open piece, one quiet line) instead of the Get changes result lines.
   // Returns { applied } so the caller knows whether anything was recorded.
-  const applyAccountFlow = async ({ mode, userId, candidates, selectedIds, ladderChoices, orderChoice, includeTechnique, automatic = false, busyIds = [] }) => {
+  //
+  // Pass 121: the same step settles a held piece from the person's answers (`settle`,
+  // { [pieceId]: { [part]: "local" | "remote" | "both" } }, mode "settle"). Only when the
+  // answers settle EVERY conflict is anything applied, record first like the rest;
+  // otherwise the piece and the record are exactly as they were.
+  const applyAccountFlow = async ({ mode, userId, candidates, selectedIds, ladderChoices, orderChoice, includeTechnique, automatic = false, busyIds = [], settle = null, leadLines = [] }) => {
     // The newest committed copies (Pass 119's refs), not the last effect's.
     const localPieces = piecesRef.current;
     const localTechnique = techniqueRef.current;
     const record = accountRecordFor(readDeviceRecord(), userId);
-    const out = applyAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record, selectedIds, ladderChoices, orderChoice, includeTechnique, automatic, busyIds });
+    const out = applyAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record, selectedIds, ladderChoices, orderChoice, includeTechnique, automatic, busyIds, settle });
     let nextRecord = withAccountCopyRecorded(readDeviceRecord(), userId, {
       entries: out.entries,
       technique: out.technique ? out.technique.entry : null,
@@ -1904,6 +1924,9 @@ export default function App() {
       if (openId && out.updatedIds.includes(openId)) setPieceUpdatedNote(openId);
       return { applied, needsYou: out.needsYou };
     }
+    // Settling a held piece (Pass 121): told by the settle flow itself, once it has
+    // gone through every piece, not by the Get changes result lines.
+    if (settle) return { applied: Object.keys(out.entries).length > 0, unsettled: out.unsettled, settledIds: out.settledIds, upToDateIds: out.upToDateIds };
     // The other copy of a combined piece is marked deleted only once this device
     // has made its first backup: until then the combined piece can't go up to
     // replace it, and marking it would leave the account with no live copy.
@@ -1931,6 +1954,10 @@ export default function App() {
     if (deletedHere.length > 0) {
       lines = lines.filter((l) => l.text !== "Everything here already matches your account.");
       deletedHere.forEach((n) => lines.push({ text: `Deleted "${n}" here too.` }));
+    }
+    if (leadLines.length > 0) {
+      // What the settle flow just said stays on top (and "everything matches" would repeat it)
+      lines = [...leadLines, ...lines.filter((l) => l.text !== "Everything here already matches your account.")];
     }
     setAccountNotice({ lines });
     return { applied };
@@ -2060,12 +2087,18 @@ export default function App() {
   // device: only what's held). Reads the account, then either applies it at once
   // (when nothing needs a decision: a clean newer copy, or what already matches)
   // or opens the import modal for the person to decide.
-  const openAccountFlow = async (mode) => {
+  //
+  // Pass 121: in "review" mode a piece held WITH recorded conflicts is not put in the
+  // picker. It gets its own flow, one plain question per conflicting part (planSettle),
+  // and opening it changes nothing. `opts.exclude` (piece ids that already had their
+  // turn) skips that and leaves them out of the picker; `opts.leadLines` is what the
+  // settle flow already said, kept at the top of the result.
+  const openAccountFlow = async (mode, opts = {}) => {
     if (!authEnabled || !authSession || accountFlowBusyRef.current || backupRunningRef.current || importCandidates) return;
     const userId = authSession.userId;
     accountFlowBusyRef.current = true;
     setAccountFlowBusy(true);
-    setAccountNotice(null);
+    setAccountNotice(opts.leadLines && opts.leadLines.length > 0 ? { lines: opts.leadLines } : null);
     try {
       const got = await fetchAccountCopy({ userId });
       if (syncLatestRef.current.userId !== userId) return; // signed out, or another account, meanwhile
@@ -2081,12 +2114,28 @@ export default function App() {
         setAccountNotice({ lines: [{ text: "Your account has nothing yet. Press Back up this device to copy this device's pieces to it." }] });
         return;
       }
-      const candidates = mode === "review" ? restrictCandidatesToHeld(all, record) : all;
+      if (mode === "review" && !opts.exclude) {
+        const settlePlan = planSettle({ candidates: all, localPieces, accountRecord: record });
+        // A piece whose questions could not be prepared goes through the picker, and says so.
+        const fallback = settlePlan.errored.map((e) => ({ name: e.name }));
+        if (settlePlan.items.length > 0) {
+          setSettleFlow({
+            userId,
+            items: settlePlan.items.map((i) => ({ ...i, candidate: all.pieces.find((c) => c.id === i.id) })),
+            index: 0,
+            state: startSettle(settlePlan.items[0]),
+            results: { settled: [], unsettled: [], fallback },
+          });
+          return;
+        }
+        if (fallback.length > 0) opts = { ...opts, leadLines: [...(opts.leadLines || []), ...describeSettleResult({ fallback })] };
+      }
+      const candidates = mode === "review" ? restrictCandidatesToHeld(all, record, opts.exclude || []) : all;
       const plan = planAccountMerge({ candidates, localPieces, localTechnique, accountRecord: record });
       const visible = plan.items.filter((i) => i.kind !== "same");
       const ask = mode === "restore" ? visible.length > 0 || plan.deletedElsewhere.length > 0 : planNeedsQuestion(plan);
       if (!ask) {
-        await applyAccountFlow({ mode, userId, candidates, selectedIds: null, ladderChoices: {}, orderChoice: "existing", includeTechnique: true });
+        await applyAccountFlow({ mode, userId, candidates, selectedIds: null, ladderChoices: {}, orderChoice: "existing", includeTechnique: true, leadLines: opts.leadLines || [] });
         return;
       }
       const matchName = (i) =>
@@ -2110,6 +2159,7 @@ export default function App() {
         deletedElsewhere: plan.deletedElsewhere,
         unreadable: plan.unreadable.length,
         techniqueQuiet: plan.technique.available && !techniqueOffered,
+        leadLines: opts.leadLines || [],
       });
       setImportTechnique(techniqueOffered ? candidates.technique.technique : null);
       setImportTechniqueInfo({ unreadable: candidates.technique.unreadable, skippedItems: candidates.technique.skippedItems });
@@ -2157,6 +2207,7 @@ export default function App() {
         ladderChoices,
         orderChoice,
         includeTechnique: includeTechnique || !!flow.techniqueQuiet,
+        leadLines: flow.leadLines || [],
       });
     } finally {
       accountFlowBusyRef.current = false;
@@ -2191,6 +2242,131 @@ export default function App() {
       setDayOverride(null);
     }
     setImportAccount((prev) => (prev ? { ...prev, deletedElsewhere: prev.deletedElsewhere.filter((d) => d.id !== id) } : prev));
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Settling a held piece, one question at a time (Pass 121).        */
+  /*  The questions, the wording and the rule for what each answer     */
+  /*  does are in lib/accountSync.js and lib/pieceMerge.js (tested);   */
+  /*  this only walks the person through them. Choosing an option and  */
+  /*  "Next" change nothing, and neither does "Decide later" or the    */
+  /*  close button. Only the last answer of a piece applies it, through */
+  /*  applyAccountFlow, the same record-first step Get changes uses.   */
+  /* ---------------------------------------------------------------- */
+
+  const settleItem = settleFlow ? settleFlow.items[settleFlow.index] : null;
+  const settleCurrent = settleFlow && settleItem ? settleView(settleItem, settleFlow.state) : null;
+
+  // Every piece has had its turn. What else is still held (a refused upload, the
+  // technique library, a piece Review could not ask about) goes through the
+  // whole-piece picker exactly as before; the pieces that just had their turn,
+  // including the ones put off with "Decide later", are left out of it.
+  const finishSettleFlow = (flow, results) => {
+    const lines = describeSettleResult(results);
+    const ids = flow.items.map((i) => i.id);
+    setSettleFlow(null);
+    const record = accountRecordFor(readDeviceRecord(), flow.userId);
+    const othersHeld = Object.keys(record.pieces).some((id) => record.pieces[id].held && !ids.includes(id)) || !!(record.technique && record.technique.held);
+    if (othersHeld) openAccountFlow("review", { exclude: ids, leadLines: lines });
+    else if (lines.length > 0) setAccountNotice({ lines });
+  };
+
+  const advanceSettleFlow = (flow, results) => {
+    if (flow.index + 1 < flow.items.length) {
+      setSettleFlow({ ...flow, index: flow.index + 1, state: startSettle(flow.items[flow.index + 1]), results });
+    } else finishSettleFlow(flow, results);
+  };
+
+  const handleSettleAnswer = (value) => {
+    if (!settleFlow || !settleItem || accountFlowBusyRef.current) return;
+    setSettleFlow({ ...settleFlow, state: settleChoose(settleItem, settleFlow.state, value) });
+  };
+  const handleSettleBack = () => {
+    if (!settleFlow || !settleItem || accountFlowBusyRef.current) return;
+    setSettleFlow({ ...settleFlow, state: settleBack(settleItem, settleFlow.state) });
+  };
+  const handleSettleDecideLater = () => {
+    if (settleFlow && !accountFlowBusyRef.current) advanceSettleFlow(settleFlow, settleFlow.results);
+  };
+  const handleSettleClose = () => {
+    if (!accountFlowBusyRef.current) setSettleFlow(null);
+  };
+  const handleSettleNext = async () => {
+    const flow = settleFlow;
+    if (!flow || !settleItem || accountFlowBusyRef.current) return;
+    const step = settleNext(settleItem, flow.state);
+    if (!step.applies) {
+      if (step.state !== flow.state) setSettleFlow({ ...flow, state: step.state });
+      return;
+    }
+    // The summary's button (or "Bring it up to date"): the one moment anything is applied.
+    if (!authSession || flow.userId !== authSession.userId) {
+      setSettleFlow(null);
+      setAccountNotice({ lines: [{ text: "You signed out, so nothing was changed." }] });
+      return;
+    }
+    accountFlowBusyRef.current = true;
+    setAccountFlowBusy(true);
+    let results = flow.results;
+    let stay = null; // set when the person stays on this piece: asked again, or the account could not be read
+    let item = settleItem;
+    try {
+      // The account may have moved on while the person decided (another device logged
+      // practice, or changed what is being decided). Read the row again; the answers are
+      // applied only if they still mean what they meant, else the questions start over.
+      const got = await fetchChangedAccountRows({ userId: flow.userId, ids: [item.id] });
+      if (syncLatestRef.current.userId !== flow.userId) {
+        setSettleFlow(null);
+        setAccountNotice({ lines: [{ text: "You signed out, so nothing was changed." }] });
+        return;
+      }
+      if (got.status !== "ok") {
+        stay = { ...flow, state: { ...flow.state, notice: describeSettleRereadProblem(got.reason) } };
+      } else {
+        const verdict = rereadSettleItem({ item, rows: got.rows, localPieces: piecesRef.current, accountRecord: accountRecordFor(readDeviceRecord(), flow.userId) });
+        if (verdict.outcome === "gone") {
+          results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: "gone" }] };
+        } else if (verdict.outcome === "again") {
+          stay = { ...flow, items: flow.items.map((it, i) => (i === flow.index ? verdict.item : it)), state: startSettle(verdict.item, verdict.notice) };
+        } else {
+          item = verdict.item;
+          const out = await applyAccountFlow({
+            mode: "settle",
+            userId: flow.userId,
+            candidates: {
+              pieces: [item.candidate],
+              deleted: [],
+              unreadable: [],
+              technique: { technique: null, revision: null, unreadable: false, skippedItems: 0 },
+            },
+            selectedIds: [item.id],
+            ladderChoices: {},
+            orderChoice: "existing",
+            includeTechnique: false,
+            settle: { [item.id]: flow.state.answers },
+          });
+          if (out.unsettled.length > 0) {
+            results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: out.unsettled[0].reason || "changed" }] };
+          } else if (out.applied) {
+            // "Kept ..." only for a piece the answers were really applied to; a piece that
+            // already matched by now is just up to date.
+            const kept = out.settledIds.includes(item.id) ? keptPhrases(item, flow.state) : [];
+            results = { ...results, settled: [...results.settled, { name: item.name, kept }] };
+          } else {
+            results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: "error" }] };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("MeasureOne: settling a piece didn't go through.", e && e.message);
+      results = { ...results, unsettled: [...results.unsettled, { name: item.name, reason: "error" }] };
+      stay = null;
+    } finally {
+      accountFlowBusyRef.current = false;
+      setAccountFlowBusy(false);
+    }
+    if (stay) setSettleFlow(stay);
+    else advanceSettleFlow(flow, results);
   };
 
   // Editing state lives here, not inside SettingsTab, so switching tabs
@@ -4180,6 +4356,20 @@ export default function App() {
           deletedElsewhere={importAccount ? importAccount.deletedElsewhere : []}
           onDeleteHere={handleDeleteHereToo}
           unreadableCount={importAccount ? importAccount.unreadable : 0}
+        />
+      )}
+      {settleFlow && settleItem && settleCurrent && (
+        <SettleConflictModal
+          pieceName={settleItem.name}
+          pieceNumber={settleFlow.index + 1}
+          pieceCount={settleFlow.items.length}
+          view={settleCurrent}
+          busy={accountFlowBusy}
+          onAnswer={handleSettleAnswer}
+          onBack={handleSettleBack}
+          onNext={handleSettleNext}
+          onDecideLater={handleSettleDecideLater}
+          onClose={handleSettleClose}
         />
       )}
       {rescheduleModalOpen && (

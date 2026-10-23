@@ -31,7 +31,10 @@ import { ensureWorkId } from "./works";
 // The comparing primitives live in pieceMerge.js (Pass 117), which the account
 // code imports and never the other way round; they're re-exported from here so
 // everything that already imports them from this file is unchanged.
-import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints, planPieceMerge } from "./pieceMerge";
+import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints, planPieceMerge, WHOLE_PIECE_PART, DATE_LINKED_FIELDS } from "./pieceMerge";
+// Pass 121: naming a chunk by its measures, for the questions a held piece asks.
+import { generateAllChunks } from "./chunking";
+import { formatRange } from "./utils";
 // The same for the technique library (Pass 118): lib/techniqueMerge.js owns its
 // canonical form and its parts, and is imported here and never the other way.
 import { canonicalTechnique, techniquePartFingerprints, planTechniqueMerge } from "./techniqueMerge";
@@ -1574,7 +1577,7 @@ export function needsMergeBeforeUpload({ pieces, technique, accountRecord, chang
 
 export const PIECE_UPDATED_NOTE = "This piece was updated from another device.";
 
-function andList(names, cap = 3) {
+export function andList(names, cap = 3) {
   const shown = names.slice(0, cap);
   const more = names.length - shown.length;
   if (more > 0) return `${shown.join(", ")} and ${more} more`;
@@ -1664,9 +1667,14 @@ export function canTakeAccountCopyWithoutAsking({ localPiece, entry, row }) {
 // this device holds as "changed on another device" (and its technique row, if
 // that's held). Rows marked deleted are kept only for held pieces, so a held
 // piece whose row was deleted elsewhere is still offered "Delete it here too".
-export function restrictCandidatesToHeld(candidates, accountRecord) {
+//
+// Pass 121: `excludeIds` leaves named pieces out. The Review flow asks about a piece
+// held with recorded conflicts one question at a time (planSettle) and never shows
+// it in this whole-piece picker, so once it has had its turn it is excluded here.
+export function restrictCandidatesToHeld(candidates, accountRecord, excludeIds = []) {
   const entries = (accountRecord && accountRecord.pieces) || {};
-  const isHeld = (id) => !!(entries[id] && entries[id].held);
+  const excluded = new Set(excludeIds || []);
+  const isHeld = (id) => !!(entries[id] && entries[id].held) && !excluded.has(id);
   const techniqueHeld = !!(accountRecord && accountRecord.technique && accountRecord.technique.held);
   return {
     pieces: candidates.pieces.filter((c) => isHeld(c.id)),
@@ -1702,13 +1710,17 @@ function engineVerdict(local, remote, baseParts) {
   if (plan.status === "conflicts" || plan.status === "whole-piece-conflict") {
     const conflicts =
       plan.status === "whole-piece-conflict"
-        ? [{ part: "chunk layout and practice", kind: "whole-piece", local: null, remote: null, base: null }]
+        ? [{ part: WHOLE_PIECE_PART, kind: "whole-piece", local: null, remote: null, base: null }]
         : plan.conflicts.map((c) => ({ part: c.part, kind: c.kind, local: c.localFingerprint, remote: c.remoteFingerprint, base: c.baseFingerprint }));
     return { kind: "conflict", conflicts };
   }
   if (plan.status === "identical" || plan.status === "local-only") return { kind: "same" };
   return { kind: "ask" };
 }
+
+// What a settling step may act on: a held piece answered about, or one that turned out to
+// match (or to be a clean newer copy) by the time the answers came. Nothing else.
+const SETTLE_KINDS = ["settle", "same", "take"];
 
 // Walks the account's pieces in order against this device's, the way the
 // import path does, so two account rows with the same name collapse into one
@@ -1724,7 +1736,10 @@ function engineVerdict(local, remote, baseParts) {
 //                    deleted (otherRow)
 // A piece this device deleted whose deletion hasn't gone up yet is skipped
 // (listed in skippedDeletedHere), never brought back.
-function walkAccountCandidates({ candidates, localPieces, accountRecord, only = null, automatic = false }) {
+//   kind "settle"  : (Pass 121, only when `settle` is given) a held piece the person is
+//                    answering questions about: `plan` is Pass 117's engine run with
+//                    their answers (`settle[id]`, { [part]: "local" | "remote" | "both" })
+function walkAccountCandidates({ candidates, localPieces, accountRecord, only = null, automatic = false, settle = null }) {
   const entries = (accountRecord && accountRecord.pieces) || {};
   // A piece here that the account marks deleted is never what another copy is
   // combined into: it's the extra copy that was marked deleted when two were
@@ -1757,7 +1772,9 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
       if (samePiece(match, c.piece)) items.push({ ...base, kind: "same", matchId: match.id });
       else if (sameOnceDatesMatch) items.push({ ...base, kind: "same", matchId: match.id, alignCreatedAt: true });
       else if (canTakeAccountCopyWithoutAsking({ localPiece: match, entry, row: c })) items.push({ ...base, kind: "take", matchId: match.id });
-      else if (automatic && entry && entry.parts) items.push({ ...base, ...engineVerdict(match, c.piece, entry.parts), matchId: match.id });
+      else if (settle && hasOwn(settle, c.id)) {
+        items.push({ ...base, kind: "settle", matchId: match.id, plan: planPieceMerge({ local: match, remote: c.piece, base: entry && entry.parts, choices: settle[c.id] }) });
+      } else if (automatic && entry && entry.parts) items.push({ ...base, ...engineVerdict(match, c.piece, entry.parts), matchId: match.id });
       else items.push({ ...base, kind: "ask", matchId: match.id });
       return;
     }
@@ -1769,10 +1786,10 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
 // What the flow would do, without doing it: per account piece, a kind (above);
 // the pieces still here that the account marks deleted ("Deleted on another
 // device"); the rows that couldn't be read; and the technique row.
-export function planAccountMerge({ candidates, localPieces, localTechnique = null, accountRecord, automatic = false }) {
+export function planAccountMerge({ candidates, localPieces, localTechnique = null, accountRecord, automatic = false, settle = null }) {
   const local = localPieces || {};
   const entries = (accountRecord && accountRecord.pieces) || {};
-  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, automatic });
+  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, automatic, settle });
   const deletedElsewhere = ((candidates && candidates.deleted) || [])
     .filter((d) => hasOwn(local, d.id))
     .map((d) => ({ id: d.id, revision: d.revision, name: pieceName(local[d.id]), hasUnsyncedChanges: !nothingWaitingHere(local[d.id], entries[d.id]) }));
@@ -1842,12 +1859,13 @@ export function applyAccountMerge({
   now = Date.now(),
   automatic = false,
   busyIds = [],
+  settle = null,
 }) {
   const local = localPieces || {};
   const prior = (accountRecord && accountRecord.pieces) || {};
   const only = selectedIds ? new Set(selectedIds) : null;
   const busy = new Set(busyIds || []);
-  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, only, automatic });
+  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, only, automatic, settle });
   const next = { ...local };
   const entries = {};
   const markDeleted = [];
@@ -1857,6 +1875,9 @@ export function applyAccountMerge({
   const needsYou = [];
   const names = { added: [], took: [], merged: [] };
   const updatedIds = []; // existing pieces whose copy here was replaced or merged
+  const settledIds = []; // Pass 121: held pieces settled by the person's answers
+  const upToDateIds = []; // Pass 121: already matching (or a clean newer copy) by the time the answers came: nothing to settle
+  const unsettled = []; // Pass 121: answered, but not every conflict was (or a new one appeared), or the piece is gone: nothing changed
   let firstNewId = null;
 
   const mergeInto = (existing, d) => {
@@ -1872,6 +1893,10 @@ export function applyAccountMerge({
   };
 
   items.forEach((d, index) => {
+    // Settling answers for the pieces it was asked about and nothing else: it never adds a
+    // piece this device no longer has (one deleted while the person was deciding), never
+    // combines two pieces by name, and so never marks a row in the account deleted.
+    if (settle && !SETTLE_KINDS.includes(d.kind)) return;
     if (automatic) {
       // Never by itself (see above). A held piece waits for Review.
       if (d.held) return;
@@ -1915,12 +1940,28 @@ export function applyAccountMerge({
       }
       entries[d.id] = rowEntry;
       counts.same += 1;
+      if (settle) upToDateIds.push(d.id);
     } else if (d.kind === "take") {
       next[d.id] = { ...d.piece };
       entries[d.id] = rowEntry;
       counts.took.push(d.name);
       names.took.push(d.name);
       updatedIds.push(d.id);
+      if (settle) upToDateIds.push(d.id);
+    } else if (d.kind === "settle") {
+      // Pass 121. Only when the person's answers settle EVERY conflict is anything
+      // applied; otherwise (an answer missing, or a new conflict appeared since the
+      // questions were asked) the piece is left exactly as it is and stays held.
+      const plan = d.plan;
+      if (plan.status === "merged" || plan.status === "identical" || plan.status === "local-only") {
+        // A piece that comes from the account keeps the account's created date.
+        next[d.id] = Number.isFinite(d.piece.createdAt) ? { ...plan.merged, createdAt: d.piece.createdAt } : plan.merged;
+        entries[d.id] = rowEntry;
+        settledIds.push(d.id);
+        updatedIds.push(d.id);
+      } else {
+        unsettled.push({ id: d.id, name: d.name, status: plan.status, reason: "changed" });
+      }
     } else if (d.kind === "ask") {
       const merged = mergeInto(next[d.id], d);
       // A piece that comes from the account keeps the account's created date.
@@ -1933,6 +1974,18 @@ export function applyAccountMerge({
       counts.combined.push(d.name);
     }
   });
+  if (settle) {
+    // A piece the person answered about that the walk could not settle at all (it is no
+    // longer on this device, or this device deleted it and the account does not know yet):
+    // said so, never silently dropped, and nothing is changed for it.
+    const reached = new Set(items.filter((d) => SETTLE_KINDS.includes(d.kind)).map((d) => d.id));
+    Object.keys(settle)
+      .filter((id) => (!only || only.has(id)) && !reached.has(id))
+      .forEach((id) => {
+        const row = ((candidates && candidates.pieces) || []).find((c) => c.id === id);
+        unsettled.push({ id, name: pieceName(row ? row.piece : local[id]), status: "gone", reason: "gone" });
+      });
+  }
   Object.keys(entries).forEach((id) => {
     if (prior[id] && prior[id].held) counts.clearedHeld += 1;
   });
@@ -1985,6 +2038,10 @@ export function applyAccountMerge({
     needsYou,
     names,
     updatedIds,
+    // Pass 121 (settle only; empty otherwise)
+    settledIds,
+    upToDateIds,
+    unsettled,
   };
 }
 
@@ -1996,13 +2053,13 @@ export function applyAccountMerge({
 // current copy alone and says so, so the caller can hold the piece.
 //   { piece, held: null | conflicts }
 export function reapplyOnto({ current, accountPiece, baseParts }) {
-  if (!baseParts || Object.keys(baseParts).length === 0) return { piece: current, held: [{ part: "chunk layout and practice", kind: "whole-piece", local: null, remote: null, base: null }] };
+  if (!baseParts || Object.keys(baseParts).length === 0) return { piece: current, held: [{ part: WHOLE_PIECE_PART, kind: "whole-piece", local: null, remote: null, base: null }] };
   const verdict = engineVerdict(current, accountPiece, baseParts);
   if (verdict.kind === "merge") {
     return { piece: Number.isFinite(accountPiece.createdAt) ? { ...verdict.merged, createdAt: accountPiece.createdAt } : verdict.merged, held: null };
   }
   if (verdict.kind === "same") return { piece: current, held: null };
-  return { piece: current, held: verdict.conflicts || [{ part: "chunk layout and practice", kind: "whole-piece", local: null, remote: null, base: null }] };
+  return { piece: current, held: verdict.conflicts || [{ part: WHOLE_PIECE_PART, kind: "whole-piece", local: null, remote: null, base: null }] };
 }
 
 // Pass 120: the technique library after an automatic update. Pass 118's engine
@@ -2135,4 +2192,447 @@ export function describeAccountMergeResult({ mode = "changes", applied, techniqu
   }
   if (lines.length === 0) lines.push({ text: "Everything here already matches your account." });
   return lines;
+}
+
+/* ---- settling a held piece, one question at a time (Pass 121) --------- */
+
+// What Pass 120's automatic update recorded about a held piece: the parts that
+// conflicted (`{ part, kind, local, remote, base }`, fingerprints only). The
+// values are not kept, so they are read again from the account's copy when a
+// question is asked (planSettle). [] for a piece that isn't held, or is held
+// without a list (a refused upload, an import).
+export function heldConflicts(accountRecord, id) {
+  const e = accountRecord && accountRecord.pieces && accountRecord.pieces[id];
+  return e && e.held && Array.isArray(e.conflicts) ? e.conflicts : [];
+}
+
+// The pieces Review asks about one question at a time: held WITH a recorded list.
+// A piece held without one still goes through the whole-piece picker, exactly as
+// before (planSettle also hands back any it can't ask about, as `fallbackIds`).
+export function heldIdsWithConflicts(accountRecord) {
+  const entries = (accountRecord && accountRecord.pieces) || {};
+  return Object.keys(entries)
+    .filter((id) => heldConflicts(accountRecord, id).length > 0)
+    .sort();
+}
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "2026-11-01" -> "Nov 1" (with the year when it isn't this year: "Nov 1, 2027").
+function shortDate(iso, thisYear) {
+  const m = typeof iso === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null;
+  if (!m || !MONTH_NAMES[Number(m[2]) - 1]) return null;
+  const text = `${MONTH_NAMES[Number(m[2]) - 1]} ${Number(m[3])}`;
+  return Number(m[1]) === thisYear ? text : `${text}, ${m[1]}`;
+}
+
+const quoted = (text, max = 60) => `"${text.length > max ? `${text.slice(0, max - 3)}...` : text}"`;
+const countOf = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const lowerFirst = (text) => text.charAt(0).toLowerCase() + text.slice(1);
+const humanize = (field) => {
+  const words = String(field).replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+const describeKey = (k) => (isObject(k) && typeof k.tonic === "string" ? `${k.tonic}${k.quality ? ` ${k.quality}` : ""}` : null);
+
+function describeDifficulty(v) {
+  if (!Array.isArray(v)) return null;
+  const hard = v.filter((x) => x === 3).length;
+  const medium = v.filter((x) => x === 2).length;
+  const parts = [];
+  if (hard) parts.push(`${hard} difficult`);
+  if (medium) parts.push(`${medium} challenging`);
+  return parts.length ? `${parts.join(" and ")} ${hard + medium === 1 ? "measure" : "measures"}` : "every measure workable";
+}
+
+function describeSections(v) {
+  if (!Array.isArray(v)) return null;
+  if (v.length > 4) return countOf(v.length, "section", "sections");
+  const named = v
+    .filter((s) => isObject(s))
+    .map((s) => `${typeof s.name === "string" && s.name.trim() ? `${s.name.trim()} ` : ""}(${formatRange(s.start, s.end)})`);
+  return named.length ? named.join(", ") : "none";
+}
+
+const countField = (one, many) => (v) => (Array.isArray(v) ? (v.length ? countOf(v.length, one, many) : "none") : null);
+const unitField = (one, many) => (v) => (Number.isFinite(v) ? countOf(v, one, many) : null);
+
+// How a piece field is named and shown in a question. Anything not listed gets its
+// name made readable and its value summarized (see describeFieldValue), so a field
+// added later still produces a question that says something.
+const FIELD_INFO = {
+  name: { label: "Name" },
+  workName: { label: "Work title" },
+  composer: { label: "Composer" },
+  notes: { label: "Notes" },
+  status: { label: "Status", format: (v) => ({ active: "active", paused: "paused", archived: "archived" })[v] },
+  markedLearnedElsewhere: { label: "Marked as learned elsewhere", format: (v) => (v === true ? "yes" : v === false ? "no" : null) },
+  totalMeasures: { label: "Number of measures", format: unitField("measure", "measures") },
+  measureDifficulty: { label: "Difficulty ratings", format: describeDifficulty },
+  sections: { label: "Sections", format: describeSections },
+  recurringPairs: { label: "Repeated passages", format: countField("passage", "passages") },
+  startDate: { label: "Start date", date: true },
+  scheduleMode: { label: "Schedule type", format: (v) => ({ days: "finish by a date", minutes: "minutes per day" })[v] },
+  daysToLearn: { label: "Days to learn", format: unitField("day", "days") },
+  minutesPerDay: { label: "Minutes per day", format: unitField("minute", "minutes") },
+  targetDate: { label: "Target date", date: true },
+  practiceDaysPerWeek: { label: "Practice days per week", format: unitField("day", "days") },
+  chunkMode: { label: "Chunk size setting", format: (v) => ({ auto: "automatic", custom: "custom" })[v] },
+  customChunkSize: { label: "Chunk size", format: unitField("measure", "measures") },
+  chunkSplitPoints: { label: "Split chunks", format: countField("split", "splits") },
+  targetBPM: { label: "Target tempo", format: (v) => (Number.isFinite(v) ? `${v} bpm` : null) },
+  homeKey: { label: "Home key", format: describeKey },
+  otherKeys: { label: "Other keys", format: (v) => (Array.isArray(v) ? (v.length ? v.map(describeKey).filter(Boolean).join(", ") : "none") : null) },
+  bpmZones: { label: "Tempo zones", format: countField("zone", "zones") },
+  recordings: { label: "Recordings", format: countField("recording", "recordings") },
+  documents: { label: "Documents", format: countField("document", "documents") },
+  sortOrder: { label: "Place in your piece list" },
+  rescheduleMarker: {
+    label: "Reschedule",
+    format: (v) => (v === null || v === undefined ? "not rescheduled" : isObject(v) ? (Number.isFinite(v.asOfDay) ? `rescheduled on day ${v.asOfDay}` : "rescheduled") : null),
+  },
+  lastPlayedDate: { label: "Last played", date: true },
+  memoryAnchors: { label: "Memory notes", format: (v) => (isObject(v) ? (Object.keys(v).length ? countOf(Object.keys(v).length, "note", "notes") : "none") : null) },
+  ladderConfig: { label: "Maintenance ladder settings" },
+  revival: { label: "Revival", format: (v) => (isObject(v) ? (v.active ? "in progress" : "not active") : null) },
+  troubleSpotsEnabled: { label: "Focus spots", format: (v) => (v === true ? "on" : v === false ? "off" : null) },
+  troubleSpotDefaultMinutes: { label: "Minutes per focus spot", format: unitField("minute", "minutes") },
+  manualOverallConfidence: { label: "Overall confidence", format: (v) => (Number.isFinite(v) ? `${v}%` : null) },
+};
+
+function describeFieldValue(field, value, year) {
+  const info = FIELD_INFO[field] || {};
+  if (field === "createdAt" && Number.isFinite(value)) {
+    try {
+      return shortDate(new Date(value).toISOString().slice(0, 10), year) || "not set";
+    } catch (e) {
+      return "not set"; // a number no date can hold: say so rather than fail the whole question
+    }
+  }
+  if (value === undefined || value === null) return (info.format && info.format(value)) || "not set";
+  if (info.date) {
+    const d = shortDate(value, year);
+    if (d) return d;
+  }
+  if (info.format) {
+    const t = info.format(value);
+    if (t) return t;
+  }
+  if (typeof value === "string") return value.trim() === "" ? "blank" : quoted(value);
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return countOf(value.length, "entry", "entries");
+  if (isObject(value)) return countOf(Object.keys(value).length, "setting", "settings");
+  return String(value);
+}
+
+const labelOfField = (field) => (field === "createdAt" ? "Date added" : (FIELD_INFO[field] && FIELD_INFO[field].label) || humanize(field));
+
+// What a progress entry's key stands for, in words a person recognizes. `piece` is
+// this device's copy (the chunk grid the question is about).
+function describeProgressTarget(piece, id) {
+  if (id === "__consolidation__") return "the full run-through";
+  if (id === "__cold_start__") return "the cold-start check";
+  if (typeof id === "string" && id.startsWith("sr_")) {
+    const section = ((piece && piece.sections) || []).find((s) => s && `sr_${s.id}` === id);
+    if (!section) return "a section run-through";
+    return `the run-through of ${typeof section.name === "string" && section.name.trim() ? section.name.trim() : formatRange(section.start, section.end)}`;
+  }
+  if (typeof id === "string" && id.startsWith("st_")) return "a run-through of two sections together";
+  try {
+    const chunk = generateAllChunks(piece).all.find((c) => c.id === id);
+    if (chunk) {
+      if (chunk.kind === "transition") return `the transition at ${formatRange(chunk.start, chunk.end)}`;
+      if (chunk.kind === "combo") return `the focus block at ${formatRange(chunk.start, chunk.end)}`;
+      return formatRange(chunk.start, chunk.end);
+    }
+  } catch (e) {
+    /* a piece that can't be chunked: fall through to the plain wording */
+  }
+  return "a chunk that is no longer in the plan";
+}
+
+// Where a progress entry sits in the piece (its first measure), to ask in order.
+function progressOrder(piece, id) {
+  try {
+    const chunk = generateAllChunks(piece).all.find((c) => c.id === id);
+    if (chunk) return chunk.start;
+  } catch (e) {
+    /* no order known */
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+const OPTION_LOCAL = "This device's";
+const OPTION_REMOTE = "The other device's";
+
+// "Days to learn, minutes per day and reschedule", as the start of a sentence
+const followerWords = (fields) => {
+  const names = fields.map((f) => labelOfField(f).toLowerCase());
+  const text = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join("");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+function fieldQuestion(c, year, followers = []) {
+  const label = labelOfField(c.field);
+  const here = describeFieldValue(c.field, c.local, year);
+  const there = describeFieldValue(c.field, c.remote, year);
+  // Two values that read the same but aren't (a reschedule "on day 3" on both) must not look like a
+  // question with one answer: say so instead of printing the same words twice.
+  const text =
+    here === there
+      ? `${label}: ${here} on both devices, but the two plans differ in detail.`
+      : here.length + there.length <= 60
+      ? `${label}: ${here} on this device, ${there} on your other device.`
+      : `${label} is different on the two devices.\nThis device: ${here}\nYour other device: ${there}`;
+  return {
+    part: c.part,
+    kind: "field",
+    title: label,
+    text,
+    // Numbers worked out from this one (see DATE_LINKED_FIELDS) go with whichever is kept.
+    ...(followers.length > 0 ? { detail: `${followerWords(followers)} follow${followers.length === 1 ? "s" : ""} the ${label.toLowerCase()} you keep.` } : {}),
+    options: [
+      { value: "local", label: OPTION_LOCAL },
+      { value: "remote", label: OPTION_REMOTE },
+    ],
+    kept: { local: `this device's ${lowerFirst(label)}`, remote: `the other device's ${lowerFirst(label)}` },
+  };
+}
+
+// The answers that throw away what one device logged. Said plainly (the person has
+// asked for this, and "left out" understated it), and flagged `removes` so the screen
+// before anything is applied can repeat it. Keeping THIS device's record also removes
+// the other device's sessions from the account (the next upload replaces its copy);
+// keeping the other device's removes only what this device logged, which the account
+// never had. Nothing is said, and nothing flagged, when no session would go.
+function removalHint(count, where, fromAccount) {
+  if (!(count > 0)) return {};
+  const who = count === 1 ? "The session" : `The ${count} sessions`;
+  return { hint: `${who} logged on ${where} will be removed${fromAccount ? ", from your account too" : ""}. This can't be undone.`, removes: true };
+}
+
+function progressQuestion(c, piece) {
+  const what = describeProgressTarget(piece, c.id);
+  const mine = isObject(c.local) ? c.local : null;
+  const theirs = isObject(c.remote) ? c.remote : null;
+  const kept = {
+    local: `this device's record of ${what}`,
+    remote: `the other device's record of ${what}`,
+    both: `both devices' sessions for ${what}`,
+  };
+  const keysOf = (entry) => new Set((Array.isArray(entry && entry.sessions) ? entry.sessions : []).map((s) => fingerprint(s)));
+  const here = keysOf(mine);
+  const there = keysOf(theirs);
+  const onlyHere = [...here].filter((k) => !there.has(k)).length;
+  const onlyThere = [...there].filter((k) => !here.has(k)).length;
+  const two = [
+    { value: "local", label: OPTION_LOCAL, ...removalHint(onlyThere, "your other device", true) },
+    { value: "remote", label: OPTION_REMOTE, ...removalHint(onlyHere, "this device", false) },
+  ];
+  const base = { part: c.part, kind: "progress", title: `Practice record: ${what}`, target: what, kept };
+  if (mine && theirs) {
+    if (onlyHere > 0 && onlyThere > 0) {
+      return {
+        ...base,
+        text: `You practiced ${what} on both devices since you last synced.`,
+        options: [
+          {
+            value: "both",
+            label: "Both devices' sessions",
+            recommended: true,
+            hint: "Every session from both devices is kept. The rest of the record (tempo, stage, next review) follows whichever device practiced last.",
+          },
+          ...two,
+        ],
+      };
+    }
+    return {
+      ...base,
+      text: `The practice record for ${what} was changed differently on the two devices.`,
+      detail: `Sessions: ${here.size} on this device, ${there.size} on your other device.`,
+      options: two,
+    };
+  }
+  return {
+    ...base,
+    text: mine
+      ? `The practice record for ${what} is on this device, but your other device no longer has it.`
+      : `The practice record for ${what} is on your other device, but this device no longer has it.`,
+    options: two,
+  };
+}
+
+function wholePieceQuestion() {
+  return {
+    part: WHOLE_PIECE_PART,
+    kind: "whole-piece",
+    title: "Chunk layout and practice",
+    text: "The chunk layout was changed on one device, while practice or a reschedule was recorded on the other, so the two can't be put together.",
+    options: [
+      {
+        value: "local",
+        label: "This device's piece",
+        hint: "Practice and changes made on your other device will be removed, from your account too. This can't be undone.",
+        removes: true,
+      },
+      {
+        value: "remote",
+        label: "The other device's piece",
+        hint: "Practice and changes made on this device will be removed. This can't be undone.",
+        removes: true,
+      },
+    ],
+    kept: { local: "this device's whole piece", remote: "the other device's whole piece" },
+  };
+}
+
+// EXACTLY one question per conflict the engine found, in a steady order: ordinary
+// fields first (by name), then practice records in the order of the piece. The one
+// exception is the numbers worked out from a conflicting target date (`plan.linkedToDate`):
+// they go with the date the person keeps, so they are not asked about, and the date's
+// question says so. `plan` is Pass 117's answer for the two copies (planPieceMerge);
+// `piece` is this device's copy.
+// A question: { part, kind, title, text, detail?, options: [{ value, label, hint?,
+// recommended? }], kept: { local, remote, both? } } (`kept` finishes the sentence
+// "Settled <piece>: kept ...", see describeKept).
+export function buildSettleQuestions({ plan, piece, year = new Date().getFullYear() }) {
+  if (!plan) return [];
+  if (plan.status === "whole-piece-conflict") return [wholePieceQuestion()];
+  const followers = new Set(plan.linkedToDate || []);
+  const fields = plan.conflicts
+    .filter((c) => c.kind !== "progress" && !followers.has(c.field))
+    .sort((a, b) => labelOfField(a.field).localeCompare(labelOfField(b.field)));
+  const practice = plan.conflicts
+    .filter((c) => c.kind === "progress")
+    .sort((a, b) => progressOrder(piece, a.id) - progressOrder(piece, b.id) || String(a.id).localeCompare(String(b.id)));
+  return [
+    ...fields.map((c) => fieldQuestion(c, year, c.field === "targetDate" ? DATE_LINKED_FIELDS.filter((f) => followers.has(f)) : [])),
+    ...practice.map((c) => progressQuestion(c, piece)),
+  ];
+}
+
+// Has every question an answer that is one of its own options?
+export function answeredAll(questions, answers) {
+  const given = answers || {};
+  return questions.every((q) => q.options.some((o) => o.value === given[q.part]));
+}
+
+// The words for what was kept, one per answered question, in the order asked.
+export function describeKept(questions, answers) {
+  const given = answers || {};
+  return questions.map((q) => (q.kept && q.kept[given[q.part]]) || null).filter(Boolean);
+}
+
+// What Review will ask, without doing anything: the account's rows for the pieces
+// held WITH a recorded list, read against this device's copies (the engine is run
+// again now, so the questions reflect both copies as they are today, not as they
+// were when the piece was held). Pure: it changes nothing and writes nothing, and it
+// never throws (a piece it fails on goes to `errored`, and to the picker).
+//   ids: only these pieces (the re-read just before applying asks about one)
+//   build: makes a piece's questions (a test can hand in one that fails)
+//   items: [{ id, name, revision, status, questions, reason }]
+//     status "questions": one question per conflict, to be answered one at a time
+//     status "ready":     nothing left to decide (the copies fit together now, or
+//                         match); still waits for the person to say go
+//   fallbackIds: held-with-a-list pieces this can't ask about (no readable row in
+//                the account, or the engine can't tell). They keep going through
+//                the whole-piece picker, exactly as before.
+//   errored:     [{ id, name }] the ones among them that failed unexpectedly (also in
+//                fallbackIds), so the page can say they were not asked about
+export function planSettle({ candidates, localPieces, accountRecord, now = Date.now(), ids: only = null, build = buildSettleQuestions }) {
+  const out = { items: [], fallbackIds: [], errored: [] };
+  const ids = heldIdsWithConflicts(accountRecord).filter((id) => !only || only.includes(id));
+  if (ids.length === 0) return out;
+  const wanted = new Set(ids);
+  const rows = ((candidates && candidates.pieces) || []).filter((c) => wanted.has(c.id));
+  const nameFor = (id) => {
+    try {
+      const row = rows.find((c) => c.id === id);
+      return pieceName(row ? row.piece : localPieces && localPieces[id]);
+    } catch (e) {
+      return "This piece";
+    }
+  };
+  const failed = (id) => {
+    out.fallbackIds.push(id);
+    out.errored.push({ id, name: nameFor(id) });
+  };
+  const subset = {
+    pieces: rows,
+    deleted: [],
+    unreadable: [],
+    technique: { technique: null, revision: null, unreadable: false, skippedItems: 0 },
+  };
+  const settle = Object.fromEntries(ids.map((id) => [id, {}]));
+  let items;
+  try {
+    items = walkAccountCandidates({ candidates: subset, localPieces, accountRecord, settle }).items;
+  } catch (e) {
+    ids.forEach(failed);
+    return out;
+  }
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const year = new Date(now).getFullYear();
+  ids.forEach((id) => {
+    const d = byId.get(id);
+    if (!d) {
+      out.fallbackIds.push(id);
+      return;
+    }
+    try {
+      const item = { id, name: d.name, revision: d.revision, questions: [], reason: d.kind };
+      if (d.kind === "same" || d.kind === "take") {
+        out.items.push({ ...item, status: "ready" });
+      } else if (d.kind === "settle" && (d.plan.status === "conflicts" || d.plan.status === "whole-piece-conflict")) {
+        out.items.push({ ...item, status: "questions", reason: d.plan.status, questions: build({ plan: d.plan, piece: localPieces[id], year }) });
+      } else if (d.kind === "settle" && (d.plan.status === "merged" || d.plan.status === "identical" || d.plan.status === "local-only")) {
+        out.items.push({ ...item, status: "ready", reason: d.plan.status });
+      } else {
+        out.fallbackIds.push(id);
+      }
+    } catch (e) {
+      failed(id);
+    }
+  });
+  return out;
+}
+
+// The result of settling, in plain words ({ text, problem? } lines for the page,
+// never a browser pop-up).
+//   settled:   [{ name, kept: [phrases from describeKept] }]  (kept empty: nothing was asked)
+//   unsettled: [{ name, reason }]  nothing was applied, and the piece is as it was. The
+//              reason says why, because "changed again" for everything misled:
+//                "changed" (the default) the piece moved on while the person decided
+//                "gone"    it is no longer there to settle (deleted, or settled elsewhere)
+//                "error"   something failed on this device
+//   fallback:  [{ name }]  pieces that could not be asked about one question at a time
+//              and went through the whole-piece choice instead
+export function describeSettleResult({ settled = [], unsettled = [], fallback = [] }) {
+  const lines = [];
+  settled.forEach((s) => {
+    lines.push({ text: s.kept && s.kept.length > 0 ? `Settled ${s.name}: kept ${andList(s.kept, 6)}.` : `${s.name} is up to date with your other device.` });
+  });
+  if (settled.length > 0) lines.push({ text: "Anything here that your account doesn't have yet goes up by itself in a few seconds." });
+  unsettled.forEach((u) => {
+    const text =
+      u.reason === "gone"
+        ? `${u.name} is no longer waiting to be settled here (it may have been deleted, or settled in another window), so nothing was changed.`
+        : u.reason === "error"
+        ? `Something went wrong while settling ${u.name}, so nothing was changed and it is still held. Press Review to try again.`
+        : `${u.name} changed again while you were deciding, so nothing was changed and it is still held. Press Review to look at it again.`;
+    lines.push({ text, problem: true });
+  });
+  if (fallback.length > 0) {
+    const names = andList(fallback.map((f) => f.name));
+    lines.push({ text: `${names} couldn't be asked about one question at a time, so ${fallback.length === 1 ? "it" : "they"} went through the whole-piece choice instead.` });
+  }
+  return lines;
+}
+
+// Just before the last step, the account is read again. When that can't be done nothing
+// is applied (the copy this device holds might be out of date), and the page says why in
+// the same words as every other failure to reach the account.
+export function describeSettleRereadProblem(reason) {
+  return `Nothing was changed. ${describeFetchProblem(reason)} You can also choose Decide later.`;
 }

@@ -218,7 +218,7 @@ export function SettingsTab({
                     </label>
                     <p className="wizard-hint" style={{ margin: "6px 0 0", fontSize: 13 }}>
                       {autoUpdate
-                        ? "On: about once a minute while this page is open, changes from your other devices are brought in by themselves. A piece changed in both places is merged when the changes don't overlap. Anything that overlaps, anything deleted elsewhere, and a piece that may be the same one under another name are left for you. A piece you're in the middle of waits until you're done with it. This choice is for this device only."
+                        ? "On: about once a minute while this page is open, changes from your other devices are brought in by themselves. A piece changed in both places is merged when the changes don't overlap. When they do overlap (the same chunk practiced on both devices, or the same setting changed on both), the piece is held and Review asks what to keep, one question at a time. Anything deleted elsewhere and a piece that may be the same one under another name are left for you. A piece you're in the middle of waits until you're done with it. This choice is for this device only."
                         : "Off: changes from your other devices are noticed and listed here, and you bring them in with Get changes from your account. Turn this on to have them arrive by themselves. This choice is for this device only."}
                     </p>
                   </div>
@@ -261,6 +261,9 @@ export function SettingsTab({
                     <button className="ghost-btn" onClick={onReviewHeld} disabled={accountBusy || backupRunning}>
                       Review
                     </button>
+                    <p className="wizard-hint" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                      Review shows what was changed in both places and lets you choose what to keep. Nothing changes until you confirm.
+                    </p>
                   </div>
                 )}
                 {accountNotice && accountNotice.lines.length > 0 && (

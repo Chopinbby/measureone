@@ -27,6 +27,9 @@ import {
   piecePartFingerprints,
   planPieceMerge,
   STRUCTURE_FIELDS,
+  unionProgressEntries,
+  isValidChoice,
+  WHOLE_PIECE_PART,
 } from "../src/lib/pieceMerge.js";
 import { fingerprint as accountSyncFingerprint } from "../src/lib/accountSync.js";
 
@@ -915,5 +918,451 @@ describe("two simulated devices (Pass 117)", () => {
   test("100 more runs with an everyday mix (mostly practice sessions): the same six invariants", () => {
     const tally = simulate("everyday mix", EVERYDAY, 100);
     assert.ok((tally.merged || 0) > 0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Settling a conflict: the person's answer, applied (Pass 121)       */
+/* ------------------------------------------------------------------ */
+
+describe("both devices' sessions for one chunk (Pass 121)", () => {
+  const sess = (day, loggedAt, over = {}) => ({ day, loggedAt, loggedDate: `2026-03-0${day}`, cleanReps: 3, bpm: 80, outcome: "pass", durationSeconds: 120, ...over });
+  const entryOf = (sessions, over = {}) => ({ doneDays: [...new Set(sessions.map((s) => s.day))], sessions, ...over });
+  const LADDER = ["stage", "consecutivePasses", "consecutiveStabilizingFails", "practiceBPM", "nextDueDate", "tier1Done", "needsRelearning", "currentBPM", "stabilizingEntryBPM", "settlingEntryBPM", "holdingEntryBPM", "tempoRatchetK", "holdingReviewCount"];
+  const ladderOf = (e) => Object.fromEntries(LADDER.map((k) => [k, e[k]]));
+  const early = { stage: "stabilizing", consecutivePasses: 1, consecutiveStabilizingFails: 0, practiceBPM: 80, nextDueDate: "2026-03-05", tier1Done: true, needsRelearning: false, currentBPM: 80, stabilizingEntryBPM: 70, settlingEntryBPM: null, holdingEntryBPM: null, tempoRatchetK: 0.3, holdingReviewCount: null };
+  const advanced = { stage: "settling", consecutivePasses: 4, consecutiveStabilizingFails: 0, practiceBPM: 104, nextDueDate: "2026-03-14", tier1Done: true, needsRelearning: false, currentBPM: 104, stabilizingEntryBPM: 70, settlingEntryBPM: 100, holdingEntryBPM: null, tempoRatchetK: 0.1, holdingReviewCount: null };
+
+  test("every session from both sides is kept, a session both hold once, the days added together, in the order they were logged", () => {
+    const mine = entryOf([sess(1, 100), sess(2, 300, { bpm: 90 })], early);
+    // the shared first session arrives from the database with its keys in another order
+    const shared = { outcome: "pass", durationSeconds: 120, bpm: 80, cleanReps: 3, loggedDate: "2026-03-01", loggedAt: 100, day: 1 };
+    const theirs = entryOf([shared, sess(3, 200, { bpm: 70 })], advanced);
+    const out = unionProgressEntries(mine, theirs);
+    assert.deepEqual(out.sessions.map((s) => s.loggedAt), [100, 200, 300], "three sessions, the shared one once, most recent last");
+    assert.deepEqual(out.doneDays, [1, 2, 3]);
+  });
+
+  test("the ladder state comes from the side whose latest session is LATER, whichever side that is", () => {
+    const mine = entryOf([sess(1, 100)], early);
+    const theirs = entryOf([sess(2, 500)], advanced);
+    assert.deepEqual(ladderOf(unionProgressEntries(mine, theirs)), ladderOf(advanced), "the other device practiced last");
+    assert.deepEqual(ladderOf(unionProgressEntries(theirs, mine)), ladderOf(advanced), "and it is about time, not about which side is 'this device'");
+    const laterHere = entryOf([sess(1, 900)], early);
+    assert.deepEqual(ladderOf(unionProgressEntries(laterHere, theirs)), ladderOf(early), "this device practiced last");
+  });
+
+  test("a tie goes to this device, and so does a record that says when on neither side", () => {
+    const tieMine = entryOf([sess(2, 400, { bpm: 70 })], early);
+    const tieTheirs = entryOf([sess(3, 400, { bpm: 95 })], advanced);
+    assert.deepEqual(ladderOf(unionProgressEntries(tieMine, tieTheirs)), ladderOf(early), "same moment: this device's");
+    assert.deepEqual(ladderOf(unionProgressEntries(tieTheirs, tieMine)), ladderOf(advanced), "...and from the other device's side, theirs is 'this device'");
+    const undatedMine = entryOf([{ day: 1, bpm: 80, outcome: "pass" }], early);
+    const undatedTheirs = entryOf([{ day: 2, bpm: 99, outcome: "pass" }], advanced);
+    const out = unionProgressEntries(undatedMine, undatedTheirs);
+    assert.deepEqual(ladderOf(out), ladderOf(early));
+    assert.deepEqual(out.sessions.map((s) => s.day), [1, 2], "nobody guesses an order for sessions that don't say when");
+  });
+
+  test("a side with no judged session at all has no ladder to offer: the other side's counts", () => {
+    const onlySkipped = entryOf([{ day: 1, loggedAt: 900, loggedDate: "2026-03-01", skipped: true, durationSeconds: 60 }], early);
+    const judged = entryOf([sess(2, 50)], advanced);
+    assert.deepEqual(ladderOf(unionProgressEntries(onlySkipped, judged)), ladderOf(advanced));
+    assert.deepEqual(ladderOf(unionProgressEntries(judged, onlySkipped)), ladderOf(advanced), "whichever side is 'this device'");
+  });
+
+  test("a skipped or unconfirmed attempt never makes a side's ladder state the later one", () => {
+    const mine = entryOf([sess(1, 100)], early);
+    const theirs = entryOf([sess(2, 50), { day: 2, loggedAt: 900, loggedDate: "2026-03-02", skipped: true, durationSeconds: 60 }, sess(2, 950, { provisional: true, outcome: "fail" })], advanced);
+    assert.deepEqual(ladderOf(unionProgressEntries(mine, theirs)), ladderOf(early), "their only judged session (50) is earlier than mine (100)");
+    assert.equal(unionProgressEntries(mine, theirs).sessions.length, 4, "but the skipped and unconfirmed sessions are still sessions, and are kept");
+  });
+
+  test("one side with no record for the chunk: the other's, as a copy; neither: nothing", () => {
+    const only = entryOf([sess(1, 100)], early);
+    assert.equal(unionProgressEntries(undefined, undefined), undefined);
+    const a = unionProgressEntries(only, undefined);
+    const b = unionProgressEntries(undefined, only);
+    assert.deepEqual(a, clone(only));
+    assert.deepEqual(b, clone(only));
+    assert.notEqual(a, only, "a copy: nothing a caller does to it reaches the inputs");
+    a.sessions.push({ day: 9 });
+    assert.equal(only.sessions.length, 1);
+  });
+
+  test("focus spots keep the practice time logged on either side, and a spot only one side has", () => {
+    const spot = (id, sessions, over = {}) => ({ id, name: id, position: "9", sessions, resolved: false, ...over });
+    const mine = entryOf([sess(1, 100)], { ...early, troubleSpots: [spot("a", [{ minutes: 5, loggedAt: 110 }])] });
+    const theirs = entryOf([sess(2, 200)], { ...advanced, troubleSpots: [spot("a", [{ minutes: 5, loggedAt: 110 }, { minutes: 7, loggedAt: 210 }], { resolved: true }), spot("b", [{ minutes: 3, loggedAt: 220 }])] });
+    const out = unionProgressEntries(mine, theirs);
+    const a = out.troubleSpots.find((x) => x.id === "a");
+    assert.deepEqual(a.sessions.map((x) => x.loggedAt), [110, 210], "both sides' minutes, the shared one once");
+    assert.equal(a.resolved, true, "a spot's own fields follow the side that practiced last");
+    assert.ok(out.troubleSpots.some((x) => x.id === "b"), "a spot only the other side has is not lost");
+    // ...also when it is THIS device that practiced last and holds the smaller list
+    const leadMine = entryOf([sess(1, 900)], { ...early, troubleSpots: [spot("a", [{ minutes: 5, loggedAt: 110 }], { resolved: false })] });
+    const out2 = unionProgressEntries(leadMine, theirs);
+    const a2 = out2.troubleSpots.find((x) => x.id === "a");
+    assert.deepEqual(a2.sessions.map((x) => x.loggedAt), [110, 210]);
+    assert.equal(a2.resolved, false, "this device practiced last, so its spot's own fields count");
+    assert.ok(out2.troubleSpots.some((x) => x.id === "b"));
+    // a record with no spots on either side stays as it is (the loader's null)
+    assert.equal(unionProgressEntries(entryOf([sess(1, 1)], { troubleSpots: null }), entryOf([sess(2, 2)], { troubleSpots: null })).troubleSpots, null);
+  });
+
+  test("a stored value that is not a list (damaged or hand-edited data) reads as having none, and never makes the union throw", () => {
+    const real = entryOf([sess(1, 100)], early);
+    // a side whose sessions or days are not lists keeps the other side's, and invents nothing
+    const damaged = { sessions: "not a list", doneDays: 3, stage: "stabilizing" };
+    const out = unionProgressEntries(real, damaged);
+    assert.deepEqual(out.sessions.map((s) => s.loggedAt), [100]);
+    assert.deepEqual(out.doneDays, [1]);
+    const flipped = unionProgressEntries(damaged, real);
+    assert.deepEqual(flipped.sessions.map((s) => s.loggedAt), [100]);
+    // both sides damaged: an empty record, not an exception
+    const both = unionProgressEntries({ sessions: "x", doneDays: 3 }, { sessions: 7, doneDays: "y" });
+    assert.deepEqual([both.sessions, both.doneDays], [[], []]);
+    // a focus spot whose own sessions are not a list
+    const spot = (sessions) => ({ id: "a", name: "a", position: "9", sessions, resolved: false });
+    const spots = unionProgressEntries(entryOf([sess(1, 100)], { troubleSpots: [spot("x")] }), entryOf([sess(2, 200)], { troubleSpots: [spot(5)] })).troubleSpots;
+    assert.deepEqual(spots.map((x) => x.sessions), [[]]);
+    // and a piece that is not an object at all is still "no record"
+    assert.equal(unionProgressEntries("junk", 5), undefined);
+  });
+
+  test("only a chunk's practice record can be answered 'both'", () => {
+    assert.equal(isValidChoice("progress", "both"), true);
+    assert.equal(isValidChoice("field", "both"), false);
+    assert.equal(isValidChoice("whole-piece", "both"), false);
+    ["local", "remote"].forEach((c) => ["progress", "field", "whole-piece"].forEach((k) => assert.equal(isValidChoice(k, c), true)));
+    ["", "mine", null, undefined, 1, "BOTH"].forEach((c) => assert.equal(isValidChoice("progress", c), false));
+  });
+});
+
+describe("settling each conflict the way the person said (Pass 121)", () => {
+  const base0 = () =>
+    makePiece({
+      progress: {
+        c1: { doneDays: [1], sessions: [{ day: 1, loggedAt: 100, loggedDate: "2026-03-01", cleanReps: 3, bpm: 80, outcome: "pass" }] },
+        c5: { doneDays: [], sessions: [] },
+      },
+      updatedAt: 10,
+    });
+  const edit = (piece, patch, stamp) => ({ ...piece, ...patch, updatedAt: stamp });
+  const fromBase = (b) => piecePartFingerprints(b);
+  // A real conflict: the same chunk (c5) practiced on both sides, and the name changed on both.
+  const conflicted = () => {
+    const b = base0();
+    const mine = edit(logSession(b, "c5", { day: 2, loggedAt: 211, bpm: 70 }), { name: "Mine" }, 30);
+    const theirs = edit(logSession(b, "c5", { day: 3, loggedAt: 311, bpm: 90 }), { name: "Theirs" }, 40);
+    return { b, mine, theirs, base: fromBase(b) };
+  };
+  const settle = (local, remote, base, choices) => planPieceMerge({ local, remote, base, choices });
+
+  test("no answers at all: exactly what the engine always gave (conflicts listed, this device's values kept)", () => {
+    const { mine, theirs, base } = conflicted();
+    const without = planPieceMerge({ local: mine, remote: theirs, base });
+    const withEmpty = settle(mine, theirs, base, {});
+    assert.equal(without.status, "conflicts");
+    assert.deepEqual(without.conflicts.map((c) => c.part).sort(), ["name", "progress:c5"]);
+    assert.deepEqual(without.settled, []);
+    assert.deepEqual(without.unusedChoices, []);
+    assert.deepEqual(withEmpty, without, "an empty set of answers is no answers");
+    assert.equal(without.merged.name, "Mine");
+  });
+
+  test("a chunk, 'both devices' sessions': every session from both, the days added, the ladder from the later session, nothing left to ask", () => {
+    const { mine, theirs, base } = conflicted();
+    const r = settle(mine, theirs, base, { "progress:c5": "both", name: "local" });
+    assert.equal(r.status, "merged");
+    assert.deepEqual(r.conflicts, []);
+    assert.deepEqual(r.settled.map((x) => [x.part, x.kind, x.choice]).sort(), [["name", "field", "local"], ["progress:c5", "progress", "both"]]);
+    assert.deepEqual([...sessionKeys(r.merged)].sort(), ["c1|100", "c5|211", "c5|311"], "this device's session and the other device's, plus the chunk nobody touched");
+    const c5 = r.merged.progress.c5;
+    assert.deepEqual(c5.doneDays, [2, 3]);
+    assert.equal(c5.currentBPM, 90, "the other device practiced last (311 is after 211), so its ladder state counts");
+    assert.equal(c5.practiceBPM, theirs.progress.c5.practiceBPM);
+    assert.equal(c5.nextDueDate, theirs.progress.c5.nextDueDate);
+    assert.equal(r.merged.lastLoggedAt, "2026-03-03", "the newest date of any session the merged piece holds");
+    // and the same from the other device's side: the ladder follows the clock, not the role
+    const back = settle(theirs, mine, base, { "progress:c5": "both", name: "local" });
+    assert.deepEqual([...sessionKeys(back.merged)].sort(), ["c1|100", "c5|211", "c5|311"]);
+    assert.equal(back.merged.progress.c5.currentBPM, 90);
+  });
+
+  test("a chunk, 'this device's' / 'the other device's': exactly that side's record, nothing of the other's", () => {
+    const { mine, theirs, base } = conflicted();
+    const local = settle(mine, theirs, base, { "progress:c5": "local", name: "remote" });
+    assert.equal(local.status, "merged");
+    assert.deepEqual(local.merged.progress.c5, canonicalPiece(mine).progress.c5);
+    assert.deepEqual([...sessionKeys(local.merged)].sort(), ["c1|100", "c5|211"], "their session is not there");
+    assert.equal(local.merged.name, "Theirs");
+    const remote = settle(mine, theirs, base, { "progress:c5": "remote", name: "local" });
+    assert.deepEqual(remote.merged.progress.c5, canonicalPiece(theirs).progress.c5);
+    assert.deepEqual([...sessionKeys(remote.merged)].sort(), ["c1|100", "c5|311"], "mine is not there");
+    assert.equal(remote.merged.name, "Mine");
+  });
+
+  test("an ordinary field: this device's or the other device's, 'both' is not an answer for it", () => {
+    const b = base0();
+    const mine = edit(b, { targetDate: "2026-04-01" }, 30);
+    const theirs = edit(b, { targetDate: "2026-04-15" }, 40);
+    const base = fromBase(b);
+    assert.equal(settle(mine, theirs, base, { targetDate: "local" }).merged.targetDate, "2026-04-01");
+    assert.equal(settle(mine, theirs, base, { targetDate: "remote" }).merged.targetDate, "2026-04-15");
+    const both = settle(mine, theirs, base, { targetDate: "both" });
+    assert.equal(both.status, "conflicts", "'both' means nothing for a date, so it is not an answer");
+    assert.deepEqual(both.conflicts.map((c) => c.part), ["targetDate"]);
+    assert.equal(both.merged.targetDate, "2026-04-01", "and this device's value is kept, as ever");
+    assert.deepEqual(both.settled, []);
+  });
+
+  test("some answered, some not: the answered ones are applied, the rest stay conflicts with this device's value", () => {
+    const { mine, theirs, base } = conflicted();
+    const r = settle(mine, theirs, base, { "progress:c5": "remote" });
+    assert.equal(r.status, "conflicts");
+    assert.deepEqual(r.conflicts.map((c) => c.part), ["name"], "exactly the one still to ask");
+    assert.equal(r.merged.name, "Mine");
+    assert.deepEqual(r.merged.progress.c5, canonicalPiece(theirs).progress.c5, "the answered one is applied");
+    assert.deepEqual(r.settled.map((x) => x.part), ["progress:c5"]);
+  });
+
+  test("an answer for a part that is not in conflict is ignored and said so, and changes nothing", () => {
+    const { mine, theirs, base } = conflicted();
+    const plain = settle(mine, theirs, base, { "progress:c5": "both", name: "local" });
+    const withStale = settle(mine, theirs, base, { "progress:c5": "both", name: "local", notes: "remote", "progress:c99": "both", daysToLearn: "remote" });
+    assert.deepEqual(withStale.unusedChoices.sort(), ["daysToLearn", "notes", "progress:c99"]);
+    assert.deepEqual({ ...withStale, unusedChoices: [] }, plain, "the same piece and the same record of what was settled");
+  });
+
+  test("an answer that is not 'local', 'remote' or (for practice) 'both' is not an answer", () => {
+    const { mine, theirs, base } = conflicted();
+    const r = settle(mine, theirs, base, { "progress:c5": "yes", name: "other" });
+    assert.equal(r.status, "conflicts");
+    assert.deepEqual(r.conflicts.map((c) => c.part).sort(), ["name", "progress:c5"]);
+    assert.deepEqual(r.settled, []);
+  });
+
+  test("a settled piece is stable: loading it again changes nothing, and what wasn't in conflict still merged", () => {
+    const b = base0();
+    const mine = edit(logSession(logSession(b, "c5", { day: 2, loggedAt: 211 }), "c9", { day: 2, loggedAt: 212 }), { name: "Mine", notes: "my notes" }, 30);
+    const theirs = edit(logSession(b, "c5", { day: 3, loggedAt: 311 }), { name: "Theirs", status: "paused" }, 40);
+    const r = settle(mine, theirs, fromBase(b), { "progress:c5": "both", name: "remote" });
+    assert.equal(r.status, "merged");
+    assert.equal(r.merged.notes, "my notes", "changed here only");
+    assert.equal(r.merged.status, "paused", "changed there only");
+    assert.ok(sessionKeys(r.merged).has("c9|212"), "the chunk only this device practiced");
+    assert.equal(r.merged.updatedAt, 40);
+    assert.deepEqual(piecePartFingerprints(validateAndMigratePiece(clone(r.merged))), piecePartFingerprints(r.merged), "unchanged by a reload");
+    assert.equal(validateAndMigratePiece(clone(r.merged)).lastLoggedAt, r.merged.lastLoggedAt);
+  });
+
+  test("a schedule mode settled 'the other device's' is the mode the merged schedule is worked out in", () => {
+    const b = base0();
+    const mine = edit(b, { scheduleMode: "minutes" }, 30);
+    const theirs = edit(b, { scheduleMode: "days" }, 40);
+    // a base that neither side still holds, so both read as having changed it
+    const base = { ...fromBase(b), scheduleMode: "an-older-value" };
+    assert.deepEqual(planPieceMerge({ local: mine, remote: theirs, base }).conflicts.map((c) => c.part), ["scheduleMode"]);
+    assert.equal(settle(mine, theirs, base, { scheduleMode: "remote" }).merged.scheduleMode, "days");
+    assert.equal(settle(mine, theirs, base, { scheduleMode: "local" }).merged.scheduleMode, "minutes");
+  });
+
+  test("a conflict over the target date: days to learn and minutes per day follow the answer as a unit, never one device's date with the other's days", () => {
+    const b = base0();
+    // this device changed the date (the app worked out new days and minutes from it); the other device changed the date and the minutes, not the days
+    const mine = edit(b, { targetDate: "2026-04-01", daysToLearn: 16, minutesPerDay: 20 }, 30);
+    const theirs = edit(b, { targetDate: "2026-04-15", minutesPerDay: 10 }, 40);
+    const base = fromBase(b);
+    const open = settle(mine, theirs, base, {});
+    assert.deepEqual(open.conflicts.map((c) => c.part).sort(), ["minutesPerDay", "targetDate"], "asked nothing: exactly as before");
+    assert.deepEqual(open.linkedToDate, ["daysToLearn", "minutesPerDay"], "and the engine says which numbers go with the date");
+    const local = settle(mine, theirs, base, { targetDate: "local" });
+    assert.equal(local.status, "merged", "the minutes are not a second question");
+    assert.deepEqual([local.merged.targetDate, local.merged.daysToLearn, local.merged.minutesPerDay], ["2026-04-01", 16, 20]);
+    const remote = settle(mine, theirs, base, { targetDate: "remote" });
+    assert.equal(remote.status, "merged");
+    assert.deepEqual(
+      [remote.merged.targetDate, remote.merged.daysToLearn, remote.merged.minutesPerDay],
+      ["2026-04-15", 21, 10],
+      "their date comes with THEIR days (the unchanged 21), not this device's 16 that was only changed here"
+    );
+    assert.deepEqual(piecePartFingerprints(validateAndMigratePiece(clone(remote.merged))), piecePartFingerprints(remote.merged), "stable after a reload");
+  });
+
+  test("the reschedule marker is regenerated by a date edit, so it follows the date too (a different one on each side is not a second question)", () => {
+    const b = base0();
+    const markerHere = { asOfDay: 3, remainingChunkOrder: ["c9", "c13"], previous: null };
+    const markerThere = { asOfDay: 3, remainingChunkOrder: ["c13", "c9"], previous: null };
+    const mine = edit(b, { targetDate: "2026-04-01", rescheduleMarker: markerHere }, 30);
+    const theirs = edit(b, { targetDate: "2026-04-15", rescheduleMarker: markerThere }, 40);
+    const base = fromBase(b);
+    const open = settle(mine, theirs, base, {});
+    assert.deepEqual(open.conflicts.map((c) => c.part).sort(), ["rescheduleMarker", "targetDate"]);
+    assert.deepEqual(open.linkedToDate, ["rescheduleMarker"]);
+    const local = settle(mine, theirs, base, { targetDate: "local" });
+    assert.equal(local.status, "merged");
+    assert.deepEqual(local.merged.rescheduleMarker.remainingChunkOrder, ["c9", "c13"]);
+    const remote = settle(mine, theirs, base, { targetDate: "remote" });
+    assert.equal(remote.status, "merged");
+    assert.deepEqual(remote.merged.rescheduleMarker.remainingChunkOrder, ["c13", "c9"], "their date comes with their plan");
+    // a reschedule made on purpose with no date change anywhere is an ordinary part, still askable
+    const a = edit(b, { rescheduleMarker: markerHere }, 30);
+    const c = edit(b, { rescheduleMarker: markerThere }, 40);
+    assert.deepEqual(settle(a, c, base, {}).conflicts.map((x) => x.part), ["rescheduleMarker"]);
+    assert.deepEqual(settle(a, c, base, {}).linkedToDate, []);
+  });
+
+  test("in a minutes-per-day schedule the minutes are what the person sets, so a conflict over the date does not carry them", () => {
+    const b = makePiece({ scheduleMode: "minutes", minutesPerDay: 30, progress: {}, updatedAt: 10 });
+    const mine = edit(b, { targetDate: "2026-04-01", minutesPerDay: 40 }, 30);
+    const theirs = edit(b, { targetDate: "2026-04-15" }, 40);
+    const base = fromBase(b);
+    const open = settle(mine, theirs, base, {});
+    assert.deepEqual(open.linkedToDate, [], "not a days-mode schedule: nothing goes with the date");
+    const remote = settle(mine, theirs, base, { targetDate: "remote" });
+    assert.equal(remote.status, "merged");
+    assert.equal(remote.merged.targetDate, "2026-04-15");
+    assert.equal(remote.merged.minutesPerDay, 40, "changed on this device only, so this device's minutes stay");
+  });
+
+  test("the numbers worked out from the date are ordinary parts when the date is not in conflict, and an answer about them alone is unused", () => {
+    const b = base0();
+    const mine = edit(b, { daysToLearn: 16 }, 30);
+    const theirs = edit(b, { minutesPerDay: 10 }, 40);
+    const base = fromBase(b);
+    const r = settle(mine, theirs, base, {});
+    assert.equal(r.status, "merged", "each changed on one side only, so each is taken");
+    assert.deepEqual([r.merged.daysToLearn, r.merged.minutesPerDay], [16, 10]);
+    assert.deepEqual(r.linkedToDate, [], "no conflict over the date: nothing is linked");
+    // both changed the minutes differently, the date untouched: still an ordinary conflict, still askable
+    const a = edit(b, { minutesPerDay: 20 }, 30);
+    const c = edit(b, { minutesPerDay: 10 }, 40);
+    assert.deepEqual(settle(a, c, base, {}).conflicts.map((x) => x.part), ["minutesPerDay"]);
+    assert.equal(settle(a, c, base, { minutesPerDay: "remote" }).merged.minutesPerDay, 10);
+    // an answer about a linked number when the date has not been answered is not an answer to the date
+    const dateOpen = settle(edit(b, { targetDate: "2026-04-01", daysToLearn: 16, minutesPerDay: 20 }, 30), edit(b, { targetDate: "2026-04-15", minutesPerDay: 10 }, 40), base, { minutesPerDay: "remote" });
+    assert.equal(dateOpen.status, "conflicts");
+    assert.deepEqual(dateOpen.conflicts.map((x) => x.part).sort(), ["targetDate"], "the minutes were settled by their own answer; the date is still open");
+  });
+
+  test("a minutes-per-day schedule settled 'the other device's' is worked out as one, so it is the same after a reload", () => {
+    const b = base0();
+    const mine = edit(b, { scheduleMode: "days" }, 30);
+    const theirs = edit(b, { scheduleMode: "minutes", minutesPerDay: 120 }, 40); // 120 a day needs far fewer than the 21 days
+    const base = { ...fromBase(b), scheduleMode: "an-older-value" };
+    const r = settle(mine, theirs, base, { scheduleMode: "remote" });
+    assert.equal(r.status, "merged");
+    assert.equal(r.merged.scheduleMode, "minutes");
+    assert.notEqual(r.merged.daysToLearn, 21, "the schedule was re-derived from the minutes, not left as the days piece's 21");
+    assert.equal(validateAndMigratePiece(clone(r.merged)).daysToLearn, r.merged.daysToLearn, "a reload would not change it");
+  });
+
+  test("a schedule mode settled 'the other device's' also makes days-to-learn derived, not a second question", () => {
+    const b = base0();
+    const mine = edit(b, { scheduleMode: "days", daysToLearn: 30 }, 30);
+    const theirs = edit(b, { scheduleMode: "minutes", minutesPerDay: 120 }, 40);
+    const base = { ...fromBase(b), scheduleMode: "an-older-value" };
+    const r = settle(mine, theirs, base, { scheduleMode: "remote" });
+    assert.equal(r.status, "merged", "in minutes mode days-to-learn is worked out from the minutes, never asked");
+    assert.deepEqual(r.derived, ["daysToLearn"]);
+  });
+
+  test("the whole-piece conflict: this device's whole piece, or the other device's, never a mix; no other answer means anything", () => {
+    const b = base0();
+    const split = splitPracticeChunk(b, "c9");
+    const splitter = reload({ ...b, chunkSplitPoints: split.chunkSplitPoints, progress: split.progress }, 30);
+    const logger = { ...logSession(b, "c13", { day: 2, loggedAt: 331 }), updatedAt: 40 };
+    const base = fromBase(b);
+    const open = settle(splitter, logger, base, {});
+    assert.equal(open.status, "whole-piece-conflict");
+    const keepMine = settle(splitter, logger, base, { [WHOLE_PIECE_PART]: "local" });
+    assert.equal(keepMine.status, "merged");
+    assert.deepEqual(keepMine.settled.map((x) => [x.part, x.kind, x.choice]), [[WHOLE_PIECE_PART, "whole-piece", "local"]]);
+    assert.deepEqual(keepMine.merged.chunkSplitPoints, canonicalPiece(splitter).chunkSplitPoints);
+    assert.equal(sessionKeys(keepMine.merged).has("c13|331"), false, "the other device's practice goes with the other device's piece");
+    assert.equal(keepMine.merged.updatedAt, 40, "the later stamp, as in every merge");
+    const keepTheirs = settle(splitter, logger, base, { [WHOLE_PIECE_PART]: "remote" });
+    assert.deepEqual(keepTheirs.merged.chunkSplitPoints, canonicalPiece(logger).chunkSplitPoints);
+    assert.ok(sessionKeys(keepTheirs.merged).has("c13|331"));
+    const notAnAnswer = settle(splitter, logger, base, { [WHOLE_PIECE_PART]: "both" });
+    assert.equal(notAnAnswer.status, "whole-piece-conflict");
+    assert.deepEqual(notAnAnswer.unusedChoices, [WHOLE_PIECE_PART]);
+    assert.deepEqual(piecePartFingerprints(validateAndMigratePiece(clone(keepTheirs.merged))), piecePartFingerprints(keepTheirs.merged), "stable after a reload");
+  });
+});
+
+describe("150 seeded pairs of copies, every conflict settled a random valid way (Pass 121)", () => {
+  const CHUNKS = ["c1", "c5", "c9", "c13", "c17"];
+  const latestJudged = (entry) => Math.max(-1, ...((entry && entry.sessions) || []).filter((s) => !s.skipped && !s.provisional).map((s) => s.loggedAt));
+
+  test("the answer is applied exactly as given, only the answered parts change, and the result survives a reload", () => {
+    let withConflicts = 0;
+    let bothAnswers = 0;
+    for (let seed = 1; seed <= 150; seed++) {
+      const rng = seeded(seed);
+      const b0 = makePiece({
+        progress: { c1: { doneDays: [1], sessions: [{ day: 1, loggedAt: 100, loggedDate: "2026-03-01", cleanReps: 3, bpm: 80, outcome: "pass" }] } },
+        updatedAt: 10,
+      });
+      let at = 1000;
+      const practice = (piece, n) => {
+        let p = piece;
+        for (let i = 0; i < n; i++) {
+          p = logSession(p, pickOf(rng, CHUNKS), { day: intIn(rng, 2, 6), loggedAt: at++, bpm: intIn(rng, 60, 120), outcome: pickOf(rng, ["pass", "soft-miss", "fail"]) });
+        }
+        return p;
+      };
+      let A = practice(b0, intIn(rng, 1, 4));
+      let B = practice(b0, intIn(rng, 1, 4));
+      if (rng() < 0.6) A = { ...A, name: `A${seed}` };
+      if (rng() < 0.6) B = { ...B, name: `B${seed}` };
+      if (rng() < 0.5) A = { ...A, targetDate: `2026-04-${String(intIn(rng, 10, 19))}` };
+      if (rng() < 0.5) B = { ...B, targetDate: `2026-04-${String(intIn(rng, 20, 28))}` };
+      A = { ...A, updatedAt: 100 + intIn(rng, 0, 50) };
+      B = { ...B, updatedAt: 100 + intIn(rng, 0, 50) };
+      const base = piecePartFingerprints(b0);
+      const first = planPieceMerge({ local: A, remote: B, base });
+      if (first.status !== "conflicts") continue;
+      withConflicts++;
+      const choices = {};
+      first.conflicts.forEach((c) => {
+        choices[c.part] = pickOf(rng, c.kind === "progress" ? ["local", "remote", "both"] : ["local", "remote"]);
+      });
+      const done = planPieceMerge({ local: A, remote: B, base, choices });
+      const where = `seed ${seed}`;
+      assert.equal(done.status, "merged", where);
+      assert.deepEqual(done.conflicts, [], where);
+      assert.deepEqual(done.unusedChoices, [], where);
+      assert.equal(done.settled.length, first.conflicts.length, `every conflict settled once (${where})`);
+      first.conflicts.forEach((c) => {
+        const choice = choices[c.part];
+        const got = c.kind === "progress" ? done.merged.progress[c.id] : done.merged[c.field];
+        if (choice === "local") assert.deepEqual(got, c.local, `${c.part}: this device's (${where})`);
+        else if (choice === "remote") assert.deepEqual(got, c.remote, `${c.part}: the other device's (${where})`);
+        else {
+          bothAnswers++;
+          const wanted = new Set([...sessionKeysInPart(c.part, c.local), ...sessionKeysInPart(c.part, c.remote)]);
+          const have = sessionKeysInPart(c.part, got);
+          assert.deepEqual([...have].sort(), [...wanted].sort(), `${c.part}: every session from both sides (${where})`);
+          assert.equal(got.sessions.length, wanted.size, `${c.part}: none twice (${where})`);
+          const later = latestJudged(c.remote) > latestJudged(c.local) ? c.remote : c.local;
+          ["stage", "practiceBPM", "nextDueDate", "currentBPM", "consecutivePasses"].forEach((k) => assert.equal(got[k], later[k], `${c.part}.${k} follows the later session (${where})`));
+        }
+      });
+      // only the answered parts differ from the engine's own merge
+      const answered = new Set(first.conflicts.map((c) => c.part));
+      Object.keys(first.merged).forEach((k) => {
+        if (k === "progress" || k === "lastLoggedAt" || answered.has(k)) return;
+        assert.deepEqual(done.merged[k], first.merged[k], `${k} untouched (${where})`);
+      });
+      Object.keys(first.merged.progress).forEach((id) => {
+        if (answered.has("progress:" + id)) return;
+        assert.deepEqual(done.merged.progress[id], first.merged.progress[id], `progress.${id} untouched (${where})`);
+      });
+      assert.deepEqual(piecePartFingerprints(validateAndMigratePiece(clone(done.merged))), piecePartFingerprints(done.merged), `stable after a reload (${where})`);
+    }
+    assert.ok(withConflicts >= 60, `the seeds really made conflicts (${withConflicts})`);
+    assert.ok(bothAnswers >= 30, `and exercised 'both' (${bothAnswers})`);
   });
 });

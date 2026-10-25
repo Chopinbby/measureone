@@ -306,8 +306,13 @@ changes can arrive by themselves, behind a switch that is off by default):
 - **121** A piece held with a recorded list of conflicting parts asks one plain question per
   part in Review, instead of the whole-piece picker. Built; see [Settling a held piece, one
   question at a time](#settling-a-held-piece-one-question-at-a-time-pass-121). It asks; it does
-  not decide: **the 2026-10-15 "most recent wins" decision is still not built.** **122**
-  deletions, remembered answers and combines.
+  not decide: **the 2026-10-15 "most recent wins" decision is still not built.**
+- **122** A piece deleted on one device is deleted everywhere, with a way back. Built; see [A piece
+  deleted on one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
+  It was split in two when its card was edited (2026-10-24): this is the deletions half.
+  **122b** (not built): a remembered "These are different pieces" for a declined combine, the
+  blank-composer "maybe the same piece" box, never asking about piece order or date added, and
+  questions for a piece held by a refused upload.
 - After those: what happens offline.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
@@ -546,7 +551,10 @@ What was built, and the small choices made building it:
   says "The account service isn't answering. Everything is still saved on this
   device." (a paused project looks exactly like no connection). Any success
   starts the count again. **A refusal is not a failure**: it never counts toward
-  that and is never retried. The status code of each answer is kept
+  that and is never retried (**one exception since Pass 122:** a *deletion* refused
+  because the row has moved on is tried once more at the newer revision, see
+  [Pass 122](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122)).
+  The status code of each answer is kept
   (`status`), because Supabase's errors carry none of their own: a 5xx, 408, 429
   or no answer at all counts as "the service isn't answering"; anything else
   that isn't a refusal leaves that one item waiting while the others still go.
@@ -642,8 +650,11 @@ What was built, and the small choices made building it:
   "different". Settling needs to decide whether that field counts. (2) The
   held list is only in the device record and the status/banner; settling needs
   the account's copy of a held piece, which this pass reads only to compare.
-  (3) A held piece's `deletedHere` mark can be held too ("a piece deleted
-  here"), and the status says so without a name. (4) The refusal judge and the
+  (3) ~~A held piece's `deletedHere` mark can be held too ("a piece deleted
+  here"), and the status says so without a name.~~ **Gone in Pass 122:** a deletion
+  refused because the row moved on is tried once more at the newer revision, and
+  if that is refused too it stays waiting, so a piece deleted here is never held
+  any more. (4) The refusal judge and the
   "same after a reload" rule are the only places that decide two copies are
   the same; settling should reuse `samePiece`/`sameTechnique` rather than
   compare raw. (5) Two other things stay as they were: about fifteen native
@@ -771,7 +782,11 @@ copy deleted.
   counting it as an upload), so no second "deleted" is sent. Deleting the open
   piece goes through `guardLeavingActiveWork` like every other way of leaving
   unfinished work. A piece this device deleted whose deletion hasn't gone up yet
-  is never brought back by a restore.
+  is never brought back by a restore. **Since Pass 122** the window also has a
+  **Keep it** button (a duplicate that a combine marked deleted gets only "Delete it
+  here too"), and with the automatic switch on a deletion from the last 30 days is
+  removed by itself instead of listed; see
+  [Pass 122](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
 - **Results show in the page**, never as a browser pop-up: the Account panel on
   Settings, and a dismissible banner elsewhere (including the welcome screen). The
   file import's `window.alert` is unchanged. A restore, "Get changes" and Review
@@ -825,11 +840,13 @@ copy deleted.
   its schedule from scratch after "ask" or "combine" merges; "take" keeps it.
   (5) **A name match with a blank composer combines two different pieces that
   share a name** and marks one row deleted; the modal shows "Same piece, other
-  copy" and the box can be unticked, but it's easy to miss. (6) **There's no way
+  copy" and the box can be unticked, but it's easy to miss. (6) ~~**There's no way
   to keep a piece the account marks deleted** (an "undelete"); Review offers only
-  "Delete it here too". (7) **The other row is marked deleted before the combined
-  piece has uploaded** (a few seconds, once the first backup is done); the row's
-  data stays, so it can be put back by hand. (8) The account code is now about
+  "Delete it here too".~~ **Fixed in Pass 122:** a **Keep it** button, and a "Recently
+  deleted" list that restores for 30 days. (7) **The other row is marked deleted before
+  the combined piece has uploaded** (a few seconds, once the first backup is done); the
+  row's data stays, so it can be put back by hand (**since Pass 122 the row also carries
+  a `mergedInto` note**, so it is no longer mistaken for a deletion). (8) The account code is now about
   13 KB compressed (Passes 110 to 112) in everyone's download, signed in or not.
   (9) **A combine that's declined (box unticked) comes back on every "Get
   changes".** Nothing remembers that two same-named rows are different pieces, so
@@ -1160,9 +1177,11 @@ change arrives.
   Pass 120 wires it in). (3) **A piece the person declines
   in "Get changes" (an unticked new piece) is noticed again on every check**,
   the same family as the declined combine; it needs the remembered "no" of Pass
-  122. (4) **A piece deleted here and changed elsewhere** (a record entry marked
-  deleted here, a live row at a newer revision) is not reported; deletions are
-  Pass 122. (5) The light read is paged by offset, so a row inserted between two
+  122b (the second half of Pass 122's card, not built). (4) ~~**A piece deleted here and
+  changed elsewhere** (a record entry marked deleted here, a live row at a newer
+  revision) is not reported; deletions are Pass 122.~~ **Fixed in Pass 122:** the
+  deletion is tried again at the newer revision and goes through (a deletion wins), so
+  there is nothing left to report. (5) The light read is paged by offset, so a row inserted between two
   pages can be missed or repeated for one check; the next check corrects it.
 - **Checked** (my own runs; the owner's checks on the preview are in the pull
   request): unit tests for each rule above; four deliberate breakages, each
@@ -1526,7 +1545,8 @@ finds is brought in without a button, in about a minute. The deciding is in
 - **One apply step.** After a usable check `runAutoUpdate` (App.jsx) works out the targets
   (`autoUpdateTargets`: the pieces the account holds at a higher revision, the ones it
   holds that this device doesn't, and the technique row if newer; **never** a held piece,
-  one deleted elsewhere, or one with no recorded revision), fetches **only those rows'
+  or one with no recorded revision; **a piece deleted elsewhere was never a target in
+  Pass 120 and since Pass 122 is one when the deletion is from the last 30 days**), fetches **only those rows'
   data** (`fetchChangedAccountRows`: `id in (...)`, 50 ids a page; the technique row only if
   newer) and calls **`applyAccountFlow({ automatic: true })`, the same function Get changes
   uses** (there is no second one). It saves the device record BEFORE any piece changes
@@ -1543,7 +1563,7 @@ finds is brought in without a button, in about a minute. The deciding is in
   | changed on both sides, but the engine can't tell (no recorded base) | left for the person (Get changes) |
   | the same piece under another name | **never by itself**: a combine is always asked |
   | already held | left for Review |
-  | deleted elsewhere | **listed as today** ("Changes from another device: 1 piece. Press Get changes."); nothing is removed |
+  | deleted elsewhere | **Pass 120: listed as today** ("Changes from another device: 1 piece. Press Get changes."); nothing was removed. **Since Pass 122:** removed by itself when the deletion is from the last 30 days, even with practice here that was never backed up; an older deletion and a combine's duplicate are listed with "Delete it here too" and "Keep it", and nothing is removed |
   | the technique library | merged by Pass 118's engine where a base is recorded, the import merge (which never asks) where not; a held library waits for Review |
 
   **Get changes and Review do not use the engines** (the `automatic` flag is off), so
@@ -1610,7 +1630,8 @@ no hold, one upload each) and both ended with identical stored data** (compared 
 order aside; there is no committed "compare script" from Pass 112 to use); **the same chunk
 on both was held with `progress:c9` kept as the conflict, nothing lost on either side, and
 Review then worked as before** (all three sessions, uploaded); **a piece deleted on one
-device was only listed on the other, nothing removed**; **a piece with its settings draft
+device was only listed on the other, nothing removed** (Pass 120 as built; Pass 122 changed
+this); **a piece with its settings draft
 open did not change (and was not recorded) until the draft was discarded, then arrived within
 6 seconds**; **with the switch off the other device only noticed, fetched no data, and Get
 changes still worked**; signed out, and with no account service: no request, no lease key,
@@ -1674,7 +1695,11 @@ same test).
 12. **A piece that waits because it is in use is downloaded again every minute** until it is
     free (only the deferred piece, not the account): only a piece left for the person is
     remembered at its revision (`autoLeftForYouRef`), a deferred one is not. An hour-long
-    Interleaved session is about 60 downloads of one piece.
+    Interleaved session is about 60 downloads of one piece. **Pass 122 saw it faster than
+    that:** with a settings draft open on a piece the account had marked deleted, the
+    stand-in's request log showed one light look and one download of that piece **every 5
+    seconds** (8 of each in the 35 seconds read), not every minute. See Pass 122's found
+    item 1.
 13. **A failed automatic update leaves only a console line.** The Account panel's "Changes
     from another device... Press Get changes" line stays (it is recomputed from the last
     check), so it is not invisible, but nothing says the automatic path failed. A piece
@@ -1924,7 +1949,8 @@ a row with the new walk (one line of `App.jsx`: `advanceSettleFlow`).
    list: 2 on this device, 4 on your other device". The engine never conflicting on those two,
    as proposed there, would remove that question.
 4. **"Both" is not "most recent wins".** It is a choice the person makes for a chunk; nothing
-   decides for them, and nothing is remembered ("always keep both" is Pass 122's).
+   decides for them, and nothing is remembered ("always keep both" was named as Pass 122's;
+   when 122 was split on 2026-10-24 it was deferred again, with no owner yet).
 5. **The whole-piece question is lossy by nature** (the other side's changes go with it), and
    re-homing progress by measure position, as Settings does on one device, is still open
    (Decisions.md, "When two copies disagree", open item (i)).
@@ -1959,7 +1985,7 @@ remembered "always keep both" half of 9.**
    case:* three or more practice records changed on both devices start with one first screen
    ("Both devices' sessions for all N" / "Decide each one"). Originally 40 conflicting chunks gave
    40 questions (a probe; building them took 6 ms). **Remembered answers ("always keep both")
-   are still Pass 122's.**
+   were named as Pass 122's and are deferred again, with no owner yet.**
 10. **"Left out" understated the choice.** *Fixed:* the answers say "removed", with the number of
     sessions, "from your account too" where that is true, and "This can't be undone", and the
     summary repeats them. Unchanged and by design: after "both", the chunk's stage and next
@@ -1970,6 +1996,325 @@ remembered "always keep both" half of 9.**
     longer brought back; `unionProgressEntries` tolerates a `sessions` that is not a list; "1
     difficult measure".
 12. **No recap before applying.** *Fixed:* the summary.
+
+## A piece deleted on one device is deleted everywhere, with a way back (Pass 122)
+
+Until this pass a piece deleted on one device was only *listed* on the others ("Delete it here
+too", Pass 112), and a deletion made while another device had logged practice was refused by
+the account and **held** ("a piece deleted here"). The owner decided on 2026-10-23: **"If a
+piece is deleted on another device, it should be deleted everywhere so the practice should be
+lost."** She also said yes to a way back. This pass builds both. **Pass 122's card was split in
+two on 2026-10-24** (her choice): this is the deletions half. **122b is not built:** a remembered
+"These are different pieces" for a declined combine, the blank-composer "maybe the same piece"
+box, never asking about piece order or date added, and questions for a piece held by a refused
+upload.
+
+**The rule and its safety net.** A deletion always wins, over practice logged on another
+device before or after it. It is an exception to the 2026-10-15 "practice sessions are always
+kept", for whole-piece deletions only. The net is Design D, unchanged: a deleted piece only has
+`deleted_at` set in the account, its data stays, and for **30 days** (`RECENTLY_DELETED_DAYS`,
+tracked in [Research.md](Research.md#account-sync-timings)) it can be brought back from
+Settings. What can't come back is practice a device logged and **never backed up** before the
+deletion reached it.
+
+**What was built**
+
+- **What a device does with a piece it still holds that the account marks deleted** (the
+  first column is the deletion's age, `isRecentlyDeleted`):
+
+  | the deletion is | "Update automatically" switch | result |
+  |---|---|---|
+  | from the last 30 days | on | **removed by itself**, even with practice here that was never backed up; a quiet line says so |
+  | from the last 30 days | off | listed, nothing removed: the Account panel and one quiet banner, each with **Delete it here too** and **Keep it** |
+  | older than 30 days | either | listed the same way; never removed by itself |
+  | a combine's duplicate (`mergedInto`, below) | either | never removed by itself; "Get changes" offers only **Delete it here too** |
+  | a piece this device **never synced** (below) | either | listed the same way; never removed by itself, however recently it was deleted |
+
+  Nothing is removed unless the switch is on, the deletion is recent **and this device synced
+  the piece before**, or the person presses **Delete it here too**. A piece this device deleted
+  itself (`deletedHere`) is not one of these.
+- **A piece this device never synced is never removed by itself** (added at the owner's request,
+  2026-10-25, after the pre-commit review found it: "fix so that imports can't be removed").
+  `wasSyncedHere(entry)` (`lib/recentlyDeleted.js`) is true when the device record holds a
+  **recorded revision** for the piece (an upload the account confirmed, or the account's copy
+  taken here), and it is the one test used in both places that decide: `deletionsElsewhere`
+  puts a recent deletion of a never-synced piece in its own `unsynced` bucket instead of
+  `recent` (so it is not fetched to be removed, and the person is told about it), and
+  `applyAccountMerge` checks it again before removing (a second line of defence, like the
+  30-day check). **Why this is the right test:** a file import keeps a piece's own id, so a piece
+  you deleted and then imported again matches the account's deleted row; once the deletion has
+  gone up the device record keeps nothing for it, and the refused re-upload leaves only a bare
+  hold (`{ held: true }`, no revision). A piece that really lives on your devices always has a
+  revision, even when it is held for a conflict (`withPieceHeld` keeps the old entry), so the
+  deletion still reaches it. It also covers a piece on a device that has never synced it (a
+  copy from before it signed in, one the first backup found already in the account). **What it
+  does not cover:** an import that is merged into a piece this device had already synced is an
+  ordinary change to that piece, and a deletion made elsewhere still wins over it (the owner's
+  rule); there is no "imported by hand" mark on a piece, because that would change the stored
+  format.
+- **Automatic removal is the same single apply step** (`applyAccountFlow({ automatic: true })`
+  -> `applyAccountMerge`; there is no second one). `autoUpdateTargets` now takes the deleted
+  pieces that are `recent` (`deletionsElsewhere`, `lib/recentlyDeleted.js`), so they are fetched
+  with the changed rows. For each deleted row of a piece this device holds: a combine's
+  duplicate, a deletion past the window or a piece this device never synced goes to
+  `leftDeleted` (listed, remembered per
+  revision in `autoLeftForYouRef` so it is not fetched again); a piece in use goes to
+  `deferred` (**not recorded**, so the next run finds it again, as in Pass 120); the rest are
+  `removed`. **The record's entry is dropped first** (`withPieceDropped`, no upload counted),
+  so this device never sends a second "deleted", **and a piece held as "changed on another
+  device" because its upload was refused by the deletion is removed the same way** (the hold
+  goes with the entry). Then the piece leaves `pieces`. **Get changes and Review never remove
+  anything by this route** (the `automatic` flag is off there).
+- **A piece that is open.** If the removed piece is the open one, the app moves to another
+  piece and closes any settings draft, the way "Delete it here too" does
+  (`setActivePieceId`, `setEditDraftState(null)`, `setSettingsEditing(false)`, the Overview tab,
+  no day override). A piece in use (`isPieceBusy`: an unconfirmed Interleaved attempt, a running
+  reassessment timer, an open settings draft) is never removed: it waits, and the existing
+  "applied when you're done" effect brings the removal in when it is free.
+- **The notices follow the owner's choice** (2026-10-23): a **red page banner only when
+  practice was lost**, otherwise a quiet line. `sessionsOnlyHere(localPiece, deletedRowData)`
+  counts the sessions this device holds that the deleted row does not (compared by content, key
+  order ignored, Pass 115's comparison, and counting focus spots' own sessions). The words:
+  *Quiet line, Account panel:* "Removed because it was deleted on another device: Nocturne."
+  *Red banner, only if sessions were lost:* "Nocturne was deleted on another device, so it was
+  removed here too. 1 session you logged here since your last backup went with it. You can
+  bring the piece back from Recently deleted in Settings for 30 days, but not that session."
+  *Plain line, only if the removed piece was the open one:* "Nocturne was deleted on another
+  device, so it was removed here too." (`describeAutoUpdate`, `describeAutoRemoved`.)
+- **Listed cases** (switch off, older than 30 days, or a duplicate). One quiet banner, in the
+  export-reminder style (not red), says "Nocturne was deleted on another device." and, for one
+  piece, "It's still on this device. Delete it here too, or keep it: it comes back in your
+  account and on every device." with **Delete it here too** and **Keep it**. For several pieces
+  it names them and has an **Open Settings** button (through `guardLeavingActiveWork`). The
+  Account panel in Settings lists each one with the same two buttons, under "Deleted on another
+  device. These are still on this device, and nothing removes them unless you choose to." The
+  "Get changes" window got **Keep it** beside its existing button (`onKeepHere`). Built from the
+  light look (`deletedElsewhere` in `refreshSyncInfo`: ids, revisions and deleted dates only).
+  **The banner warns when "Delete it here too" would throw away changes the account never got**
+  (found in the pre-commit review, 2026-10-25; the Account panel's list and the "Get changes"
+  window already said so): for one piece, "It's still on this device, and it has changes your
+  account never got. If you delete it here too, those changes are lost. If you keep it, the
+  piece comes back in your account and on every device, with those changes."; for several,
+  "... some have changes your account never got." (`describeDeletedBanner`'s `unsynced`).
+- **Keep it** (and **Restore**, below) is `bringBackDeletedPiece`: it reads the row, then answers
+  `gone` (no such row), `live` (not deleted any more: already back), `combined` (its data says
+  `mergedInto`: never brought back on its own), `moved` (the row's revision is not the one the
+  person was looking at: **refused, nothing changed**), or clears `deleted_at` with
+  `restorePieceRow` **only if the row is still at the revision read** and answers `kept`; or
+  `stopped` (no connection, signed out). Nothing but `deleted_at` is written, and no migration is
+  needed: the update rule ("change own rows") checks only that the row is the person's, and the
+  revision trigger only raises the count (`supabase/migrations/`; **read, not run against the
+  real project**). A `kept` row then goes through **the one apply step again**
+  (`applyAccountFlow`, mode "changes", this piece only, with the "Kept ..." line first), so a
+  piece this device still holds that differs from the account's copy is merged by the Pass 112
+  rules, **never replaced**, and a piece this device no longer holds arrives as a new piece. The
+  device record is saved first, as always. Before that, `bringBackThroughApply` corrects the
+  last light look's row for this one piece (`deleted_at: null`, the new revision), because the
+  banner and the "Changes from another device" line are computed from that look and would
+  otherwise go on showing a deletion that is no longer true (**found in the browser, fixed**).
+  The piece then reappears on the other devices through the ordinary routes (the automatic
+  update, or Get changes).
+- **A deletion is not held up by practice elsewhere** (`syncWaitingChanges`). A device's own
+  deletion that is refused because the row is live but has moved on (`judgeRefusal`: a delete
+  against a live row is "differs") is **tried once more against the revision just read**, setting
+  only `deleted_at`. If that succeeds the revision is adopted; if the connection drops the run
+  stops; **if it is refused again, or fails, the deletion stays waiting (not held)** and the next
+  run reads the row again. This is **the one exception to "a refusal is never retried"**. Why it
+  is safe: nothing is erased, and what the other device logged stays in the row's data, so the
+  piece can be restored from Recently deleted with that practice. A deletion against a row that
+  is already marked deleted is "same" (the revision is adopted), against a missing row there is
+  nothing to delete, both as before. **A deleted piece can therefore no longer be held.**
+- **Recently deleted** (a button under Account in Settings, `RecentlyDeletedModal`). It reads
+  only the rows marked deleted at or after the cutoff (`fetchDeletedPieces`: `deleted_at` >=
+  30 days ago, with each row's data so a name and counts can be shown) and lists them newest
+  first (`recentlyDeletedList`): the name, "Deleted today / yesterday / 3 days ago", the number
+  of measures and sessions the **account's copy** has, and **Restore**. A combine's duplicate is
+  never listed, and a row whose data can't be read is left out rather than offered. Opening the
+  list changes nothing. **Restore is the same step as Keep it**, so the piece comes back on every
+  device as the account last held it, and a restored piece is a new piece on a device that no
+  longer has it.
+- **A combine records where its duplicate went** (`markOtherCopiesDeleted` ->
+  `markPieceRowCombined`). The extra row is still only marked deleted, "only if it is still at
+  the revision it was read at", and its saved data is sent back **exactly as read plus one key,
+  `mergedInto: <the surviving piece's id>`**. Without it a combine's duplicate was
+  indistinguishable from a deletion the person made, so the automatic path would have removed
+  it from a device that held practice the combine never saw, and Recently deleted would have
+  listed it. With it: `accountRowsToCandidates` carries `mergedInto` (and `deletedAt` and the
+  saved data) on each deleted row; the automatic path leaves it; Recently deleted leaves it out;
+  Keep it answers `combined` ("... was combined into another piece, so it can't be kept on its
+  own."). **This is the first time the app writes into the data of a deleted row anything other
+  than a piece's own copy.** A combine made before this pass carries no note (found item 3).
+- **The delete window** (`DeletePieceModal`, words in `deleteWindowCopy`, tested). Signed in
+  with a checked first backup: "Are you sure you want to delete this piece and all its progress?
+  This removes "Nocturne" (every chunk, session log, and revival history) from this device and
+  from every other device on your account. You can bring it back from Recently deleted in
+  Settings for 30 days, without any practice that was never backed up." with **Delete
+  everywhere**. Signed out, or signed in with no checked backup: what it always said ("...from
+  this browser, permanently. It can't be undone."), with **Delete permanently**.
+- **Files.** `lib/recentlyDeleted.js` and `components/RecentlyDeletedModal.jsx` (new);
+  `lib/accountSync.js`, `App.jsx`, `components/tabs/SettingsTab.jsx`,
+  `components/ImportPiecesModal.jsx`, `components/DeletePieceModal.jsx`; tests; docs.
+  `lib/recentlyDeleted.js` is pure and never imports `accountSync.js`.
+
+**Not changed:** the merge engines, tab sync, the stored format, the device record's fields,
+and the database. A piece is still only ever marked deleted (Design D); nothing in the account
+is erased by this pass or by anything the app does.
+
+**Checked.** `test/recentlyDeleted.test.mjs` (24 tests, new) and `test/accountSync.test.mjs`
+(289, was 243), 1476 in all (1406 before). They cover: the window's edge (exactly 30 days is
+outside), an unreadable or future time; which pieces count as deleted elsewhere (a piece this
+device deleted, a piece it doesn't hold, a held piece); what the person is told about with the
+switch on and off; counting lost sessions by content, including a focus spot's own log;
+automatic removal (only with the switch on, only inside the window, never a combine's duplicate,
+waits for a piece in use, does not touch a piece this device doesn't hold, Get changes never
+removes); the targets; the retried deletion (at the new revision, refused again, no connection,
+against an already deleted row); Keep it and Restore (every answer, refused when the row moved,
+no write when it is not deleted, never a combine's duplicate); the list (fetches only the last 30
+days, newest first, no duplicates); the combine note (added, the data otherwise untouched, read
+back by the candidates) and end to end through the fake database (A deletes, B removes, the
+account row keeps its data, Recently deleted lists it, Restore brings it back with every session
+the account had); the words, none with an em dash; the banner's warning about changes the account
+never got; and a piece this device never synced (no record, or a bare hold) being listed and never
+removed or fetched to be removed, down to a whole chain through the fake database (delete, import
+the file again, refused and held, switch on, left alone). **Re-broken on purpose, 51 ways (30 in
+`accountSync.js`, 21 in `recentlyDeleted.js`), all caught.** The five the card names: no 30-day
+limit (also on the list), removal with the switch off (two ways: by hand through Get changes, and
+the switch ignored when choosing what to fetch), Keep it without the revision check (the check,
+and the write not being conditional), no retry (a deletion held, never retried), and a combine's
+duplicate shown in the list (and removed by itself).
+
+**In a browser** (2026-10-24; the real app against a throwaway local stand-in for the account
+service with a "pretend it's down" switch, two or more browser addresses as devices, a made-up
+saved sign-in; the stand-in cannot test the real database's rules): with the switch on in both,
+the delete window said the new words and **Delete everywhere** removed the piece on A (the row
+got `deleted_at`, kept its data, revision 2) and **B removed it within a second of its next look,
+said so only in the Account panel, and sent nothing back**; **Recently deleted** on A listed it
+("Deleted today · 32 measures, 1 session") and **Restore** brought it back on A and on B (account
+revision 3, then 5 after B's own Restore); with a **settings draft open on B** the piece stayed
+for the 40 seconds watched, then **was removed about a second after the draft was discarded,
+the open piece moved to another one and the plain line said so**; **with the service down B
+logged a session that never reached the account, A deleted, and B then removed the piece with the
+red banner "...1 session you logged here since your last backup went with it..."**, and the
+quiet line alone appeared when nothing was lost; **A deleted while B had uploaded a newer
+session (the account row was at revision 8, A at 7): the stand-in's log shows the write at
+revision 7 refused and the retry at revision 8 accepted, nothing held, no red banner, and the
+restored piece held B's session**; with **B's switch off** the piece stayed, the banner and the
+Account panel group listed it with the two buttons, **Keep it** cleared the mark (account
+revision 12), A got the piece back on its own, and a **Delete it here too** (the other round)
+removed it with no write from B; **a deletion back-dated to 31 days ago was not removed with the
+switch on (watched for 7 seconds after a fresh look; the unit tests hold the boundary), was
+listed with the two buttons, and Recently deleted said "Nothing was deleted in the last 30
+days."** (the list's request carried the 30-day filter); **a combine's duplicate
+(two devices that each held "Etude") was marked deleted with `mergedInto` and its data intact,
+stayed on the other device, was not in Recently deleted, and Keep it answered "...combined into
+another piece, so it can't be kept on its own." with the account unchanged**; signed out, the
+delete window said "...from this browser, permanently" with **Delete permanently** and the
+Account panel offered only "Sign in"; **a build with no account service configured** had no
+Account panel, no banner and the permanent wording, and the console showed no errors.
+**After the pre-commit review (2026-10-25), again in the real app:** with a piece holding changes
+the account never got, the banner warned in the new words; **Keep it** on a copy that differed
+merged both sides' sessions, put it back in the account (revision 4, two sessions) and cleared
+the hold; and the re-import case: a piece **deleted through the app's own window and then
+imported again through the real Import window, with automatic updates on, was left alone** (the
+app looked at the account, listed it with the two buttons, kept it on the device, and nothing
+was removed or sent), and **Keep it** then brought it back (account revision 3, hold cleared).
+**Not seen in a browser:** the real preview with the real test project (the card's "Yours" checks,
+which need a push); the several-pieces form of the banner (its **Open Settings** button; the
+wording is unit-tested); a deletion arriving while an Interleaved attempt is unconfirmed;
+Restore after the row moved (unit-tested: `moved`); a hidden page.
+
+**Found, for decisions** (none acted on beyond what is said above):
+
+1. **A piece in use is looked at and downloaded every 5 seconds, not every minute.** With a
+   settings draft open on a piece the account had marked deleted, the stand-in's request log
+   showed one light look and one download of that piece's row every 5 seconds (8 of each in the
+   35 seconds read) until the draft was closed. Read from the code, the likely path: with the
+   switch on, every upload round starts with a fresh look and then the automatic update; a
+   piece left waiting because it is in use is not remembered (`autoLeftForYouRef` holds only
+   pieces left for the person), and while the piece also has a change that cannot be sent yet
+   the round repeats after the 5-second quiet period. **It is Pass 120's left-open item 12
+   (stated there as "every minute"), made more reachable here** because a recent deletion is
+   one more thing to wait for. Harmless to the data (about 3 KB and one piece each time) and
+   not fixed (it is Pass 120's wiring, outside this card). **Proposed:** remember a deferred
+   piece by revision until it is idle, the way a piece left for the person is; the idle effect
+   already re-runs the update when the piece is free.
+2. **The banner and the Account panel offer "Keep it" on a combine's duplicate.** They are built
+   from the light look, which never reads a row's data, so they cannot know it is a duplicate;
+   "Get changes" fetches the data and offers only "Delete it here too". Pressing Keep it on a
+   duplicate is safe: it answers "... can't be kept on its own" and changes nothing (seen in a
+   browser). **Proposed if it matters:** one extra read of the deleted rows when they are
+   listed, or leave it.
+3. **A combine made before this pass carries no `mergedInto` note**, so it looks like a
+   deletion: with the switch on, such a duplicate under 30 days old is removed by itself and is
+   listed in Recently deleted, and any practice only that duplicate held is lost with it. The
+   owner is the only account. **Asked and answered 2026-10-25: she has not combined two copies
+   ("Same piece, other copy") on the real site in the last 30 days**, so nothing in her account
+   is affected today and no check of old duplicates is needed before the switch is turned on.
+   The gap stays for any older combine that shows up later.
+4. **A card being typed into or timed is not "in use".** Pass 120's busy test (an unconfirmed
+   Interleaved attempt, a running reassessment timer, an open settings draft) leaves out typed
+   reps and a practice timer on Daily Practice, which was fine when the piece was only
+   *replaced* (the card survives, cards are keyed by chunk and role). **A removal does not
+   survive it**: if the piece is open and the deletion arrives mid-card, the card goes with the
+   piece, and the plain line is all that says why. Under the owner's rule that is accepted;
+   mentioned because the old reasoning no longer covers it.
+5. **The 30 days are counted on this device's clock** against the account's `deleted_at`. A
+   clock that is ahead makes a deletion look older (listed, safe); a clock that is behind makes
+   an old one look recent (removed by itself, and listed in Recently deleted by the same
+   clock). Nothing is erased in either case. This is the "wrong device clock" of Decisions.md
+   open item (iv); not guarded here.
+6. **Once the switch is on there is no "remove from just this phone".** A piece lives on every
+   device or on none (deleting is global; "Delete it here too" exists only while the switch is
+   off or the deletion is older than 30 days). Stated in the card; recorded so it is not rediscovered.
+7. **Restore is "as the account last had it".** Practice a device logged and never uploaded
+   before the deletion reached it is gone (the owner's rule), and the red line says how many
+   sessions; the window and the Recently deleted text both say it can't come back. There is no
+   way to restore a device's local-only practice, because it was never in the account.
+8. **`docs/Research.md` still says the check runs "every 5 minutes"** (Pass 120 left-open item 8;
+   the real values are 60 s and 15 s). Not touched: it is another pass's slip and outside this
+   card. The 30-day row was added to the same table.
+
+**Found in the pre-commit review (2026-10-25), none of it losing data for good.** Two were fixed
+(the banner warning, above, and item 9, at the owner's request); the rest were logged. 9 to 11
+were run with the real library functions.
+
+9. **A piece you deleted and then re-imported from a backup file was treated as "deleted on
+   another device". FIXED the same day, at the owner's request** ("fix so that imports can't be
+   removed"; see "A piece this device never synced is never removed by itself" above). A file
+   import keeps the piece's original id (`handleConfirmImport` makes a new one only if the id is
+   still here), and once your own deletion has gone up the device record has no entry for it, so
+   the piece read as one whose account row is marked deleted. With the switch on it was a target
+   and **was removed again within a minute** (the probe: removed, with the file's newer sessions
+   counted as lost); with it off it was listed under the banner. Nothing was lost for good (the
+   file and Recently deleted still hold it), but it looked like the app undoing the import. Now
+   a piece with no recorded sync is only ever listed, whatever the switch. **Still true, and the
+   owner's rule:** an import that is merged into a piece this device had already synced is an
+   ordinary change to it, and a deletion made elsewhere still wins. The banner's words for such a
+   piece still say "deleted on another device" although it may have been this one; the app
+   can't tell which.
+10. **Restore (or Keep it) next to a same-named piece combines instead of restoring.** The apply
+    step matches by name when the id isn't here, so restoring "Etude" while another "Etude"
+    exists merges the restored copy into it and marks the restored row deleted again
+    (`mergedInto`); the page says "Restored ..." and then "Combined the two copies of Etude."
+    The sessions are merged, not lost, but that row can't be restored on its own afterwards.
+    Same rule as every other flow (a name match is the same piece); the wording is what is off.
+11. **A deletion that was already held before this change stays held.** The retry covers a
+    refusal from now on; a device record that already holds "a piece deleted here" (Passes 111
+    to 121) is never re-queued. Rare, and I have not looked at the owner's record. A small
+    change in `computeWaiting` would re-queue it.
+12. **A deletion refused twice in a row counts as a failure, not a refusal** (`result.failed`),
+    so after two such runs the status line says the service "isn't answering". It needs another
+    device to write between the re-read and the retry, twice; wording only. Pressing **Keep it** or
+    **Restore** in the second or so an automatic update holds the busy flag does nothing and says
+    nothing; pressing again works.
+13. **The delete window says "every other device on your account"**, which is true for a device
+    with the switch on; one with it off (the default) keeps the piece and asks. The words were
+    in the approved card. **Proposed:** "... and your other devices remove it or ask you."
+
+**Left open:** items 1 to 3, 10 and 11 above; 122b (above); a piece held by a *refusal* of an upload (not a
+deletion) still gets no questions in Review (Pass 120 for-later item 2); the app's own
+`App.jsx` wiring for Keep it, Restore and the banners has no automated test (checked in a
+browser, as above); no "always keep both" (deferred, no owner); and the real-project checks.
 
 ## Setup (test project)
 

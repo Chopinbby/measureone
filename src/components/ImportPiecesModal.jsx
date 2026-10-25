@@ -28,12 +28,15 @@ import { findMatchingPiece, diffImportedPiece, mergeImportedTechnique } from "..
 // wording says "your account" where it has to. `mode` is "restore" |
 // "changes" | "review". `deletedElsewhere` lists pieces the account marks
 // deleted that are still here, each with a "Delete it here too" button
-// (onDeleteHere); nothing is removed unless that's clicked. A piece changed on
+// (onDeleteHere) and, since Pass 122, a "Keep it" button (onKeepHere: clears the
+// account's deleted mark, so the piece lives again on every device); nothing is
+// removed unless "Delete it here too" is clicked. A duplicate that a combine marked
+// deleted (`mergedInto`) gets only "Delete it here too". A piece changed on
 // both sides ("ask") or to be combined ("combine") always gets the picker.
 export function ImportPiecesModal({
   candidates, existingPieces, techniqueCandidate = null, existingTechnique = null,
   techniqueUnreadable = false, techniqueSkippedItems = 0, onCancel, onImport,
-  source = "file", mode = "changes", rowMeta = null, deletedElsewhere = [], onDeleteHere = null, unreadableCount = 0,
+  source = "file", mode = "changes", rowMeta = null, deletedElsewhere = [], onDeleteHere = null, onKeepHere = null, unreadableCount = 0,
 }) {
   const fromAccount = source === "account";
   const [selected, setSelected] = useState(() => new Set(candidates.map((_, i) => i)));
@@ -249,18 +252,26 @@ export function ImportPiecesModal({
           {fromAccount && deletedElsewhere.length > 0 && (
             <div style={{ margin: "14px 0 0", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
               <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
-                <strong>Deleted on another device.</strong> Your account has these marked deleted, but they're still here.
-                Nothing is removed unless you choose to.
+                <strong>Deleted on another device.</strong> Your account has these marked deleted, but they're still here. "Delete it
+                here too" removes it from this device. "Keep it" brings it back in your account and on every device.
               </p>
               {deletedElsewhere.map((d) => (
-                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", padding: "6px 0" }}>
+                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", padding: "6px 0", flexWrap: "wrap" }}>
                   <span style={{ fontSize: 14 }}>
                     {d.name}
+                    {d.mergedInto && <span className="tip-line" style={{ display: "block", margin: 0 }}>This was the extra copy when two were combined.</span>}
                     {d.hasUnsyncedChanges && <span className="tip-line" style={{ display: "block", margin: 0 }}>Has changes here that your account never got.</span>}
                   </span>
-                  <button type="button" className="ghost-btn" onClick={() => onDeleteHere && onDeleteHere(d.id)}>
-                    Delete it here too
-                  </button>
+                  <span style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="ghost-btn" onClick={() => onDeleteHere && onDeleteHere(d.id)}>
+                      Delete it here too
+                    </button>
+                    {!d.mergedInto && onKeepHere && (
+                      <button type="button" className="ghost-btn" onClick={() => onKeepHere(d.id)}>
+                        Keep it
+                      </button>
+                    )}
+                  </span>
                 </div>
               ))}
             </div>

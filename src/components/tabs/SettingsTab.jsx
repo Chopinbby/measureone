@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload, CloudDownload, KeyRound, MonitorSmartphone } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload, CloudDownload, KeyRound, MonitorSmartphone, Trash2 } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { KeyText } from "./technique/KeyText";
@@ -101,6 +101,15 @@ export function SettingsTab({
   autoUpdateNotice = null,
   onDismissAutoUpdateNotice,
   autoPendingText = null,
+  // A piece deleted on another device (Pass 122). `deletedElsewhere` is the pieces the
+  // account marks deleted that are still here and that nothing removes by itself (the switch
+  // is off, or the deletion is older than 30 days, or it was a combine's duplicate):
+  // [{ id, name, unsynced }], each with "Delete it here too" and "Keep it". "Recently
+  // deleted" opens the list of pieces deleted in the last 30 days, with Restore.
+  deletedElsewhere = [],
+  onKeepDeleted,
+  onDeleteDeletedHere,
+  onOpenRecentlyDeleted,
   // Account settings (Pass 113). "Change password" opens a window (App.jsx).
   // "Sign out of all devices" asks first, here in the panel (signOutAllAsking),
   // never as a browser pop-up. signOutNotice is the last result ({ text,
@@ -197,6 +206,11 @@ export function SettingsTab({
                   <button className="ghost-btn" onClick={onGetChanges} disabled={backupRunning || !!backupAskText || syncRunning || accountBusy}>
                     <CloudDownload size={14} /> {accountBusy ? "Reading your account..." : "Get changes from your account"}
                   </button>
+                  {onOpenRecentlyDeleted && (
+                    <button className="ghost-btn" onClick={onOpenRecentlyDeleted} disabled={backupRunning || !!backupAskText || syncRunning || accountBusy}>
+                      <Trash2 size={14} /> Recently deleted
+                    </button>
+                  )}
                   <button className="ghost-btn" onClick={onSignOut} disabled={backupRunning || accountBusy}>
                     <LogOut size={14} /> Sign out
                   </button>
@@ -218,7 +232,7 @@ export function SettingsTab({
                     </label>
                     <p className="wizard-hint" style={{ margin: "6px 0 0", fontSize: 13 }}>
                       {autoUpdate
-                        ? "On: about once a minute while this page is open, changes from your other devices are brought in by themselves. A piece changed in both places is merged when the changes don't overlap. When they do overlap (the same chunk practiced on both devices, or the same setting changed on both), the piece is held and Review asks what to keep, one question at a time. Anything deleted elsewhere and a piece that may be the same one under another name are left for you. A piece you're in the middle of waits until you're done with it. This choice is for this device only."
+                        ? "On: about once a minute while this page is open, changes from your other devices are brought in by themselves. A piece changed in both places is merged when the changes don't overlap. When they do overlap (the same chunk practiced on both devices, or the same setting changed on both), the piece is held and Review asks what to keep, one question at a time. A piece deleted on another device in the last 30 days is removed here too, even if you practiced it here since your last backup (you can bring it back from Recently deleted). Older deletions and a piece that may be the same one under another name are left for you. A piece you're in the middle of waits until you're done with it. This choice is for this device only."
                         : "Off: changes from your other devices are noticed and listed here, and you bring them in with Get changes from your account. Turn this on to have them arrive by themselves. This choice is for this device only."}
                     </p>
                   </div>
@@ -236,6 +250,29 @@ export function SettingsTab({
                   <p role="status" className="wizard-hint" style={{ margin: "8px 0 0", fontSize: 13 }}>
                     {accountChangesText}
                   </p>
+                )}
+                {deletedElsewhere.length > 0 && (
+                  <div role="group" aria-label="Deleted on another device" style={{ margin: "12px 0 0", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
+                    <p className="wizard-hint" style={{ margin: "0 0 8px", fontSize: 13 }}>
+                      <strong>Deleted on another device.</strong> These are still on this device, and nothing removes them unless you choose to.
+                    </p>
+                    {deletedElsewhere.map((d) => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", padding: "6px 0", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 14 }}>
+                          {d.name} was deleted on another device.
+                          {d.unsynced && <span className="tip-line" style={{ display: "block", margin: 0 }}>It has practice here that your account never got.</span>}
+                        </span>
+                        <span style={{ display: "flex", gap: 8 }}>
+                          <button className="ghost-btn" onClick={() => onDeleteDeletedHere && onDeleteDeletedHere(d.id)} disabled={accountBusy || backupRunning}>
+                            Delete it here too
+                          </button>
+                          <button className="ghost-btn" onClick={() => onKeepDeleted && onKeepDeleted(d.id)} disabled={accountBusy || backupRunning}>
+                            Keep it
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
                 {autoPendingText && (
                   <p role="status" className="wizard-hint" style={{ margin: "8px 0 0", fontSize: 13 }}>

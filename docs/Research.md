@@ -169,6 +169,7 @@ is the only account so far, so "real use" below means hers.
 | Check on focus or when the page becomes visible | at most once a minute (`CHECK_FOCUS_GAP_MS`) | How often returning to the window can start a check | How often people switch windows, against how current the "Changes from another device" line has to be |
 | Check on the clock | every 5 minutes while the page is visible (`CHECK_EVERY_MS`) | How stale that line may get | Same |
 | Clock look | every 60 seconds (`CHECK_TICK_MS`) | How often the page asks whether a check is due (a look at the clock, no request) | Not tuned: it only bounds how late a due check can start |
+| Recently deleted window (Pass 122) | 30 days (`RECENTLY_DELETED_DAYS`, `lib/recentlyDeleted.js`) | Two things at once: how long "Recently deleted" lists a deleted piece, and how long a deletion made on another device arrives by itself (automatic switch on). An older deletion is only listed, with "Delete it here too" and "Keep it". **Nothing is erased when the window ends**: a deleted piece only ever has `deleted_at` set in the account, so the window bounds what the app offers, not what exists. The owner said yes to "30 days" (2026-10-23); it is her number, not a measured one | How long people really take to notice a piece was deleted by mistake. Keep it at or below however long the account is ever allowed to keep deleted rows |
 
 ## Open research questions
 

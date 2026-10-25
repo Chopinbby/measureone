@@ -151,11 +151,20 @@ import {
   planSettle,
   describeSettleResult,
   describeSettleRereadProblem,
+  // A piece deleted on one device is deleted everywhere, with a way back (Pass 122)
+  bringBackDeletedPiece,
+  fetchDeletedPieces,
+  nothingWaitingHere,
+  describeAutoRemoved,
+  describeDeletedBanner,
+  describeBringBack,
 } from "./lib/accountSync";
 import { startSettle, settleChoose, settleBack, settleNext, settleView, keptPhrases, rereadSettleItem } from "./lib/settleFlow";
+import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { SettleConflictModal } from "./components/SettleConflictModal";
+import { RecentlyDeletedModal } from "./components/RecentlyDeletedModal";
 import { Wizard } from "./components/Wizard";
 
 import { OverviewTab } from "./components/tabs/OverviewTab";
@@ -225,7 +234,11 @@ function PieceStatusBadge({ status }) {
 // syncSnapshot; `failures` is how many attempts in a row have failed.
 // `changes` (Pass 116) is what the last light read of the account says another
 // device changed (classifyAccountChanges), or null.
-const NO_SYNC_INFO = { firstBackupDone: false, waiting: 0, held: { pieces: [], technique: false }, backedUpAt: null, failures: 0, running: false, changes: null };
+// `deletedElsewhere` (Pass 122) is the pieces the account marks deleted that the PERSON is
+// asked about ({ id, name, unsynced }): all of them with the automatic switch off, otherwise
+// the ones older than 30 days and a combine's duplicates. The rest are removed by themselves.
+const NO_SYNC_INFO = { firstBackupDone: false, waiting: 0, held: { pieces: [], technique: false }, backedUpAt: null, failures: 0, running: false, changes: null, deletedElsewhere: [] };
+const deletedKey = (list) => (list || []).map((d) => `${d.id}:${d.name}:${d.unsynced ? 1 : 0}`).join("|");
 const heldKey = (held) => held.pieces.map((p) => `${p.id}:${p.name}:${p.deletedHere ? 1 : 0}`).join("|") + (held.technique ? "|T" : "");
 const changesKey = (c) =>
   c ? [c.newer, c.added, c.deleted, c.held, c.needsReview].map((ids) => ids.join(",")).join("|") + (c.techniqueNewer ? "|N" : "") + (c.techniqueHeld ? "|H" : "") : "";
@@ -237,7 +250,8 @@ const sameSyncInfo = (a, b) =>
     a.failures === b.failures &&
     a.running === b.running &&
     heldKey(a.held) === heldKey(b.held) &&
-    changesKey(a.changes) === changesKey(b.changes));
+    changesKey(a.changes) === changesKey(b.changes) &&
+    deletedKey(a.deletedElsewhere) === deletedKey(b.deletedElsewhere));
 // How long after startup (or signing in) before the first look at what's waiting.
 const SYNC_STARTUP_DELAY_MS = 2000;
 // ...and before the first light look at what other devices changed, a little
@@ -368,6 +382,10 @@ export default function App() {
   // (lib/settleFlow.js: the first screen, each question, the summary), plain data.
   // Holding it changes nothing: only the summary's button applies a piece.
   const [settleFlow, setSettleFlow] = useState(null);
+  // Pass 122: the "Recently deleted" window. null (closed), or { status: "loading" | "ok" |
+  // "error", items: [{ id, revision, name, deletedAt, measures, sessions }], error, busyId,
+  // notice: { text, problem } | null }. Reading it changes nothing; Restore brings a piece back.
+  const [recentlyDeleted, setRecentlyDeleted] = useState(null);
   const [accountFlowBusy, setAccountFlowBusy] = useState(false);
   const accountFlowBusyRef = useRef(false);
   const [accountNotice, setAccountNotice] = useState(null);
@@ -709,7 +727,9 @@ export default function App() {
       return null;
     }
     // The switch lives in the device record (another tab may have changed it).
-    setAutoUpdate(autoUpdateOn(readDeviceRecord(), userId));
+    const deviceRecord = readDeviceRecord();
+    const autoOn = autoUpdateOn(deviceRecord, userId);
+    setAutoUpdate(autoOn);
     const lastRead = checkRowsRef.current;
     const snap = syncSnapshot({
       pieces: latestPieces,
@@ -717,7 +737,20 @@ export default function App() {
       userId,
       accountRows: lastRead && lastRead.userId === userId ? lastRead.rows : null,
     });
-    const next = { ...snap, failures: syncFailuresRef.current, running: syncRunningRef.current };
+    // Pass 122: the pieces the account marks deleted that the person is asked about.
+    let deletedElsewhere = [];
+    if (lastRead && lastRead.userId === userId && snap.firstBackupDone) {
+      const acct = accountRecordFor(deviceRecord, userId);
+      const deletions = deletionsElsewhere({ rows: lastRead.rows, entries: acct.pieces, localPieceIds: Object.keys(latestPieces), now: Date.now() });
+      const rowRevision = Object.fromEntries(((lastRead.rows && lastRead.rows.pieces) || []).map((r) => [r.id, r.revision]));
+      const leftIds = deletions.ids.filter((id) => autoLeftForYouRef.current.get(id) === rowRevision[id]);
+      deletedElsewhere = deletedForPerson({ deletions, autoOn, leftIds }).map((id) => ({
+        id,
+        name: (latestPieces[id] && latestPieces[id].name) || "Untitled piece",
+        unsynced: !nothingWaitingHere(latestPieces[id], acct.pieces[id]),
+      }));
+    }
+    const next = { ...snap, deletedElsewhere, failures: syncFailuresRef.current, running: syncRunningRef.current };
     setSyncInfo((prev) => (sameSyncInfo(prev, next) ? prev : next));
     return snap;
   };
@@ -1839,7 +1872,8 @@ export default function App() {
     if (importSource === "account") {
       const gone = accountDeletedHereRef.current;
       accountDeletedHereRef.current = [];
-      if (gone.length) setAccountNotice({ lines: gone.map((n) => ({ text: `Deleted "${n}" here too.` })) });
+      // (Pass 122: added to what is already said, e.g. a piece kept from this same window)
+      if (gone.length) setAccountNotice((prev) => ({ lines: [...(prev ? prev.lines : []), ...gone.map((n) => ({ text: `Deleted "${n}" here too.` }))] }));
     }
     setImportSource("file");
     setImportAccount(null);
@@ -1876,6 +1910,12 @@ export default function App() {
     out.held.forEach((h) => {
       nextRecord = withPieceHeld(nextRecord, userId, h.id, h.conflicts);
     });
+    // Pass 122: a piece the account marks deleted, removed here by itself. The device forgets
+    // it FIRST (without counting it as an upload), so no second "deleted" is ever sent.
+    const removedIds = out.removed.map((r) => r.id);
+    removedIds.forEach((id) => {
+      nextRecord = withPieceDropped(nextRecord, userId, id);
+    });
     saveDeviceRecord(nextRecord);
     const changedIds = Object.keys(out.pieces).filter((id) => out.pieces[id] !== localPieces[id]);
     if (changedIds.length > 0) {
@@ -1902,6 +1942,25 @@ export default function App() {
       // regular app (sidebar included) in place of the welcome screen.
       if (out.firstNewId) setActivePieceId((prev) => prev || out.firstNewId);
     }
+    // ...and then it goes. The piece that is OPEN is left for another one, the way deleting it
+    // here does (handleDeleteHereToo). A piece in use never gets this far: it waited.
+    let openRemovedName = null;
+    if (removedIds.length > 0) {
+      const openId = busyCtxRef.current && busyCtxRef.current.activePieceId;
+      setPieces((prev) => {
+        const next = { ...prev };
+        removedIds.forEach((id) => delete next[id]);
+        return next;
+      });
+      if (openId && removedIds.includes(openId)) {
+        openRemovedName = (out.removed.find((r) => r.id === openId) || {}).name || null;
+        setActivePieceId(Object.keys(localPieces).filter((id) => !removedIds.includes(id))[0] || null);
+        setEditDraftState(null);
+        setSettingsEditing(false);
+        setActiveTab("overview");
+        setDayOverride(null);
+      }
+    }
     if (out.technique && out.technique.changed) {
       const accountTechnique = candidates.technique.technique;
       const baseParts = record.technique && record.technique.parts;
@@ -1912,17 +1971,24 @@ export default function App() {
     // change waiting: send it after the usual quiet period. (Nothing in state may
     // have changed, so the effect that normally schedules this might not run.)
     if (accountRecordFor(readDeviceRecord(), userId).checkedAt != null) scheduleSync(SYNC_QUIET_MS);
-    const applied = Object.keys(out.entries).length > 0 || !!out.technique || out.held.length > 0;
+    const applied = Object.keys(out.entries).length > 0 || !!out.technique || out.held.length > 0 || removedIds.length > 0;
     if (automatic) {
-      // Told quietly, in the Account panel; never the page-wide banner Get changes uses.
-      const text = describeAutoUpdate({ names: [...out.names.added, ...out.names.took, ...out.names.merged], technique: !!(out.technique && out.technique.changed) });
+      // Told quietly, in the Account panel; the page-wide banner only when something was lost
+      // (practice that went with a removed piece) or the piece that was open just went (Pass 122).
+      const text = describeAutoUpdate({
+        names: [...out.names.added, ...out.names.took, ...out.names.merged],
+        technique: !!(out.technique && out.technique.changed),
+        removed: out.removed.map((r) => r.name),
+      });
       if (text) setAutoNotice({ text });
+      const removedLines = describeAutoRemoved(out.removed, openRemovedName);
+      if (removedLines.length > 0) setAccountNotice({ lines: removedLines });
       autoPendingIdsRef.current = new Set(out.deferred.map((d) => d.id));
       setAutoPending(out.deferred.map((d) => d.name));
       // Only if the piece that is OPEN changed: one quiet line at the top of the page.
       const openId = busyCtxRef.current && busyCtxRef.current.activePieceId;
       if (openId && out.updatedIds.includes(openId)) setPieceUpdatedNote(openId);
-      return { applied, needsYou: out.needsYou };
+      return { applied, needsYou: out.needsYou, leftDeleted: out.leftDeleted };
     }
     // Settling a held piece (Pass 121): told by the settle flow itself, once it has
     // gone through every piece, not by the Get changes result lines.
@@ -1981,7 +2047,14 @@ export default function App() {
       accountRecord: accountRecordFor(deviceRecord, userId),
       localPieceIds: Object.keys(piecesRef.current),
     });
-    const targets = autoUpdateTargets({ deviceRecord, userId, changes });
+    // Pass 122: a piece the account marked deleted within 30 days is removed here by itself.
+    const deletions = deletionsElsewhere({
+      rows: lastRead.rows,
+      entries: accountRecordFor(deviceRecord, userId).pieces,
+      localPieceIds: Object.keys(piecesRef.current),
+      now: Date.now(),
+    });
+    const targets = autoUpdateTargets({ deviceRecord, userId, changes, deletions });
     const accountRevision = Object.fromEntries(((lastRead.rows && lastRead.rows.pieces) || []).map((r) => [r.id, r.revision]));
     targets.pieceIds = targets.pieceIds.filter((id) => autoLeftForYouRef.current.get(id) !== accountRevision[id]);
     if (!targets.on) {
@@ -2024,6 +2097,12 @@ export default function App() {
         const c = candidates.pieces.find((x) => x.id === n.id);
         if (c) autoLeftForYouRef.current.set(n.id, c.revision);
       });
+      // ...and the same for a deleted row the apply looked at and left alone (a combine's
+      // duplicate): it is not fetched again, and the person is asked about it instead
+      if ((result.leftDeleted || []).length > 0) {
+        result.leftDeleted.forEach((d) => autoLeftForYouRef.current.set(d.id, d.revision));
+        refreshSyncInfo();
+      }
       return result;
     } catch (e) {
       console.warn("MeasureOne: an automatic update didn't go through.", e && e.message);
@@ -2219,7 +2298,9 @@ export default function App() {
   // device) but that's still here. Only this click removes it. The device forgets
   // it first (without counting it as an upload), so no second "deleted" is sent
   // for a row that's already marked.
-  const handleDeleteHereToo = (id) => {
+  // From the window the result is said when the window closes; from the banner or the Account
+  // panel (Pass 122, `fromWindow: false`) there is no window, so it is said at once.
+  const handleDeleteHereToo = (id, { fromWindow = true } = {}) => {
     const target = pieces[id];
     if (!target) return;
     // Deleting the open piece switches pieces and tabs, so it goes through the
@@ -2227,7 +2308,8 @@ export default function App() {
     // Interleaved attempt, a running assessment timer).
     if (activePieceId === id && !guardLeavingActiveWork()) return;
     if (authSession) saveDeviceRecord(withPieceDropped(readDeviceRecord(), authSession.userId, id));
-    accountDeletedHereRef.current = [...accountDeletedHereRef.current, target.name || "Untitled piece"];
+    if (fromWindow) accountDeletedHereRef.current = [...accountDeletedHereRef.current, target.name || "Untitled piece"];
+    else setAccountNotice({ lines: [{ text: `Deleted "${target.name || "Untitled piece"}" here too.` }] });
     const remainingIds = Object.keys(pieces).filter((x) => x !== id);
     setPieces((prev) => {
       const next = { ...prev };
@@ -2243,6 +2325,119 @@ export default function App() {
     }
     setImportAccount((prev) => (prev ? { ...prev, deletedElsewhere: prev.deletedElsewhere.filter((d) => d.id !== id) } : prev));
   };
+
+  /* ---------------------------------------------------------------- */
+  /*  Bringing a deleted piece back (Pass 122).                        */
+  /*  "Keep it" is for a piece this device still holds that the        */
+  /*  account marks deleted; "Restore" (in Recently deleted) is for    */
+  /*  any piece deleted in the last 30 days. Both clear the account's  */
+  /*  deleted mark, "only if still at revision N" (lib/accountSync.js  */
+  /*  bringBackDeletedPiece), and then bring the piece in through the  */
+  /*  same single apply step Get changes uses, so a copy here that     */
+  /*  differs from the account's is merged, never replaced.            */
+  /* ---------------------------------------------------------------- */
+
+  // `out` is bringBackDeletedPiece's "kept" or "live" answer: the account's copy is live now.
+  const bringBackThroughApply = async ({ userId, id, out, lead }) => {
+    // The last light look at the account still says this piece is deleted. Correct that one
+    // row first, so nothing is shown (the banner, the "Changes from another device" line)
+    // from a look that is no longer true.
+    const last = checkRowsRef.current;
+    if (last && last.userId === userId && last.rows) {
+      const rows = (last.rows.pieces || []).map((r) => (r.id === id ? { ...r, deleted_at: null, revision: out.revision } : r));
+      checkRowsRef.current = { ...last, rows: { ...last.rows, pieces: rows } };
+    }
+    const candidates = accountRowsToCandidates({ pieces: [{ id, revision: out.revision, deleted_at: null, data: out.data }], technique: null });
+    await applyAccountFlow({ mode: "changes", userId, candidates, selectedIds: [id], ladderChoices: {}, orderChoice: "existing", includeTechnique: false, leadLines: [lead] });
+  };
+
+  const handleKeepDeleted = async (id) => {
+    if (!authEnabled || !authSession || accountFlowBusyRef.current || backupRunningRef.current) return;
+    const target = piecesRef.current[id];
+    if (!target) return;
+    const userId = authSession.userId;
+    const name = target.name || "Untitled piece";
+    // The revision this device read when it noticed the deletion (the last light look).
+    const lastRead = checkRowsRef.current;
+    const seen = lastRead && lastRead.userId === userId ? ((lastRead.rows && lastRead.rows.pieces) || []).find((r) => r.id === id) : null;
+    accountFlowBusyRef.current = true;
+    setAccountFlowBusy(true);
+    try {
+      const out = await bringBackDeletedPiece({ userId, id, expectedRevision: seen ? seen.revision : null });
+      if (syncLatestRef.current.userId !== userId) return; // signed out, or another account, meanwhile
+      const line = describeBringBack({ status: out.status, name, reason: out.reason });
+      if (out.status === "kept" || out.status === "live") await bringBackThroughApply({ userId, id, out, lead: line });
+      else setAccountNotice({ lines: [line] });
+    } catch (e) {
+      console.warn("MeasureOne: keeping a piece didn't go through.", e && e.message);
+      setAccountNotice({ lines: [describeBringBack({ status: "stopped", name, reason: "other" })] });
+    } finally {
+      accountFlowBusyRef.current = false;
+      setAccountFlowBusy(false);
+    }
+    setImportAccount((prev) => (prev ? { ...prev, deletedElsewhere: prev.deletedElsewhere.filter((d) => d.id !== id) } : prev));
+    refreshSyncInfo();
+  };
+
+  const loadRecentlyDeleted = async (userId, notice = null) => {
+    const got = await fetchDeletedPieces({ userId });
+    if (syncLatestRef.current.userId !== userId) {
+      setRecentlyDeleted(null);
+      return;
+    }
+    setRecentlyDeleted((prev) => {
+      if (!prev) return prev; // closed meanwhile
+      if (got.status !== "ok") return { ...prev, status: "error", items: [], error: describeFetchProblem(got.reason), busyId: null, notice };
+      return { ...prev, status: "ok", items: recentlyDeletedList(got.rows, { now: Date.now() }), error: null, busyId: null, notice };
+    });
+  };
+
+  const handleOpenRecentlyDeleted = () => {
+    if (!authEnabled || !authSession) return;
+    setRecentlyDeleted({ status: "loading", items: [], error: null, busyId: null, notice: null });
+    loadRecentlyDeleted(authSession.userId);
+  };
+
+  const handleCloseRecentlyDeleted = () => setRecentlyDeleted(null);
+
+  const handleRestoreDeleted = async (item) => {
+    if (!authEnabled || !authSession || accountFlowBusyRef.current || backupRunningRef.current) return;
+    const userId = authSession.userId;
+    accountFlowBusyRef.current = true;
+    setAccountFlowBusy(true);
+    setRecentlyDeleted((prev) => (prev ? { ...prev, busyId: item.id } : prev));
+    let notice = null;
+    let lookAgain = false;
+    try {
+      const out = await bringBackDeletedPiece({ userId, id: item.id, expectedRevision: item.revision });
+      if (syncLatestRef.current.userId !== userId) {
+        setRecentlyDeleted(null);
+        return;
+      }
+      const line = describeBringBack({ status: out.status, name: item.name, restored: true, reason: out.reason });
+      if (out.status === "kept" || out.status === "live") {
+        await bringBackThroughApply({ userId, id: item.id, out, lead: line });
+        notice = { text: line.text, problem: false };
+        setRecentlyDeleted((prev) => (prev ? { ...prev, items: prev.items.filter((i) => i.id !== item.id) } : prev));
+      } else {
+        notice = { text: line.text, problem: !!line.problem };
+        lookAgain = out.status === "moved"; // the row changed since the list was read: read it again
+      }
+    } catch (e) {
+      console.warn("MeasureOne: restoring a piece didn't go through.", e && e.message);
+      notice = { text: describeBringBack({ status: "stopped", name: item.name, reason: "other" }).text, problem: true };
+    } finally {
+      accountFlowBusyRef.current = false;
+      setAccountFlowBusy(false);
+    }
+    setRecentlyDeleted((prev) => (prev ? { ...prev, busyId: null, notice } : prev));
+    if (lookAgain) loadRecentlyDeleted(userId, notice);
+  };
+
+  // The one quiet banner for pieces the account marks deleted that the person is asked about.
+  const deletedBanner = authSession
+    ? describeDeletedBanner(syncInfo.deletedElsewhere.map((d) => d.name), { unsynced: syncInfo.deletedElsewhere.some((d) => d.unsynced) })
+    : null;
 
   /* ---------------------------------------------------------------- */
   /*  Settling a held piece, one question at a time (Pass 121).        */
@@ -3902,6 +4097,34 @@ export default function App() {
         </div>
       )}
 
+      {deletedBanner && (
+        // Pass 122: a piece the account marks deleted on another device that is still here and
+        // that nothing removes by itself (the automatic switch is off, or the deletion is older
+        // than 30 days, or it was a combine's duplicate). One quiet banner; the Account panel
+        // in Settings lists each one with the same two buttons.
+        <div className="export-reminder-banner" role="status">
+          <CloudDownload size={18} />
+          <div>
+            <p className="export-reminder-title">{deletedBanner.title}</p>
+            <p className="export-reminder-sub">{deletedBanner.sub}</p>
+          </div>
+          {syncInfo.deletedElsewhere.length === 1 ? (
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexShrink: 0 }}>
+              <button className="ghost-btn" onClick={() => handleDeleteHereToo(syncInfo.deletedElsewhere[0].id, { fromWindow: false })} disabled={accountFlowBusy || backup.running}>
+                Delete it here too
+              </button>
+              <button className="ghost-btn" onClick={() => handleKeepDeleted(syncInfo.deletedElsewhere[0].id)} disabled={accountFlowBusy || backup.running}>
+                Keep it
+              </button>
+            </div>
+          ) : (
+            <button className="ghost-btn" onClick={() => { if (guardLeavingActiveWork()) setActiveTab("settings"); }}>
+              Open Settings
+            </button>
+          )}
+        </div>
+      )}
+
       {authSession && accountNotice && accountNotice.lines.length > 0 && !(piece && activeTab === "settings") && (
         // The last result of restoring, getting changes or reviewing, in the
         // page (the Account panel shows it itself on Settings). Dismissible.
@@ -4299,6 +4522,10 @@ export default function App() {
                 autoUpdateNotice={authSession && autoNotice ? autoNotice.text : null}
                 onDismissAutoUpdateNotice={() => setAutoNotice(null)}
                 autoPendingText={authSession && autoUpdate ? describeAutoPending(autoPending) : null}
+                deletedElsewhere={authSession ? syncInfo.deletedElsewhere : []}
+                onKeepDeleted={handleKeepDeleted}
+                onDeleteDeletedHere={(id) => handleDeleteHereToo(id, { fromWindow: false })}
+                onOpenRecentlyDeleted={handleOpenRecentlyDeleted}
                 onChangePassword={openChangePassword}
                 signOutAllAsking={signOutAllAsking && !!authSession}
                 onAskSignOutAll={() => setSignOutAllAsking(true)}
@@ -4330,7 +4557,12 @@ export default function App() {
         />
       )}
       {deleteModalOpen && piece && (
-        <DeletePieceModal piece={piece} onCancel={() => setDeleteModalOpen(false)} onConfirm={handleDeletePiece} />
+        <DeletePieceModal
+          piece={piece}
+          syncsToAccount={authEnabled && !!authSession && syncInfo.firstBackupDone}
+          onCancel={() => setDeleteModalOpen(false)}
+          onConfirm={handleDeletePiece}
+        />
       )}
       {exportModalOpen && (
         <ExportPiecesModal
@@ -4355,8 +4587,12 @@ export default function App() {
           rowMeta={importAccount ? importAccount.rowMeta : null}
           deletedElsewhere={importAccount ? importAccount.deletedElsewhere : []}
           onDeleteHere={handleDeleteHereToo}
+          onKeepHere={handleKeepDeleted}
           unreadableCount={importAccount ? importAccount.unreadable : 0}
         />
+      )}
+      {authEnabled && authSession && recentlyDeleted && (
+        <RecentlyDeletedModal state={recentlyDeleted} busy={accountFlowBusy} onRestore={handleRestoreDeleted} onClose={handleCloseRecentlyDeleted} />
       )}
       {settleFlow && settleItem && settleCurrent && (
         <SettleConflictModal

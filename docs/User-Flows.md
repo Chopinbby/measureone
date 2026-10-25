@@ -705,9 +705,11 @@ export reminder are unaffected.
 (on a site with no account service nothing below appears). One flow, three
 ways in. It reads
 your account and **adds to or updates what's on this device; it never removes
-anything from this device** unless you click "Delete it here too". The only
-thing it ever writes to the account is marking a duplicate copy deleted (the
-row stays). Design:
+anything from this device** unless you click "Delete it here too" (with the
+automatic switch of flow 14 on, a deletion from the last 30 days also removes the
+piece by itself: flow 16). The only things it ever writes to the account are
+marking a duplicate copy deleted (the row stays) and, if you press **Keep it**,
+clearing a deleted mark. Design:
 [Accounts-and-Backend.md](Accounts-and-Backend.md#restore-get-changes-and-settle-pass-112).
 
 **Three ways in**
@@ -781,8 +783,10 @@ line sits under the buttons, and the first of these that applies is shown:
   - The **Technique library** row appears when merging it would add something.
     Nothing here is ever removed from it.
   - **Deleted on another device**: pieces your account has marked deleted that are
-    still here, each with **Delete it here too**. Nothing is removed unless you
-    click it. A note says when the piece has changes your account never got.
+    still here, each with **Delete it here too** and, since Pass 122, **Keep it**
+    (flow 16). Nothing is removed unless you click it. A note says when the piece
+    has changes your account never got. A copy that was removed by combining two
+    copies of a piece gets only **Delete it here too**.
   The button reads **Restore N pieces**, or **Bring in N pieces**.
 - **The result**, in plain words in the page (never a browser pop-up): on Settings,
   under the Account buttons; elsewhere (including the welcome screen) as a
@@ -883,9 +887,9 @@ decision is brought in by itself, with no button:
    is **held**: your device keeps its own copy untouched, nothing is lost on either side,
    and the red banner "1 piece changed on another device" with **Review** appears, exactly
    as before. **Review** then asks one plain question for each thing that was changed in both
-   places (flow 15). A piece **deleted on another device**
-   is only listed ("Changes from another device: 1 piece. Press Get changes."), never
-   removed. A piece that may be the same one under a different name is always asked.
+   places (flow 15). A piece **deleted on another device** within the last 30 days
+   is removed by itself (flow 16); an older deletion is only listed, never removed.
+   A piece that may be the same one under a different name is always asked.
 5. **A piece you are in the middle of waits.** If you have an unconfirmed Interleaved
    attempt, a reassessment timer running, or Edit piece settings open for that piece,
    another device's change to it is not applied until you are done (confirm or discard the
@@ -1001,5 +1005,81 @@ If both kinds are waiting, the questions come first and that window follows.
 
 **Signed out, or on a site with no account service:** none of this appears.
 
-**Not covered yet:** deleting a piece on one device while practicing it on the other, and
-remembering an answer ("always keep both"): see Roadmap.md and Accounts-and-Backend.md.
+**Not covered yet:** remembering an answer ("always keep both"): see Roadmap.md and
+Accounts-and-Backend.md. (Deleting a piece on one device while practicing it on the other is
+flow 16.)
+
+## 16. Deleting a piece on every device, and bringing it back (optional, Pass 122)
+
+**Only when signed in with a checked first backup, on a site connected to an account
+service.** Signed out, or on a site with no account service, deleting a piece works exactly as
+before (this browser only, permanently) and nothing below appears. Design:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
+The rule is the owner's (2026-10-23): a piece deleted on one device is deleted everywhere, and
+the practice goes with it. The way back is her addition.
+
+**Deleting.** Settings, **Delete this piece**. The window says the piece is removed "from this
+device and from every other device on your account", that you can bring it back from **Recently
+deleted** in Settings for 30 days, "without any practice that was never backed up". You type the
+piece's name to confirm, and the button reads **Delete everywhere** (signed out it reads **Delete
+permanently**). Your account keeps the piece's data, marked deleted: nothing is erased.
+
+**On your other devices**, what happens depends on the switch of flow 14:
+1. **Switch on, deleted in the last 30 days:** the piece is removed by itself within about a
+   minute, with no button. The Account panel says "Removed because it was deleted on another
+   device: Ballade No. 1." If the piece was the one you had open, the app moves you to another
+   piece and one line at the top says why ("Ballade No. 1 was deleted on another device, so it
+   was removed here too."). A piece you are in the middle of (an unconfirmed Interleaved attempt,
+   a reassessment timer running, Edit piece settings open) waits until you are done.
+2. **That device had practice that was never backed up:** it goes with the piece, and a red
+   banner says how many sessions: "Ballade No. 1 was deleted on another device, so it was removed
+   here too. 1 session you logged here since your last backup went with it. You can bring the
+   piece back from Recently deleted in Settings for 30 days, but not that session." With nothing
+   lost there is no banner, only the quiet line in the Account panel.
+3. **Switch off, or the deletion is older than 30 days:** nothing is removed. A quiet banner
+   says "Ballade No. 1 was deleted on another device. It's still on this device. Delete it here
+   too, or keep it: it comes back in your account and on every device." with two buttons (for
+   several pieces it names them and has **Open Settings**). If this device holds changes the
+   account never got, the banner says so before you choose ("It's still on this device, and it
+   has changes your account never got. If you delete it here too, those changes are lost. If you
+   keep it, the piece comes back in your account and on every device, with those changes.").
+   The Account panel lists each one under "Deleted on another device" with the same two buttons
+   (and a line when it has practice the account never got), and the **Get changes** window has
+   them too.
+   - **Delete it here too** removes the piece here, as before.
+   - **Keep it** brings the piece back in your account and, within a minute or on **Get
+     changes**, on your other devices. If this device's copy differs from the account's, they
+     are merged, not replaced. If the account's copy changed since you looked, nothing is
+     changed and the page says so ("... changed in your account since you looked, so nothing was
+     changed. Look again, then try once more.").
+4. **A copy removed by combining two copies of one piece** is never removed by itself, and can't
+   be kept on its own. In the **Get changes** window it gets only **Delete it here too**. The
+   banner and the Account panel's list are built without reading the piece's data, so they can't
+   tell and show both buttons; **Keep it** there answers "... was combined into another piece, so
+   it can't be kept on its own." and changes nothing.
+5. **A piece you brought in by hand is never removed by itself.** If you delete a piece and then
+   import it again from a backup file (an import keeps the piece's id), or this device holds a
+   copy it never synced with your account, the piece stays even with the switch on and even
+   though your account marks it deleted. It is listed like case 3 (banner, Account panel, Get
+   changes window) with **Delete it here too** and **Keep it**; **Keep it** is what you want here
+   (it brings the piece back in your account, merged with the copy you imported). The wording
+   says "deleted on another device" because the app cannot tell which device did it. An import
+   merged into a piece this device had already synced with your account is an ordinary change to
+   it, and a deletion made elsewhere still wins over it.
+
+**Deleting while another device is practicing.** The deletion goes through (it is no longer
+held as "a piece deleted here"). Practice that device had already backed up stays in the
+account's copy, so Restore brings it back; practice it had not backed up is lost, as above.
+
+**Recently deleted.** Settings, under Account, **Recently deleted**. It lists the pieces deleted
+from any of your devices in the last 30 days, newest first: the name, when ("Deleted today",
+"Deleted yesterday", "Deleted 3 days ago"), and how many measures and sessions your account's
+copy holds, each with **Restore**. Restore does what **Keep it** does: the piece comes back here
+and, within a minute or on **Get changes**, on your other devices, as your account last had it.
+Opening the list changes nothing. A copy removed by combining is not listed. An older deletion is
+not listed either; the account still holds it, but only the dashboard can reach it.
+
+**Not covered:** bringing back a piece deleted more than 30 days ago; removing a piece from just
+one device while the switch is on; deleting your account (Phase 3). Whether "Keep it" should be
+offered on a combined copy (it answers that it can't be kept) is open: see
+Accounts-and-Backend.md, Pass 122 found item 2.

@@ -7647,8 +7647,9 @@ what it rules out.
   say "1 piece" for up to a retry gap; it corrects itself. (b) The technique library
   will often read "newer" while two devices are in use, because each rebuilds today's
   list on its own, the per-device-parts problem (Pass 120). (c) A piece declined in "Get
-  changes" is noticed again on every check (Pass 122's remembered "no"). (d) A piece
-  deleted here and changed elsewhere isn't reported (Pass 122). (e) The light read pages
+  changes" is noticed again on every check (the remembered "no", now Pass 122b). (d) ~~A piece
+  deleted here and changed elsewhere isn't reported (Pass 122).~~ **Resolved in Pass 122:** the
+  deletion is retried at the newer revision and goes through. (e) The light read pages
   by offset, so a row inserted between two pages can be missed or repeated for one
   check; the next check corrects it.
 
@@ -7941,7 +7942,9 @@ what it rules out.
   - **Pass 121 (the question) mostly goes away.** What is left of it is whatever "most
     recent" can't settle: see the open items below.
   - **Unchanged:** practice sessions, practiced dates and scales are always kept; a
-    deletion is marked, never erased (Design D); manual export stays.
+    deletion is marked, never erased (Design D); manual export stays. **Qualified
+    2026-10-23:** "always kept" no longer holds for a *whole-piece deletion*, which wins
+    over practice on another device (open item (iii) below, Pass 122); Design D still holds.
   **Open, to settle with the owner before or in Pass 120 (not decided):**
   (i) **A piece whose chunk grid was changed on one device while the other logged
   practice against the old grid** (the engine's "travel together" case). Progress is
@@ -7953,9 +7956,12 @@ what it rules out.
   session's own time and, for the technique library, the library's `updatedAt` and each
   tempo's exact time. Options: the piece's `updatedAt` as the stand-in for any part both
   sides changed, or a time kept per part.
-  (iii) **Deletions (Pass 122):** if one device deletes a piece and the other practices
+  (iii) ~~**Deletions (Pass 122):** if one device deletes a piece and the other practices
   it later, "the later action wins" means either the piece comes back or the practice is
-  lost; it needs her answer.
+  lost; it needs her answer.~~ **Answered 2026-10-23, built in Pass 122:** "If a piece is
+  deleted on another device, it should be deleted everywhere so the practice should be
+  lost." A deletion always wins, before or after the other device's practice, with a 30-day
+  way back; see the Pass 122 entry below.
   (iv) **A wrong device clock** is not guarded against; the account's own order of
   arrival could break a near tie. Not designed.
 
@@ -8004,6 +8010,127 @@ what it rules out.
      one window sent uploads and looks; the window that did not hold the lease still heard
      and saved what was logged there; closing the holder let the other window take over
      and upload.
+
+- **Pass 121 — a held piece asks one plain question per conflicting part (2026-10-19 to
+  2026-10-21; merged 2026-10-23).** `lib/accountSync.js` (`planSettle`, `buildSettleQuestions`,
+  `rereadSettleItem`), `lib/pieceMerge.js` (`planPieceMerge`'s `choices`,
+  `unionProgressEntries`), `lib/settleFlow.js` and `components/SettleConflictModal.jsx`
+  (new), `App.jsx`, and the docs; merged as pull request #73 (the pass, then a follow-up after
+  its own review). **This entry was left out when the pass shipped** (the card's file list
+  didn't include this document) and is written here, in Pass 122; the design, the checks and
+  the review's twelve findings are in
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121).
+  The calls a reader might not expect:
+  1. **It asks; it does not decide.** The 2026-10-15 "the most recent change wins, item by
+     item" decision said Pass 121 "mostly goes away". It did not: the card asked for
+     questions, the questions were built, and **"most recent wins" is still not built.** A
+     conflicting part is held, and then asked about.
+  2. **Which pieces ask:** only a piece held WITH the list of conflicting parts Pass 120
+     records. A piece held by a refused upload, a file import and the technique library keep
+     the whole-piece picker; a piece the questions can't be built for falls back to it, with a
+     note.
+  3. **The questions are made again when Review opens**, from the account's copy as it is
+     now. The recorded list only decides which pieces are asked about. One conflict is one
+     question.
+  4. **The words.** "This device" and "your other device" (devices have no names). The two
+     sentences were the card's; the hints, the "Recommended" tag and the whole-piece sentence
+     were additions. **"Removed" (for what an answer throws away) was confirmed 2026-10-21**
+     ("removed is fine").
+  5. **"Both devices' sessions"** keeps every session from both sides (counted once, by
+     content), unions the days practiced and focus spots' own sessions, and takes the rest of
+     the chunk's record from the side whose latest judged session is later (a tie goes to
+     this device). **The ladder is not replayed**, and a session one side had undone comes
+     back. Deliberately deferred.
+  6. **Numbers worked out from the target date follow it** (days mode only). Beyond the card;
+     found in the browser, where taking one device's date with the other's days gave a piece
+     that didn't add up. The one place a conflict is not its own question.
+  7. **The follow-up, agreed 2026-10-21** ("I think a first screen is fine"): a first screen
+     when three or more practice records offer "both"; a summary before anything is applied,
+     with a red box for what would be removed; the account read again at the last step.
+     **If the account can't be read at that moment, nothing is applied** (the plan said to
+     carry on with the copy already held; stopping is the safer of the two).
+  8. **Settling acts only on what it was asked about** (found in the review): it never
+     re-adds a piece deleted in another tab and never combines two pieces by name.
+  9. **Still open from it:** (a) *size and schedule travel together* (a resize on one device
+     against a difficulty edit on the other still gives a piece whose measure count and
+     difficulty list disagree; proposed as its own pass, not approved); (b) a piece held by a
+     refusal gets no questions (Pass 122b); (c) remembered answers ("always keep both"),
+     deferred with no owner; (d) `foldConflictedProgress` (`tabSync.js`) and
+     `unionProgressEntries` are two implementations of "keep both"; (e) Pass 117's open item 2
+     (piece order and date added can conflict; Pass 122b).
+
+- **Pass 122 — a piece deleted on one device is deleted everywhere, with a way back
+  (2026-10-23 to 2026-10-24).** `lib/recentlyDeleted.js` and
+  `components/RecentlyDeletedModal.jsx` (new), `lib/accountSync.js`, `App.jsx`,
+  `SettingsTab.jsx`, `ImportPiecesModal.jsx`, `DeletePieceModal.jsx`, tests and the docs. The
+  design, the checks and the found items are
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
+  **The owner's rule, 2026-10-23, answering open item (iii) ("the piece comes back, or the
+  practice is lost"):** *"If a piece is deleted on another device, it should be deleted
+  everywhere so the practice should be lost."* A deletion always wins, over practice logged on
+  another device before or after it. **Two earlier statements are therefore qualified:**
+  the 2026-10-15 "practice sessions are always kept" (no longer true for a whole-piece
+  deletion), and Passes 112 and 120's "nothing is removed by itself" (no longer true with the
+  automatic switch on, for a deletion from the last 30 days). Design D is untouched: a deleted
+  piece is only marked, never erased. **Cost, accepted by the rule:** practice a device logged
+  and never backed up before a deletion reaches it is lost with the piece (the red banner
+  counts the sessions), and with the switch on there is no "remove from just this phone".
+  **Her other answers:**
+  - **A way back: yes** ("do you want a way back, such as recently deleted for 30 days?"). 30
+    days is her number, not a measured one (tracked in [Research.md](Research.md#account-sync-timings)).
+  - **Switch off:** "Get changes" still lists a deleted piece with "Delete it here too" and
+    nothing is removed by itself. **Automatic removal only for deletions from the last 30
+    days**, so anything removed by itself can be restored; older ones are only listed.
+  - **Notices:** a red page banner only when practice was lost, otherwise a quiet line in the
+    Account panel.
+  - **Two passes, not one** (2026-10-24), and then the split, the added files and the combine
+    note were approved ("go ahead with the split, the files, and the note"). **122b is not
+    built:** the remembered "These are different pieces", the blank-composer box, never
+    asking about piece order or date added, and questions for a piece held by a refused upload.
+  **Calls made while building it, for her to overrule:**
+  1. **A refused deletion is retried once** against the newer revision (the card; the one
+     exception to "a refusal is never retried"). Safe because only `deleted_at` is set: what
+     the other device logged stays in the row, so Restore brings it back with that practice.
+     A deleted piece can no longer be held.
+  2. **A combine's duplicate is told apart by a note, not a same-name check** (the card, and
+     she confirmed it): the marked-deleted row carries `mergedInto`. It is the first time the
+     app writes anything but a piece's own copy into a deleted row's data. **A combine made
+     before this pass has no note** and looks like a deletion (Accounts-and-Backend found item
+     3, with a question for her).
+  3. **Keep it and Restore go through the ordinary apply step**, not a replace, so a piece
+     this device still holds that differs from the account's copy is merged by the Pass 112
+     rules rather than overwritten. Not spelled out on the card.
+  4. **A piece held as "changed on another device" is removed too** when the deletion is why
+     its upload was refused: the hold goes with it.
+  5. **The banner and the Account panel offer "Keep it" on a combine's duplicate** because
+     they are built from the light look, which never reads data; it answers that it can't be
+     kept and changes nothing. A limitation, not a choice (found item 2).
+  6. **The 30 days run on this device's clock** against the account's `deleted_at`; nothing
+     is erased either way (open item (iv), a wrong device clock, is not guarded).
+  7. **The quiet banner warns before a one-click "Delete it here too" throws away changes the
+     account never got.** Found in the pre-commit review (2026-10-25): the Account panel's list
+     and the "Get changes" window already said so, the banner did not.
+  8. **A piece this device never synced is never removed by itself** (the owner's call,
+     2026-10-25: "fix so that imports can't be removed"). Found in the pre-commit review: a
+     file import keeps a piece's id, so a piece you deleted and then imported again matched the
+     account's deleted row and, with the switch on, was removed again within a minute. Now
+     automatic removal needs a recorded sync for the piece (`wasSyncedHere`), both when choosing
+     what to fetch and again when removing; the rest is listed with the two buttons. **What it
+     does not do:** an import merged into a piece this device had already synced is an ordinary
+     change, and a deletion made elsewhere still wins over it (her rule; marking imports would
+     change the stored format). She also answered that she has no combined copies in the last 30
+     days, so call 2's gap (older combines carry no note) touches nothing today.
+  **Resolved by it:** Pass 111's later-passes item 3 (a deleted-here piece held), Pass 112's
+  item 6 (no undelete), Pass 116's found item 4 (deleted here and changed elsewhere), and open
+  item (iii). **Not resolved, now 122b:** Pass 112's items 5 and 9 and Pass 116's found item 3.
+  **Found and not fixed:** a piece in use is downloaded again every 5 seconds, not every
+  minute (Pass 120's left-open item, more reachable here); a card being typed into or timed is
+  not "in use", so a removal takes it with the piece. **From the pre-commit review
+  (Accounts-and-Backend.md, Pass 122 found items 9 to 13):** item 9, a re-imported piece being
+  removed again with the switch on, was FIXED (call 8); still open: "Restore" next to a
+  same-named piece combines instead of restoring; a deletion held before this pass stays held;
+  the delete window's "every other device" is stronger than what a device with the switch off
+  does.
 
 ## Open questions
 
@@ -8262,12 +8389,13 @@ oversight to silently fix; surface it instead.
      held; the status line shows the held message and the normal line together.
      See [Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115).
   3. **From Pass 112:** a combine the person declines is offered again on
-     every Get changes (Pass 122); ~~two devices that both use the app often hold
+     every Get changes (Pass 122b); ~~two devices that both use the app often hold
      each other's technique library (its per-device parts are in the shared
      row)~~ **the `updatedAt` part is resolved in Pass 115** (it no longer counts
      as a change; today's list and the walk position still do; Pass 118 decided how
      those merge, as an engine only, see its entry above); a name match with a blank composer can combine two
-     different pieces; there is no "undelete" (Pass 122); a merge clears the
+     different pieces (Pass 122b); ~~there is no "undelete" (Pass 122)~~ **resolved in Pass 122**
+     ("Keep it", and "Recently deleted" for 30 days); a merge clears the
      piece's reschedule marker; and ~~`mergeSessionArrays` compares sessions as
      text, so key order matters~~ **resolved in Pass 115** (compares content;
      the workaround in `lib/accountSync.js` is deleted).
@@ -8508,7 +8636,10 @@ oversight to silently fix; surface it instead.
      still possible when both devices are busy on one piece within a minute.
   2. **Two upload runs can overlap** during the fresh look (a focus or online event in that
      gap); expected harmless, not run.
-  3. **A piece waiting because it is in use is downloaded again every minute.**
+  3. **A piece waiting because it is in use is downloaded again every minute.** (Pass 122
+     saw it every 5 seconds while an upload round kept repeating; see
+     [Accounts-and-Backend.md](Accounts-and-Backend.md#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122),
+     found item 1.)
   4. **A failed automatic update leaves only a console line** (the "Press Get changes" line
      stays).
   5. **A stale plan that ends in a conflict is held a moment late** (needs a log, a

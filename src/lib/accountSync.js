@@ -17,6 +17,9 @@
 /*  piece is held until the person settles it (Pass 112, the last      */
 /*  section: restore, "Get changes", and Review, all one flow that     */
 /*  hands the account's rows to the import path's own merge functions).*/
+/*  The one exception is a deletion (Pass 122): it wins over practice  */
+/*  logged on another device, so a refused deletion is tried once more */
+/*  against the newer revision.                                        */
 /* ------------------------------------------------------------------ */
 
 import { loadBackend, isConnectionProblem, NO_CONNECTION_MESSAGE } from "./backend";
@@ -38,6 +41,9 @@ import { formatRange } from "./utils";
 // The same for the technique library (Pass 118): lib/techniqueMerge.js owns its
 // canonical form and its parts, and is imported here and never the other way.
 import { canonicalTechnique, techniquePartFingerprints, planTechniqueMerge } from "./techniqueMerge";
+// Pass 122: the 30-day window and the pure rules about deleted pieces. This file imports
+// them; recentlyDeleted.js never imports this one.
+import { RECENTLY_DELETED_DAYS, isRecentlyDeleted, wasSyncedHere, deletedCutoffIso, sessionsOnlyHere } from "./recentlyDeleted";
 
 export { fingerprint, canonicalPiece, piecePartFingerprints, canonicalTechnique, techniquePartFingerprints };
 
@@ -254,6 +260,37 @@ export async function deletePieceRow(client, userId, id, expectedRevision, delet
     await client
       .from("pieces")
       .update({ deleted_at: deletedAtIso })
+      .eq("user_id", userId)
+      .eq("id", id)
+      .eq("revision", expectedRevision)
+      .select("revision")
+  );
+}
+
+// Pass 122: the other half of Design D. A piece marked deleted can be brought back by
+// clearing the mark, nothing else: the row's data was never touched. Like every change
+// it is "only if still at revision N".
+export async function restorePieceRow(client, userId, id, expectedRevision) {
+  return changeResult(
+    await client
+      .from("pieces")
+      .update({ deleted_at: null })
+      .eq("user_id", userId)
+      .eq("id", id)
+      .eq("revision", expectedRevision)
+      .select("revision")
+  );
+}
+
+// Pass 122: a combine marks the other copy deleted, and now also notes where it went
+// (`mergedInto`, inside the row's saved data, which is otherwise sent back exactly as it
+// was read), so no device ever takes that duplicate for a piece somebody deleted. Still
+// "only if still at revision N", and nothing is erased.
+export async function markPieceRowCombined(client, userId, id, expectedRevision, deletedAtIso, rawData, intoId) {
+  return changeResult(
+    await client
+      .from("pieces")
+      .update({ deleted_at: deletedAtIso, data: { ...rawData, mergedInto: intoId } })
       .eq("user_id", userId)
       .eq("id", id)
       .eq("revision", expectedRevision)
@@ -1175,6 +1212,25 @@ export async function syncWaitingChanges({ pieces, technique, userId, getClient 
         }
         // refused again: someone just added it. Fall through and hold it.
       }
+      // Pass 122: a deletion wins over a change made on another device (the owner's rule,
+      // 2026-10-23). The row is live but has moved on (practice logged elsewhere), so the
+      // deletion is tried ONCE more against the revision just read, instead of being held.
+      // Only deleted_at is set: nothing is erased, and what the other device logged stays in
+      // the row, so the piece can still be brought back from "Recently deleted". The one
+      // exception to "a refusal is never retried".
+      if (item.action === "delete" && verdict.kind === "differs" && read.row && read.row.deleted_at == null) {
+        const again = await upload({ ...item, expectedRevision: read.row.revision });
+        if (again.ok) {
+          finish(item, again.revision);
+          result.uploaded += 1;
+          break;
+        }
+        if (again.failed === "connection") return stopped("connection");
+        // failed, or refused again (the row moved a second time): left waiting, not held,
+        // so the next run tries again against what is there then
+        result.failed += 1;
+        break;
+      }
       hold(item);
       break;
     }
@@ -1313,6 +1369,82 @@ export async function fetchChangedAccountRows({ userId, ids = [], technique = fa
       trow = (t.data && t.data[0]) || null;
     }
     return { status: "ok", rows: { pieces, technique: trow } };
+  } catch (e) {
+    return { status: "stopped", reason: reasonFor(e) };
+  }
+}
+
+// Reads this account's signed-in session the way every reader here does: the client, and
+// that the session is THIS account's. Returns { client } or { stopped: { status, reason } }.
+async function clientForAccount(userId, getClient) {
+  const client = await getClient();
+  if (!client) return { stopped: { status: "stopped", reason: "connection" } };
+  const session = await client.auth.getSession();
+  const sessionUser = session && session.data && session.data.session && session.data.session.user;
+  if (!sessionUser || sessionUser.id !== userId) {
+    return { stopped: { status: "stopped", reason: session && session.error && isConnectionProblem(session.error) ? "connection" : "signed-out" } };
+  }
+  return { client };
+}
+
+// Pass 122: the account's pieces deleted within the 30-day window, for "Recently deleted"
+// (each row's saved data comes with it, so a name and a count can be shown). Same shape
+// and reasons as fetchAccountCopy; never throws. Only rows marked deleted at or after
+// the cutoff are asked for.
+//   { status: "ok", rows: [{ id, revision, deleted_at, data }] } or { status: "stopped", reason }
+export async function fetchDeletedPieces({ userId, now = Date.now(), getClient = loadBackend }) {
+  try {
+    const got = await clientForAccount(userId, getClient);
+    if (got.stopped) return got.stopped;
+    const { client } = got;
+    const cutoff = deletedCutoffIso(now);
+    const rows = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const from = page * PAGE_SIZE;
+      const { data, error } = await client
+        .from("pieces")
+        .select("id, revision, deleted_at, data")
+        .eq("user_id", userId)
+        .gte("deleted_at", cutoff)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (error) return { status: "stopped", reason: reasonFor(error) };
+      const list = data || [];
+      list.forEach((r) => rows.push(r));
+      if (list.length < PAGE_SIZE) break;
+    }
+    return { status: "ok", rows };
+  } catch (e) {
+    return { status: "stopped", reason: reasonFor(e) };
+  }
+}
+
+// Pass 122: bring a deleted piece back, for "Keep it" (this device still holds it) and
+// "Restore" (the list). Only deleted_at is cleared, and only "if still at revision N":
+// `expectedRevision` is the revision the person was looking at (null: whatever is read
+// here), and a row that has moved since is refused, never overwritten.
+//   { status: "kept", revision, data }  the mark is cleared; `data` is the row's saved copy
+//   { status: "live", revision, data }  it is not marked deleted any more (already back)
+//   { status: "moved" }                 the row changed since the person looked; nothing changed
+//   { status: "combined" }              a duplicate that a combine marked deleted: never brought back on its own
+//   { status: "gone" }                  there is no such row
+//   { status: "stopped", reason }       not reached ("connection" | "signed-out" | "other")
+export async function bringBackDeletedPiece({ userId, id, expectedRevision = null, getClient = loadBackend }) {
+  try {
+    const got = await clientForAccount(userId, getClient);
+    if (got.stopped) return got.stopped;
+    const { client } = got;
+    const read = await client.from("pieces").select("id, revision, deleted_at, data").eq("user_id", userId).eq("id", id);
+    if (read.error) return { status: "stopped", reason: reasonFor(read.error) };
+    const row = (read.data && read.data[0]) || null;
+    if (!row) return { status: "gone" };
+    if (row.deleted_at == null) return { status: "live", revision: row.revision, data: row.data };
+    if (isObject(row.data) && typeof row.data.mergedInto === "string" && row.data.mergedInto !== "") return { status: "combined" };
+    if (expectedRevision != null && row.revision !== expectedRevision) return { status: "moved" };
+    const r = await restorePieceRow(client, userId, id, row.revision);
+    if (r.ok) return { status: "kept", revision: r.revision, data: row.data };
+    if (r.conflict) return { status: "moved" };
+    return { status: "stopped", reason: failureKind(r) };
   } catch (e) {
     return { status: "stopped", reason: reasonFor(e) };
   }
@@ -1551,11 +1683,17 @@ export function describeAccountChanges(changes) {
 // device doesn't, and the technique row if it is newer. With the switch OFF
 // nothing is ever a target, so the app behaves exactly as after Pass 116: it
 // notices (describeAccountChanges) and "Get changes" is the way in. Pieces held
-// as "changed on another device", pieces with no recorded revision (needsReview)
-// and pieces deleted elsewhere are never targets.
-export function autoUpdateTargets({ deviceRecord, userId, changes }) {
+// as "changed on another device" and pieces with no recorded revision
+// (needsReview) are never targets.
+//
+// Pass 122: a piece the account marks deleted is a target, but only one deleted
+// within the 30-day window (`deletions.recent`, from deletionsElsewhere; the owner's
+// rule: a deletion always wins, and what is removed by itself can be brought back from
+// Recently deleted). Older deletions are only listed, as they always were.
+export function autoUpdateTargets({ deviceRecord, userId, changes, deletions = null }) {
   if (!changes || !autoUpdateOn(deviceRecord, userId)) return { on: false, pieceIds: [], technique: false };
-  return { on: true, pieceIds: [...changes.added, ...changes.newer].sort(), technique: !!changes.techniqueNewer };
+  const removals = deletions && Array.isArray(deletions.recent) ? deletions.recent : [];
+  return { on: true, pieceIds: [...new Set([...changes.added, ...changes.newer, ...removals])].sort(), technique: !!changes.techniqueNewer };
 }
 
 // Merge BEFORE upload. A piece with a change waiting here and a newer copy in the
@@ -1586,14 +1724,95 @@ export function andList(names, cap = 3) {
 }
 
 // The Account panel's line after an automatic update, or null when nothing was
-// changed here. `names` are the pieces that were added, replaced or merged.
+// changed here. `names` are the pieces that were added, replaced or merged; `removed`
+// (Pass 122) the pieces taken away because they were deleted on another device.
 //   "Updated from another device: Ballade No. 1, and the technique library."
-export function describeAutoUpdate({ names = [], technique = false }) {
+//   "Removed because it was deleted on another device: Etude."
+export function describeAutoUpdate({ names = [], technique = false, removed = [] }) {
   const pieces = [...new Set(names)];
-  if (pieces.length === 0 && !technique) return null;
-  const list = pieces.length > 0 ? andList(pieces) : "";
-  const text = pieces.length > 0 ? (technique ? `${list}, and the technique library` : list) : "the technique library";
-  return `Updated from another device: ${text}.`;
+  const gone = [...new Set(removed)];
+  const lines = [];
+  if (pieces.length > 0 || technique) {
+    const list = pieces.length > 0 ? andList(pieces) : "";
+    const text = pieces.length > 0 ? (technique ? `${list}, and the technique library` : list) : "the technique library";
+    lines.push(`Updated from another device: ${text}.`);
+  }
+  if (gone.length > 0) lines.push(`Removed because ${gone.length === 1 ? "it was" : "they were"} deleted on another device: ${andList(gone)}.`);
+  return lines.length > 0 ? lines.join(" ") : null;
+}
+
+// Pass 122: the page-wide lines after an automatic update removed pieces that were deleted
+// on another device. A removal that took practice with it (sessions this device never
+// backed up) gets a red line of its own that says how many, and that the piece can come
+// back but those sessions can't; a removal of the piece that was OPEN gets one plain
+// line, because the page just changed under the person. Anything else is only the quiet
+// line in the Account panel (describeAutoUpdate), so this returns [] for most removals.
+//   removed: [{ name, lostSessions }]   openName: the removed piece that was open, or null
+export function describeAutoRemoved(removed, openName = null) {
+  const lines = [];
+  (removed || []).forEach((r) => {
+    if (r.lostSessions > 0) {
+      const many = r.lostSessions > 1;
+      lines.push({
+        text:
+          `${r.name} was deleted on another device, so it was removed here too. ${many ? `${r.lostSessions} sessions` : "1 session"} you logged here since your last backup ` +
+          `went with it. You can bring the piece back from Recently deleted in Settings for ${RECENTLY_DELETED_DAYS} days, but not ${many ? "those sessions" : "that session"}.`,
+        problem: true,
+      });
+    } else if (openName && r.name === openName) {
+      lines.push({ text: `${r.name} was deleted on another device, so it was removed here too.` });
+    }
+  });
+  return lines;
+}
+
+// Pass 122: pieces the account marks deleted that the person is asked about (the switch is
+// off, or the deletion is older than 30 days, or it was a duplicate left alone).
+//   "Ballade No. 1 was deleted on another device."
+export function describeDeletedElsewhere(names = []) {
+  const list = [...new Set(names)];
+  if (list.length === 0) return null;
+  return list.length === 1 ? `${list[0]} was deleted on another device.` : `${list.length} pieces were deleted on another device: ${andList(list)}.`;
+}
+
+// The one quiet banner for them: a title and a line saying what the two buttons do.
+// `unsynced`: this device holds changes the account never got for the piece (or, with
+// several, for at least one). "Delete it here too" would throw those away with one click,
+// so the banner says so, the way the Account panel's list and the "Get changes" window do.
+export function describeDeletedBanner(names = [], { unsynced = false } = {}) {
+  const title = describeDeletedElsewhere(names);
+  if (!title) return null;
+  const one = new Set(names).size === 1;
+  let sub;
+  if (one) {
+    sub = unsynced
+      ? "It's still on this device, and it has changes your account never got. If you delete it here too, those changes are lost. If you keep it, the piece comes back in your account and on every device, with those changes."
+      : "It's still on this device. Delete it here too, or keep it: it comes back in your account and on every device.";
+  } else {
+    sub = unsynced
+      ? "They're still on this device, and some have changes your account never got. Choose what to do with each one in Settings, under Account."
+      : "They're still on this device. Choose what to do with each one in Settings, under Account.";
+  }
+  return { title, sub };
+}
+
+// Pass 122: what happened when someone pressed "Keep it" or "Restore" (bringBackDeletedPiece's
+// answer), as one line for the page. `restored`: it came from Recently deleted.
+//   { text, problem? }
+export function describeBringBack({ status, name, restored = false, reason = null }) {
+  const piece = name || "This piece";
+  if (status === "kept") {
+    return {
+      text: restored
+        ? `Restored ${piece}. It's back on this device and in your account, and it will reappear on your other devices.`
+        : `Kept ${piece}. It's back in your account, and it will reappear on your other devices.`,
+    };
+  }
+  if (status === "live") return { text: `${piece} is already back in your account.` };
+  if (status === "moved") return { text: `${piece} changed in your account since you looked, so nothing was changed. Look again, then try once more.`, problem: true };
+  if (status === "combined") return { text: `${piece} was combined into another piece, so it can't be kept on its own.`, problem: true };
+  if (status === "gone") return { text: `${piece} is no longer in your account, so there is nothing to bring back.`, problem: true };
+  return { text: `Nothing was changed. ${describeFetchProblem(reason)}`, problem: true };
 }
 
 // The line while a change waits for a piece to be free:
@@ -1608,7 +1827,8 @@ export function describeAutoPending(names = []) {
 //   pieces:     [{ id, revision, piece }]   live rows, each run through
 //               validateAndMigratePiece (the same as a local load), the row's
 //               id being the piece's id
-//   deleted:    [{ id, revision, name }]    rows marked deleted: never candidates
+//   deleted:    [{ id, revision, name, deletedAt, mergedInto, data }]
+//               rows marked deleted: never candidates
 //   unreadable: [{ id, revision }]          live rows that couldn't be read
 //   technique:  { technique, revision, unreadable, skippedItems }  the technique
 //               row read the way a backup's technique block is (so an
@@ -1620,7 +1840,16 @@ export function accountRowsToCandidates(accountRows) {
   (rows.pieces || []).forEach((row) => {
     if (!row || row.id == null) return;
     if (row.deleted_at != null) {
-      out.deleted.push({ id: row.id, revision: row.revision, name: row.data && typeof row.data.name === "string" ? row.data.name : null });
+      out.deleted.push({
+        id: row.id,
+        revision: row.revision,
+        name: row.data && typeof row.data.name === "string" ? row.data.name : null,
+        // Pass 122: when it was deleted, which piece a combine put it into (a duplicate, not a
+        // deletion anyone made), and the saved data (to count what was never backed up)
+        deletedAt: row.deleted_at,
+        mergedInto: isObject(row.data) && typeof row.data.mergedInto === "string" && row.data.mergedInto !== "" ? row.data.mergedInto : null,
+        data: row.data,
+      });
       return;
     }
     let piece = null;
@@ -1629,7 +1858,9 @@ export function accountRowsToCandidates(accountRows) {
     } catch (e) {
       piece = null;
     }
-    if (piece) out.pieces.push({ id: row.id, revision: row.revision, piece });
+    // `raw` (Pass 122) is the row's saved data exactly as read: a combine sends it back
+    // with one note added when it marks this copy deleted
+    if (piece) out.pieces.push({ id: row.id, revision: row.revision, piece, raw: row.data });
     else out.unreadable.push({ id: row.id, revision: row.revision });
   });
   const trow = rows.technique;
@@ -1778,7 +2009,7 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
       else items.push({ ...base, kind: "ask", matchId: match.id });
       return;
     }
-    items.push({ ...base, kind: "combine", matchId: match.id, otherRow: { id: c.id, revision: c.revision } });
+    items.push({ ...base, kind: "combine", matchId: match.id, otherRow: { id: c.id, revision: c.revision, raw: c.raw } });
   });
   return { items, skippedDeletedHere };
 }
@@ -1792,7 +2023,14 @@ export function planAccountMerge({ candidates, localPieces, localTechnique = nul
   const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, automatic, settle });
   const deletedElsewhere = ((candidates && candidates.deleted) || [])
     .filter((d) => hasOwn(local, d.id))
-    .map((d) => ({ id: d.id, revision: d.revision, name: pieceName(local[d.id]), hasUnsyncedChanges: !nothingWaitingHere(local[d.id], entries[d.id]) }));
+    .map((d) => ({
+      id: d.id,
+      revision: d.revision,
+      name: pieceName(local[d.id]),
+      hasUnsyncedChanges: !nothingWaitingHere(local[d.id], entries[d.id]),
+      deletedAt: d.deletedAt || null, // Pass 122
+      mergedInto: d.mergedInto || null, // a duplicate that a combine marked deleted: only "Delete it here too"
+    }));
   const t = (candidates && candidates.technique) || { technique: null, unreadable: false, skippedItems: 0 };
   const technique = {
     available: !!t.technique,
@@ -1844,7 +2082,11 @@ export function planNeedsQuestion(plan) {
 //     device's copy untouched; Review settles it as it always has
 //   - a piece the engine can't judge ("ask") or one matched by name under another
 //     id ("combine"): left for the person (out.needsYou)
-//   - a piece that is already held, and anything deleted elsewhere
+//   - a piece that is already held
+//   - (Pass 122) a deletion older than 30 days, a duplicate that a combine marked deleted, and a
+//     piece this device never synced (one brought in by hand from a file): listed for the person
+//     (out.leftDeleted), never removed. A piece this device synced that the account marks deleted
+//     within the window IS removed (out.removed): the owner's rule, a deletion always wins.
 // and a piece named in `busyIds` (in use right now) is DEFERRED (out.deferred):
 // nothing about it is recorded or changed, so the next run finds it again.
 export function applyAccountMerge({
@@ -1970,7 +2212,7 @@ export function applyAccountMerge({
       counts.merged.push(d.name);
     } else if (d.kind === "combine" && next[d.matchId]) {
       next[d.matchId] = mergeInto(next[d.matchId], d);
-      markDeleted.push({ id: d.otherRow.id, revision: d.otherRow.revision, name: d.name, intoId: d.matchId });
+      markDeleted.push({ id: d.otherRow.id, revision: d.otherRow.revision, name: d.name, intoId: d.matchId, raw: d.otherRow.raw });
       counts.combined.push(d.name);
     }
   });
@@ -1985,6 +2227,36 @@ export function applyAccountMerge({
         const row = ((candidates && candidates.pieces) || []).find((c) => c.id === id);
         unsettled.push({ id, name: pieceName(row ? row.piece : local[id]), status: "gone", reason: "gone" });
       });
+  }
+  // Pass 122, automatic only: a piece the account marks deleted is removed here by itself,
+  // even with practice on it that was never backed up (the owner's rule, 2026-10-23: a
+  // deletion always wins). Four things are never removed by themselves and are left for the
+  // person, as they always were (`leftDeleted`): a deletion older than the 30-day window
+  // (so whatever is removed here can be brought back from Recently deleted), a duplicate
+  // that a combine marked deleted (`mergedInto`: nobody deleted it, and this device may hold
+  // practice on it that the combine never saw), a piece this device never synced (brought in
+  // by hand from a file: the owner's rule is about a piece that lives on her devices, and
+  // taking away what she just imported is not that; wasSyncedHere), and, for now, a piece in
+  // use (`deferred`: not recorded, so the next run finds it again). The caller drops the
+  // record's entry first (withPieceDropped), so no second "deleted" is ever sent, then
+  // removes the piece.
+  const removed = [];
+  const leftDeleted = [];
+  if (automatic) {
+    ((candidates && candidates.deleted) || []).forEach((d) => {
+      if (!hasOwn(local, d.id) || (only && !only.has(d.id))) return;
+      const name = pieceName(local[d.id]);
+      if (d.mergedInto || !isRecentlyDeleted(d.deletedAt, now) || !wasSyncedHere(prior[d.id])) {
+        leftDeleted.push({ id: d.id, name, revision: d.revision });
+        return;
+      }
+      if (busy.has(d.id)) {
+        deferred.push({ id: d.id, name });
+        return;
+      }
+      removed.push({ id: d.id, name, lostSessions: sessionsOnlyHere(local[d.id], d.data) });
+      delete next[d.id];
+    });
   }
   Object.keys(entries).forEach((id) => {
     if (prior[id] && prior[id].held) counts.clearedHeld += 1;
@@ -2042,6 +2314,10 @@ export function applyAccountMerge({
     settledIds,
     upToDateIds,
     unsettled,
+    // Pass 122 (automatic only; empty otherwise): [{ id, name, lostSessions }] removed here
+    // because the account marks them deleted, and [{ id, name, revision }] left alone
+    removed,
+    leftDeleted,
   };
 }
 
@@ -2099,9 +2375,10 @@ export function withAccountCopyRecorded(deviceRecord, userId, { entries = {}, te
   });
 }
 
-// Marks the account's other copy of a combined piece deleted: only deleted_at
-// is sent, "only if still at the revision it was read at" (deletePieceRow), so
-// nothing is erased and a copy someone changed meanwhile is left alone.
+// Marks the account's other copy of a combined piece deleted: deleted_at, and (Pass 122)
+// a note of which piece it went into inside the row's saved data (markPieceRowCombined),
+// "only if still at the revision it was read at", so nothing is erased and a copy someone
+// changed meanwhile is left alone.
 //   { marked: [{ id, name }], failed: [{ id, name, reason: "refused" | "connection" | "other" }] }
 export async function markOtherCopiesDeleted({ items, userId, getClient = loadBackend, now = Date.now }) {
   const out = { marked: [], failed: [] };
@@ -2120,7 +2397,12 @@ export async function markOtherCopiesDeleted({ items, userId, getClient = loadBa
   }
   for (const item of items) {
     try {
-      const r = await deletePieceRow(client, userId, item.id, item.revision, new Date(now()).toISOString());
+      const at = new Date(now()).toISOString();
+      // Pass 122: with the row's data in hand, note where the duplicate went (see
+      // markPieceRowCombined); without it, the plain mark as before.
+      const r = isObject(item.raw) && item.intoId
+        ? await markPieceRowCombined(client, userId, item.id, item.revision, at, item.raw, item.intoId)
+        : await deletePieceRow(client, userId, item.id, item.revision, at);
       if (r.ok) out.marked.push({ id: item.id, name: item.name });
       else if (r.conflict) fail(item, "refused");
       else fail(item, failureKind(r));

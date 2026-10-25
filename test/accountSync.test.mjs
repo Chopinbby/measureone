@@ -111,7 +111,17 @@ import {
   describeKept,
   describeSettleResult,
   describeSettleRereadProblem,
+  // Pass 122
+  restorePieceRow,
+  markPieceRowCombined,
+  bringBackDeletedPiece,
+  fetchDeletedPieces,
+  describeAutoRemoved,
+  describeDeletedElsewhere,
+  describeDeletedBanner,
+  describeBringBack,
 } from "../src/lib/accountSync.js";
+import { RECENTLY_DELETED_DAYS, deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "../src/lib/recentlyDeleted.js";
 import { planPieceMerge, WHOLE_PIECE_PART } from "../src/lib/pieceMerge.js";
 import { generateAllChunks } from "../src/lib/chunking.js";
 
@@ -369,11 +379,14 @@ function syncFake({ pieceRows = [], techniqueRows = [], inject = null } = {}) {
   const rows = { pieces: pieceRows.map((r) => ({ ...r })), technique: techniqueRows.map((r) => ({ ...r })) };
   const calls = [];
   const from = (table) => {
-    const q = { op: "select", filters: [], ins: [], values: null, selected: false, columns: null, range: null };
-    const hit = (row) => q.filters.every(([c, v]) => row[c] === v) && q.ins.every(([c, vals]) => vals.includes(row[c]));
+    const q = { op: "select", filters: [], ins: [], gtes: [], values: null, selected: false, columns: null, range: null };
+    const hit = (row) =>
+      q.filters.every(([c, v]) => row[c] === v) &&
+      q.ins.every(([c, vals]) => vals.includes(row[c])) &&
+      q.gtes.every(([c, v]) => row[c] != null && String(row[c]) >= String(v));
     const run = () => {
       const filterId = (q.filters.find(([c]) => c === "id") || [])[1];
-      const call = { table, op: q.op, id: q.op === "insert" ? q.values.id : filterId, values: q.values, filters: q.filters, ins: q.ins, columns: q.columns };
+      const call = { table, op: q.op, id: q.op === "insert" ? q.values.id : filterId, values: q.values, filters: q.filters, ins: q.ins, gtes: q.gtes, columns: q.columns };
       calls.push(call);
       const injected = inject && inject(call, rows);
       if (injected) return injected;
@@ -406,6 +419,7 @@ function syncFake({ pieceRows = [], techniqueRows = [], inject = null } = {}) {
       update: (v) => ((q.op = "update"), (q.values = v), api),
       eq: (c, v) => (q.filters.push([c, v]), api),
       in: (c, vals) => (q.ins.push([c, vals]), api),
+      gte: (c, v) => (q.gtes.push([c, v]), api),
       order: () => api,
       range: (from, to) => ((q.range = [from, to]), api),
       then: (ok, bad) => Promise.resolve(run()).then(ok, bad),
@@ -1306,11 +1320,13 @@ describe("planning what a restore / get changes would do (Pass 112)", () => {
   test("two copies of one piece under different ids are matched by name: combine, with the account's other row to mark deleted", () => {
     const here = { ...viaJson(pieceOf("L1")), name: "Ballade No. 1", composer: "Chopin" };
     const there = { ...viaJson(pieceOf("R1")), name: "ballade no. 1", composer: "Chopin" };
-    const p = plan({ local: { L1: validateAndMigratePiece(here) }, rows: { pieces: [acctRow(validateAndMigratePiece(there), 7)], technique: null } });
+    const row = acctRow(validateAndMigratePiece(there), 7);
+    const p = plan({ local: { L1: validateAndMigratePiece(here) }, rows: { pieces: [row], technique: null } });
     assert.equal(p.items.length, 1);
     assert.equal(p.items[0].kind, "combine");
     assert.equal(p.items[0].matchId, "L1");
-    assert.deepEqual(p.items[0].otherRow, { id: "R1", revision: 7 });
+    // (Pass 122: the other row also carries its saved data as read, so the combine can note where it went)
+    assert.deepEqual(p.items[0].otherRow, { id: "R1", revision: 7, raw: row.data });
   });
 
   test("two account rows with the same name collapse into one new piece and one combine", () => {
@@ -1449,15 +1465,16 @@ describe("merging what the account holds (Pass 112)", () => {
   test("two copies of one piece are combined into this device's piece, and the other account row is named to be marked deleted", () => {
     const here = validateAndMigratePiece({ ...viaJson(pieceOf("L1")), name: "Ballade No. 1", composer: "Chopin", createdAt: 10 });
     const there = validateAndMigratePiece({ ...viaJson(withMore(pieceOf("R1"), 2)), name: "Ballade No. 1", composer: "Chopin", createdAt: 20 });
+    const row = acctRow(there, 7);
     const out = apply({
-      candidates: accountRowsToCandidates({ pieces: [acctRow(there, 7)], technique: null }),
+      candidates: accountRowsToCandidates({ pieces: [row], technique: null }),
       localPieces: { L1: here },
       accountRecord: syncedRecord({ L1: [here, 1] }),
     });
     assert.deepEqual(Object.keys(out.pieces), ["L1"], "this device ends with one copy, under its own id");
     assert.equal(out.pieces.L1.createdAt, 10);
     assert.deepEqual(out.pieces.L1.progress.c1.sessions.map((s) => s.day).sort(), [1, 2], "the other copy's history is merged in");
-    assert.deepEqual(out.markDeleted, [{ id: "R1", revision: 7, name: "Ballade No. 1", intoId: "L1" }]);
+    assert.deepEqual(out.markDeleted, [{ id: "R1", revision: 7, name: "Ballade No. 1", intoId: "L1", raw: row.data }]);
     assert.deepEqual(out.counts.combined, ["Ballade No. 1"]);
     assert.equal(out.entries.R1, undefined, "the other row is never recorded as a piece here");
   });
@@ -3660,5 +3677,616 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     const rec = recordOf(storage);
     assert.equal(rec.pieces.p1.held, undefined);
     assert.equal(computeWaiting({ pieces: out.pieces, technique: tech, accountRecord: rec }).count, 0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Pass 122: a piece deleted on one device is deleted everywhere,     */
+/*  with a way back                                                    */
+/* ------------------------------------------------------------------ */
+
+const P122_NOW = Date.parse("2026-10-24T12:00:00Z");
+const P122_DAY = 24 * 60 * 60 * 1000;
+const p122ago = (ms) => new Date(P122_NOW - ms).toISOString();
+
+describe("a piece deleted on another device is removed here by itself, within 30 days (Pass 122)", () => {
+  const base = pieceOf("p1", { name: "Etude" });
+  const gone = (p, revision, at, extra = {}) => acctRow(p, revision, { deleted_at: at, ...extra });
+  const candidatesOf = (rows) => accountRowsToCandidates({ pieces: rows, technique: null });
+  const rec = (extra = {}) => autoRec({ p1: syncedAs(base, 1), ...extra });
+  const run = ({ local = { p1: base }, rows, record = rec(), busyIds = [], automatic = true }) =>
+    applyAccountMerge({ candidates: candidatesOf(rows), localPieces: local, accountRecord: record, automatic, busyIds, now: P122_NOW, includeTechnique: false });
+
+  test("a piece the account marked deleted yesterday is removed, with nothing recorded for it", () => {
+    const out = run({ rows: [gone(base, 5, p122ago(P122_DAY))] });
+    assert.deepEqual(out.removed, [{ id: "p1", name: "Etude", lostSessions: 0 }]);
+    assert.deepEqual(Object.keys(out.pieces), []);
+    assert.deepEqual(out.entries, {}, "no 'synced at revision 5' is recorded for something that is gone");
+    assert.deepEqual([out.leftDeleted, out.deferred, out.held, out.needsYou], [[], [], [], []]);
+  });
+
+  test("practice that was never backed up goes with the piece and is counted; what the account already has is not", () => {
+    const here = withMore(withMore(base, 2), 3);
+    assert.equal(run({ local: { p1: here }, rows: [gone(base, 5, p122ago(P122_DAY))] }).removed[0].lostSessions, 2);
+    assert.equal(run({ rows: [gone(base, 5, p122ago(P122_DAY))] }).removed[0].lostSessions, 0);
+  });
+
+  test("the window: exactly 30 days is inside; a millisecond older is only listed, and this device's copy is untouched", () => {
+    assert.deepEqual(run({ rows: [gone(base, 5, p122ago(30 * P122_DAY))] }).removed.map((r) => r.id), ["p1"]);
+    const outside = run({ rows: [gone(base, 5, p122ago(30 * P122_DAY + 1))] });
+    assert.deepEqual([outside.removed, outside.leftDeleted], [[], [{ id: "p1", name: "Etude", revision: 5 }]]);
+    assert.equal(outside.pieces.p1, base);
+  });
+
+  test("a deleted time that can't be read is never a reason to remove anything", () => {
+    const out = run({ rows: [gone(base, 5, "garbage")] });
+    assert.deepEqual([out.removed, out.leftDeleted.map((d) => d.id)], [[], ["p1"]]);
+  });
+
+  test("a duplicate that a combine marked deleted is never removed by itself", () => {
+    const out = run({ rows: [gone({ ...viaJson(base), mergedInto: "L1" }, 5, p122ago(P122_DAY))] });
+    assert.deepEqual([out.removed, out.leftDeleted.map((d) => d.id)], [[], ["p1"]]);
+    assert.equal(out.pieces.p1, base);
+  });
+
+  test("a piece this device never synced (brought in from a file) is never removed by itself, even deleted yesterday", () => {
+    // no record at all: the piece you deleted and then imported again from a backup file
+    const noRecord = run({ rows: [gone(base, 5, p122ago(P122_DAY))], record: autoRec({}) });
+    assert.deepEqual([noRecord.removed, noRecord.leftDeleted], [[], [{ id: "p1", name: "Etude", revision: 5 }]]);
+    assert.equal(noRecord.pieces.p1, base);
+    assert.deepEqual(noRecord.entries, {}, "nothing is recorded as synced for it either");
+    // a bare hold (what a refused first upload leaves) is not a sync
+    const bareHold = run({ rows: [gone(base, 5, p122ago(P122_DAY))], record: autoRec({ p1: { held: true, sent: ["abc"] } }) });
+    assert.deepEqual([bareHold.removed, bareHold.leftDeleted.map((d) => d.id)], [[], ["p1"]]);
+    assert.equal(bareHold.pieces.p1, base);
+    // the same piece WITH a recorded sync still goes: the owner's rule, a deletion wins
+    assert.deepEqual(run({ rows: [gone(base, 5, p122ago(P122_DAY))] }).removed.map((r) => r.id), ["p1"]);
+  });
+
+  test("a piece in use waits: not removed, not recorded, found again next time", () => {
+    const out = run({ rows: [gone(base, 5, p122ago(P122_DAY))], busyIds: ["p1"] });
+    assert.deepEqual([out.removed, out.deferred, out.entries], [[], [{ id: "p1", name: "Etude" }], {}]);
+    assert.equal(out.pieces.p1, base);
+  });
+
+  test("a piece held as 'changed on another device' is removed too: the deletion is why its upload was refused", () => {
+    const out = run({ rows: [gone(base, 5, p122ago(P122_DAY))], record: rec({ p1: { ...syncedAs(base, 1), held: true } }) });
+    assert.deepEqual(out.removed.map((r) => r.id), ["p1"]);
+  });
+
+  test("a deleted row for a piece this device doesn't hold is nothing", () => {
+    const out = run({ rows: [gone(pieceOf("p9"), 3, p122ago(P122_DAY))] });
+    assert.deepEqual([out.removed, out.leftDeleted, out.pieces.p1 === base], [[], [], true]);
+  });
+
+  test("the rest of an automatic update goes on as before: a clean newer copy of another piece is still taken", () => {
+    const two = pieceOf("p2", { name: "Nocturne" });
+    const out = run({
+      local: { p1: base, p2: two },
+      rows: [gone(base, 5, p122ago(P122_DAY)), acctRow(withMore(two, 2), 3)],
+      record: autoRec({ p1: syncedAs(base, 1), p2: syncedAs(two, 2) }),
+    });
+    assert.deepEqual(out.removed.map((r) => r.id), ["p1"]);
+    assert.deepEqual(Object.keys(out.pieces), ["p2"]);
+    assert.deepEqual(out.names.took, ["Nocturne"]);
+  });
+
+  test("by hand (Get changes) nothing is removed: it is listed with when it was deleted, and whether it was a combine's duplicate", () => {
+    const rows = [gone(base, 5, p122ago(P122_DAY))];
+    const manual = run({ rows, automatic: false });
+    assert.deepEqual([manual.removed, manual.pieces.p1 === base], [[], true]);
+    const plan = planAccountMerge({ candidates: candidatesOf(rows), localPieces: { p1: base }, localTechnique: null, accountRecord: rec() });
+    assert.deepEqual(plan.deletedElsewhere.map((d) => [d.id, d.deletedAt, d.mergedInto, d.hasUnsyncedChanges]), [["p1", p122ago(P122_DAY), null, false]]);
+    const dup = planAccountMerge({ candidates: candidatesOf([gone({ ...viaJson(base), mergedInto: "L1" }, 5, p122ago(P122_DAY))]), localPieces: { p1: base }, localTechnique: null, accountRecord: rec() });
+    assert.equal(dup.deletedElsewhere[0].mergedInto, "L1");
+  });
+
+  test("the candidates carry what the rest needs: when, where a combine put it, its saved data; live rows carry theirs as read", () => {
+    const live = acctRow(pieceOf("p2"), 3);
+    const dead = gone({ ...viaJson(base), mergedInto: "L1" }, 5, p122ago(P122_DAY));
+    const c = candidatesOf([live, dead]);
+    assert.deepEqual(c.deleted.map((d) => [d.id, d.deletedAt, d.mergedInto, d.name]), [["p1", p122ago(P122_DAY), "L1", "Etude"]]);
+    assert.equal(c.deleted[0].data, dead.data);
+    assert.equal(c.pieces[0].raw, live.data);
+    assert.equal(candidatesOf([gone(base, 5, p122ago(P122_DAY))]).deleted[0].mergedInto, null);
+  });
+});
+
+describe("what an automatic update fetches, with deletions (Pass 122)", () => {
+  const entry = (revision) => ({ revision, fingerprint: "f" });
+  const rows = {
+    pieces: [
+      { id: "p1", revision: 3, deleted_at: null }, // newer
+      { id: "p3", revision: 2, deleted_at: p122ago(P122_DAY) }, // deleted yesterday
+      { id: "p4", revision: 2, deleted_at: p122ago(40 * P122_DAY) }, // deleted long ago
+    ],
+    technique: null,
+  };
+  const record = (on) => {
+    const r = { version: 1, accounts: { [USER]: autoRec({ p1: entry(1), p3: entry(1), p4: entry(1) }) } };
+    return on ? withAutoUpdate(r, USER, true) : r;
+  };
+  const inputs = (on) => {
+    const acct = accountRecordFor(record(on), USER);
+    const here = ["p1", "p3", "p4"];
+    return {
+      changes: classifyAccountChanges({ rows, accountRecord: acct, localPieceIds: here }),
+      deletions: deletionsElsewhere({ rows, entries: acct.pieces, localPieceIds: here, now: P122_NOW }),
+    };
+  };
+
+  test("with the switch on, a recent deletion is a target; one older than 30 days never is", () => {
+    const { changes, deletions } = inputs(true);
+    assert.deepEqual(deletions, { ids: ["p3", "p4"], recent: ["p3"], older: ["p4"], unsynced: [] });
+    assert.deepEqual(autoUpdateTargets({ deviceRecord: record(true), userId: USER, changes, deletions }), { on: true, pieceIds: ["p1", "p3"], technique: false });
+  });
+
+  test("a recent deletion of a piece this device never synced is not a target: it is only listed", () => {
+    // p3 sits here with no record (brought in from a file); p5 has only a bare hold (a refused first upload)
+    const lightRows = {
+      pieces: [
+        { id: "p1", revision: 3, deleted_at: null },
+        { id: "p3", revision: 2, deleted_at: p122ago(P122_DAY) },
+        { id: "p5", revision: 2, deleted_at: p122ago(P122_DAY) },
+      ],
+      technique: null,
+    };
+    const rec2 = withAutoUpdate({ version: 1, accounts: { [USER]: autoRec({ p1: entry(1), p5: { held: true, sent: ["x"] } }) } }, USER, true);
+    const acct = accountRecordFor(rec2, USER);
+    const here = ["p1", "p3", "p5"];
+    const deletions = deletionsElsewhere({ rows: lightRows, entries: acct.pieces, localPieceIds: here, now: P122_NOW });
+    assert.deepEqual(deletions, { ids: ["p3", "p5"], recent: [], older: [], unsynced: ["p3", "p5"] });
+    const changes = classifyAccountChanges({ rows: lightRows, accountRecord: acct, localPieceIds: here });
+    assert.deepEqual(autoUpdateTargets({ deviceRecord: rec2, userId: USER, changes, deletions }).pieceIds, ["p1"]);
+  });
+
+  test("with the switch off nothing is ever a target, deletions included", () => {
+    const { changes, deletions } = inputs(false);
+    assert.deepEqual(autoUpdateTargets({ deviceRecord: record(false), userId: USER, changes, deletions }), { on: false, pieceIds: [], technique: false });
+  });
+
+  test("asked without deletions it is exactly what it was before this pass", () => {
+    const { changes } = inputs(true);
+    assert.deepEqual(autoUpdateTargets({ deviceRecord: record(true), userId: USER, changes }), { on: true, pieceIds: ["p1"], technique: false });
+    assert.deepEqual(autoUpdateTargets({ deviceRecord: record(true), userId: USER, changes, deletions: { ids: [], recent: [], older: [] } }).pieceIds, ["p1"]);
+  });
+
+  test("a piece that is both newer and recently deleted is asked for once", () => {
+    const { changes } = inputs(true);
+    const out = autoUpdateTargets({ deviceRecord: record(true), userId: USER, changes, deletions: { ids: ["p1"], recent: ["p1"], older: [] } });
+    assert.deepEqual(out.pieceIds, ["p1"]);
+  });
+});
+
+describe("a deletion wins over practice logged on another device (Pass 122)", () => {
+  const setup = () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const { p3, ...without } = pieces;
+    saveDeviceRecord(reconcileLocalDeletions(readDeviceRecord(storage), { removedIds: ["p3"], presentIds: ["p1", "p2"] }).record, storage);
+    return { storage, pieces, without, fake: syncFake(accountHolding(pieces, technique)) };
+  };
+  const movedOn = (fake, id) => {
+    const row = fake.rows.pieces.find((x) => x.id === id);
+    row.revision += 1;
+    row.data = { ...row.data, name: "Practiced on another device" };
+  };
+  const revisionsOf = (writes) => writes.map((w) => w.filters.filter(([c]) => c === "revision")[0][1]);
+
+  test("the account moved on after this device last saw the piece: the deletion goes through at the newer revision and is not held", async () => {
+    const { storage, without, fake } = setup();
+    movedOn(fake, "p3");
+    const r = await runSync(without, technique, fake, storage, { now: () => P122_NOW });
+    assert.equal(r.uploaded, 1);
+    assert.deepEqual(r.newlyHeld, []);
+    const row = fake.rows.pieces.find((x) => x.id === "p3");
+    assert.equal(row.deleted_at, new Date(P122_NOW).toISOString());
+    assert.equal(row.revision, 3);
+    assert.equal(row.data.name, "Practiced on another device", "what the other device logged is still in the row");
+    const writes = fake.writes();
+    assert.deepEqual(revisionsOf(writes), [1, 2], "first at the revision this device saw, then at the one just read");
+    assert.deepEqual(writes.map((w) => Object.keys(w.values)), [["deleted_at"], ["deleted_at"]], "only the deleted mark, both times");
+    assert.equal(recordOf(storage).pieces.p3, undefined, "this device has nothing left to remember about it");
+    assert.equal(computeWaiting({ pieces: without, technique, accountRecord: recordOf(storage) }).count, 0);
+  });
+
+  test("tried ONCE more, not forever: if the row moves again, the deletion stays waiting (not held) and the next run finishes it", async () => {
+    const { storage, without, fake } = setup();
+    movedOn(fake, "p3");
+    let updates = 0;
+    const flaky = syncFake({
+      pieceRows: fake.rows.pieces,
+      techniqueRows: fake.rows.technique,
+      inject: (call, rows) => {
+        if (call.table === "pieces" && call.op === "update" && (updates += 1) === 2) rows.pieces.find((x) => x.id === "p3").revision += 1;
+        return null;
+      },
+    });
+    const first = await runSync(without, technique, flaky, storage, { now: () => P122_NOW });
+    assert.equal(first.uploaded, 0);
+    assert.equal(first.failed, 1);
+    assert.deepEqual(first.newlyHeld, []);
+    assert.equal(recordOf(storage).pieces.p3.held, undefined, "not held");
+    assert.equal(computeWaiting({ pieces: without, technique, accountRecord: recordOf(storage) }).count, 1, "still waiting");
+    const second = await runSync(without, technique, flaky, storage, { now: () => P122_NOW });
+    assert.equal(second.uploaded, 1);
+    assert.ok(flaky.rows.pieces.find((x) => x.id === "p3").deleted_at);
+    assert.equal(recordOf(storage).pieces.p3, undefined);
+  });
+
+  test("no connection on the second try stops the run with the deletion still waiting", async () => {
+    const { storage, without, fake } = setup();
+    movedOn(fake, "p3");
+    let updates = 0;
+    const down = syncFake({
+      pieceRows: fake.rows.pieces,
+      techniqueRows: fake.rows.technique,
+      inject: (call) => (call.table === "pieces" && call.op === "update" && (updates += 1) === 2 ? noConnection() : null),
+    });
+    const r = await runSync(without, technique, down, storage, { now: () => P122_NOW });
+    assert.equal(r.status, "stopped");
+    assert.equal(r.reason, "connection");
+    assert.equal(recordOf(storage).pieces.p3.deletedHere, true, "still waiting to go up");
+    assert.equal(recordOf(storage).pieces.p3.held, undefined);
+  });
+
+  test("a row that someone else already marked deleted is simply adopted, as before", async () => {
+    const { storage, without, fake } = setup();
+    const row = fake.rows.pieces.find((x) => x.id === "p3");
+    row.revision = 2;
+    row.deleted_at = "2026-10-20T00:00:00.000Z";
+    const r = await runSync(without, technique, fake, storage, { now: () => P122_NOW });
+    assert.equal(r.resolved, 1);
+    assert.equal(fake.writes().length, 1, "nothing more was sent");
+    assert.equal(recordOf(storage).pieces.p3, undefined);
+  });
+
+  test("only a deletion is retried: a refused CHANGE to a piece is still held, exactly as before", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    movedOn(fake, "p2");
+    const r = await runSync({ ...pieces, p2: { ...pieces.p2, name: "Mine" } }, technique, fake, storage);
+    assert.deepEqual(r.newlyHeld.map((h) => h.id), ["p2"]);
+    assert.equal(fake.writes().length, 1, "never retried");
+  });
+
+  test("a change this device made to a piece the account has deleted is held: removing it is the automatic update's job, not the upload's", async () => {
+    const storage = memoryStorage(), pieces = three();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    const row = fake.rows.pieces.find((x) => x.id === "p2");
+    row.revision = 2;
+    row.deleted_at = "2026-10-20T00:00:00.000Z";
+    const r = await runSync({ ...pieces, p2: { ...pieces.p2, name: "Practiced here" } }, technique, fake, storage);
+    assert.deepEqual(r.newlyHeld.map((h) => h.id), ["p2"]);
+    assert.equal(fake.rows.pieces.find((x) => x.id === "p2").deleted_at, "2026-10-20T00:00:00.000Z", "the account's deletion is untouched");
+  });
+});
+
+describe("bringing a deleted piece back: Keep it and Restore (Pass 122)", () => {
+  const deletedAt = "2026-10-23T10:00:00.000Z";
+  const setup = (extra = {}, rowExtra = {}) => {
+    const p = pieceOf("p1", { name: "Etude" });
+    return { p, fake: syncFake({ pieceRows: [pieceRow(p, { user_id: USER, revision: 5, deleted_at: deletedAt, ...rowExtra })], ...extra }) };
+  };
+  const bring = (fake, over = {}) => bringBackDeletedPiece({ userId: USER, id: "p1", getClient: async () => fake.client, ...over });
+
+  test("it clears deleted_at and nothing else, only if the row is still at the revision the person looked at", async () => {
+    const { p, fake } = setup();
+    const out = await bring(fake, { expectedRevision: 5 });
+    assert.equal(out.status, "kept");
+    assert.equal(out.revision, 6);
+    assert.equal(sameData(out.data, p), true, "the row's saved copy comes back to the caller");
+    const [write] = fake.writes();
+    assert.deepEqual(write.values, { deleted_at: null });
+    assert.deepEqual(write.filters.filter(([c]) => c === "revision"), [["revision", 5]]);
+    const row = fake.rows.pieces[0];
+    assert.deepEqual([row.deleted_at, row.revision], [null, 6]);
+    assert.equal(sameData(row.data, p), true, "its data was never touched");
+  });
+
+  test("a row that moved since the person looked is refused, and nothing is written", async () => {
+    const { fake } = setup();
+    const out = await bring(fake, { expectedRevision: 4 });
+    assert.deepEqual(out, { status: "moved" });
+    assert.deepEqual(fake.writes(), []);
+    assert.equal(fake.rows.pieces[0].deleted_at, deletedAt);
+  });
+
+  test("a row that moves between the read and the write is refused too: the write itself is conditional", async () => {
+    const { fake } = setup({ inject: (call, rows) => { if (call.op === "update") rows.pieces[0].revision += 1; return null; } });
+    const out = await bring(fake, { expectedRevision: 5 });
+    assert.deepEqual(out, { status: "moved" });
+    assert.equal(fake.rows.pieces[0].deleted_at, deletedAt, "still deleted");
+  });
+
+  test("with no revision to hold it to, it keeps whatever is read (the same conditional write)", async () => {
+    const { fake } = setup();
+    assert.equal((await bring(fake)).status, "kept");
+  });
+
+  test("a piece that is no longer marked deleted is 'live': nothing is written, and the caller still gets its copy", async () => {
+    const { p, fake } = setup({}, { deleted_at: null, revision: 6 });
+    const out = await bring(fake, { expectedRevision: 5 });
+    assert.equal(out.status, "live");
+    assert.equal(out.revision, 6);
+    assert.equal(sameData(out.data, p), true);
+    assert.deepEqual(fake.writes(), []);
+  });
+
+  test("a duplicate that a combine marked deleted is never brought back on its own", async () => {
+    const dup = { ...viaJson(pieceOf("p1")), mergedInto: "L1" };
+    const fake = syncFake({ pieceRows: [{ user_id: USER, id: "p1", data: reorder(dup), revision: 5, deleted_at: deletedAt }] });
+    assert.deepEqual(await bring(fake, { expectedRevision: 5 }), { status: "combined" });
+    assert.deepEqual(fake.writes(), []);
+  });
+
+  test("no such row, no connection and the wrong account are each said, and nothing is written", async () => {
+    const { fake } = setup();
+    assert.deepEqual(await bring(fake, { id: "nope" }), { status: "gone" });
+    const down = setup({ inject: () => noConnection() });
+    assert.deepEqual(await bring(down.fake), { status: "stopped", reason: "connection" });
+    assert.deepEqual(await bring(fake, { userId: "someone-else" }), { status: "stopped", reason: "signed-out" });
+    assert.deepEqual(fake.writes(), []);
+  });
+
+  test("restorePieceRow on its own: the right revision clears the mark, the wrong one is a conflict", async () => {
+    const { fake } = setup();
+    const wrong = await restorePieceRow(fake.client, USER, "p1", 4);
+    assert.equal(wrong.ok, false);
+    assert.equal(wrong.conflict, true);
+    const right = await restorePieceRow(fake.client, USER, "p1", 5);
+    assert.deepEqual([right.ok, right.revision], [true, 6]);
+  });
+});
+
+describe("the Recently deleted list reads only the last 30 days (Pass 122)", () => {
+  test("it asks the account for rows deleted at or after the cutoff, with their saved data, and the list is shaped from them", async () => {
+    const rows = [
+      pieceRow(pieceOf("a", { name: "Ballade" }), { revision: 4, deleted_at: p122ago(2 * P122_DAY) }),
+      pieceRow(pieceOf("b"), { revision: 3, deleted_at: p122ago(31 * P122_DAY) }),
+      pieceRow(pieceOf("c"), { revision: 2, deleted_at: null }),
+    ];
+    const fake = syncFake({ pieceRows: rows });
+    const out = await fetchDeletedPieces({ userId: USER, now: P122_NOW, getClient: async () => fake.client });
+    assert.equal(out.status, "ok");
+    assert.deepEqual(out.rows.map((r) => r.id), ["a"], "only what was asked for came back");
+    const call = fake.calls[0];
+    assert.deepEqual(call.gtes, [["deleted_at", p122ago(RECENTLY_DELETED_DAYS * P122_DAY)]]);
+    assert.equal(call.columns, "id, revision, deleted_at, data");
+    assert.deepEqual(recentlyDeletedList(out.rows, { now: P122_NOW }).map((i) => [i.id, i.name]), [["a", "Ballade"]]);
+  });
+
+  test("a read that fails is reported as stopped, never thrown; the wrong account is signed-out", async () => {
+    const down = syncFake({ inject: () => noConnection() });
+    assert.deepEqual(await fetchDeletedPieces({ userId: USER, now: P122_NOW, getClient: async () => down.client }), { status: "stopped", reason: "connection" });
+    const fake = syncFake();
+    assert.deepEqual(await fetchDeletedPieces({ userId: "someone-else", now: P122_NOW, getClient: async () => fake.client }), { status: "stopped", reason: "signed-out" });
+    assert.deepEqual(await fetchDeletedPieces({ userId: USER, getClient: async () => null }), { status: "stopped", reason: "connection" });
+  });
+});
+
+describe("a combine notes where its duplicate went (Pass 122)", () => {
+  const NOW4 = Date.UTC(2026, 9, 4);
+  const setup = () => {
+    const dup = pieceOf("R1", { name: "Ballade No. 1" });
+    const fake = syncFake({ pieceRows: [pieceRow(dup, { user_id: USER, revision: 7 })] });
+    return { dup, fake, raw: fake.rows.pieces[0].data };
+  };
+  const mark = (fake, raw) =>
+    markOtherCopiesDeleted({ items: [{ id: "R1", revision: 7, name: "Ballade No. 1", intoId: "L1", raw }], userId: USER, getClient: async () => fake.client, now: () => Date.UTC(2026, 9, 3) });
+
+  test("the row is marked deleted and its data goes back as read with one note added, only if still at that revision", async () => {
+    const { dup, fake, raw } = setup();
+    const r = await mark(fake, raw);
+    assert.deepEqual(r.marked.map((m) => m.id), ["R1"]);
+    const call = fake.calls.find((c) => c.op === "update");
+    assert.deepEqual(Object.keys(call.values).sort(), ["data", "deleted_at"]);
+    assert.ok(call.filters.some(([c, v]) => c === "revision" && v === 7));
+    const row = fake.rows.pieces[0];
+    assert.ok(row.deleted_at);
+    assert.equal(row.data.mergedInto, "L1");
+    const { mergedInto, ...rest } = row.data;
+    assert.equal(sameData(rest, dup), true, "everything else in the saved data is exactly what it was");
+    assert.equal(fake.rows.pieces.length, 1, "nothing erased");
+  });
+
+  test("a row someone changed meanwhile is left alone, note and all", async () => {
+    const { fake, raw } = setup();
+    fake.rows.pieces[0].revision = 9;
+    const r = await mark(fake, raw);
+    assert.deepEqual(r.failed.map((f) => f.reason), ["refused"]);
+    assert.equal(fake.rows.pieces[0].deleted_at, null);
+    assert.equal(fake.rows.pieces[0].data.mergedInto, undefined);
+  });
+
+  test("everything downstream reads the note: the candidates, the list, and the automatic path", async () => {
+    const { dup, fake, raw } = setup();
+    await mark(fake, raw);
+    const row = fake.rows.pieces[0];
+    const c = accountRowsToCandidates({ pieces: [{ id: row.id, revision: row.revision, deleted_at: row.deleted_at, data: row.data }], technique: null });
+    assert.equal(c.deleted[0].mergedInto, "L1");
+    assert.deepEqual(recentlyDeletedList([row], { now: NOW4 }), [], "never listed as something a person deleted");
+    const out = applyAccountMerge({ candidates: c, localPieces: { R1: dup }, accountRecord: autoRec({ R1: syncedAs(dup, 7) }), automatic: true, now: NOW4, includeTechnique: false });
+    assert.deepEqual([out.removed, out.leftDeleted.map((d) => d.id)], [[], ["R1"]], "a device that still holds the duplicate leaves it alone");
+    assert.equal(out.pieces.R1, dup);
+  });
+
+  test("markPieceRowCombined on its own: the note is added to what was read, never replacing it", async () => {
+    const { fake, raw } = setup();
+    const r = await markPieceRowCombined(fake.client, USER, "R1", 7, "2026-10-03T00:00:00.000Z", raw, "L1");
+    assert.deepEqual([r.ok, r.revision], [true, 8]);
+    assert.deepEqual(Object.keys(fake.rows.pieces[0].data).sort(), [...Object.keys(raw), "mergedInto"].sort());
+  });
+
+  test("end to end: a combine through the apply step names the duplicate's data, and the account row then reads as a combine's", async () => {
+    const here = validateAndMigratePiece({ ...viaJson(pieceOf("L1")), name: "Ballade No. 1", composer: "Chopin", createdAt: 10 });
+    const there = validateAndMigratePiece({ ...viaJson(pieceOf("R1")), name: "Ballade No. 1", composer: "Chopin", createdAt: 20 });
+    const fake = syncFake({ pieceRows: [pieceRow(there, { user_id: USER, revision: 7 })] });
+    const out = applyAccountMerge({
+      candidates: accountRowsToCandidates({ pieces: [{ id: "R1", revision: 7, deleted_at: null, data: fake.rows.pieces[0].data }], technique: null }),
+      localPieces: { L1: here },
+      accountRecord: autoRec({ L1: syncedAs(here, 1) }),
+      includeTechnique: false,
+    });
+    assert.equal(out.markDeleted.length, 1);
+    const r = await markOtherCopiesDeleted({ items: out.markDeleted, userId: USER, getClient: async () => fake.client, now: () => NOW4 });
+    assert.deepEqual(r.marked.map((m) => m.id), ["R1"]);
+    assert.equal(fake.rows.pieces[0].data.mergedInto, "L1");
+    assert.equal(fake.rows.pieces[0].deleted_at, new Date(NOW4).toISOString());
+  });
+});
+
+describe("the whole chain through the fake database: one device deletes, another removes it (Pass 122)", () => {
+  test("device A deletes a piece and it goes up; device B's automatic update removes it, and has nothing to send afterwards", async () => {
+    const pieces = three();
+    const storageA = memoryStorage(), storageB = memoryStorage();
+    afterFirstBackup(pieces, technique, storageA);
+    afterFirstBackup(pieces, technique, storageB);
+    const fake = syncFake(accountHolding(pieces, technique));
+    // A: p3 deleted, then uploaded
+    const { p3, ...without } = pieces;
+    saveDeviceRecord(reconcileLocalDeletions(readDeviceRecord(storageA), { removedIds: ["p3"], presentIds: ["p1", "p2"] }).record, storageA);
+    await runSync(without, technique, fake, storageA, { now: () => P122_NOW - P122_DAY });
+    // B: the light look, what an automatic update would fetch, the rows, the apply
+    saveDeviceRecord(withAutoUpdate(readDeviceRecord(storageB), USER, true), storageB);
+    const light = { pieces: fake.rows.pieces.map((r) => ({ id: r.id, revision: r.revision, deleted_at: r.deleted_at })), technique: { revision: 1 } };
+    const acct = recordOf(storageB);
+    const here = Object.keys(pieces);
+    const deletions = deletionsElsewhere({ rows: light, entries: acct.pieces, localPieceIds: here, now: P122_NOW });
+    assert.deepEqual(deletions.recent, ["p3"]);
+    const targets = autoUpdateTargets({ deviceRecord: readDeviceRecord(storageB), userId: USER, changes: classifyAccountChanges({ rows: light, accountRecord: acct, localPieceIds: here }), deletions });
+    assert.deepEqual(targets.pieceIds, ["p3"]);
+    const got = await fetchChangedAccountRows({ userId: USER, ids: targets.pieceIds, getClient: async () => fake.client });
+    assert.equal(got.status, "ok");
+    const out = applyAccountMerge({ candidates: accountRowsToCandidates(got.rows), localPieces: pieces, accountRecord: acct, automatic: true, now: P122_NOW, includeTechnique: false });
+    assert.deepEqual(out.removed, [{ id: "p3", name: "Piece p3", lostSessions: 0 }]);
+    assert.deepEqual(Object.keys(out.pieces).sort(), ["p1", "p2"]);
+    // the caller forgets the piece first (withPieceDropped), then removes it: nothing is left to send
+    saveDeviceRecord(withPieceDropped(readDeviceRecord(storageB), USER, "p3"), storageB);
+    assert.equal(computeWaiting({ pieces: out.pieces, technique, accountRecord: recordOf(storageB) }).count, 0);
+    const writesBefore = fake.writes().length;
+    await runSync(out.pieces, technique, fake, storageB);
+    assert.equal(fake.writes().length, writesBefore, "B sent nothing: no second deletion goes up");
+    assert.ok(fake.rows.pieces.find((x) => x.id === "p3").deleted_at, "and the account still has the deleted piece, marked, with its data");
+  });
+
+  test("a piece you deleted and then imported again from a backup file is never removed by itself", async () => {
+    const pieces = three();
+    const storage = memoryStorage();
+    afterFirstBackup(pieces, technique, storage);
+    const fake = syncFake(accountHolding(pieces, technique));
+    // this device deletes p3 and the deletion goes up: the record keeps nothing about it
+    const { p3, ...without } = pieces;
+    saveDeviceRecord(reconcileLocalDeletions(readDeviceRecord(storage), { removedIds: ["p3"], presentIds: ["p1", "p2"] }).record, storage);
+    await runSync(without, technique, fake, storage, { now: () => P122_NOW - P122_DAY });
+    assert.equal(recordOf(storage).pieces.p3, undefined);
+    assert.ok(fake.rows.pieces.find((x) => x.id === "p3").deleted_at);
+    // importing a file that holds it again keeps its id, so it is back here; the account's deleted row refuses its upload
+    const again = await runSync(pieces, technique, fake, storage, { now: () => P122_NOW });
+    assert.deepEqual(again.newlyHeld.map((h) => h.id), ["p3"]);
+    assert.equal(recordOf(storage).pieces.p3.revision, undefined, "held, but nothing says this device ever synced it");
+    // with the switch on, the light look says it was deleted a day ago
+    saveDeviceRecord(withAutoUpdate(readDeviceRecord(storage), USER, true), storage);
+    const light = { pieces: fake.rows.pieces.map((r) => ({ id: r.id, revision: r.revision, deleted_at: r.deleted_at })), technique: { revision: 1 } };
+    const acct = recordOf(storage);
+    const here = Object.keys(pieces);
+    const deletions = deletionsElsewhere({ rows: light, entries: acct.pieces, localPieceIds: here, now: P122_NOW });
+    assert.deepEqual([deletions.recent, deletions.unsynced], [[], ["p3"]]);
+    const targets = autoUpdateTargets({ deviceRecord: readDeviceRecord(storage), userId: USER, changes: classifyAccountChanges({ rows: light, accountRecord: acct, localPieceIds: here }), deletions });
+    assert.equal(targets.pieceIds.includes("p3"), false, "not even fetched to be removed");
+    // and if the apply step is handed the row anyway, it still leaves the piece alone
+    const got = await fetchChangedAccountRows({ userId: USER, ids: ["p3"], getClient: async () => fake.client });
+    const out = applyAccountMerge({ candidates: accountRowsToCandidates(got.rows), localPieces: pieces, accountRecord: acct, automatic: true, now: P122_NOW, includeTechnique: false });
+    assert.deepEqual([out.removed, out.leftDeleted.map((d) => d.id)], [[], ["p3"]]);
+    assert.equal(out.pieces.p3, pieces.p3);
+    // and the person is told about it, switch on or off, with the two buttons
+    assert.deepEqual(deletedForPerson({ deletions, autoOn: true, leftIds: [] }), ["p3"]);
+    assert.deepEqual(deletedForPerson({ deletions, autoOn: false, leftIds: [] }), ["p3"]);
+  });
+});
+
+describe("the words for deletions and for bringing a piece back (Pass 122)", () => {
+  test("the Account panel's line: updated, removed, or both", () => {
+    assert.equal(describeAutoUpdate({ names: ["Ballade"] }), "Updated from another device: Ballade.");
+    assert.equal(describeAutoUpdate({ technique: true }), "Updated from another device: the technique library.");
+    assert.equal(describeAutoUpdate({ removed: ["Etude"] }), "Removed because it was deleted on another device: Etude.");
+    assert.equal(describeAutoUpdate({ removed: ["Etude", "Nocturne"] }), "Removed because they were deleted on another device: Etude and Nocturne.");
+    assert.equal(describeAutoUpdate({ names: ["Ballade"], removed: ["Etude"] }), "Updated from another device: Ballade. Removed because it was deleted on another device: Etude.");
+    assert.equal(describeAutoUpdate({ removed: ["Etude", "Etude"] }), "Removed because it was deleted on another device: Etude.", "a name once");
+    assert.equal(describeAutoUpdate({}), null);
+  });
+
+  test("the page-wide lines: red when practice went with the piece (how many, and that it can't come back), plain when the open piece went, otherwise none", () => {
+    const one = describeAutoRemoved([{ name: "Etude", lostSessions: 1 }]);
+    assert.deepEqual(one, [
+      {
+        text: "Etude was deleted on another device, so it was removed here too. 1 session you logged here since your last backup went with it. You can bring the piece back from Recently deleted in Settings for 30 days, but not that session.",
+        problem: true,
+      },
+    ]);
+    const many = describeAutoRemoved([{ name: "Etude", lostSessions: 3 }]);
+    assert.match(many[0].text, /^Etude was deleted on another device, so it was removed here too\. 3 sessions you logged here since your last backup went with it\./);
+    assert.match(many[0].text, /but not those sessions\.$/);
+    assert.deepEqual(describeAutoRemoved([{ name: "Etude", lostSessions: 0 }], "Etude"), [{ text: "Etude was deleted on another device, so it was removed here too." }]);
+    assert.deepEqual(describeAutoRemoved([{ name: "Etude", lostSessions: 0 }], "Other"), [], "a quiet removal of a piece that was not open is only the Account panel's line");
+    assert.deepEqual(describeAutoRemoved([{ name: "Etude", lostSessions: 2 }], "Etude").length, 1, "practice lost and open: the one red line, not two");
+    assert.deepEqual(describeAutoRemoved([], null), []);
+  });
+
+  test("the banner for pieces the person is asked about", () => {
+    assert.equal(describeDeletedElsewhere(["Ballade No. 1"]), "Ballade No. 1 was deleted on another device.");
+    assert.equal(describeDeletedElsewhere(["A", "B", "C"]), "3 pieces were deleted on another device: A, B and C.");
+    assert.equal(describeDeletedElsewhere([]), null);
+    assert.deepEqual(describeDeletedBanner(["Ballade No. 1"]), {
+      title: "Ballade No. 1 was deleted on another device.",
+      sub: "It's still on this device. Delete it here too, or keep it: it comes back in your account and on every device.",
+    });
+    assert.match(describeDeletedBanner(["A", "B"]).sub, /^They're still on this device\. Choose what to do with each one in Settings, under Account\.$/);
+    assert.equal(describeDeletedBanner([]), null);
+  });
+
+  test("the banner warns before a one-click 'Delete it here too' would throw away changes the account never got", () => {
+    // one piece: says what each button does to those changes
+    const one = describeDeletedBanner(["Ballade No. 1"], { unsynced: true });
+    assert.equal(one.title, "Ballade No. 1 was deleted on another device.");
+    assert.equal(
+      one.sub,
+      "It's still on this device, and it has changes your account never got. If you delete it here too, those changes are lost. If you keep it, the piece comes back in your account and on every device, with those changes."
+    );
+    // several: says that some have them, and points to the list that shows which
+    assert.equal(
+      describeDeletedBanner(["A", "B"], { unsynced: true }).sub,
+      "They're still on this device, and some have changes your account never got. Choose what to do with each one in Settings, under Account."
+    );
+    // nothing waiting: exactly the words as before, with or without the option
+    assert.equal(describeDeletedBanner(["A"], { unsynced: false }).sub, describeDeletedBanner(["A"]).sub);
+    assert.equal(describeDeletedBanner(["A", "B"], { unsynced: false }).sub, describeDeletedBanner(["A", "B"]).sub);
+    assert.equal(/—/.test(JSON.stringify([one, describeDeletedBanner(["A", "B"], { unsynced: true })])), false, "no em dash");
+  });
+
+  test("what Keep it and Restore say, for each way it can end", () => {
+    assert.deepEqual(describeBringBack({ status: "kept", name: "Etude" }), { text: "Kept Etude. It's back in your account, and it will reappear on your other devices." });
+    assert.deepEqual(describeBringBack({ status: "kept", name: "Etude", restored: true }), { text: "Restored Etude. It's back on this device and in your account, and it will reappear on your other devices." });
+    assert.deepEqual(describeBringBack({ status: "live", name: "Etude" }), { text: "Etude is already back in your account." });
+    assert.deepEqual(describeBringBack({ status: "moved", name: "Etude" }), { text: "Etude changed in your account since you looked, so nothing was changed. Look again, then try once more.", problem: true });
+    assert.deepEqual(describeBringBack({ status: "combined", name: "Etude" }), { text: "Etude was combined into another piece, so it can't be kept on its own.", problem: true });
+    assert.deepEqual(describeBringBack({ status: "gone", name: "Etude" }), { text: "Etude is no longer in your account, so there is nothing to bring back.", problem: true });
+    assert.deepEqual(describeBringBack({ status: "stopped", name: "Etude", reason: "connection" }), { text: `Nothing was changed. ${describeFetchProblem("connection")}`, problem: true });
+    assert.equal(describeBringBack({ status: "gone" }).text.startsWith("This piece"), true, "no name: 'This piece'");
+  });
+
+  test("nothing in any of it has an em dash", () => {
+    const all = [
+      describeAutoUpdate({ names: ["A"], removed: ["B"] }),
+      ...describeAutoRemoved([{ name: "E", lostSessions: 2 }, { name: "F", lostSessions: 0 }], "F").map((l) => l.text),
+      describeDeletedElsewhere(["A"]),
+      describeDeletedElsewhere(["A", "B"]),
+      JSON.stringify(describeDeletedBanner(["A"])),
+      JSON.stringify(describeDeletedBanner(["A", "B"])),
+      ...["kept", "live", "moved", "combined", "gone", "stopped"].flatMap((status) => [describeBringBack({ status, name: "X", reason: "other" }).text, describeBringBack({ status, name: "X", restored: true }).text]),
+    ];
+    all.forEach((t) => assert.equal(/—/.test(t), false, t));
   });
 });

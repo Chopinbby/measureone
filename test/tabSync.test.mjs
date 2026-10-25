@@ -498,6 +498,22 @@ describe("[Pass 119] reconcileFromStorage: pieces", () => {
     assert.deepEqual(m.conflicts.map((c) => [c.part, c.local, c.remote]), [["notes", "mine", "theirs"]]);
   });
 
+  test("[Pass 122b] both tabs reordered the list differently: this tab's order is kept, and it is no conflict (nobody is asked)", () => {
+    const mine = { ...base, sortOrder: 1, updatedAt: 10 };
+    const theirs = { ...base, sortOrder: 7, updatedAt: 20 };
+    const out = reconcile({ p1: mine }, { p1: clone(theirs) }, { p1: base });
+    const m = out.pieces.merge.p1;
+    assert.equal(m.piece.sortOrder, 1, "this tab's order, as before");
+    assert.deepEqual(m.conflicts, [], "not listed as a conflict any more");
+    assert.equal(m.status, "merged");
+  });
+
+  test("[Pass 122b] a tab that did not reorder follows the tab that did", () => {
+    const theirs = { ...base, sortOrder: 7, updatedAt: 20 };
+    const out = reconcile({ p1: base }, { p1: clone(theirs) }, { p1: base });
+    assert.equal((out.pieces.reload.p1 || {}).sortOrder, 7);
+  });
+
   test("changed in both, a field here and a different one there: both survive", () => {
     const mine = { ...base, notes: "mine", updatedAt: 10 };
     const theirs = { ...withSession(base, "c5", 20, "theirs"), composer: "Chopin" };

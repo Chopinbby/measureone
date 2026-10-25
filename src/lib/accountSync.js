@@ -318,6 +318,10 @@ export async function markPieceRowCombined(client, userId, id, expectedRevision,
 /*  account's user id, so a different account on this browser starts   */
 /*  empty. `checkedAt` is the first backup's read-back check (Pass     */
 /*  110); `syncedAt` is the last time an upload landed (Pass 111).     */
+/*  Also on the account, only when set: `autoUpdate` (Pass 120, the    */
+/*  switch) and `declined` (Pass 122b, { pieces, pairs }: what the     */
+/*  person said no to; see cleanDeclined). Every function that         */
+/*  rebuilds an account's entry must carry both over.                  */
 /* ------------------------------------------------------------------ */
 
 export function emptyAccountRecord() {
@@ -369,6 +373,40 @@ function cleanEntry(e) {
   return Object.keys(out).length ? out : null;
 }
 
+/* ---- remembered "no" answers (Pass 122b) --------------------------- */
+
+// What the person answered "no" to in Get changes and Restore, kept per account on this
+// device only (never in the account), so the app stops asking and stops mentioning it:
+//   pieces  ids of account pieces they left unticked ("not on this device")
+//   pairs   pairs of piece ids they said are DIFFERENT pieces (an unticked "same piece,
+//           other copy"): never offered as a combine again, either way round
+// An account field next to `autoUpdate`, kept only when something is in it, so a record that
+// never had one reads exactly as before. "Ask me again" clears it (withDeclinedCleared).
+export const MAX_DECLINED = 500;
+
+// Two ids as one key, the same either way round (an id is never empty and has no NUL).
+const pairKey = (a, b) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
+
+function cleanDeclined(d) {
+  if (!isObject(d)) return null;
+  // The newest answers are kept when there are more than the cap.
+  const pieces = [...new Set((Array.isArray(d.pieces) ? d.pieces : []).filter((x) => typeof x === "string" && x !== ""))].slice(-MAX_DECLINED);
+  const seen = new Set();
+  const pairs = [];
+  (Array.isArray(d.pairs) ? d.pairs : []).forEach((p) => {
+    if (!Array.isArray(p) || p.length !== 2) return;
+    const [a, b] = p;
+    if (typeof a !== "string" || typeof b !== "string" || a === "" || b === "" || a === b) return;
+    const key = pairKey(a, b);
+    if (seen.has(key)) return;
+    seen.add(key);
+    pairs.push(a < b ? [a, b] : [b, a]);
+  });
+  if (pairs.length > MAX_DECLINED) pairs.splice(0, pairs.length - MAX_DECLINED);
+  if (pieces.length === 0 && pairs.length === 0) return null;
+  return { ...(pieces.length ? { pieces } : {}), ...(pairs.length ? { pairs } : {}) };
+}
+
 // Never throws; anything unreadable is treated as empty (the only cost is
 // that the question is asked again and matching pieces are re-recorded).
 export function readDeviceRecord(storage) {
@@ -389,6 +427,7 @@ export function readDeviceRecord(storage) {
           if (entry) pieces[id] = entry;
         });
       }
+      const declined = cleanDeclined(a.declined);
       accounts[uid] = {
         pieces,
         technique: cleanEntry(a.technique),
@@ -397,6 +436,8 @@ export function readDeviceRecord(storage) {
         // Pass 120: "Update automatically from other devices". Kept only when on, so
         // a record that never had the switch reads exactly as before.
         ...(a.autoUpdate === true ? { autoUpdate: true } : {}),
+        // Pass 122b: what the person said no to. Kept only when there is something.
+        ...(declined ? { declined } : {}),
       };
     });
     return { version: ACCOUNT_SYNC_VERSION, accounts };
@@ -430,6 +471,7 @@ export function withBackupRecorded(deviceRecord, userId, { pieces, technique, ch
         checkedAt,
         syncedAt: before.syncedAt,
         ...(before.autoUpdate ? { autoUpdate: true } : {}),
+        ...(before.declined ? { declined: before.declined } : {}),
       },
     },
   };
@@ -739,8 +781,11 @@ function changeAccount(deviceRecord, userId, change) {
   // function, and a draft that forgot it would switch the person's choice off.
   const draft = { pieces: { ...before.pieces }, technique: before.technique, checkedAt: before.checkedAt, syncedAt: before.syncedAt };
   if (before.autoUpdate) draft.autoUpdate = true;
+  // Pass 122b: so must the remembered "no" answers, for the same reason.
+  if (before.declined) draft.declined = before.declined;
   change(draft);
   if (draft.autoUpdate === false) delete draft.autoUpdate;
+  if (!draft.declined) delete draft.declined;
   return {
     version: ACCOUNT_SYNC_VERSION,
     accounts: { ...(deviceRecord && deviceRecord.accounts ? deviceRecord.accounts : {}), [userId]: draft },
@@ -798,6 +843,65 @@ export function autoUpdateOn(deviceRecord, userId) {
 export function withAutoUpdate(deviceRecord, userId, on) {
   return changeAccount(deviceRecord, userId, (a) => {
     a.autoUpdate = !!on;
+  });
+}
+
+// Pass 122b: the remembered "no" answers of one account (see cleanDeclined), as lookups:
+// { pieces: Set of piece ids, pairs: Set of pair keys }. Ask `isDeclinedPair` rather than
+// building a key by hand.
+export function declinedOf(accountRecord) {
+  const d = (accountRecord && accountRecord.declined) || null;
+  return {
+    pieces: new Set((d && d.pieces) || []),
+    pairs: new Set(((d && d.pairs) || []).map((p) => pairKey(p[0], p[1]))),
+  };
+}
+
+export function isDeclinedPair(accountRecord, a, b) {
+  return declinedOf(accountRecord).pairs.has(pairKey(a, b));
+}
+
+// How many "no" answers are remembered: pieces left off, and pairs said to be different.
+export function declinedSummary(accountRecord) {
+  const d = (accountRecord && accountRecord.declined) || null;
+  return { pieces: d && d.pieces ? d.pieces.length : 0, pairs: d && d.pairs ? d.pairs.length : 0 };
+}
+
+// ...and in all: the button that takes them back shows only while there is something to take back.
+export function declinedCount(accountRecord) {
+  const { pieces, pairs } = declinedSummary(accountRecord);
+  return pieces + pairs;
+}
+
+// Adds answers to what is remembered: pieces left off this device, and pairs of pieces said
+// to be different (either way round; saying it twice is saying it once). Pure.
+export function withDeclined(deviceRecord, userId, { pairs = [], pieces = [] } = {}) {
+  return changeAccount(deviceRecord, userId, (a) => {
+    const before = a.declined || {};
+    a.declined = cleanDeclined({ pieces: [...(before.pieces || []), ...pieces], pairs: [...(before.pairs || []), ...pairs] });
+  });
+}
+
+// Pass 122b: the person asked for these pieces by name (Keep it, Restore from Recently deleted),
+// which beats an old "no": forget any answer about them, the piece itself and any pair they are
+// in, so what they just asked for is not skipped as left off. Everything else stays. Pure.
+export function withDeclinedRemoved(deviceRecord, userId, ids = []) {
+  const drop = new Set(ids);
+  return changeAccount(deviceRecord, userId, (a) => {
+    const d = a.declined;
+    if (!d) return;
+    a.declined = cleanDeclined({
+      pieces: (d.pieces || []).filter((id) => !drop.has(id)),
+      pairs: (d.pairs || []).filter((pair) => !drop.has(pair[0]) && !drop.has(pair[1])),
+    });
+  });
+}
+
+// "Ask me again": forgets every remembered "no" for this account on this device, so what was
+// left off is offered again. Nothing else in the record changes. Pure.
+export function withDeclinedCleared(deviceRecord, userId) {
+  return changeAccount(deviceRecord, userId, (a) => {
+    delete a.declined;
   });
 }
 
@@ -1560,7 +1664,9 @@ export async function checkAccountChanges({ userId, getClient = loadBackend }) {
 //                (Pass 111): known, shown by its own message, never counted again
 //   newer        the account holds it (live) at a higher revision than the
 //                record says this device last saw
-//   added        a live row this device has neither a piece nor a record for
+//   added        a live row this device has neither a piece nor a record for, and the
+//                person has not said no to (Pass 122b: an unticked new piece is
+//                remembered and never counted again; "Ask me again" brings it back)
 //   deleted      a row marked deleted that this device still holds
 //   needsReview  this device holds it, the account has a live row, and the
 //                record has no revision for it (Pass 110's "different at first
@@ -1574,6 +1680,7 @@ export function classifyAccountChanges({ rows, accountRecord, localPieceIds }) {
   const acct = accountRecord || emptyAccountRecord();
   const entries = acct.pieces || {};
   const here = new Set(localPieceIds || []);
+  const leftOff = declinedOf(acct).pieces;
   const seen = new Set();
   ((rows && rows.pieces) || []).forEach((row) => {
     if (!row || row.id == null || seen.has(row.id)) return;
@@ -1589,7 +1696,7 @@ export function classifyAccountChanges({ rows, accountRecord, localPieceIds }) {
     } else if (holdsIt) {
       if (!hasRevision) out.needsReview.push(id);
       else if (Number.isFinite(row.revision) && row.revision > entry.revision) out.newer.push(id);
-    } else if (!entry) {
+    } else if (!entry && !leftOff.has(id)) {
       out.added.push(id);
     }
   });
@@ -1949,6 +2056,20 @@ function engineVerdict(local, remote, baseParts) {
   return { kind: "ask" };
 }
 
+// Pass 122b: the pieces a row may be matched with by name: this device's pieces (and the rows
+// already walked), minus any the person said are a DIFFERENT piece from this one.
+function matchPoolFor(working, id, pairs) {
+  if (pairs.size === 0) return working;
+  const pool = {};
+  Object.keys(working).forEach((other) => {
+    if (!pairs.has(pairKey(other, id))) pool[other] = working[other];
+  });
+  return pool;
+}
+
+// No composer to compare (blank or missing): the name alone said "same piece".
+const composerBlank = (piece) => !(piece && typeof piece.composer === "string" && piece.composer.trim() !== "");
+
 // What a settling step may act on: a held piece answered about, or one that turned out to
 // match (or to be a clean newer copy) by the time the answers came. Nothing else.
 const SETTLE_KINDS = ["settle", "same", "take"];
@@ -1967,11 +2088,20 @@ const SETTLE_KINDS = ["settle", "same", "take"];
 //                    deleted (otherRow)
 // A piece this device deleted whose deletion hasn't gone up yet is skipped
 // (listed in skippedDeletedHere), never brought back.
+// Pass 122b: what the person said no to is honored here, so every caller (the Get changes
+// window, Review, the automatic update, a restore) honors it the same way:
+//   - an account piece they left off this device (`declined.pieces`), that is not here, is
+//     skipped (listed in skippedDeclined): never offered, never brought in, never counted
+//   - two pieces they said are different (`declined.pairs`, either way round) are never matched
+//     by name, so the other copy is an ordinary "new" piece, not a "combine"
+//   - a "combine" says `uncertain` when either side has no composer: the name matched, but
+//     nothing says it is the same piece (the window offers it unticked, as "maybe")
 //   kind "settle"  : (Pass 121, only when `settle` is given) a held piece the person is
 //                    answering questions about: `plan` is Pass 117's engine run with
 //                    their answers (`settle[id]`, { [part]: "local" | "remote" | "both" })
 function walkAccountCandidates({ candidates, localPieces, accountRecord, only = null, automatic = false, settle = null }) {
   const entries = (accountRecord && accountRecord.pieces) || {};
+  const declined = declinedOf(accountRecord);
   // A piece here that the account marks deleted is never what another copy is
   // combined into: it's the extra copy that was marked deleted when two were
   // combined elsewhere, so the surviving copy comes in as a new piece instead
@@ -1983,6 +2113,7 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
   });
   const items = [];
   const skippedDeletedHere = [];
+  const skippedDeclined = [];
   ((candidates && candidates.pieces) || []).forEach((c) => {
     if (only && !only.has(c.id)) return;
     const entry = entries[c.id];
@@ -1991,8 +2122,14 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
       skippedDeletedHere.push({ id: c.id, name });
       return;
     }
+    // A piece the person said no to stays off this device. (One that IS here, however it
+    // got here, is an ordinary piece again: a stale answer never hides a piece's updates.)
+    if (declined.pieces.has(c.id) && !hasOwn(localPieces || {}, c.id)) {
+      skippedDeclined.push({ id: c.id, name });
+      return;
+    }
     const base = { id: c.id, revision: c.revision, name, piece: c.piece, held: !!(entry && entry.held), matchId: null, alignCreatedAt: false, otherRow: null };
-    const match = findMatchingPiece(working, c.piece);
+    const match = findMatchingPiece(matchPoolFor(working, c.id, declined.pairs), c.piece);
     if (!match) {
       items.push({ ...base, kind: "new" });
       working[c.id] = c.piece;
@@ -2009,9 +2146,9 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
       else items.push({ ...base, kind: "ask", matchId: match.id });
       return;
     }
-    items.push({ ...base, kind: "combine", matchId: match.id, otherRow: { id: c.id, revision: c.revision, raw: c.raw } });
+    items.push({ ...base, kind: "combine", matchId: match.id, otherRow: { id: c.id, revision: c.revision, raw: c.raw }, uncertain: composerBlank(match) || composerBlank(c.piece) });
   });
-  return { items, skippedDeletedHere };
+  return { items, skippedDeletedHere, skippedDeclined };
 }
 
 // What the flow would do, without doing it: per account piece, a kind (above);
@@ -2020,7 +2157,7 @@ function walkAccountCandidates({ candidates, localPieces, accountRecord, only = 
 export function planAccountMerge({ candidates, localPieces, localTechnique = null, accountRecord, automatic = false, settle = null }) {
   const local = localPieces || {};
   const entries = (accountRecord && accountRecord.pieces) || {};
-  const { items, skippedDeletedHere } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, automatic, settle });
+  const { items, skippedDeletedHere, skippedDeclined } = walkAccountCandidates({ candidates, localPieces: local, accountRecord, automatic, settle });
   const deletedElsewhere = ((candidates && candidates.deleted) || [])
     .filter((d) => hasOwn(local, d.id))
     .map((d) => ({
@@ -2039,7 +2176,7 @@ export function planAccountMerge({ candidates, localPieces, localTechnique = nul
     unreadable: !!t.unreadable,
     skippedItems: t.skippedItems || 0,
   };
-  return { items, skippedDeletedHere, deletedElsewhere, unreadable: (candidates && candidates.unreadable) || [], technique };
+  return { items, skippedDeletedHere, skippedDeclined, deletedElsewhere, unreadable: (candidates && candidates.unreadable) || [], technique };
 }
 
 // Does anything in the plan need a person to look at it? New pieces, pieces
@@ -2055,7 +2192,9 @@ export function planNeedsQuestion(plan) {
 // ones out. It re-works the plan from what it's given (never trusting an
 // earlier look), over only the pieces in `selectedIds` (null: all).
 //   ladderChoices: { [rowId]: "existing" | "imported" } for pieces that were asked
-//   orderChoice:   "existing" | "imported", for the switcher order of merged pieces
+//   orderChoice:   "existing" | "imported", for the switcher order of merged pieces; or
+//                  (Pass 122b, what every account flow passes) "follow": nobody is asked,
+//                  the order follows the person between devices (orderChoiceFor)
 // Per kind: new pieces are added keeping the account's created date; a clean
 // newer copy ("take") replaces this device's piece outright; a "same" piece
 // only gets its created date matched; "ask" and "combine" pieces go through
@@ -2124,11 +2263,12 @@ export function applyAccountMerge({
 
   const mergeInto = (existing, d) => {
     const ladderChoice = ladderChoices[d.id] === "imported" ? "imported" : "existing";
+    const order = orderChoice === "follow" ? orderChoiceFor({ existing, imported: d.piece, kind: d.kind, baseParts: prior[d.id] && prior[d.id].parts }) : orderChoice;
     // Same as the import path: re-derive everything a stored piece gets on
     // load, and let the schedule re-derive itself (rescheduleMarker cleared).
     return validateAndMigratePiece(
       ensureWorkId({
-        ...mergeImportedPiece(existing, d.piece, ladderChoice, orderChoice),
+        ...mergeImportedPiece(existing, d.piece, ladderChoice, order),
         rescheduleMarker: null,
       })
     );
@@ -2261,6 +2401,10 @@ export function applyAccountMerge({
   Object.keys(entries).forEach((id) => {
     if (prior[id] && prior[id].held) counts.clearedHeld += 1;
   });
+  // Pass 122b: how many pieces in the account the person said no to and that are not here,
+  // so the result can say they stayed off (whether they were left unticked just now or earlier).
+  const leftOffIds = declinedOf(accountRecord).pieces;
+  const leftOff = ((candidates && candidates.pieces) || []).filter((c) => leftOffIds.has(c.id) && !hasOwn(local, c.id)).length;
 
   let technique = null;
   const t = candidates && candidates.technique;
@@ -2318,7 +2462,64 @@ export function applyAccountMerge({
     // because the account marks them deleted, and [{ id, name, revision }] left alone
     removed,
     leftDeleted,
+    // Pass 122b: pieces the person said no to that stayed off this device
+    leftOff,
   };
+}
+
+// Pass 122b: piece order follows the person between devices, and no account flow asks about it.
+// For a piece changed in both places that goes through the import merge (which has no base of
+// its own), this says which side's order that merge keeps:
+//   - the same order on both sides: nothing to choose
+//   - only THIS device reordered since it last synced (the recorded base says the account still
+//     holds the order they last agreed on): this device's, so a reorder is never undone by an
+//     older copy
+//   - otherwise the account's. It is what the other devices hold, and it is the rule the merge
+//     engine uses when both sides reordered (SOFT_PARTS in lib/pieceMerge.js)
+// Two copies being combined (the same piece under another id) keep the place of the piece that
+// is here. Returns "existing" (this device's) or "imported" (the account's), the choices
+// mergeImportedPiece already takes.
+export function orderChoiceFor({ existing, imported, kind = "ask", baseParts = null }) {
+  if (kind === "combine") return "existing";
+  const mine = piecePartFingerprints(existing).sortOrder;
+  const theirs = piecePartFingerprints(imported).sortOrder;
+  if (mine === theirs) return "existing";
+  const base = baseParts && typeof baseParts.sortOrder === "string" ? baseParts.sortOrder : null;
+  if (base !== null && theirs === base && mine !== base) return "existing";
+  return "imported";
+}
+
+// What the person's ticks in the Get changes / Restore window mean (Pass 122b), the part that
+// needs no screen to test. `items` are the rows the window showed ({ id, kind, matchId }),
+// `selectedIds` the ids left ticked, `mode` "restore" | "changes" | "review".
+//   an unticked NEW row is a "no": remembered, and not mentioned again (`pieces`)
+//   an unticked COMBINE row says "these are different pieces": the pair is remembered and
+//     never offered as a combine again (`pairs`). In Get changes that copy also stays off this
+//     device and is not mentioned again (`pieces`), so no window opens for it a second time. In
+//     a restore it arrives as its own piece (`arrivingIds`) when the copy it would have been
+//     combined with is coming too, so two different pieces that share a name can both be
+//     restored; if that one isn't coming either, this one is simply left off.
+//     ("Ask me again" forgets the pair and the piece together, so the question is a combine again.)
+// Nothing else is remembered: an unticked "newer in your account" or "changed in both places"
+// row is neither (the piece is here), and it keeps being noticed, as before.
+export function planDeclines({ items, selectedIds, mode = "changes" }) {
+  const selected = new Set(selectedIds || []);
+  const out = { pairs: [], pieces: [], arrivingIds: [] };
+  (items || []).forEach((i) => {
+    if (!i || selected.has(i.id)) return;
+    if (i.kind === "new") {
+      out.pieces.push(i.id);
+    } else if (i.kind === "combine" && i.matchId) {
+      if (mode !== "restore") {
+        out.pairs.push([i.matchId, i.id]);
+        out.pieces.push(i.id);
+      } else if (selected.has(i.matchId)) {
+        out.pairs.push([i.matchId, i.id]);
+        out.arrivingIds.push(i.id);
+      } else out.pieces.push(i.id);
+    }
+  });
+  return out;
 }
 
 // Pass 120: an automatic update plans from the pieces this device held a moment
@@ -2426,7 +2627,7 @@ function nameList(names, cap = 5) {
 // `marked` is markOtherCopiesDeleted's answer (null if none were due);
 // `notMarked` says the other copies were left because this device hasn't done
 // its first backup yet (so the combined piece can't go up to replace them).
-export function describeAccountMergeResult({ mode = "changes", applied, technique = null, unreadable = 0, skippedItems = 0, techniqueUnreadable = false, marked = null, notMarked = [] }) {
+export function describeAccountMergeResult({ mode = "changes", applied, technique = null, unreadable = 0, skippedItems = 0, techniqueUnreadable = false, marked = null, notMarked = [], leftOff = 0 }) {
   const lines = [];
   const c = applied;
   if (c.added > 0) {
@@ -2473,7 +2674,66 @@ export function describeAccountMergeResult({ mode = "changes", applied, techniqu
     lines.push({ text: `${unreadable} ${plural(unreadable, "piece", "pieces")} in your account couldn't be read and ${plural(unreadable, "was", "were")} skipped.`, problem: true });
   }
   if (lines.length === 0) lines.push({ text: "Everything here already matches your account." });
+  // Pass 122b: said plainly, so "everything matches" is never read as "nothing is held back"
+  if (leftOff > 0) lines.push({ text: describeLeftOff(leftOff, mode) });
   return lines;
+}
+
+/* ---- what the person said no to (Pass 122b) --------------------------- */
+
+export const ASK_ME_AGAIN_LABEL = "Ask me again about what I said no to";
+
+// The line under a window's pieces (Get changes, Restore) that says what leaving a row
+// unticked means, so it is never a surprise that the app stops mentioning it.
+export function describeUntickedNote(mode) {
+  return mode === "restore"
+    ? `A piece you leave unticked isn't restored, and the app stops mentioning it. "Ask me again" in Settings, under Account, brings it back.`
+    : `A piece you leave unticked stays off this device, and the app stops mentioning it. "Ask me again" in Settings, under Account, brings it back.`;
+}
+
+// The words on a "same piece, other copy" row. Ticked combines them; unticked says they are
+// different pieces. `uncertain`: one of the two has no composer, so the name alone said it.
+export function describeCombineRow({ matchName, uncertain = false, mode = "changes" }) {
+  const name = matchName || "this piece";
+  const erased = "the extra copy in your account is marked deleted, not erased";
+  if (uncertain) {
+    return mode === "restore"
+      ? `Maybe the same piece as "${name}", but one of them has no composer, so the app can't be sure. Tick it to restore them as one piece (${erased}). Left unticked, they're different pieces, so both are restored.`
+      : `Maybe the same piece as "${name}" here, but one of them has no composer, so the app can't be sure. Tick it to combine them (${erased}). Left unticked, they're different pieces, and this one stays off this device.`;
+  }
+  return mode === "restore"
+    ? `Same name as "${name}". Ticked: they're restored as one piece, and ${erased}. Unticked: they're different pieces, so both are restored.`
+    : `Same piece as "${name}" here. Ticked: they're combined, and ${erased}. Unticked: they're different pieces, and this one stays off this device.`;
+}
+
+export const describeCombineBadge = (uncertain) => (uncertain ? "Maybe the same piece" : "Same piece, other copy");
+
+// After a window, when pieces the person said no to are in the account and stayed off. A restore
+// is offered on the welcome screen, which has no Settings, so it says how to choose again there.
+export function describeLeftOff(count, mode = "changes") {
+  if (mode === "restore") {
+    return `${count} ${plural(count, "piece", "pieces")} you said no to ${plural(count, "was", "were")} not restored. Press Restore again, or use "Ask me again" in Settings, under Account, to choose again.`;
+  }
+  return `${count} ${plural(count, "piece", "pieces")} you said no to ${plural(count, "stays", "stay")} off this device. "Ask me again" in Settings, under Account, brings ${plural(count, "it", "them")} back.`;
+}
+
+// The line under the "Ask me again" button: what it would take back.
+export function describeAskMeAgainHint({ pieces = 0, pairs = 0 }) {
+  const said = pairs === 1 ? "1 pair of pieces is" : `${pairs} pairs of pieces are`;
+  if (pieces > 0 && pairs > 0) {
+    return `You said no to ${pieces} ${plural(pieces, "piece", "pieces")}, and that ${said} different. Pressing this makes the app ask about all of it again.`;
+  }
+  if (pieces > 0) {
+    return `You said no to ${pieces} ${plural(pieces, "piece", "pieces")}, so ${plural(pieces, "it's", "they're")} left off this device and not mentioned. Pressing this makes the app offer ${plural(pieces, "it", "them")} again.`;
+  }
+  return `You said ${said} different, so the app doesn't offer to combine ${pairs === 1 ? "them" : "any of them"}. Pressing this makes the app ask again.`;
+}
+
+// What the page says after the button was pressed (lines for the page, never a pop-up).
+export function describeAskMeAgain({ cleared }) {
+  return cleared
+    ? [{ text: "Okay. The app will ask again about everything you said no to. Press Get changes from your account to see it now." }]
+    : [{ text: "There was nothing to ask again about." }];
 }
 
 /* ---- settling a held piece, one question at a time (Pass 121) --------- */
@@ -2488,13 +2748,28 @@ export function heldConflicts(accountRecord, id) {
   return e && e.held && Array.isArray(e.conflicts) ? e.conflicts : [];
 }
 
-// The pieces Review asks about one question at a time: held WITH a recorded list.
-// A piece held without one still goes through the whole-piece picker, exactly as
-// before (planSettle also hands back any it can't ask about, as `fallbackIds`).
+// The pieces held WITH a recorded list of conflicting parts (Pass 120's automatic update).
 export function heldIdsWithConflicts(accountRecord) {
   const entries = (accountRecord && accountRecord.pieces) || {};
   return Object.keys(entries)
     .filter((id) => heldConflicts(accountRecord, id).length > 0)
+    .sort();
+}
+
+// The pieces Review asks about one question at a time: held WITH a recorded list, and (Pass
+// 122b) a piece held because an upload was REFUSED that still knows what it last synced: its
+// record keeps the fingerprint of each part as last agreed (`parts`), which is all the engine
+// needs as a base, so Review can tell which parts both sides changed. A piece held with no
+// recorded base (a first upload refused leaves only the held mark; an import) still goes
+// through the whole-piece picker, exactly as before (planSettle also hands back any it can't
+// ask about, as `fallbackIds`).
+export function heldIdsToSettle(accountRecord) {
+  const entries = (accountRecord && accountRecord.pieces) || {};
+  return Object.keys(entries)
+    .filter((id) => {
+      const e = entries[id];
+      return !!e && e.held === true && (heldConflicts(accountRecord, id).length > 0 || (isObject(e.parts) && Object.keys(e.parts).length > 0));
+    })
     .sort();
 }
 
@@ -2824,7 +3099,7 @@ export function describeKept(questions, answers) {
 //                fallbackIds), so the page can say they were not asked about
 export function planSettle({ candidates, localPieces, accountRecord, now = Date.now(), ids: only = null, build = buildSettleQuestions }) {
   const out = { items: [], fallbackIds: [], errored: [] };
-  const ids = heldIdsWithConflicts(accountRecord).filter((id) => !only || only.includes(id));
+  const ids = heldIdsToSettle(accountRecord).filter((id) => !only || only.includes(id));
   if (ids.length === 0) return out;
   const wanted = new Set(ids);
   const rows = ((candidates && candidates.pieces) || []).filter((c) => wanted.has(c.id));

@@ -30,6 +30,8 @@ import {
   unionProgressEntries,
   isValidChoice,
   WHOLE_PIECE_PART,
+  SOFT_PARTS,
+  compareSwitcherOrder,
 } from "../src/lib/pieceMerge.js";
 import { fingerprint as accountSyncFingerprint } from "../src/lib/accountSync.js";
 
@@ -629,16 +631,20 @@ describe("a reschedule on one device, a session on another (Pass 117)", () => {
 
 // Two simulated devices start from one piece, edit it offline in random ways,
 // and sync in random orders, merging by part. Every merge is checked against
-// six invariants:
+// seven invariants:
 //   1. no session logged on either device since the base is missing: it is in
 //      the merged piece or, for a conflicted part, in the conflict's values
 //   2. a part changed on one side only ends with that side's value
 //   3. a part changed on both to different values is reported as a conflict,
-//      never silently chosen (and the merged piece keeps this device's value)
+//      never silently chosen (and the merged piece keeps this device's value);
+//      except piece order and date added (7)
 //   4. the merged piece is unchanged by validateAndMigratePiece
 //   5. merging the same inputs again gives the same result
 //   6. merging when the remote equals the base returns this device's piece
 //      untouched
+//   7. (Pass 122b) piece order and date added are never a conflict: changed on
+//      both to different values, the other copy's value wins and the result
+//      says so (softSettled)
 // "Changed" below is judged from the real pieces (a deep comparison of values),
 // not from the engine's fingerprints, so the checks don't depend on the code
 // they check.
@@ -673,8 +679,9 @@ describe("two simulated devices (Pass 117)", () => {
   // How often each kind of edit is made. EVERY_KIND gives each of the spec's
   // edits a real share (so every rule is exercised often); EVERYDAY is mostly
   // practice sessions, which is closer to how the app is actually used.
-  const EVERY_KIND = [["log", 30], ["undo", 8], ["schedule", 8], ["difficulty", 8], ["status", 5], ["describe", 6], ["split", 8], ["reschedule", 8], ["spot", 8], ["spotTime", 4]];
-  const EVERYDAY = [["log", 80], ["undo", 3], ["schedule", 3], ["difficulty", 3], ["status", 1], ["describe", 3], ["split", 1], ["reschedule", 1], ["spot", 3], ["spotTime", 2]];
+  // Pass 122b added "reorder" (the piece's place in the switcher) and "dated" (its date added).
+  const EVERY_KIND = [["log", 30], ["undo", 8], ["schedule", 8], ["difficulty", 8], ["status", 5], ["describe", 6], ["split", 8], ["reschedule", 8], ["spot", 8], ["spotTime", 4], ["reorder", 8], ["dated", 3]];
+  const EVERYDAY = [["log", 80], ["undo", 3], ["schedule", 3], ["difficulty", 3], ["status", 1], ["describe", 3], ["split", 1], ["reschedule", 1], ["spot", 3], ["spotTime", 2], ["reorder", 3], ["dated", 1]];
 
   function edit(piece, rng, ctx) {
     const kinds = ctx.weights;
@@ -710,6 +717,11 @@ describe("two simulated devices (Pass 117)", () => {
       next = { ...piece, status: pickOf(rng, ["active", "paused", "archived"]) };
     } else if (kind === "describe") {
       next = rng() < 0.5 ? { ...piece, notes: `notes ${stamp}` } : { ...piece, name: `Ballade ${stamp}` };
+    } else if (kind === "reorder") {
+      // like moveGroupTo (App.jsx): a new rank in the switcher
+      next = { ...piece, sortOrder: intIn(rng, 0, 9) };
+    } else if (kind === "dated") {
+      next = { ...piece, createdAt: 1000 + intIn(rng, 1, 9) };
     } else if (kind === "split") {
       const options = practice.filter(canSplitChunk);
       if (options.length) {
@@ -837,6 +849,13 @@ describe("two simulated devices (Pass 117)", () => {
         const conflictKeys = new Set(partConflicts.map((c) => c.part));
         keys.forEach((k) => {
           if (derivedKeys.has(k)) return;
+          // In a minutes-per-day schedule `daysToLearn` is worked out from the other schedule parts
+          // on every load, so after a merge it can differ from both sides' copy even when neither
+          // changed it (one side changed minutes per day, the other split a chunk). The engine
+          // reconciles the merged schedule so that a reload gives the same piece (invariant 4);
+          // this check would otherwise call that a lost part. Found by running wider than seed 300
+          // (seed 311 on the code before Pass 122b; the engine is right, the check was too strict).
+          if (k === "daysToLearn" && mt.scheduleMode === "minutes") return;
           const cl = changed(lt, k);
           const cr = changed(rt, k);
           if (!cl && !cr) assert.ok(same(mt[k], lt[k]), `unchanged part ${k} (${where})`);
@@ -845,6 +864,13 @@ describe("two simulated devices (Pass 117)", () => {
           else if (same(lt[k], rt[k])) {
             assert.ok(same(mt[k], lt[k]), `agreed ${k} (${where})`);
             assert.equal(conflictKeys.has(k), false, `${k} is agreement, not a conflict (${where})`);
+          } else if (SOFT_PARTS.includes(k)) {
+            // (7) Pass 122b: piece order and date added are never a conflict. Changed on both
+            // to different values, the engine settles them itself: the other copy's value.
+            assert.equal(conflictKeys.has(k), false, `(7) ${k}: never a conflict (${where})`);
+            assert.ok(same(mt[k], rt[k]), `(7) ${k}: the other copy's value wins (${where})`);
+            assert.ok(r.softSettled.some((s) => s.part === k && s.side === "remote"), `(7) ${k}: said so in softSettled (${where})`);
+            tally.softSettled = (tally.softSettled || 0) + 1;
           } else {
             assert.ok(conflictKeys.has(k), `(3) ${k}: changed on both to different values is reported (${where})`);
             assert.ok(same(mt[k], lt[k]), `(3) ${k}: this device's value is kept (${where})`);
@@ -852,6 +878,8 @@ describe("two simulated devices (Pass 117)", () => {
             assert.ok(same(c.local, lt[k]) && same(c.remote, rt[k]), `(3) ${k}: the conflict lists both values (${where})`);
           }
         });
+        // nothing is in softSettled that was not a soft part changed on both sides
+        r.softSettled.forEach((s) => assert.ok(SOFT_PARTS.includes(s.part) && changed(lt, s.part) && changed(rt, s.part) && !same(lt[s.part], rt[s.part]), `(7) no false softSettled on ${s.part} (${where})`));
         conflictKeys.forEach((k) => assert.ok(changed(lt, k) && changed(rt, k) && !same(lt[k], rt[k]), `no false conflict on ${k} (${where})`));
         // (1) every session either side logged since the base is in the merged piece or in a conflict
         const have = sessionKeys(merged);
@@ -908,14 +936,15 @@ describe("two simulated devices (Pass 117)", () => {
     return tally;
   }
 
-  test(`${RUNS} seeded runs of ${ROUNDS} rounds, every kind of edit: the six invariants hold after every merge`, () => {
+  test(`${RUNS} seeded runs of ${ROUNDS} rounds, every kind of edit: the seven invariants hold after every merge`, () => {
     const tally = simulate("every kind of edit", EVERY_KIND, RUNS);
     assert.ok(tally.merges > RUNS, "the simulation really merged");
     assert.ok((tally.merged || 0) > 0 && (tally.conflicts || 0) > 0 && (tally["whole-piece-conflict"] || 0) > 0, "it exercised clean merges, part conflicts and whole-piece conflicts");
     assert.ok(tally.partConflicts > 0 && tally.chunkConflicts > 0, "and single-part conflicts");
+    assert.ok((tally.softSettled || 0) > 0, "and piece order or date added changed on both sides (settled by the engine, never a conflict)");
   });
 
-  test("100 more runs with an everyday mix (mostly practice sessions): the same six invariants", () => {
+  test("100 more runs with an everyday mix (mostly practice sessions): the same seven invariants", () => {
     const tally = simulate("everyday mix", EVERYDAY, 100);
     assert.ok((tally.merged || 0) > 0);
   });
@@ -1364,5 +1393,202 @@ describe("150 seeded pairs of copies, every conflict settled a random valid way 
     }
     assert.ok(withConflicts >= 60, `the seeds really made conflicts (${withConflicts})`);
     assert.ok(bothAnswers >= 30, `and exercised 'both' (${bothAnswers})`);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Piece order and date added are never a conflict (Pass 122b)        */
+/* ------------------------------------------------------------------ */
+
+describe("piece order and date added are never a conflict (Pass 122b)", () => {
+  const base0 = makePiece({ sortOrder: 5, createdAt: 1000 });
+  const baseParts = piecePartFingerprints(base0);
+  const edited = (over, updatedAt = 50) => ({ ...base0, ...over, updatedAt });
+
+  test("the parts the engine settles by itself are exactly piece order and date added", () => {
+    assert.deepEqual([...SOFT_PARTS].sort(), ["createdAt", "sortOrder"]);
+  });
+
+  test("changed on one side only, the order travels like any part, whichever side moved it", () => {
+    const moved = edited({ sortOrder: 2 });
+    const here = planPieceMerge({ local: moved, remote: base0, base: baseParts });
+    assert.equal(here.status, "local-only");
+    assert.equal(here.merged.sortOrder, 2);
+    assert.deepEqual(here.softSettled, []);
+    const there = planPieceMerge({ local: base0, remote: moved, base: baseParts });
+    assert.equal(there.status, "merged");
+    assert.equal(there.merged.sortOrder, 2, "the other device reordered: this one follows");
+    assert.deepEqual(there.softSettled, [], "nothing to settle: only one side changed it");
+    assert.deepEqual(there.fromRemote, ["sortOrder"]);
+  });
+
+  test("changed on both sides to different values: no conflict, the other copy's order wins, and the result says so", () => {
+    const r = planPieceMerge({ local: edited({ sortOrder: 1 }), remote: edited({ sortOrder: 3 }), base: baseParts });
+    assert.equal(r.status, "merged", "not 'conflicts'");
+    assert.deepEqual(r.conflicts, []);
+    assert.equal(r.merged.sortOrder, 3);
+    assert.deepEqual(r.softSettled, [{ part: "sortOrder", side: "remote" }]);
+  });
+
+  test("softWins 'local' keeps this device's value instead (the rule between two tabs of one browser)", () => {
+    const r = planPieceMerge({ local: edited({ sortOrder: 1 }), remote: edited({ sortOrder: 3 }), base: baseParts, softWins: "local" });
+    assert.equal(r.status, "merged");
+    assert.deepEqual(r.conflicts, []);
+    assert.equal(r.merged.sortOrder, 1);
+    assert.deepEqual(r.softSettled, [{ part: "sortOrder", side: "local" }]);
+    // anything else for softWins means the default
+    const odd = planPieceMerge({ local: edited({ sortOrder: 1 }), remote: edited({ sortOrder: 3 }), base: baseParts, softWins: "nonsense" });
+    assert.equal(odd.merged.sortOrder, 3);
+  });
+
+  test("date added is settled the same way", () => {
+    const r = planPieceMerge({ local: edited({ createdAt: 1111 }), remote: edited({ createdAt: 2222 }), base: baseParts });
+    assert.equal(r.status, "merged");
+    assert.deepEqual(r.conflicts, []);
+    assert.equal(r.merged.createdAt, 2222);
+    assert.deepEqual(r.softSettled, [{ part: "createdAt", side: "remote" }]);
+    const mine = planPieceMerge({ local: edited({ createdAt: 1111 }), remote: edited({ createdAt: 2222 }), base: baseParts, softWins: "local" });
+    assert.equal(mine.merged.createdAt, 1111);
+  });
+
+  test("both changed to the SAME value is agreement: nothing for the engine to settle", () => {
+    const r = planPieceMerge({ local: edited({ sortOrder: 4 }), remote: edited({ sortOrder: 4, notes: "x" }), base: baseParts });
+    assert.equal(r.status, "merged");
+    assert.deepEqual(r.softSettled, []);
+    assert.ok(r.agreed.includes("sortOrder"));
+    assert.equal(r.merged.sortOrder, 4);
+  });
+
+  test("with a real conflict beside them, only the real one is a conflict; the order and the date are still settled", () => {
+    const local = edited({ sortOrder: 1, createdAt: 1111, name: "Mine" });
+    const remote = edited({ sortOrder: 3, createdAt: 2222, name: "Theirs" });
+    const r = planPieceMerge({ local, remote, base: baseParts });
+    assert.equal(r.status, "conflicts");
+    assert.deepEqual(r.conflicts.map((c) => c.part), ["name"], "only the name is a conflict");
+    assert.equal(r.merged.name, "Mine", "a real conflict still keeps this device's value");
+    assert.equal(r.merged.sortOrder, 3);
+    assert.equal(r.merged.createdAt, 2222);
+    assert.deepEqual(r.softSettled.map((s) => s.part).sort(), ["createdAt", "sortOrder"]);
+  });
+
+  test("an answer given for the order or the date is not an answer: it is unused and changes nothing", () => {
+    const r = planPieceMerge({
+      local: edited({ sortOrder: 1 }),
+      remote: edited({ sortOrder: 3 }),
+      base: baseParts,
+      choices: { sortOrder: "local" },
+    });
+    assert.deepEqual(r.unusedChoices, ["sortOrder"]);
+    assert.equal(r.merged.sortOrder, 3, "the engine's own rule, not the answer");
+    assert.deepEqual(r.settled, []);
+  });
+
+  test("the merged piece is the same after a reload, and the inputs are never changed", () => {
+    const local = edited({ sortOrder: 1, createdAt: 1111 });
+    const remote = edited({ sortOrder: 3, createdAt: 2222 });
+    const before = [clone(local), clone(remote)];
+    const r = planPieceMerge({ local, remote, base: baseParts });
+    assert.deepEqual(piecePartFingerprints(validateAndMigratePiece(clone(r.merged))), piecePartFingerprints(r.merged));
+    assert.ok(same(local, before[0]) && same(remote, before[1]));
+  });
+
+  test("a structure change against progress is still one whole-piece conflict (order and date change nothing about that)", () => {
+    const grid = { ...edited({ sortOrder: 1 }), totalMeasures: 40, measureDifficulty: Array(40).fill(1), sections: [{ id: "s1", name: "", start: 1, end: 40 }] };
+    const practiced = logSession(edited({ sortOrder: 3 }), "c1", { day: 2, loggedAt: 7 });
+    const r = planPieceMerge({ local: grid, remote: practiced, base: baseParts });
+    assert.equal(r.status, "whole-piece-conflict");
+    assert.equal(r.merged, grid, "this device's whole piece, untouched");
+  });
+});
+
+describe("two devices that reorder end up with the same order (Pass 122b)", () => {
+  // A model of the account: one shared copy. A sync merges it into the device and the
+  // merged result becomes the shared copy (what an upload does). Each round both devices
+  // reorder (or not) and then every device syncs, A then B then A again, a full exchange.
+  const RUNS = 300;
+  const ROUNDS = 6;
+
+  function runOne(seed) {
+    const rng = seeded(seed);
+    let clock = 100;
+    const start = makePiece({ sortOrder: intIn(rng, 0, 9), createdAt: 1000 });
+    const account = { piece: start };
+    const devices = [0, 1].map(() => ({ piece: start, base: piecePartFingerprints(start) }));
+    let settledByEngine = 0;
+    const sync = (d, where) => {
+      const r = planPieceMerge({ local: d.piece, remote: account.piece, base: d.base });
+      assert.notEqual(r.status, "ask", `there is always a base (${where})`);
+      assert.equal(r.conflicts.some((c) => c.part === "sortOrder" || c.part === "createdAt"), false, `never a conflict on order or date (${where})`);
+      settledByEngine += r.softSettled.length;
+      d.piece = r.merged;
+      account.piece = d.piece;
+      d.base = piecePartFingerprints(d.piece);
+    };
+    for (let round = 0; round < ROUNDS; round++) {
+      devices.forEach((d) => {
+        if (rng() < 0.7) d.piece = { ...d.piece, sortOrder: intIn(rng, 0, 9), updatedAt: ++clock };
+        if (rng() < 0.2) d.piece = { ...d.piece, createdAt: 1000 + intIn(rng, 1, 9), updatedAt: ++clock };
+        if (rng() < 0.3) d.piece = { ...d.piece, notes: `notes ${++clock}`, updatedAt: clock }; // a real conflict now and then
+      });
+      const order = rng() < 0.5 ? [0, 1] : [1, 0];
+      order.forEach((i) => {
+        if (rng() < 0.85) sync(devices[i], `seed ${seed}, round ${round}, device ${i}`);
+      });
+      // a full exchange: nobody changes anything in between
+      const where = `seed ${seed}, round ${round}, exchange`;
+      sync(devices[0], where);
+      sync(devices[1], where);
+      sync(devices[0], where);
+      [0, 1].forEach((i) => {
+        assert.equal(devices[i].piece.sortOrder, account.piece.sortOrder, `device ${i} holds the account's order (${where})`);
+        assert.equal(devices[i].piece.createdAt, account.piece.createdAt, `device ${i} holds the account's date added (${where})`);
+      });
+    }
+    return settledByEngine;
+  }
+
+  test(`${RUNS} seeded runs: after a full exchange both devices hold the same order and the same date added, whatever each did`, () => {
+    let settled = 0;
+    for (let seed = 1; seed <= RUNS; seed++) settled += runOne(seed);
+    console.log(`order convergence: ${RUNS} runs of ${ROUNDS} rounds, the engine settled ${settled} order or date conflicts by itself`);
+    assert.ok(settled > 50, `the runs really made order conflicts (${settled})`);
+  });
+});
+
+describe("the switcher shows the same list on every device (Pass 122b)", () => {
+  const piece = (id, sortOrder, createdAt) => ({ id, sortOrder, createdAt });
+
+  test("by rank first, then (for a tie) by date added, then by id, whatever order the pieces were loaded in", () => {
+    const list = [piece("c", 2, 300), piece("a", 1, 500), piece("d", 2, 100), piece("b", 2, 100), piece("e", 0, 900)];
+    const expected = ["e", "a", "b", "d", "c"]; // rank 0, 1, then the three 2s: 100 (b before d by id), then 300
+    const rng = seeded(7);
+    for (let i = 0; i < 50; i++) {
+      const shuffled = [...list].sort(() => rng() - 0.5);
+      assert.deepEqual(shuffled.sort(compareSwitcherOrder).map((p) => p.id), expected, `shuffle ${i}`);
+    }
+  });
+
+  test("a piece with no rank sorts by when it was added, as it always did; nothing throws on gaps", () => {
+    const list = [piece("x", undefined, 50), piece("y", 10, 1), piece("z", null, 5)];
+    // the old rule: sortOrder ?? createdAt ?? 0, so z is 5, y is 10 and x is 50
+    assert.deepEqual([...list].sort(compareSwitcherOrder).map((p) => p.id), ["z", "y", "x"]);
+    assert.deepEqual([{}, { id: "q" }, null].sort(compareSwitcherOrder).length, 3);
+  });
+
+  test("wherever two pieces do not tie, it orders exactly as the old sort did (it only ends ties)", () => {
+    const old = (a, b) => (a.sortOrder ?? a.createdAt ?? 0) - (b.sortOrder ?? b.createdAt ?? 0);
+    const rng = seeded(11);
+    for (let run = 0; run < 100; run++) {
+      const ranks = [...new Set(Array.from({ length: 12 }, () => intIn(rng, 0, 40)))];
+      const list = ranks.map((r, i) => (rng() < 0.7 ? piece(`p${i}`, r, intIn(rng, 1, 900)) : piece(`p${i}`, undefined, r)));
+      assert.deepEqual([...list].sort(compareSwitcherOrder).map((p) => p.id), [...list].sort(old).map((p) => p.id), `run ${run}`);
+    }
+  });
+
+  test("two devices that hold the same ranks (a merge by piece can leave a tie) end with the same list", () => {
+    // device one loaded p1 first, device two loaded p2 first; both hold rank 4 for both pieces
+    const one = [piece("p1", 4, 1000), piece("p2", 4, 1000)];
+    const two = [piece("p2", 4, 1000), piece("p1", 4, 1000)];
+    assert.deepEqual(one.sort(compareSwitcherOrder).map((p) => p.id), two.sort(compareSwitcherOrder).map((p) => p.id));
   });
 });

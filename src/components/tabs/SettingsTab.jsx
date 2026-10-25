@@ -20,6 +20,7 @@ import { DocumentsList } from "../fields/DocumentsList";
 import { isPlanActuallyComplete } from "../../lib/scheduling";
 import { isInRevival } from "../../lib/revival";
 import { formatMinutes } from "../../lib/utils";
+import { ASK_ME_AGAIN_LABEL, describeAskMeAgainHint } from "../../lib/accountSync";
 
 // The grayed-out look for the plan-incomplete Archive button comes from the
 // shared .ghost-btn:disabled rule (App.jsx CSS, Pass 85) — this used to need
@@ -110,6 +111,12 @@ export function SettingsTab({
   onKeepDeleted,
   onDeleteDeletedHere,
   onOpenRecentlyDeleted,
+  // What the person said no to (Pass 122b). `declinedSummary` is { pieces, pairs }: pieces left
+  // off this device and pairs of pieces said to be different. While it is not empty the Account
+  // panel offers "Ask me again about what I said no to" (`onAskMeAgain`: App.jsx forgets them all
+  // on this device, so they are offered again).
+  declinedSummary = { pieces: 0, pairs: 0 },
+  onAskMeAgain,
   // Account settings (Pass 113). "Change password" opens a window (App.jsx).
   // "Sign out of all devices" asks first, here in the panel (signOutAllAsking),
   // never as a browser pop-up. signOutNotice is the last result ({ text,
@@ -211,10 +218,20 @@ export function SettingsTab({
                       <Trash2 size={14} /> Recently deleted
                     </button>
                   )}
+                  {onAskMeAgain && declinedSummary.pieces + declinedSummary.pairs > 0 && (
+                    <button className="ghost-btn" onClick={onAskMeAgain} disabled={backupRunning || !!backupAskText || syncRunning || accountBusy}>
+                      <RotateCcw size={14} /> {ASK_ME_AGAIN_LABEL}
+                    </button>
+                  )}
                   <button className="ghost-btn" onClick={onSignOut} disabled={backupRunning || accountBusy}>
                     <LogOut size={14} /> Sign out
                   </button>
                 </div>
+                {onAskMeAgain && declinedSummary.pieces + declinedSummary.pairs > 0 && (
+                  <p className="wizard-hint" style={{ margin: "8px 0 0", fontSize: 13 }}>
+                    {describeAskMeAgainHint(declinedSummary)}
+                  </p>
+                )}
                 {/* Pass 120: off unless chosen, on this device only (it is kept in the
                     device record, never in the account). Offered once this device's
                     first backup is checked, because the look at the account that

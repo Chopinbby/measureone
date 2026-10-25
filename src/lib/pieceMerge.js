@@ -228,6 +228,33 @@ function sameFingerprints(a, b) {
 // label the device record and the question use for it.
 export const WHOLE_PIECE_PART = "chunk layout and practice";
 
+// Pass 122b: two parts are display arrangement, never data a person would want to be
+// asked about: where the piece sits in the switcher (`sortOrder`) and the date it was
+// added (`createdAt`). Changed on one side only they travel like any part (reorder the
+// list on one device and the others follow). Changed to different values on both sides
+// they are NOT a conflict: the engine settles them itself, in favor of the side the caller
+// names (`softWins`), and lists what it did in `softSettled`. It is always one fixed side,
+// never "whichever device happens to be merging". The account's copy wins for the
+// account's flows (the default): the merged piece then holds exactly the order the account
+// holds, so nothing about the order is left waiting to go up and two devices cannot take
+// turns overwriting each other's order (a simulation in test/pieceMerge.test.mjs checks that
+// devices that have exchanged copies end with the same order). A tab of one browser keeps
+// its own value instead (tabSync.js): the person is working in that tab.
+export const SOFT_PARTS = ["sortOrder", "createdAt"];
+
+// The order the switcher shows pieces in (Pass 122b): by `sortOrder` (a piece with none sorts
+// by when it was added, as it always did), and where two pieces hold the same rank by date
+// added and then by id. Merging a reorder piece by piece can leave two pieces with the same
+// number, and a plain sort would leave that tie to the order the pieces happened to be loaded
+// in, which can differ between devices: this way two devices that hold the same pieces show the
+// same list. The next reorder gives every piece a fresh rank and ends the tie for good.
+export function compareSwitcherOrder(a, b) {
+  const rank = (p) => (p && (p.sortOrder ?? p.createdAt)) ?? 0;
+  const added = (p) => (p && p.createdAt) ?? 0;
+  const id = (p) => String((p && p.id) ?? "");
+  return rank(a) - rank(b) || added(a) - added(b) || (id(a) < id(b) ? -1 : id(a) > id(b) ? 1 : 0);
+}
+
 // In a days-mode schedule the target date is the one thing a person sets. "Days to
 // learn" and "minutes per day" are worked out FROM it whenever it is edited (Settings,
 // Schedule), and so is the reschedule marker (handleSavePiece takes a fresh one on a
@@ -383,6 +410,10 @@ export function unionProgressEntries(mine, theirs) {
 //                (DATE_LINKED_FIELDS). They are listed in `conflicts` or merged as
 //                ever until the date is answered; once it is, they follow it as a unit
 //                and drop out of `conflicts`, so a question about them is never needed
+//   softSettled  (Pass 122b) [{ part, side: "remote" | "local" }]: the display parts
+//                (SOFT_PARTS) both sides changed to different values, settled by the
+//                engine itself for the side `softWins` names. Never in `conflicts`,
+//                never asked about
 //   reason       for "ask": "no-base" | "different-ids" | "not-pieces"
 //
 // `base` is the entry's `parts` ({ key: fingerprint }). `local` and `remote`
@@ -398,6 +429,12 @@ export function unionProgressEntries(mine, theirs) {
 // is "merged" only when every conflict was answered, and a partial set of answers
 // changes nothing the caller should apply. Without `choices` nothing differs.
 //
+// `softWins` (Pass 122b, "remote" by default): which side's value SOFT_PARTS take when
+// both sides changed them to different values. "remote" is the other copy (the account's,
+// in every flow that reads the account); "local" is this device's (a tab of one browser,
+// where the person is working in this tab). Always one fixed side, so that two devices
+// that have exchanged copies end with the same order.
+//
 // Two stamps are not parts. updatedAt is the later of the two. lastLoggedAt is
 // recomputed from the merged sessions (the later of the two unless that date
 // belongs to a session the merged piece doesn't hold: an undo, or the remote
@@ -409,7 +446,7 @@ export function unionProgressEntries(mine, theirs) {
 // reschedule's extension as a floor. So it is taken like any part when one side
 // changed it, the larger when both did, and the whole schedule is reconciled
 // once more at the end.
-export function planPieceMerge({ local, remote, base, choices = null }) {
+export function planPieceMerge({ local, remote, base, choices = null, softWins = "remote" }) {
   const result = (status, extra = {}) => ({
     status,
     merged: local,
@@ -422,6 +459,7 @@ export function planPieceMerge({ local, remote, base, choices = null }) {
     settled: [],
     unusedChoices: [],
     linkedToDate: [],
+    softSettled: [],
     reason: null,
     ...extra,
   });
@@ -497,6 +535,18 @@ export function planPieceMerge({ local, remote, base, choices = null }) {
     else conflictKeys.push(k);
   });
 
+  // Pass 122b: piece order and date added are never a conflict. Changed on one side only
+  // they were taken above like any part; changed on both to different values, the engine
+  // settles them itself, for the side `softWins` names, and says so in `softSettled`.
+  const softSide = softWins === "local" ? "local" : "remote";
+  const softSettled = [];
+  SOFT_PARTS.forEach((k) => {
+    const i = conflictKeys.indexOf(k);
+    if (i < 0) return;
+    conflictKeys.splice(i, 1);
+    softSettled.push({ part: k, side: softSide });
+  });
+
   // Which schedule mode the merged piece ends up in: the remote's if only the
   // remote changed it, or if the person settled a conflict over it that way; this
   // device's otherwise (an unsettled conflict keeps this device's).
@@ -556,6 +606,7 @@ export function planPieceMerge({ local, remote, base, choices = null }) {
     }
   };
   fromRemote.forEach(takeFromRemote);
+  softSettled.filter((s) => s.side === "remote").forEach((s) => takeFromRemote(s.part)); // "local": already in `merged`
   if (daysToLearnFromRemote) takeFromRemote("daysToLearn");
   if (dateAnswer === "remote") linkedToDate.forEach(takeFromRemote); // "this device's": already in `merged`
   settled.forEach(({ part, choice }) => {
@@ -604,5 +655,6 @@ export function planPieceMerge({ local, remote, base, choices = null }) {
     settled,
     unusedChoices,
     linkedToDate,
+    softSettled,
   });
 }

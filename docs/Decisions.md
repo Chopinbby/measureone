@@ -7647,7 +7647,8 @@ what it rules out.
   say "1 piece" for up to a retry gap; it corrects itself. (b) The technique library
   will often read "newer" while two devices are in use, because each rebuilds today's
   list on its own, the per-device-parts problem (Pass 120). (c) A piece declined in "Get
-  changes" is noticed again on every check (the remembered "no", now Pass 122b). (d) ~~A piece
+  changes" is noticed again on every check (the remembered "no", now Pass 122b). **Resolved in
+  Pass 122b:** a piece left unticked is remembered and no longer counted. (d) ~~A piece
   deleted here and changed elsewhere isn't reported (Pass 122).~~ **Resolved in Pass 122:** the
   deletion is retried at the newer revision and goes through. (e) The light read pages
   by offset, so a row inserted between two pages can be missed or repeated for one
@@ -8054,10 +8055,10 @@ what it rules out.
   9. **Still open from it:** (a) *size and schedule travel together* (a resize on one device
      against a difficulty edit on the other still gives a piece whose measure count and
      difficulty list disagree; proposed as its own pass, not approved); (b) a piece held by a
-     refusal gets no questions (Pass 122b); (c) remembered answers ("always keep both"),
+     refusal gets no questions (Pass 122b; **done**); (c) remembered answers ("always keep both"),
      deferred with no owner; (d) `foldConflictedProgress` (`tabSync.js`) and
      `unionProgressEntries` are two implementations of "keep both"; (e) Pass 117's open item 2
-     (piece order and date added can conflict; Pass 122b).
+     (piece order and date added can conflict; Pass 122b; **done**).
 
 - **Pass 122 — a piece deleted on one device is deleted everywhere, with a way back
   (2026-10-23 to 2026-10-24).** `lib/recentlyDeleted.js` and
@@ -8084,9 +8085,10 @@ what it rules out.
   - **Notices:** a red page banner only when practice was lost, otherwise a quiet line in the
     Account panel.
   - **Two passes, not one** (2026-10-24), and then the split, the added files and the combine
-    note were approved ("go ahead with the split, the files, and the note"). **122b is not
-    built:** the remembered "These are different pieces", the blank-composer box, never
-    asking about piece order or date added, and questions for a piece held by a refused upload.
+    note were approved ("go ahead with the split, the files, and the note"). **122b was built
+    afterwards** (the next entry): the remembered "These are different pieces", the
+    blank-composer box, never asking about piece order or date added, and questions for a piece
+    held by a refused upload.
   **Calls made while building it, for her to overrule:**
   1. **A refused deletion is retried once** against the newer revision (the card; the one
      exception to "a refusal is never retried"). Safe because only `deleted_at` is set: what
@@ -8122,7 +8124,8 @@ what it rules out.
      days, so call 2's gap (older combines carry no note) touches nothing today.
   **Resolved by it:** Pass 111's later-passes item 3 (a deleted-here piece held), Pass 112's
   item 6 (no undelete), Pass 116's found item 4 (deleted here and changed elsewhere), and open
-  item (iii). **Not resolved, now 122b:** Pass 112's items 5 and 9 and Pass 116's found item 3.
+  item (iii). **Not resolved here, then done in 122b:** Pass 112's items 5 and 9 and Pass 116's
+  found item 3.
   **Found and not fixed:** a piece in use is downloaded again every 5 seconds, not every
   minute (Pass 120's left-open item, more reachable here); a card being typed into or timed is
   not "in use", so a removal takes it with the piece. **From the pre-commit review
@@ -8131,6 +8134,42 @@ what it rules out.
   same-named piece combines instead of restoring; a deletion held before this pass stays held;
   the delete window's "every other device" is stronger than what a device with the switch off
   does.
+
+- **Pass 122b — what the person said no to is remembered, and order follows them
+  (2026-10-25).** `lib/accountSync.js`, `lib/pieceMerge.js`, `lib/tabSync.js` (one argument),
+  `App.jsx`, `ImportPiecesModal.jsx`, `SettingsTab.jsx`, tests and the docs. The design, the
+  checks and the found items are
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b).
+  **The owner's answers (2026-10-25), on the backlog card:** remember a declined NEW piece too
+  (Pass 116 found item 3); **one "Ask me again about what I said no to" button** as the way back
+  (not a list, and not a backup file); **piece order follows her between devices**. **Calls made
+  while building it, for her to overrule** (she had left, and asked for the pass to be built):
+  1. **When both devices reordered differently, the order already in the account wins, silently.**
+     This was the one point still marked "proposed, confirm" on the card, so it is the card's own
+     proposal, not her answer. The heavier option ("the most recent reorder wins", her 2026-10-15
+     principle) needs a stored note of when the list was last reordered and was not built. It is
+     the default of `planPieceMerge`'s `softWins`, and tabs pass `"local"`.
+  2. **A declined combine in Get changes also keeps the copy off the device.** The card says "no
+     window opens again", and a first version that only remembered the pair opened one (the copy
+     became a new piece). In a restore the copy arrives as its own piece, as the card says.
+  3. **"Select none" leaves everything off and remembers it,** with a line in the window saying
+     so. The kinder rule (leave a row alone unless it was unticked by hand) would need the
+     window to track touches; not built.
+  4. **The window's button works with nothing ticked** ("Leave these off"); it was disabled,
+     which made "no" impossible for a single piece.
+  5. **Pieces with the same rank are ordered by date added, then id,** so two devices show the
+     same list (merging a reorder piece by piece can leave a tie).
+  6. **"Keep it" and "Restore" forget any answer about the piece first.**
+  7. **The answers are this device's,** not the account's (an account-level answer is a stored
+     change and a question about whose "no" counts).
+  8. **The wider simulation found a too-strict check** (seed 311 on `main`, before this pass):
+     minutes-mode `daysToLearn` is re-worked by the merge so a reload gives the same piece; the
+     engine was right and the check was relaxed for that one part, with the reason in the test.
+  **Resolved by it:** Pass 112's later-passes items 5 and 9, Pass 116's found item 3, Pass 117's
+  open item 2, Pass 120's for-later item 2 (for a piece that still knows what it last synced).
+  **Still open:** a "not now" that is not a "no"; "most recent reorder wins"; answers that follow
+  the person to other devices; a tab or phone on the previous version drops the answers when it
+  saves the record; "always keep both"; size and schedule travelling together.
 
 ## Open questions
 
@@ -8389,12 +8428,12 @@ oversight to silently fix; surface it instead.
      held; the status line shows the held message and the normal line together.
      See [Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115).
   3. **From Pass 112:** a combine the person declines is offered again on
-     every Get changes (Pass 122b); ~~two devices that both use the app often hold
+     every Get changes (Pass 122b; **resolved**); ~~two devices that both use the app often hold
      each other's technique library (its per-device parts are in the shared
      row)~~ **the `updatedAt` part is resolved in Pass 115** (it no longer counts
      as a change; today's list and the walk position still do; Pass 118 decided how
      those merge, as an engine only, see its entry above); a name match with a blank composer can combine two
-     different pieces (Pass 122b); ~~there is no "undelete" (Pass 122)~~ **resolved in Pass 122**
+     different pieces (Pass 122b; **resolved**); ~~there is no "undelete" (Pass 122)~~ **resolved in Pass 122**
      ("Keep it", and "Recently deleted" for 30 days); a merge clears the
      piece's reschedule marker; and ~~`mergeSessionArrays` compares sessions as
      text, so key order matters~~ **resolved in Pass 115** (compares content;
@@ -8445,7 +8484,10 @@ oversight to silently fix; surface it instead.
      already treats it), and for `createdAt` follow Pass 112's decision (the account's
      created date wins). Whether the sidebar order should sync between devices at all
      is the user's call. About 3 lines plus tests. **Owner:** Pass 121 is the natural
-     home; it can be done earlier in the engine.
+     home; it can be done earlier in the engine. **Resolved in Pass 122b:** the engine never
+     conflicts on them (`SOFT_PARTS`); the owner decided the order follows her between devices
+     (so the engine does not keep "this device's" order, as proposed here); when both devices
+     reordered, the account's order wins (`softWins`).
   3. **Other snapshot-like parts may have the marker's problem; revival is untested.**
      A reschedule marker is a snapshot of progress taken at one moment (see the Pass 117
      entry). `revival.plan` is another (computed from progress and the reassessment

@@ -4,7 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { validateAndMigratePiece, validateAndMigrateTechnique, normalizeTechniqueItem } from "../src/lib/storage.js";
+import { validateAndMigratePiece, validateAndMigrateTechnique, normalizeTechniqueItem, findMatchingPiece } from "../src/lib/storage.js";
 import {
   PIECE_SCHEMA_VERSION,
   MATCHES,
@@ -120,6 +120,25 @@ import {
   describeDeletedElsewhere,
   describeDeletedBanner,
   describeBringBack,
+  // Pass 122b
+  declinedOf,
+  declinedSummary,
+  declinedCount,
+  isDeclinedPair,
+  withDeclined,
+  withDeclinedCleared,
+  withDeclinedRemoved,
+  planDeclines,
+  orderChoiceFor,
+  heldIdsToSettle,
+  describeUntickedNote,
+  describeCombineRow,
+  describeCombineBadge,
+  describeLeftOff,
+  describeAskMeAgainHint,
+  describeAskMeAgain,
+  ASK_ME_AGAIN_LABEL,
+  MAX_DECLINED,
 } from "../src/lib/accountSync.js";
 import { RECENTLY_DELETED_DAYS, deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "../src/lib/recentlyDeleted.js";
 import { planPieceMerge, WHOLE_PIECE_PART } from "../src/lib/pieceMerge.js";
@@ -3370,8 +3389,9 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.deepEqual([asked.items.length, asked.fallbackIds], [0, ["p1"]], "the engine can't tell without a base");
   });
 
-  test("a piece held without a list is not planned here at all, and the picker's rows can leave a settled one out", () => {
-    const device = withPieceHeld({ version: 1, accounts: { [USER]: autoRec({ p2: syncedAs(pieceOf("p2"), 1) }) } }, USER, "p2");
+  test("a piece held with no list AND no recorded base (a first upload that was refused, an import) is not planned here at all, and the picker's rows can leave a settled one out", () => {
+    // (Pass 122b: a refused upload that still knows what it last synced IS planned, below.)
+    const device = withPieceHeld({ version: 1, accounts: { [USER]: autoRec({}) } }, USER, "p2");
     const plan = planSettle({ candidates: accountRowsToCandidates({ pieces: [acctRow(pieceOf("p2", { name: "Other" }), 2)], technique: null }), localPieces: { p2: pieceOf("p2") }, accountRecord: accountRecordFor(device, USER), now: NOW });
     assert.deepEqual([plan.items, plan.fallbackIds], [[], []]);
     const both = withPieceHeld(heldDevice(), USER, "p2");
@@ -4288,5 +4308,436 @@ describe("the words for deletions and for bringing a piece back (Pass 122)", () 
       ...["kept", "live", "moved", "combined", "gone", "stopped"].flatMap((status) => [describeBringBack({ status, name: "X", reason: "other" }).text, describeBringBack({ status, name: "X", restored: true }).text]),
     ];
     all.forEach((t) => assert.equal(/—/.test(t), false, t));
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Pass 122b: what the person said no to is remembered, so the app    */
+/*  never asks twice.                                                  */
+/* ------------------------------------------------------------------ */
+
+describe("things the person said no to are remembered on this device (Pass 122b)", () => {
+  const emptyDevice = () => readDeviceRecord(memoryStorage());
+  const recOf = (device) => accountRecordFor(device, USER);
+  const named = (id, name, composer = "Chopin", extra = {}) => validateAndMigratePiece({ ...viaJson(pieceOf(id)), name, composer, ...extra });
+  const candidatesOf = (...ps) => accountRowsToCandidates({ pieces: ps.map(([p, rev = 1]) => acctRow(p, rev)), technique: null });
+  const planFor = ({ local = {}, candidates, device = emptyDevice() }) => planAccountMerge({ candidates, localPieces: local, localTechnique: null, accountRecord: recOf(device) });
+  const kinds = (plan) => plan.items.map((i) => [i.id, i.kind]);
+
+  test("nothing is remembered until something is said; it is per account", () => {
+    const device = emptyDevice();
+    assert.equal("declined" in recOf(device), false);
+    assert.equal(declinedCount(recOf(device)), 0);
+    const said = withDeclined(device, USER, { pieces: ["b"], pairs: [["x", "y"]] });
+    assert.deepEqual(recOf(said).declined, { pieces: ["b"], pairs: [["x", "y"]] });
+    assert.deepEqual(declinedSummary(recOf(said)), { pieces: 1, pairs: 1 });
+    assert.equal(declinedCount(recOf(said)), 2);
+    assert.equal("declined" in accountRecordFor(said, "someone-else"), false, "another account on this device has its own answers");
+  });
+
+  test("a pair is the same either way round, said once or twice, and never a piece with itself", () => {
+    const said = withDeclined(emptyDevice(), USER, { pairs: [["b", "a"], ["a", "b"], ["a", "a"], ["", "z"]] });
+    assert.deepEqual(recOf(said).declined, { pairs: [["a", "b"]] });
+    assert.equal(isDeclinedPair(recOf(said), "a", "b"), true);
+    assert.equal(isDeclinedPair(recOf(said), "b", "a"), true, "either way round");
+    assert.equal(isDeclinedPair(recOf(said), "a", "c"), false);
+    const again = withDeclined(said, USER, { pieces: ["p", "p", "q"], pairs: [["b", "a"]] });
+    assert.deepEqual(recOf(again).declined, { pieces: ["p", "q"], pairs: [["a", "b"]] });
+  });
+
+  test("every kind of record update carries the answers over (a draft that forgot them would take them back)", () => {
+    const p = pieceOf("p1");
+    const rec = withDeclined(emptyDevice(), USER, { pieces: ["b"], pairs: [["x", "y"]] });
+    const before = recOf(rec).declined;
+    const after = [
+      withPieceUploaded(rec, USER, "p1", syncedAs(p, 2), 5000),
+      withSentRecorded(rec, USER, { kind: "piece", id: "p1" }, "abc"),
+      withPieceHeld(rec, USER, "p1"),
+      withAccountCopyRecorded(rec, USER, { entries: { p1: syncedAs(p, 3) }, checkedAt: 7 }),
+      withBackupRecorded(rec, USER, { pieces: { p1: syncedAs(p) }, technique: null, checkedAt: 9 }),
+      withTechniqueUploaded(rec, USER, { revision: 2, fingerprint: "f", parts: { a: "b" } }, 1),
+      withTechniqueHeld(rec, USER),
+      withPieceForgotten(rec, USER, "p1", 1),
+      withPieceDropped(rec, USER, "p1"),
+      withAutoUpdate(rec, USER, true),
+      withAutoUpdate(withAutoUpdate(rec, USER, true), USER, false),
+      reconcileLocalDeletions(withPieceUploaded(rec, USER, "p1", syncedAs(p), 1), { removedIds: ["p1"] }).record,
+      withPartsRecorded(withPieceUploaded(rec, USER, "p1", { revision: 1, fingerprint: pieceFingerprint(p) }, 1), { p1: p }).record,
+      withDeclined(rec, USER, { pieces: [] }),
+    ];
+    after.forEach((r, i) => assert.deepEqual(recOf(r).declined, before, `still there after update ${i}`));
+  });
+
+  test("it round-trips through storage; anything unreadable reads as nothing said", () => {
+    const storage = memoryStorage();
+    saveDeviceRecord(withDeclined(readDeviceRecord(storage), USER, { pieces: ["b"], pairs: [["y", "x"]] }), storage);
+    assert.deepEqual(recOf(readDeviceRecord(storage)).declined, { pieces: ["b"], pairs: [["x", "y"]] });
+    [
+      "yes",
+      { pieces: "b" },
+      { pieces: [1, null, ""], pairs: [["a"], "ab", [1, 2], ["a", "a"]] },
+      { pieces: [], pairs: [] },
+      null,
+    ].forEach((junk) => {
+      storage.setItem(ACCOUNT_SYNC_KEY, JSON.stringify({ version: 1, accounts: { [USER]: { pieces: {}, technique: null, checkedAt: 1, syncedAt: null, declined: junk } } }));
+      assert.equal("declined" in recOf(readDeviceRecord(storage)), false, JSON.stringify(junk));
+    });
+  });
+
+  test("there is a cap, and the newest answers are the ones kept", () => {
+    const many = Array.from({ length: MAX_DECLINED + 25 }, (_, i) => `piece-${i}`);
+    const said = withDeclined(emptyDevice(), USER, { pieces: many });
+    const kept = recOf(said).declined.pieces;
+    assert.equal(kept.length, MAX_DECLINED);
+    assert.equal(kept[kept.length - 1], `piece-${MAX_DECLINED + 24}`, "the newest is kept");
+    assert.equal(kept.includes("piece-0"), false, "the oldest goes");
+  });
+
+  test("'Ask me again' forgets every answer and nothing else", () => {
+    const p = pieceOf("p1");
+    let device = withAutoUpdate(withAccountCopyRecorded(emptyDevice(), USER, { entries: { p1: syncedAs(p, 4) }, checkedAt: 7 }), USER, true);
+    device = withDeclined(device, USER, { pieces: ["b"], pairs: [["x", "y"]] });
+    const cleared = withDeclinedCleared(device, USER);
+    assert.equal("declined" in recOf(cleared), false);
+    assert.equal(declinedCount(recOf(cleared)), 0);
+    const { declined, ...rest } = recOf(device);
+    assert.deepEqual(recOf(cleared), rest, "pieces, the switch, the dates: untouched");
+    assert.equal(withDeclinedCleared(emptyDevice(), USER).accounts[USER].pieces !== undefined, true, "clearing nothing is harmless");
+  });
+
+  test("asking for a piece by name (Keep it, Restore) beats an old no about it: its answers go, everything else stays", () => {
+    const said = withDeclined(emptyDevice(), USER, { pieces: ["a", "b", "c"], pairs: [["a", "x"], ["y", "z"]] });
+    const asked = withDeclinedRemoved(said, USER, ["a"]);
+    assert.deepEqual(recOf(asked).declined, { pieces: ["b", "c"], pairs: [["y", "z"]] }, "the piece and the pair it was in");
+    assert.deepEqual(recOf(withDeclinedRemoved(said, USER, ["x"])).declined, { pieces: ["a", "b", "c"], pairs: [["y", "z"]] }, "a pair goes whichever of the two is asked for");
+    assert.equal("declined" in recOf(withDeclinedRemoved(withDeclined(emptyDevice(), USER, { pieces: ["a"] }), USER, ["a"])), false, "nothing left: nothing kept");
+    assert.deepEqual(withDeclinedRemoved(emptyDevice(), USER, ["a"]).accounts[USER].pieces, {}, "nothing said: nothing happens");
+    // and the walk then brings the piece in as the new piece it is
+    const nocturne = named("a", "Nocturne");
+    const candidates = candidatesOf([nocturne]);
+    assert.deepEqual(kinds(planFor({ candidates, device: said })), [], "skipped while the no stands");
+    assert.deepEqual(kinds(planFor({ candidates, device: asked })), [["a", "new"]], "offered once it is asked for");
+  });
+
+  /* ---- the window and the walk ---- */
+
+  test("a piece the person left off is never offered, never brought in, never counted; the plan says so", () => {
+    const a = named("A1", "Nocturne"), b = named("B1", "Etude");
+    const device = withDeclined(emptyDevice(), USER, { pieces: ["B1"] });
+    const candidates = candidatesOf([a], [b]);
+    const plan = planFor({ candidates, device });
+    assert.deepEqual(kinds(plan), [["A1", "new"]]);
+    assert.deepEqual(plan.skippedDeclined.map((d) => d.id), ["B1"]);
+    const applied = applyAccountMerge({ candidates, localPieces: {}, localTechnique: null, accountRecord: recOf(device), selectedIds: null, orderChoice: "follow" });
+    assert.deepEqual(Object.keys(applied.pieces), ["A1"]);
+    assert.equal(applied.leftOff, 1);
+    // by itself, with the switch on, it is no different
+    const auto = applyAccountMerge({ candidates, localPieces: {}, localTechnique: null, accountRecord: recOf(device), automatic: true });
+    assert.deepEqual(Object.keys(auto.pieces), ["A1"]);
+    // asking for it by name changes nothing either: it is not walked as a candidate
+    const named1 = applyAccountMerge({ candidates, localPieces: {}, localTechnique: null, accountRecord: recOf(device), selectedIds: ["A1", "B1"] });
+    assert.deepEqual(Object.keys(named1.pieces), ["A1"]);
+  });
+
+  test("a stale answer never hides a piece that IS here: it is an ordinary piece again", () => {
+    const here = named("B1", "Etude");
+    const newer = withMore(here, 2);
+    const device = withAccountCopyRecorded(withDeclined(emptyDevice(), USER, { pieces: ["B1"] }), USER, { entries: { B1: syncedAs(here, 1) }, checkedAt: 1 });
+    const plan = planFor({ local: { B1: here }, candidates: candidatesOf([newer, 2]), device });
+    assert.deepEqual(kinds(plan), [["B1", "take"]]);
+    assert.deepEqual(plan.skippedDeclined, []);
+  });
+
+  test("two pieces said to be different are never matched by name, either way round: the other copy is a new piece", () => {
+    const here = named("L1", "Ballade No. 1"), there = named("R1", "ballade no. 1");
+    const candidates = candidatesOf([there, 3]);
+    assert.deepEqual(kinds(planFor({ local: { L1: here }, candidates })), [["R1", "combine"]], "as before");
+    [[["L1", "R1"]], [["R1", "L1"]]].forEach((pairs) => {
+      const device = withDeclined(emptyDevice(), USER, { pairs });
+      const plan = planFor({ local: { L1: here }, candidates, device });
+      assert.deepEqual(kinds(plan), [["R1", "new"]]);
+      assert.equal(plan.items[0].matchId, null);
+    });
+    // a pair about other pieces changes nothing
+    const other = withDeclined(emptyDevice(), USER, { pairs: [["L1", "somebody-else"]] });
+    assert.deepEqual(kinds(planFor({ local: { L1: here }, candidates, device: other })), [["R1", "combine"]]);
+  });
+
+  test("two account rows with the same name: said different, both come in as pieces", () => {
+    const a = named("A1", "Same Name"), b = named("B1", "Same Name");
+    const candidates = candidatesOf([a], [b]);
+    assert.deepEqual(kinds(planFor({ candidates })), [["A1", "new"], ["B1", "combine"]]);
+    const device = withDeclined(emptyDevice(), USER, { pairs: [["B1", "A1"]] });
+    assert.deepEqual(kinds(planFor({ candidates, device })), [["A1", "new"], ["B1", "new"]]);
+    const out = applyAccountMerge({ candidates, localPieces: {}, localTechnique: null, accountRecord: recOf(device) });
+    assert.deepEqual(Object.keys(out.pieces).sort(), ["A1", "B1"], "both are restored");
+    assert.deepEqual(out.markDeleted, [], "nothing in the account is marked deleted");
+  });
+
+  test("the automatic update never combines a pair; one said to be different arrives as the new piece it is", () => {
+    const here = named("L1", "Ballade No. 1"), there = named("R1", "Ballade No. 1");
+    const candidates = candidatesOf([there, 3]);
+    const device = withAccountCopyRecorded(emptyDevice(), USER, { entries: { L1: syncedAs(here, 1) }, checkedAt: 1 });
+    const asks = applyAccountMerge({ candidates, localPieces: { L1: here }, localTechnique: null, accountRecord: recOf(device), automatic: true });
+    assert.deepEqual(asks.needsYou.map((n) => [n.id, n.kind]), [["R1", "combine"]], "left for the person, as before");
+    assert.deepEqual(Object.keys(asks.pieces), ["L1"]);
+    const said = withDeclined(device, USER, { pairs: [["L1", "R1"]] });
+    const out = applyAccountMerge({ candidates, localPieces: { L1: here }, localTechnique: null, accountRecord: recOf(said), automatic: true });
+    assert.deepEqual(out.needsYou, [], "no longer asked about");
+    assert.deepEqual(Object.keys(out.pieces).sort(), ["L1", "R1"]);
+    assert.deepEqual(out.markDeleted, []);
+  });
+
+  test("a name match where either side has no composer says so; two composers that agree do not", () => {
+    const certain = (composerHere, composerThere) => {
+      const here = named("L1", "Ballade", composerHere), there = named("R1", "Ballade", composerThere);
+      return planFor({ local: { L1: here }, candidates: candidatesOf([there, 3]) }).items[0];
+    };
+    assert.deepEqual([certain("Chopin", "Chopin").kind, certain("Chopin", "Chopin").uncertain], ["combine", false]);
+    assert.deepEqual([certain("Chopin", "chopin ").kind, certain("Chopin", "chopin ").uncertain], ["combine", false], "same composer, however it is typed");
+    assert.equal(certain("", "Chopin").uncertain, true, "this device's has none");
+    assert.equal(certain("Chopin", "").uncertain, true, "the account's has none");
+    assert.equal(certain("", "").uncertain, true, "neither has one");
+    assert.equal(certain("  ", "Chopin").uncertain, true, "blanks are blank");
+    // two different composers are not a match at all
+    assert.equal(certain("Chopin", "Liszt").kind, "new");
+  });
+
+  test("a file import still matches by name exactly as before (the 'maybe' is the account's window only)", () => {
+    const here = named("L1", "Ballade", "");
+    const file = named("R1", "Ballade", "Chopin");
+    assert.equal(findMatchingPiece({ L1: here }, file), here);
+  });
+
+  /* ---- what the ticks mean ---- */
+
+  test("an unticked NEW row is a no; an unticked combine row says 'different pieces' (and the copy stays off); ticked rows and other kinds say nothing", () => {
+    const items = [
+      { id: "n1", kind: "new" },
+      { id: "n2", kind: "new" },
+      { id: "c1", kind: "combine", matchId: "L1" },
+      { id: "c2", kind: "combine", matchId: "L2" },
+      { id: "t1", kind: "take" },
+      { id: "a1", kind: "ask" },
+    ];
+    const out = planDeclines({ items, selectedIds: ["n2", "c2"], mode: "changes" });
+    assert.deepEqual(out, { pairs: [["L1", "c1"]], pieces: ["n1", "c1"], arrivingIds: [] }, "in Get changes the other copy also stays off, so no window opens for it again");
+    assert.deepEqual(planDeclines({ items, selectedIds: items.map((i) => i.id), mode: "changes" }), { pairs: [], pieces: [], arrivingIds: [] });
+    assert.deepEqual(planDeclines({ items: [], selectedIds: [] }), { pairs: [], pieces: [], arrivingIds: [] });
+    assert.deepEqual(planDeclines({ items: null, selectedIds: null }), { pairs: [], pieces: [], arrivingIds: [] });
+  });
+
+  test("in a restore, an unticked copy arrives as its own piece when the one it would be combined with is coming too", () => {
+    const items = [{ id: "A1", kind: "new" }, { id: "B1", kind: "combine", matchId: "A1" }];
+    assert.deepEqual(planDeclines({ items, selectedIds: ["A1"], mode: "restore" }), { pairs: [["A1", "B1"]], pieces: [], arrivingIds: ["B1"] });
+    assert.deepEqual(planDeclines({ items, selectedIds: ["A1", "B1"], mode: "restore" }), { pairs: [], pieces: [], arrivingIds: [] }, "ticked: combined, as before");
+    assert.deepEqual(planDeclines({ items, selectedIds: [], mode: "restore" }), { pairs: [], pieces: ["A1", "B1"], arrivingIds: [] }, "neither is wanted: both left off, nothing arrives");
+  });
+
+  test("said and applied: the pair stays different, both copies stay off, nothing is offered again, and 'Ask me again' brings it all back", () => {
+    const here = named("L1", "Ballade No. 1"), there = named("R1", "Ballade No. 1"), extra = named("N1", "Etude");
+    const candidates = candidatesOf([there, 3], [extra, 1]);
+    const first = planFor({ local: { L1: here }, candidates });
+    assert.deepEqual(kinds(first), [["N1", "new"], ["R1", "combine"]].sort((x, y) => first.items.findIndex((i) => i.id === x[0]) - first.items.findIndex((i) => i.id === y[0])));
+    const said = planDeclines({
+      items: first.items.map((i) => ({ id: i.id, kind: i.kind, matchId: i.matchId })),
+      selectedIds: [],
+      mode: "changes",
+    });
+    const device = withDeclined(emptyDevice(), USER, said);
+    const second = planFor({ local: { L1: here }, candidates, device });
+    assert.deepEqual(kinds(second), [], "nothing is offered a second time: no window");
+    assert.deepEqual(second.skippedDeclined.map((d) => d.id).sort(), ["N1", "R1"], "the etude and the other Ballade both stay off");
+    assert.equal(planNeedsQuestion(second), false);
+    const asked = withDeclinedCleared(device, USER);
+    assert.deepEqual(kinds(planFor({ local: { L1: here }, candidates, device: asked })), first.items.map((i) => [i.id, i.kind]), "back to the very first plan");
+  });
+
+  /* ---- the check ---- */
+
+  test("the check stops counting a piece the person said no to, and counts it again once they ask again", () => {
+    const rows = { pieces: [{ id: "n1", revision: 1, deleted_at: null }, { id: "n2", revision: 1, deleted_at: null }], technique: null };
+    const device = withAccountCopyRecorded(emptyDevice(), USER, { entries: {}, checkedAt: 1 });
+    assert.deepEqual(classifyAccountChanges({ rows, accountRecord: recOf(device), localPieceIds: [] }).added, ["n1", "n2"]);
+    const said = withDeclined(device, USER, { pieces: ["n2"] });
+    const changes = classifyAccountChanges({ rows, accountRecord: recOf(said), localPieceIds: [] });
+    assert.deepEqual(changes.added, ["n1"]);
+    assert.equal(describeAccountChanges({ ...changes, added: [] }), null, "nothing left to mention");
+    assert.deepEqual(autoUpdateTargets({ deviceRecord: withAutoUpdate(said, USER, true), userId: USER, changes }).pieceIds, ["n1"], "the automatic update does not fetch it");
+    assert.deepEqual(classifyAccountChanges({ rows, accountRecord: recOf(withDeclinedCleared(said, USER)), localPieceIds: [] }).added, ["n1", "n2"]);
+    // a pair changes nothing about the count (the check sees only ids, so a copy of a piece is a new row until the person answers about it)
+    const pair = withDeclined(device, USER, { pairs: [["n1", "n2"]] });
+    assert.deepEqual(classifyAccountChanges({ rows, accountRecord: recOf(pair), localPieceIds: [] }).added, ["n1", "n2"]);
+  });
+
+  test("a declined piece that is here is not 'added' anyway, and a held or deleted one is sorted as it always was", () => {
+    const rows = { pieces: [{ id: "n1", revision: 4, deleted_at: null }], technique: null };
+    const device = withDeclined(withAccountCopyRecorded(emptyDevice(), USER, { entries: { n1: { revision: 2, fingerprint: "f" } }, checkedAt: 1 }), USER, { pieces: ["n1"] });
+    const changes = classifyAccountChanges({ rows, accountRecord: recOf(device), localPieceIds: ["n1"] });
+    assert.deepEqual([changes.newer, changes.added], [["n1"], []]);
+  });
+
+  /* ---- piece order ---- */
+
+  test("piece order follows the person: nobody is asked, and the rule is the same everywhere", () => {
+    const base = pieceOf("p1", { sortOrder: 5 });
+    const baseParts = piecePartFingerprints(base);
+    const at = (n) => validateAndMigratePiece({ ...viaJson(base), sortOrder: n });
+    assert.equal(orderChoiceFor({ existing: at(5), imported: at(5), baseParts }), "existing", "the same: nothing to choose");
+    assert.equal(orderChoiceFor({ existing: at(2), imported: at(5), baseParts }), "existing", "only this device reordered: kept");
+    assert.equal(orderChoiceFor({ existing: at(5), imported: at(2), baseParts }), "imported", "only the account reordered: followed");
+    assert.equal(orderChoiceFor({ existing: at(2), imported: at(7), baseParts }), "imported", "both: the account's order");
+    assert.equal(orderChoiceFor({ existing: at(2), imported: at(7), baseParts: null }), "imported", "no base to tell: the account's order");
+    assert.equal(orderChoiceFor({ existing: at(2), imported: at(7), baseParts: { name: "x" } }), "imported", "a base with no order in it: the account's");
+    assert.equal(orderChoiceFor({ existing: at(2), imported: at(7), baseParts, kind: "combine" }), "existing", "two copies combined keep the place of the one that is here");
+  });
+
+  test("a piece changed in both places is merged with the order followed, not asked: through the real apply step", () => {
+    const base = pieceOf("p1", { sortOrder: 5 });
+    const mineMore = validateAndMigratePiece({ ...viaJson(withMore(base, 2)), sortOrder: 5 });
+    const theirsMore = validateAndMigratePiece({ ...viaJson(withMore(base, 3)), sortOrder: 5 });
+    const device = withAccountCopyRecorded(emptyDevice(), USER, { entries: { p1: syncedAs(base, 1) }, checkedAt: 1 });
+    const run = (mineOrder, theirOrder) =>
+      applyAccountMerge({
+        candidates: candidatesOf([validateAndMigratePiece({ ...viaJson(theirsMore), sortOrder: theirOrder }), 2]),
+        localPieces: { p1: validateAndMigratePiece({ ...viaJson(mineMore), sortOrder: mineOrder }) },
+        localTechnique: null,
+        accountRecord: recOf(device),
+        selectedIds: ["p1"],
+        orderChoice: "follow",
+      });
+    assert.equal(run(5, 2).pieces.p1.sortOrder, 2, "the other device reordered: this one follows");
+    assert.equal(run(1, 5).pieces.p1.sortOrder, 1, "only this device reordered: kept");
+    assert.equal(run(1, 2).pieces.p1.sortOrder, 2, "both: the account's");
+    assert.equal(run(1, 2).counts.merged.length, 1, "and it was a merge, with no question");
+    // the old explicit choices still mean what they meant (the file import path and any caller that passes one)
+    const explicit = applyAccountMerge({
+      candidates: candidatesOf([validateAndMigratePiece({ ...viaJson(theirsMore), sortOrder: 2 }), 2]),
+      localPieces: { p1: validateAndMigratePiece({ ...viaJson(mineMore), sortOrder: 1 }) },
+      localTechnique: null,
+      accountRecord: recOf(device),
+      selectedIds: ["p1"],
+      orderChoice: "existing",
+    });
+    assert.equal(explicit.pieces.p1.sortOrder, 1);
+  });
+
+  test("two copies being combined: the piece that is here keeps its place", () => {
+    const here = named("L1", "Ballade No. 1", "Chopin", { sortOrder: 3 });
+    const there = named("R1", "Ballade No. 1", "Chopin", { sortOrder: 9 });
+    const out = applyAccountMerge({
+      candidates: candidatesOf([there, 3]),
+      localPieces: { L1: here },
+      localTechnique: null,
+      accountRecord: recOf(withAccountCopyRecorded(emptyDevice(), USER, { entries: { L1: syncedAs(here, 1) }, checkedAt: 1 })),
+      selectedIds: ["R1"],
+      orderChoice: "follow",
+    });
+    assert.equal(out.pieces.L1.sortOrder, 3);
+  });
+
+  /* ---- a piece held because an upload was refused ---- */
+
+  test("a piece held by a refused upload that still knows what it last synced is asked about like any held piece", () => {
+    const base = pieceOf("p2", { notes: "" });
+    const device = withPieceHeld(withAccountCopyRecorded(emptyDevice(), USER, { entries: { p2: syncedAs(base, 1) }, checkedAt: 1 }), USER, "p2");
+    const rec = recOf(device);
+    assert.deepEqual(heldIdsWithConflicts(rec), [], "no recorded list of conflicts");
+    assert.deepEqual(heldIdsToSettle(rec), ["p2"], "but it knows its base");
+    const NOW = Date.parse("2026-10-19T12:00:00Z");
+    // changed on the other device only: nothing to ask, ready to bring up to date
+    const ready = planSettle({ candidates: candidatesOf([validateAndMigratePiece({ ...viaJson(base), name: "Other" }), 2]), localPieces: { p2: base }, accountRecord: rec, now: NOW });
+    assert.deepEqual(ready.items.map((i) => [i.id, i.status]), [["p2", "ready"]]);
+    assert.deepEqual(ready.fallbackIds, []);
+    // the same thing changed on both: one question, about that
+    const mine = validateAndMigratePiece({ ...viaJson(base), notes: "mine" });
+    const theirs = validateAndMigratePiece({ ...viaJson(base), notes: "theirs" });
+    const asked = planSettle({ candidates: candidatesOf([theirs, 2]), localPieces: { p2: mine }, accountRecord: rec, now: NOW });
+    assert.deepEqual(asked.items.map((i) => [i.id, i.status]), [["p2", "questions"]]);
+    assert.deepEqual(asked.items[0].questions.map((q) => q.part), ["notes"]);
+    // the answer is applied through the one apply step, and settles it
+    const out = applyAccountMerge({
+      candidates: candidatesOf([theirs, 2]),
+      localPieces: { p2: mine },
+      localTechnique: null,
+      accountRecord: rec,
+      selectedIds: ["p2"],
+      settle: { p2: { notes: "remote" } },
+    });
+    assert.deepEqual(out.settledIds, ["p2"]);
+    assert.equal(out.pieces.p2.notes, "theirs");
+    assert.deepEqual(out.unsettled, []);
+    assert.equal(out.entries.p2.revision, 2, "the account's copy is what the record holds now");
+  });
+
+  test("a held piece with NO recorded base (a first upload refused, an import) still goes through the whole-piece picker", () => {
+    const device = withPieceHeld({ version: 1, accounts: { [USER]: autoRec({}) } }, USER, "p3");
+    assert.deepEqual(heldIdsToSettle(recOf(device)), []);
+    const plan = planSettle({ candidates: candidatesOf([pieceOf("p3", { name: "Other" }), 2]), localPieces: { p3: pieceOf("p3") }, accountRecord: recOf(device), now: Date.now() });
+    assert.deepEqual([plan.items, plan.fallbackIds], [[], []]);
+    // one held WITH a list is asked about, exactly as before
+    const listed = withPieceHeld(withAccountCopyRecorded(emptyDevice(), USER, { entries: { p4: syncedAs(pieceOf("p4"), 1) }, checkedAt: 1 }), USER, "p4", [{ part: "notes", kind: "field", local: "a", remote: "b", base: "c" }]);
+    assert.deepEqual(heldIdsToSettle(recOf(listed)), ["p4"]);
+    // and an entry that is not held at all is never planned
+    assert.deepEqual(heldIdsToSettle(recOf(withAccountCopyRecorded(emptyDevice(), USER, { entries: { p5: syncedAs(pieceOf("p5"), 1) }, checkedAt: 1 }))), []);
+  });
+
+  /* ---- the words ---- */
+
+  test("what a row says, what unticked means, and what stayed off: plain words, singular and plural, no em dashes", () => {
+    const all = [
+      describeUntickedNote("changes"),
+      describeUntickedNote("restore"),
+      describeCombineRow({ matchName: "Ballade No. 1" }),
+      describeCombineRow({ matchName: "Ballade No. 1", mode: "restore" }),
+      describeCombineRow({ matchName: "Ballade No. 1", uncertain: true }),
+      describeCombineRow({ matchName: "Ballade No. 1", uncertain: true, mode: "restore" }),
+      describeCombineRow({}),
+      describeCombineBadge(true),
+      describeCombineBadge(false),
+      describeLeftOff(1),
+      describeLeftOff(3),
+      describeAskMeAgainHint({ pieces: 1, pairs: 0 }),
+      describeAskMeAgainHint({ pieces: 2, pairs: 0 }),
+      describeAskMeAgainHint({ pieces: 0, pairs: 1 }),
+      describeAskMeAgainHint({ pieces: 0, pairs: 2 }),
+      describeAskMeAgainHint({ pieces: 2, pairs: 1 }),
+      ...describeAskMeAgain({ cleared: true }).map((l) => l.text),
+      ...describeAskMeAgain({ cleared: false }).map((l) => l.text),
+      ASK_ME_AGAIN_LABEL,
+    ];
+    all.forEach((t) => assert.equal(t.includes("—"), false, `no em dash: ${t}`));
+    assert.match(describeCombineRow({ matchName: "Ballade No. 1" }), /Ticked: they're combined.*not erased.*Unticked: they're different pieces, and this one stays off this device\./);
+    assert.match(describeCombineRow({ matchName: "Ballade No. 1", mode: "restore" }), /Unticked: they're different pieces, so both are restored/);
+    assert.match(describeCombineRow({ matchName: "Ballade No. 1", uncertain: true }), /Maybe the same piece.*no composer.*Left unticked, they're different pieces, and this one stays off this device\./);
+    assert.equal(describeCombineBadge(true), "Maybe the same piece");
+    assert.equal(describeCombineBadge(false), "Same piece, other copy");
+    assert.match(describeCombineRow({}), /"this piece"/);
+    assert.match(describeLeftOff(1), /^1 piece you said no to stays off this device\..*brings it back\.$/);
+    assert.match(describeLeftOff(3), /^3 pieces you said no to stay off this device\..*brings them back\.$/);
+    assert.match(describeAskMeAgainHint({ pieces: 1, pairs: 0 }), /^You said no to 1 piece, so it's left off this device and not mentioned\./);
+    assert.match(describeAskMeAgainHint({ pieces: 2, pairs: 0 }), /^You said no to 2 pieces, so they're left off/);
+    assert.match(describeAskMeAgainHint({ pieces: 0, pairs: 1 }), /^You said 1 pair of pieces is different, so the app doesn't offer to combine them\./);
+    assert.match(describeAskMeAgainHint({ pieces: 0, pairs: 2 }), /^You said 2 pairs of pieces are different, so the app doesn't offer to combine any of them\./);
+    assert.match(describeAskMeAgainHint({ pieces: 2, pairs: 1 }), /^You said no to 2 pieces, and that 1 pair of pieces is different\./);
+    assert.equal(ASK_ME_AGAIN_LABEL, "Ask me again about what I said no to");
+    assert.match(describeUntickedNote("changes"), /^A piece you leave unticked stays off this device.*Ask me again/);
+    assert.match(describeUntickedNote("restore"), /isn't restored.*Ask me again/);
+  });
+
+  test("a result that left something off says so after 'everything matches', and says nothing when nothing was left off", () => {
+    const counts = { added: 0, took: [], merged: [], combined: [], same: 0, aligned: 0, clearedHeld: 0 };
+    const quiet = describeAccountMergeResult({ applied: counts });
+    assert.deepEqual(quiet.map((l) => l.text), ["Everything here already matches your account."]);
+    const left = describeAccountMergeResult({ applied: counts, leftOff: 2 });
+    assert.deepEqual(left.map((l) => l.text), ["Everything here already matches your account.", describeLeftOff(2)]);
+    const added = describeAccountMergeResult({ applied: { ...counts, added: 1 }, leftOff: 1 });
+    assert.deepEqual(added.map((l) => l.text), ["Added 1 new piece from your account.", describeLeftOff(1)]);
+    // a restore is offered where there is no Settings, so it says how to choose again there
+    const restored = describeAccountMergeResult({ mode: "restore", applied: { ...counts, added: 2 }, leftOff: 2 });
+    assert.equal(restored[restored.length - 1].text, describeLeftOff(2, "restore"));
+    assert.match(describeLeftOff(1, "restore"), /^1 piece you said no to was not restored\. Press Restore again, or use "Ask me again" in Settings, under Account, to choose again\.$/);
+    assert.match(describeLeftOff(2, "restore"), /^2 pieces you said no to were not restored\./);
+    assert.equal(describeLeftOff(2, "restore").includes("\u2014"), false);
   });
 });

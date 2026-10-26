@@ -32,6 +32,14 @@ import {
   WHOLE_PIECE_PART,
   SOFT_PARTS,
   compareSwitcherOrder,
+  isOrderNote,
+  compareOrderNotes,
+  laterOrderNote,
+  latestSwitcherOrder,
+  nextOrderStamp,
+  makeOrderNote,
+  sortPiecesForSwitcher,
+  planSwitcherMove,
 } from "../src/lib/pieceMerge.js";
 import { fingerprint as accountSyncFingerprint } from "../src/lib/accountSync.js";
 
@@ -642,9 +650,11 @@ describe("a reschedule on one device, a session on another (Pass 117)", () => {
 //   5. merging the same inputs again gives the same result
 //   6. merging when the remote equals the base returns this device's piece
 //      untouched
-//   7. (Pass 122b) piece order and date added are never a conflict: changed on
-//      both to different values, the other copy's value wins and the result
-//      says so (softSettled)
+//   7. (Pass 122b) piece order, the note a reorder leaves and date added are
+//      never a conflict: changed on both to different values, the side with the
+//      more recent reorder note wins the order (the other copy's value wins
+//      where the notes cannot tell, and the date) and the result says so
+//      (softSettled)
 // "Changed" below is judged from the real pieces (a deep comparison of values),
 // not from the engine's fingerprints, so the checks don't depend on the code
 // they check.
@@ -718,8 +728,12 @@ describe("two simulated devices (Pass 117)", () => {
     } else if (kind === "describe") {
       next = rng() < 0.5 ? { ...piece, notes: `notes ${stamp}` } : { ...piece, name: `Ballade ${stamp}` };
     } else if (kind === "reorder") {
-      // like moveGroupTo (App.jsx): a new rank in the switcher
-      next = { ...piece, sortOrder: intIn(rng, 0, 9) };
+      // like moveGroupTo (App.jsx, planSwitcherMove): a new rank in the switcher and a dated note of
+      // the whole arrangement; one time in four without the note, as a device on the previous
+      // version would leave it
+      const sortOrder = intIn(rng, 0, 9);
+      const ids = ["p1", "p2", "p3"].sort(() => rng() - 0.5);
+      next = rng() < 0.75 ? { ...piece, sortOrder, switcherOrder: { at: stamp, ids } } : { ...piece, sortOrder };
     } else if (kind === "dated") {
       next = { ...piece, createdAt: 1000 + intIn(rng, 1, 9) };
     } else if (kind === "split") {
@@ -865,12 +879,20 @@ describe("two simulated devices (Pass 117)", () => {
             assert.ok(same(mt[k], lt[k]), `agreed ${k} (${where})`);
             assert.equal(conflictKeys.has(k), false, `${k} is agreement, not a conflict (${where})`);
           } else if (SOFT_PARTS.includes(k)) {
-            // (7) Pass 122b: piece order and date added are never a conflict. Changed on both
-            // to different values, the engine settles them itself: the other copy's value.
+            // (7) Pass 122b: piece order, its note and date added are never a conflict. Changed on
+            // both to different values, the engine settles them itself: the side holding the more
+            // recent reorder note for the note and the rank (judged here from the notes' own
+            // moments, not from the engine), the other copy's value otherwise and for the date.
+            const atOf = (t) => (t.switcherOrder && Number.isFinite(t.switcherOrder.at) ? t.switcherOrder.at : null);
+            const la = atOf(lt);
+            const ra = atOf(rt);
+            const orderSide = la !== null && (ra === null || la > ra) ? "local" : "remote";
+            const side = k === "createdAt" ? "remote" : orderSide;
             assert.equal(conflictKeys.has(k), false, `(7) ${k}: never a conflict (${where})`);
-            assert.ok(same(mt[k], rt[k]), `(7) ${k}: the other copy's value wins (${where})`);
-            assert.ok(r.softSettled.some((s) => s.part === k && s.side === "remote"), `(7) ${k}: said so in softSettled (${where})`);
+            assert.ok(same(mt[k], (side === "local" ? lt : rt)[k]), `(7) ${k}: the ${side} copy's value wins (${where})`);
+            assert.ok(r.softSettled.some((s) => s.part === k && s.side === side), `(7) ${k}: said so in softSettled (${where})`);
             tally.softSettled = (tally.softSettled || 0) + 1;
+            if (k !== "createdAt" && side === "local") tally.orderByNote = (tally.orderByNote || 0) + 1;
           } else {
             assert.ok(conflictKeys.has(k), `(3) ${k}: changed on both to different values is reported (${where})`);
             assert.ok(same(mt[k], lt[k]), `(3) ${k}: this device's value is kept (${where})`);
@@ -942,6 +964,7 @@ describe("two simulated devices (Pass 117)", () => {
     assert.ok((tally.merged || 0) > 0 && (tally.conflicts || 0) > 0 && (tally["whole-piece-conflict"] || 0) > 0, "it exercised clean merges, part conflicts and whole-piece conflicts");
     assert.ok(tally.partConflicts > 0 && tally.chunkConflicts > 0, "and single-part conflicts");
     assert.ok((tally.softSettled || 0) > 0, "and piece order or date added changed on both sides (settled by the engine, never a conflict)");
+    assert.ok((tally.orderByNote || 0) > 0, "and a reorder note on this device beat the other copy's order (the more recent reorder wins)");
   });
 
   test("100 more runs with an everyday mix (mostly practice sessions): the same seven invariants", () => {
@@ -1405,8 +1428,8 @@ describe("piece order and date added are never a conflict (Pass 122b)", () => {
   const baseParts = piecePartFingerprints(base0);
   const edited = (over, updatedAt = 50) => ({ ...base0, ...over, updatedAt });
 
-  test("the parts the engine settles by itself are exactly piece order and date added", () => {
-    assert.deepEqual([...SOFT_PARTS].sort(), ["createdAt", "sortOrder"]);
+  test("the parts the engine settles by itself are exactly piece order, the note a reorder leaves and date added", () => {
+    assert.deepEqual([...SOFT_PARTS].sort(), ["createdAt", "sortOrder", "switcherOrder"]);
   });
 
   test("changed on one side only, the order travels like any part, whichever side moved it", () => {
@@ -1590,5 +1613,400 @@ describe("the switcher shows the same list on every device (Pass 122b)", () => {
     const one = [piece("p1", 4, 1000), piece("p2", 4, 1000)];
     const two = [piece("p2", 4, 1000), piece("p1", 4, 1000)];
     assert.deepEqual(one.sort(compareSwitcherOrder).map((p) => p.id), two.sort(compareSwitcherOrder).map((p) => p.id));
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  The most recent reorder wins (Pass 122b)                           */
+/* ------------------------------------------------------------------ */
+
+describe("the reorder note: what it is, and which of two is later (Pass 122b)", () => {
+  const note = (at, ...ids) => ({ at, ids });
+
+  test("a note is { at: a finite number, ids: an array of strings }; anything else is not one", () => {
+    assert.equal(isOrderNote(note(5, "a", "b")), true);
+    assert.equal(isOrderNote(note(0)), true, "an empty arrangement is still a note");
+    [undefined, null, 5, "x", [], {}, { at: 5 }, { ids: [] }, { at: "5", ids: [] }, { at: NaN, ids: [] }, { at: Infinity, ids: [] }, { at: 5, ids: ["a", 7] }, { at: 5, ids: "ab" }].forEach((n) =>
+      assert.equal(isOrderNote(n), false, JSON.stringify(n))
+    );
+  });
+
+  test("the later moment is the later note; a real note beats a missing or malformed one; neither is a tie", () => {
+    assert.equal(compareOrderNotes(note(9, "a"), note(5, "b")), 1);
+    assert.equal(compareOrderNotes(note(5, "b"), note(9, "a")), -1);
+    assert.equal(compareOrderNotes(note(5, "a"), undefined), 1);
+    assert.equal(compareOrderNotes(null, note(5, "a")), -1);
+    assert.equal(compareOrderNotes(note(5, "a"), { at: "x" }), 1);
+    assert.equal(compareOrderNotes(undefined, null), 0);
+    assert.equal(compareOrderNotes({ at: 1 }, "junk"), 0);
+    assert.equal(compareOrderNotes(note(5, "a", "b"), note(5, "a", "b")), 0, "the same note");
+  });
+
+  test("the same moment with a different arrangement is settled by the arrangement's text, the same way round on every device", () => {
+    const x = note(5, "a", "b");
+    const y = note(5, "b", "a");
+    assert.notEqual(compareOrderNotes(x, y), 0);
+    assert.equal(compareOrderNotes(x, y), -compareOrderNotes(y, x), "swapping the two flips the answer");
+  });
+
+  test("laterOrderNote gives back the later note itself, a real one over a missing one, or undefined when neither is a note", () => {
+    const a = note(5, "a");
+    const b = note(9, "b");
+    assert.equal(laterOrderNote(a, b), b);
+    assert.equal(laterOrderNote(b, a), b);
+    assert.equal(laterOrderNote(a, undefined), a);
+    assert.equal(laterOrderNote(null, b), b);
+    assert.equal(laterOrderNote(a, { ...a }) !== undefined, true);
+    assert.equal(laterOrderNote(undefined, "junk"), undefined);
+    assert.equal(laterOrderNote({ at: "x" }, null), undefined);
+  });
+
+  test("latestSwitcherOrder finds the latest note held by any piece, in an array or an id-keyed map, ignoring malformed ones", () => {
+    const early = note(10, "a", "b");
+    const late = note(30, "b", "a");
+    const middle = note(20, "a", "b");
+    const pieces = [{ id: "a", switcherOrder: early }, { id: "b" }, { id: "c", switcherOrder: late }, { id: "d", switcherOrder: middle }, { id: "e", switcherOrder: { at: 99 } }, null];
+    assert.equal(latestSwitcherOrder(pieces), late);
+    assert.equal(latestSwitcherOrder(Object.fromEntries(pieces.filter(Boolean).map((p) => [p.id, p]))), late);
+    assert.equal(latestSwitcherOrder([{ id: "a" }, { id: "b", switcherOrder: "x" }]), null);
+    assert.equal(latestSwitcherOrder([]), null);
+    assert.equal(latestSwitcherOrder(undefined), null);
+  });
+
+  test("a new reorder is stamped now, but never at or before one this device has already seen (a clock that runs behind still wins after receiving)", () => {
+    const pieces = [{ id: "a", switcherOrder: note(500, "a") }];
+    assert.equal(nextOrderStamp([{ id: "a" }], 1000), 1000, "no note yet: now");
+    assert.equal(nextOrderStamp(pieces, 1000), 1000, "a note in the past: now");
+    assert.equal(nextOrderStamp(pieces, 400), 501, "this clock is behind the note it holds: just after it");
+    assert.equal(nextOrderStamp(pieces, 500), 501, "the same moment: just after");
+    assert.ok(nextOrderStamp(pieces) >= 501, "it works without a clock argument (the real clock)");
+    assert.equal(nextOrderStamp([], NaN), 0, "a clock that gives nothing: 0, not NaN");
+  });
+
+  test("makeOrderNote is the whole arrangement in the order given, stamped as above", () => {
+    const ordered = [{ id: "c" }, { id: "a" }, { id: "b" }];
+    assert.deepEqual(makeOrderNote({ ordered, now: 77 }), { at: 77, ids: ["c", "a", "b"] });
+    const all = [{ id: "a", switcherOrder: note(900, "a") }, { id: "b" }, { id: "c" }];
+    assert.deepEqual(makeOrderNote({ ordered, all, now: 77 }), { at: 901, ids: ["c", "a", "b"] });
+  });
+});
+
+describe("the switcher list: the latest note decides (Pass 122b)", () => {
+  const piece = (id, sortOrder, createdAt, switcherOrder) => ({ id, sortOrder, createdAt, ...(switcherOrder ? { switcherOrder } : {}) });
+  const ids = (list) => list.map((p) => p.id);
+
+  test("with no note anywhere it is exactly the old order, for any pieces", () => {
+    const rng = seeded(21);
+    for (let run = 0; run < 100; run++) {
+      const list = Array.from({ length: 10 }, (_, i) => (rng() < 0.7 ? piece(`p${i}`, intIn(rng, 0, 12), intIn(rng, 1, 900)) : piece(`p${i}`, undefined, intIn(rng, 1, 900))));
+      assert.deepEqual(ids(sortPiecesForSwitcher(list)), ids([...list].sort(compareSwitcherOrder)), `run ${run}`);
+    }
+  });
+
+  test("with a note, the pieces are in the note's order, whatever their ranks say", () => {
+    const n = { at: 5, ids: ["c", "a", "b"] };
+    const list = [piece("a", 0, 1, n), piece("b", 1, 2, n), piece("c", 2, 3, n)];
+    assert.deepEqual(ids(sortPiecesForSwitcher(list)), ["c", "a", "b"]);
+  });
+
+  test("a piece the note does not list follows the listed ones, and those that are not listed keep the old order among themselves", () => {
+    const n = { at: 5, ids: ["b", "a"] };
+    const list = [piece("z", 1, 900), piece("a", 0, 1, n), piece("y", 0, 800), piece("b", 5, 2)];
+    assert.deepEqual(ids(sortPiecesForSwitcher(list)), ["b", "a", "y", "z"], "y before z: rank 0 before rank 1");
+  });
+
+  test("an id in the note that no piece has is ignored, and an id listed twice counts at its first place", () => {
+    const n = { at: 5, ids: ["gone", "b", "a", "b", "also-gone"] };
+    assert.deepEqual(ids(sortPiecesForSwitcher([piece("a", 0, 1, n), piece("b", 1, 2)])), ["b", "a"]);
+  });
+
+  test("the LATEST note among all the pieces decides, not the first one found, and not the one on the piece that is listed first", () => {
+    const old = { at: 5, ids: ["a", "b", "c"] };
+    const fresh = { at: 9, ids: ["c", "b", "a"] };
+    const list = [piece("a", 0, 1, old), piece("b", 1, 2, old), piece("c", 2, 3, fresh)];
+    assert.deepEqual(ids(sortPiecesForSwitcher(list)), ["c", "b", "a"]);
+    assert.deepEqual(ids(sortPiecesForSwitcher([...list].reverse())), ["c", "b", "a"]);
+  });
+
+  test("the same list whatever order the pieces were loaded in; an array or a map; nothing given is changed", () => {
+    const n = { at: 5, ids: ["d", "b", "a"] };
+    const list = [piece("a", 0, 1, n), piece("b", 1, 2), piece("c", 7, 3), piece("d", 2, 4, n), piece("e", 7, 3)];
+    const expected = ["d", "b", "a", "c", "e"];
+    const rng = seeded(5);
+    for (let i = 0; i < 30; i++) assert.deepEqual(ids(sortPiecesForSwitcher([...list].sort(() => rng() - 0.5))), expected, `shuffle ${i}`);
+    const snapshot = clone(list);
+    assert.deepEqual(ids(sortPiecesForSwitcher(Object.fromEntries(list.map((p) => [p.id, p])))), expected);
+    sortPiecesForSwitcher(list);
+    assert.deepEqual(list, snapshot);
+  });
+
+  test("a malformed note on a piece is ignored; pieces without ids or notes do not throw", () => {
+    const list = [{ id: "a", sortOrder: 1, switcherOrder: { at: "x", ids: ["b", "a"] } }, { id: "b", sortOrder: 0 }, {}, null];
+    assert.equal(sortPiecesForSwitcher(list).length, 4);
+    assert.deepEqual(ids(sortPiecesForSwitcher(list).filter(Boolean).filter((p) => p.id)), ["b", "a"]);
+  });
+});
+
+describe("what a drag writes (Pass 122b)", () => {
+  const piece = (id, sortOrder, switcherOrder) => ({ id, sortOrder, createdAt: 1, ...(switcherOrder ? { switcherOrder } : {}) });
+  const applied = (pieces, updates) => pieces.map((p) => ({ ...p, ...(updates.find((u) => u.id === p.id) || {}) }));
+
+  test("moving one piece up one place: the two pieces whose rank changed get the new rank and the note; the others are not written", () => {
+    const before = [piece("a", 0), piece("b", 1), piece("c", 2), piece("d", 3)];
+    const ordered = [before[0], before[2], before[1], before[3]]; // c up above b
+    const updates = planSwitcherMove({ ordered, movedIds: ["c"], all: before, now: 100 });
+    assert.deepEqual(updates.map((u) => u.id).sort(), ["b", "c"]);
+    assert.deepEqual(updates.map((u) => [u.id, u.sortOrder]).sort(), [["b", 2], ["c", 1]]);
+    updates.forEach((u) => assert.deepEqual(u.switcherOrder, { at: 100, ids: ["a", "c", "b", "d"] }));
+  });
+
+  test("the note is the whole arrangement in the new order, a separate copy for each piece, and the list then shows it", () => {
+    const before = [piece("a", 0), piece("b", 1), piece("c", 2)];
+    const ordered = [before[2], before[0], before[1]];
+    const updates = planSwitcherMove({ ordered, movedIds: ["c"], all: before, now: 50 });
+    assert.equal(updates.length, 3, "every rank changed");
+    assert.notEqual(updates[0].switcherOrder, updates[1].switcherOrder);
+    assert.notEqual(updates[0].switcherOrder.ids, updates[1].switcherOrder.ids);
+    assert.deepEqual(sortPiecesForSwitcher(applied(before, updates)).map((p) => p.id), ["c", "a", "b"]);
+  });
+
+  test("the piece that was dragged is always written, even if its rank came out the same (the note has to exist somewhere)", () => {
+    // ranks already equal the new order's positions (they were out of step with the list the person saw)
+    const stale = [piece("a", 0), piece("b", 1), piece("c", 2)];
+    const updates = planSwitcherMove({ ordered: stale, movedIds: ["b"], all: stale, now: 9 });
+    assert.deepEqual(updates.map((u) => u.id), ["b"]);
+    assert.deepEqual(updates[0].switcherOrder, { at: 9, ids: ["a", "b", "c"] });
+  });
+
+  test("a drag made after receiving a later note than this clock reads is still stamped after it, and so wins", () => {
+    const seen = { at: 5000, ids: ["a", "b", "c"] };
+    const before = [piece("a", 0, seen), piece("b", 1), piece("c", 2)];
+    const updates = planSwitcherMove({ ordered: [before[1], before[0], before[2]], movedIds: ["b"], all: before, now: 1200 });
+    assert.equal(updates[0].switcherOrder.at, 5001);
+    assert.deepEqual(sortPiecesForSwitcher(applied(before, updates)).map((p) => p.id), ["b", "a", "c"]);
+  });
+
+  test("two drags in a row: the second is later, and the list shows the second arrangement", () => {
+    let pieces = [piece("a", 0), piece("b", 1), piece("c", 2), piece("d", 3)];
+    const drag = (from, to, now) => {
+      const list = sortPiecesForSwitcher(pieces);
+      const ordered = [...list];
+      const [m] = ordered.splice(from, 1);
+      ordered.splice(to, 0, m);
+      pieces = applied(pieces, planSwitcherMove({ ordered, movedIds: [m.id], all: pieces, now }));
+    };
+    drag(3, 0, 10); // d first
+    assert.deepEqual(sortPiecesForSwitcher(pieces).map((p) => p.id), ["d", "a", "b", "c"]);
+    drag(1, 3, 20); // a down to the end
+    assert.deepEqual(sortPiecesForSwitcher(pieces).map((p) => p.id), ["d", "b", "c", "a"]);
+    assert.equal(latestSwitcherOrder(pieces).at, 20);
+  });
+
+  test("a move that changes nothing writes only the piece it was told was moved; no pieces: no writes", () => {
+    assert.deepEqual(planSwitcherMove({ ordered: [], movedIds: [], now: 1 }), []);
+    assert.deepEqual(planSwitcherMove({ now: 1 }), []);
+  });
+});
+
+describe("two copies that were both reordered: the more recent reorder wins (Pass 122b)", () => {
+  const base0 = makePiece({ sortOrder: 5, createdAt: 1000 });
+  const baseParts = piecePartFingerprints(base0);
+  const edited = (over, updatedAt = 50) => ({ ...base0, ...over, updatedAt });
+  const noteA = { at: 100, ids: ["p1", "p2", "p3"] };
+  const noteB = { at: 200, ids: ["p3", "p2", "p1"] };
+  const sides = (r) => r.softSettled.map((s) => `${s.part}:${s.side}`).sort();
+
+  test("both copies reordered: the later note and its rank win, whichever copy is 'local', and softWins has no say", () => {
+    const a = edited({ sortOrder: 1, switcherOrder: noteA });
+    const b = edited({ sortOrder: 3, switcherOrder: noteB });
+    ["remote", "local"].forEach((softWins) => {
+      const here = planPieceMerge({ local: a, remote: b, base: baseParts, softWins });
+      assert.equal(here.status, "merged");
+      assert.deepEqual(here.conflicts, []);
+      assert.deepEqual(here.merged.switcherOrder, noteB);
+      assert.equal(here.merged.sortOrder, 3);
+      assert.deepEqual(sides(here), ["sortOrder:remote", "switcherOrder:remote"]);
+      const there = planPieceMerge({ local: b, remote: a, base: baseParts, softWins });
+      assert.deepEqual(there.merged.switcherOrder, noteB);
+      assert.equal(there.merged.sortOrder, 3);
+      assert.deepEqual(sides(there), ["sortOrder:local", "switcherOrder:local"]);
+    });
+  });
+
+  test("the same two copies merged from either side give the same order: two devices cannot disagree", () => {
+    const a = edited({ sortOrder: 1, switcherOrder: noteA });
+    const b = edited({ sortOrder: 3, switcherOrder: noteB });
+    const one = planPieceMerge({ local: a, remote: b, base: baseParts }).merged;
+    const two = planPieceMerge({ local: b, remote: a, base: baseParts }).merged;
+    assert.deepEqual([one.sortOrder, one.switcherOrder], [two.sortOrder, two.switcherOrder]);
+  });
+
+  test("one copy was reordered with a note, the other by a device on the previous version (a rank and no note): the noted copy wins both", () => {
+    const noted = edited({ sortOrder: 1, switcherOrder: noteA });
+    const plain = edited({ sortOrder: 3 });
+    const r = planPieceMerge({ local: plain, remote: noted, base: baseParts });
+    assert.equal(r.status, "merged");
+    assert.equal(r.merged.sortOrder, 1, "the noted copy's rank, not the other copy's by default");
+    assert.deepEqual(r.merged.switcherOrder, noteA);
+    const back = planPieceMerge({ local: noted, remote: plain, base: baseParts });
+    assert.equal(back.merged.sortOrder, 1);
+    assert.deepEqual(back.merged.switcherOrder, noteA);
+  });
+
+  test("no note on either side: exactly the earlier rule (the account's order, or this device's for a tab)", () => {
+    const r = planPieceMerge({ local: edited({ sortOrder: 1 }), remote: edited({ sortOrder: 3 }), base: baseParts });
+    assert.equal(r.merged.sortOrder, 3);
+    assert.equal(r.merged.switcherOrder, undefined);
+    assert.deepEqual(sides(r), ["sortOrder:remote"]);
+    const tab = planPieceMerge({ local: edited({ sortOrder: 1 }), remote: edited({ sortOrder: 3 }), base: baseParts, softWins: "local" });
+    assert.equal(tab.merged.sortOrder, 1);
+  });
+
+  test("only one copy was reordered: it travels whichever side that is, and nothing needs settling", () => {
+    const moved = edited({ sortOrder: 2, switcherOrder: noteA });
+    const here = planPieceMerge({ local: base0, remote: moved, base: baseParts });
+    assert.deepEqual([here.merged.sortOrder, here.merged.switcherOrder], [2, noteA]);
+    assert.deepEqual(here.softSettled, []);
+    assert.deepEqual(here.fromRemote.sort(), ["sortOrder", "switcherOrder"]);
+    const there = planPieceMerge({ local: moved, remote: base0, base: baseParts });
+    assert.equal(there.status, "local-only");
+    assert.deepEqual(there.merged.switcherOrder, noteA);
+  });
+
+  test("the date added is not part of a reorder: it still follows softWins even when a note decides the order", () => {
+    const a = edited({ sortOrder: 1, switcherOrder: noteA, createdAt: 1111 });
+    const b = edited({ sortOrder: 3, switcherOrder: noteB, createdAt: 2222 });
+    const r = planPieceMerge({ local: b, remote: a, base: baseParts });
+    assert.equal(r.merged.sortOrder, 3, "the later note is local's");
+    assert.equal(r.merged.createdAt, 1111, "the date added is the other copy's, as before");
+    assert.deepEqual(sides(r), ["createdAt:remote", "sortOrder:local", "switcherOrder:local"]);
+  });
+
+  test("a real conflict beside a reorder is still the only conflict; the merged piece is the same after a reload; the inputs are never changed", () => {
+    const local = edited({ sortOrder: 1, switcherOrder: noteB, name: "Mine" });
+    const remote = edited({ sortOrder: 3, switcherOrder: noteA, name: "Theirs" });
+    const before = [clone(local), clone(remote)];
+    const r = planPieceMerge({ local, remote, base: baseParts });
+    assert.equal(r.status, "conflicts");
+    assert.deepEqual(r.conflicts.map((c) => c.part), ["name"]);
+    assert.equal(r.merged.sortOrder, 1);
+    assert.deepEqual(r.merged.switcherOrder, noteB);
+    assert.deepEqual(piecePartFingerprints(validateAndMigratePiece(clone(r.merged))), piecePartFingerprints(r.merged));
+    assert.ok(same(local, before[0]) && same(remote, before[1]));
+  });
+
+  test("an answer given for the note is not an answer: it is unused and changes nothing", () => {
+    const r = planPieceMerge({
+      local: edited({ sortOrder: 1, switcherOrder: noteA }),
+      remote: edited({ sortOrder: 3, switcherOrder: noteB }),
+      base: baseParts,
+      choices: { switcherOrder: "local" },
+    });
+    assert.deepEqual(r.unusedChoices, ["switcherOrder"]);
+    assert.deepEqual(r.merged.switcherOrder, noteB);
+  });
+
+  test("a malformed note counts as no note: the other copy's real note wins, and two malformed ones fall back to the earlier rule", () => {
+    const junk = edited({ sortOrder: 1, switcherOrder: { at: "x" } });
+    const real = edited({ sortOrder: 3, switcherOrder: noteA });
+    assert.equal(planPieceMerge({ local: real, remote: junk, base: baseParts }).merged.sortOrder, 3);
+    assert.equal(planPieceMerge({ local: junk, remote: real, base: baseParts }).merged.sortOrder, 3);
+    const junk2 = edited({ sortOrder: 4, switcherOrder: "?" });
+    assert.equal(planPieceMerge({ local: junk, remote: junk2, base: baseParts }).merged.sortOrder, 4);
+  });
+});
+
+// The whole-list property, the one the owner asked for. Two or three devices each hold every piece
+// of one list, drag pieces around while apart (some drags made before the device has seen the
+// others', some after), log practice (so that real merges happen), and sync with one shared copy
+// of each piece. Whatever happened, after a full exchange every device shows the SAME list, and it
+// is exactly the arrangement of the reorder with the latest note: not a blend of two drags.
+describe("devices that reorder apart end with the most recent reorder, as a whole (Pass 122b)", () => {
+  const RUNS = 300;
+  const ROUNDS = 6;
+  const later = (a, b) => a.at > b.at || (a.at === b.at && a.ids.join("\u0001") > b.ids.join("\u0001"));
+
+  function runOne(seed, tally) {
+    const rng = seeded(seed);
+    const ids = Array.from({ length: intIn(rng, 3, 6) }, (_, i) => `p${i + 1}`);
+    const deviceCount = intIn(rng, 2, 3);
+    let clock = 100000; // real time, shared
+    let stamp = 0; // unique labels for edits
+    const skew = Array.from({ length: deviceCount }, (_, i) => (i === 0 ? 0 : intIn(rng, -400, 400))); // each device's clock reads a little off
+    const start = Object.fromEntries(ids.map((id, i) => [id, makePiece({ id, name: `Piece ${i + 1}`, createdAt: 1000 + i, sortOrder: 1000 + i })]));
+    const account = { ...start };
+    const devices = Array.from({ length: deviceCount }, (_, n) => ({ n, pieces: { ...start }, bases: Object.fromEntries(ids.map((id) => [id, piecePartFingerprints(start[id])])) }));
+    const made = []; // every note a drag made, with the arrangement it stands for
+    const listOf = (d) => sortPiecesForSwitcher(Object.values(d.pieces)).map((p) => p.id);
+
+    const drag = (d) => {
+      const list = sortPiecesForSwitcher(Object.values(d.pieces));
+      const from = intIn(rng, 0, list.length - 1);
+      const to = intIn(rng, 0, list.length - 1);
+      if (from === to) return false;
+      const ordered = [...list];
+      const [moved] = ordered.splice(from, 1);
+      ordered.splice(to, 0, moved);
+      clock += intIn(rng, 1, 40);
+      const seen = latestSwitcherOrder(Object.values(d.pieces));
+      const updates = planSwitcherMove({ ordered, movedIds: [moved.id], all: Object.values(d.pieces), now: clock + skew[d.n] });
+      assert.ok(updates.length >= 1, "a drag writes something");
+      if (seen) assert.ok(updates[0].switcherOrder.at > seen.at, "a drag is stamped after every reorder this device has seen");
+      updates.forEach((u) => {
+        d.pieces[u.id] = { ...d.pieces[u.id], sortOrder: u.sortOrder, switcherOrder: u.switcherOrder, updatedAt: 500000 + ++stamp };
+      });
+      made.push({ at: updates[0].switcherOrder.at, ids: ordered.map((p) => p.id) });
+      return true;
+    };
+    const practice = (d) => {
+      const id = pickOf(rng, ids);
+      const p = d.pieces[id];
+      const target = pickOf(rng, generateAllChunks(p).practiceChunks);
+      d.pieces[id] = reload(logSession(p, target.id, { day: intIn(rng, 1, p.daysToLearn), loggedAt: ++stamp, bpm: intIn(rng, 50, 110) }), 500000 + ++stamp);
+    };
+    const sync = (d, where) => {
+      ids.forEach((id) => {
+        const r = planPieceMerge({ local: d.pieces[id], remote: account[id], base: d.bases[id] });
+        assert.notEqual(r.status, "ask", `there is always a base (${where})`);
+        assert.notEqual(r.status, "whole-piece-conflict", `nothing here changes the grid (${where})`);
+        assert.equal(r.conflicts.some((c) => SOFT_PARTS.includes(c.part)), false, `the order is never a conflict (${where})`);
+        tally.settled += r.softSettled.length;
+        d.pieces[id] = r.merged;
+        account[id] = r.merged;
+        d.bases[id] = piecePartFingerprints(r.merged);
+      });
+    };
+
+    for (let round = 0; round < ROUNDS; round++) {
+      let drags = 0;
+      devices.forEach((d) => {
+        for (let i = 0, n = intIn(rng, 0, 2); i < n; i++) practice(d);
+        if (rng() < 0.7 && drag(d)) drags += 1;
+        if (rng() < 0.2 && drag(d)) drags += 1;
+      });
+      tally.drags += drags;
+      if (drags >= 2) tally.apart += 1;
+      (rng() < 0.5 ? devices : [...devices].reverse()).forEach((d) => {
+        if (rng() < 0.85) sync(d, `seed ${seed}, round ${round}, device ${d.n}`);
+      });
+      const where = `seed ${seed}, round ${round}, exchange`;
+      for (let pass = 0; pass < 2; pass++) devices.forEach((d) => sync(d, where));
+      const winner = made.reduce((best, m) => (best === null || later(m, best) ? m : best), null);
+      const expected = winner ? winner.ids : ids;
+      devices.forEach((d) => {
+        const shown = listOf(d);
+        assert.equal(new Set(shown).size, ids.length, `every piece appears once (${where})`);
+        assert.deepEqual(shown, expected, `device ${d.n} shows the most recent reorder, whole (${where})`);
+      });
+    }
+  }
+
+  test(`${RUNS} seeded runs of ${ROUNDS} rounds, two or three devices: after a full exchange everyone shows the latest reorder as a whole`, () => {
+    const tally = { drags: 0, apart: 0, settled: 0 };
+    for (let seed = 1; seed <= RUNS; seed++) runOne(seed, tally);
+    console.log(`reorder simulation: ${RUNS} runs of ${ROUNDS} rounds, ${tally.drags} drags, ${tally.apart} rounds with two or more drags made apart, the engine settled ${tally.settled} order parts by itself`);
+    assert.ok(tally.drags > 500, `drags were made (${tally.drags})`);
+    assert.ok(tally.apart > 100, `devices really dragged apart (${tally.apart})`);
+    assert.ok(tally.settled > 100, `and the engine really settled order parts (${tally.settled})`);
   });
 });

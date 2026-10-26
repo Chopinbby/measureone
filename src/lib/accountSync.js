@@ -34,7 +34,7 @@ import { ensureWorkId } from "./works";
 // The comparing primitives live in pieceMerge.js (Pass 117), which the account
 // code imports and never the other way round; they're re-exported from here so
 // everything that already imports them from this file is unchanged.
-import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints, planPieceMerge, WHOLE_PIECE_PART, DATE_LINKED_FIELDS } from "./pieceMerge";
+import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints, planPieceMerge, WHOLE_PIECE_PART, DATE_LINKED_FIELDS, compareOrderNotes, laterOrderNote } from "./pieceMerge";
 // Pass 121: naming a chunk by its measures, for the questions a held piece asks.
 import { generateAllChunks } from "./chunking";
 import { formatRange } from "./utils";
@@ -2266,12 +2266,13 @@ export function applyAccountMerge({
     const order = orderChoice === "follow" ? orderChoiceFor({ existing, imported: d.piece, kind: d.kind, baseParts: prior[d.id] && prior[d.id].parts }) : orderChoice;
     // Same as the import path: re-derive everything a stored piece gets on
     // load, and let the schedule re-derive itself (rescheduleMarker cleared).
-    return validateAndMigratePiece(
-      ensureWorkId({
-        ...mergeImportedPiece(existing, d.piece, ladderChoice, order),
-        rescheduleMarker: null,
-      })
-    );
+    // The reorder note (the most recent reorder wins) is not the import merge's to decide:
+    // the later of the two travels, and two copies being combined keep this device's.
+    const note = d.kind === "combine" ? laterOrderNote(existing.switcherOrder, undefined) : laterOrderNote(existing.switcherOrder, d.piece.switcherOrder);
+    const merged = { ...mergeImportedPiece(existing, d.piece, ladderChoice, order), rescheduleMarker: null };
+    if (note === undefined) delete merged.switcherOrder;
+    else merged.switcherOrder = note;
+    return validateAndMigratePiece(ensureWorkId(merged));
   };
 
   items.forEach((d, index) => {
@@ -2470,6 +2471,8 @@ export function applyAccountMerge({
 // Pass 122b: piece order follows the person between devices, and no account flow asks about it.
 // For a piece changed in both places that goes through the import merge (which has no base of
 // its own), this says which side's order that merge keeps:
+//   - the more recent reorder (the dated note a drag leaves in the pieces it changes), when
+//     either side holds one
 //   - the same order on both sides: nothing to choose
 //   - only THIS device reordered since it last synced (the recorded base says the account still
 //     holds the order they last agreed on): this device's, so a reorder is never undone by an
@@ -2481,6 +2484,11 @@ export function applyAccountMerge({
 // mergeImportedPiece already takes.
 export function orderChoiceFor({ existing, imported, kind = "ask", baseParts = null }) {
   if (kind === "combine") return "existing";
+  // The more recent reorder wins (the owner, 2026-10-25): each drag leaves a dated note in the
+  // pieces it changes, and the rank follows the later one. Without a note on either side (a
+  // piece nobody has dragged since notes began) the rules below, as before.
+  const noted = compareOrderNotes(existing && existing.switcherOrder, imported && imported.switcherOrder);
+  if (noted !== 0) return noted > 0 ? "existing" : "imported";
   const mine = piecePartFingerprints(existing).sortOrder;
   const theirs = piecePartFingerprints(imported).sortOrder;
   if (mine === theirs) return "existing";

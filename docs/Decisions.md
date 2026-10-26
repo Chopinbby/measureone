@@ -8144,11 +8144,28 @@ what it rules out.
   (Pass 116 found item 3); **one "Ask me again about what I said no to" button** as the way back
   (not a list, and not a backup file); **piece order follows her between devices**. **Calls made
   while building it, for her to overrule** (she had left, and asked for the pass to be built):
-  1. **When both devices reordered differently, the order already in the account wins, silently.**
-     This was the one point still marked "proposed, confirm" on the card, so it is the card's own
-     proposal, not her answer. The heavier option ("the most recent reorder wins", her 2026-10-15
-     principle) needs a stored note of when the list was last reordered and was not built. It is
-     the default of `planPieceMerge`'s `softWins`, and tabs pass `"local"`.
+  1. **When both devices reordered differently: the most recent reorder wins (the owner's answer,
+     2026-10-25, after the pull request was open: "it should remember the most recent reorder").**
+     The pass was first built with the card's own proposal, "the order already in the account
+     wins, silently", the one point still marked "proposed, confirm"; she overruled it. Built as a
+     small dated note, `piece.switcherOrder = { at, ids }`, that every drag leaves in the pieces
+     it changes (the WHOLE arrangement, not a rank per piece, so the last drag wins as a whole
+     list however the rows travel and whichever of them reach a device first). Calls inside it:
+     (a) the list shown is the latest note held by any piece, and a merge keeps the later of two,
+     never as a question; (b) a new reorder is stamped after any reorder the device has already
+     SEEN (`nextOrderStamp`), so a device whose clock runs behind still wins when it reorders
+     after receiving the other's; only two reorders made without either device having seen the
+     other are judged by the clocks, which is the one place a wrong clock can pick the wrong
+     winner; (c) a piece the note does not list (added after it) follows the listed ones;
+     (d) a backup file never brings a note in, and choosing "Use the imported order" is a reorder
+     of its own, stamped now; (e) two copies being combined keep the note of the piece that is
+     here; (f) nothing extra is saved or uploaded for a drag: the note goes into the pieces whose
+     rank changed (and the one dragged), as the rank always did. **Considered and not built:**
+     stamping every piece with a time (a drag would change, upload and, if the other device had
+     changed it meanwhile, hold every piece), and a time per piece with the later winning piece
+     by piece (two drags made apart would blend into a list neither device showed, which is not
+     "the most recent reorder"). `softWins` (the account's, or this tab's) now only decides what
+     nothing can date: no note on either side.
   2. **A declined combine in Get changes also keeps the copy off the device.** The card says "no
      window opens again", and a first version that only remembered the pair opened one (the copy
      became a new piece). In a restore the copy arrives as its own piece, as the card says.
@@ -8167,9 +8184,10 @@ what it rules out.
      engine was right and the check was relaxed for that one part, with the reason in the test.
   **Resolved by it:** Pass 112's later-passes items 5 and 9, Pass 116's found item 3, Pass 117's
   open item 2, Pass 120's for-later item 2 (for a piece that still knows what it last synced).
-  **Still open:** a "not now" that is not a "no"; "most recent reorder wins"; answers that follow
-  the person to other devices; a tab or phone on the previous version drops the answers when it
-  saves the record; "always keep both"; size and schedule travelling together.
+  **Still open:** a "not now" that is not a "no"; answers that follow the person to other
+  devices; a tab or phone on the previous version drops the answers when it saves the record (and
+  writes a rank with no note, which a noted reorder beats); "always keep both"; size and schedule
+  travelling together.
 
 ## Open questions
 
@@ -8487,7 +8505,9 @@ oversight to silently fix; surface it instead.
      home; it can be done earlier in the engine. **Resolved in Pass 122b:** the engine never
      conflicts on them (`SOFT_PARTS`); the owner decided the order follows her between devices
      (so the engine does not keep "this device's" order, as proposed here); when both devices
-     reordered, the account's order wins (`softWins`).
+     reordered, the account's order won (`softWins`), and later the same day the owner chose
+     "the most recent reorder wins" (see the Pass 122b entry above): a dated note decides, and
+     `softWins` only settles what nothing can date.
   3. **Other snapshot-like parts may have the marker's problem; revival is untested.**
      A reschedule marker is a snapshot of progress taken at one moment (see the Pass 117
      entry). `revival.plan` is another (computed from progress and the reassessment

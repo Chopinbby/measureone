@@ -168,7 +168,7 @@ import {
   describeAskMeAgain,
 } from "./lib/accountSync";
 import { startSettle, settleChoose, settleBack, settleNext, settleView, keptPhrases, rereadSettleItem } from "./lib/settleFlow";
-import { compareSwitcherOrder } from "./lib/pieceMerge";
+import { compareSwitcherOrder, sortPiecesForSwitcher, planSwitcherMove, makeOrderNote } from "./lib/pieceMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
@@ -1780,9 +1780,14 @@ export default function App() {
     // own backup of an in-progress piece), that start date is honored so
     // the plan doesn't jump back to day 1.
     const importedAt = Date.now();
+    const reRanked = []; // matched pieces that took the file's place in the list (orderChoice "imported")
     selectedIndices.forEach((index) => {
-      const p = importCandidates[index];
-      if (!p) return;
+      const candidate = importCandidates[index];
+      if (!candidate) return;
+      // A backup file never brings a reorder note along: it dates from another day and lists
+      // pieces that may no longer be here, so it must not rearrange the list. (A chosen
+      // "use the imported order" is stamped as a reorder of its own, below.)
+      const { switcherOrder: _fileNote, ...p } = candidate;
       // Match by id first, then by song identity (name + composer), so
       // re-importing a backup — e.g. after hand-editing minutesPerDay in
       // the exported file — updates the piece it already matches instead
@@ -1817,6 +1822,7 @@ export default function App() {
         }));
         next[match.id] = merged;
         writePieceDirect(match.id, merged);
+        if (merged.sortOrder !== match.sortOrder) reRanked.push(match.id);
         updatedCount++;
       } else {
         const id = next[p.id] ? newId("p") : p.id;
@@ -1834,6 +1840,16 @@ export default function App() {
         createdCount++;
       }
     });
+    if (reRanked.length > 0) {
+      // The person chose the file's order on purpose, which is a reorder: stamped now, so that it
+      // is the most recent one and the list shows what the ranks now say.
+      const ordered = groupPiecesByWork(Object.values(next).sort(compareSwitcherOrder)).flatMap((g) => g.pieces);
+      const note = makeOrderNote({ ordered, all: Object.values(next), now: importedAt });
+      reRanked.forEach((id) => {
+        next[id] = { ...next[id], switcherOrder: { at: note.at, ids: [...note.ids] } };
+        writePieceDirect(id, next[id]);
+      });
+    }
     setPieces(next);
     if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
     // Technique library (Pass 104): merged, never replaced — see
@@ -4070,7 +4086,10 @@ export default function App() {
     );
   };
 
-  const pieceList = Object.values(pieces).sort(compareSwitcherOrder);
+  // The list the switcher shows: the arrangement of the most recent reorder (the dated note a
+  // drag leaves in the pieces it changes), the old rank order for anything it does not list.
+  // lib/pieceMerge.js decides; two devices holding the same pieces show the same list.
+  const pieceList = sortPiecesForSwitcher(Object.values(pieces));
   const pieceGroups = groupPiecesByWork(pieceList);
   const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
 
@@ -4087,11 +4106,15 @@ export default function App() {
     const reordered = [...pieceGroups];
     const [moved] = reordered.splice(fromIndex, 1);
     reordered.splice(toIndex, 0, moved);
-    reordered
-      .flatMap((g) => g.pieces)
-      .forEach((p, i) => {
-        if (p.sortOrder !== i) updatePiece((current) => ({ ...current, sortOrder: i }), p.id);
-      });
+    // What is written is decided in lib/pieceMerge.js (planSwitcherMove): the new ranks as
+    // always, and, so that the most recent reorder wins on every device, a dated note of the
+    // whole arrangement in the pieces that changed (and in none that did not).
+    planSwitcherMove({
+      ordered: reordered.flatMap((g) => g.pieces),
+      movedIds: moved.pieces.map((p) => p.id),
+      all: pieceList,
+      now: Date.now(),
+    }).forEach((u) => updatePiece((current) => ({ ...current, sortOrder: u.sortOrder, switcherOrder: u.switcherOrder }), u.id));
   };
 
   return (

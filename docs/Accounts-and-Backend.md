@@ -2339,11 +2339,12 @@ items 5 and 9, Pass 116 found item 3, Pass 117 open item 2, Pass 120 for-later i
 unticked is remembered too** (Pass 116 found item 3, which these docs had handed to this pass);
 **one button, "Ask me again about what I said no to"**, is the way back (not a list, and not
 "only a backup file"); and **piece order follows her between devices**. **One thing was not
-answered before she left, and was built as the card proposed it:** when both devices reordered
-the list differently before they synced, **the order already in the account wins**, silently.
-The heavier alternative, "the most recent reorder wins" (her 2026-10-15 principle), needs the app
-to store when the list was last reordered, a stored-format change, and was not built (found item
-10). It is one default in one function (`planPieceMerge`'s `softWins`) to change.
+answered before she left, and was first built as the card proposed it:** when both devices
+reordered the list differently before they synced, **the order already in the account wins**,
+silently. **She answered it the same day, with the pull request open: "it should remember the
+most recent reorder."** That is built (see "The most recent reorder wins" below). It needed a
+small dated note stored in the pieces a drag changes, which is why the card had left it out; the
+account-wins default now only decides what nothing can date.
 
 **What was built**
 
@@ -2393,19 +2394,23 @@ to store when the list was last reordered, a stored-format change, and was not b
   composer (and they agree) is exactly as before. **File import is unchanged** (`findMatchingPiece`
   was not touched; the window's own piece-order question stays for a file).
 - **Piece order follows the person; nobody is asked.**
-  - *Engine* (`lib/pieceMerge.js`): `SOFT_PARTS` (`sortOrder`, `createdAt`) are never a conflict.
-    Changed on one side only they travel like any part. Changed on both to different values,
-    `planPieceMerge` settles them itself for the side `softWins` names, lists it in `softSettled`
-    and never in `conflicts`. The default is `"remote"`, the other copy (the account's), so the
-    merged piece holds exactly the order the account holds and nothing about order is left
-    waiting to go up.
-  - *Tabs of one browser* (`lib/tabSync.js`): `softWins: "local"`, so this tab keeps its own
-    order exactly as it did when the two were listed as conflicts. **Two rules for one engine,
-    on purpose:** the person is working in this tab; the account is the shared copy.
+  - *Engine* (`lib/pieceMerge.js`): `SOFT_PARTS` (`sortOrder`, `createdAt` and, since the most
+    recent reorder wins, `switcherOrder`) are never a conflict. Changed on one side only they
+    travel like any part. Changed on both to different values, `planPieceMerge` settles them
+    itself, lists it in `softSettled` and never in `conflicts`: the rank and the reorder note go
+    to the side holding the MORE RECENT reorder; where the notes cannot tell (no note on either
+    side, or the same one) and for `createdAt`, to the side `softWins` names. The default is
+    `"remote"`, the other copy (the account's), so the merged piece holds exactly what the
+    account holds and nothing about order is left waiting to go up.
+  - *Tabs of one browser* (`lib/tabSync.js`): `softWins: "local"`, so with nothing to date the two
+    reorders this tab keeps its own order exactly as it did when the two were listed as
+    conflicts; when a note dates them, the more recent reorder wins here too. **Two rules for
+    one engine, on purpose:** the person is working in this tab; the account is the shared copy.
   - *The window and Get changes / Review* (a piece changed in both places, merged through the
     import merge, which has no base): `orderChoiceFor` decides, and the account's flows pass
-    `orderChoice: "follow"`. Same order on both sides: nothing to choose. Only this device
-    reordered since it last synced (the recorded base says so): this device's. Otherwise the
+    `orderChoice: "follow"`. The more recent reorder (the dated note) wins when either side
+    holds one. Otherwise: same order on both sides, nothing to choose; only this device
+    reordered since it last synced (the recorded base says so), this device's; else the
     account's. Two copies being combined keep the place of the one that is here. The "Piece
     order" question is gone from the account's window.
   - *The list* (`compareSwitcherOrder`, used by `App.jsx`'s switcher): merging a reorder piece by
@@ -2413,6 +2418,39 @@ to store when the list was last reordered, a stored-format change, and was not b
     tie to the order the pieces were loaded in, which can differ between devices. Ties are now
     broken by date added, then id, so two devices holding the same pieces show the same list. It
     orders exactly as the old sort wherever there is no tie (a test compares them).
+- **The most recent reorder wins (the owner, 2026-10-25), as a whole list.** Pieces are saved one
+  row each, so no single place holds "the order". Every drag in the switcher therefore leaves the
+  same small note in the pieces it changes: `piece.switcherOrder = { at, ids }`, the moment of the
+  drag and the WHOLE arrangement (every piece's id, in order). `planSwitcherMove`
+  (`lib/pieceMerge.js`) decides what a drag writes and `App.jsx`'s `moveGroupTo` writes it; the
+  ranks are written as they always were.
+  - **What is shown** is a pure function of the pieces (`sortPiecesForSwitcher`): the arrangement
+    of the LATEST note held by any piece; a piece the note does not list (added after it) follows
+    the listed ones by the old rule; no note anywhere is exactly the old order. So it does not
+    matter which rows of a drag reach a device first, or that a drag left some pieces' rows
+    untouched: one changed row carries the whole list. (The stored ranks can then disagree with
+    the list for a piece or two. That is harmless: the list decides, and the next drag writes
+    fresh ranks.)
+  - **What a merge does** is keep the later of two notes (`compareOrderNotes`; the same moment is
+    settled by the arrangement's text, so it is one answer on every device), and the rank with
+    it, never as a question. `orderChoiceFor` and the account's import merge (`mergeInto`) apply
+    the same rule; two copies being combined keep the note of the piece that is here.
+  - **A new reorder is stamped after every reorder the device has already SEEN**
+    (`nextOrderStamp`: the later of now and one past the latest note it holds, its own or another
+    device's), so a device whose clock runs behind still wins when it reorders after receiving
+    the other's. Only two reorders made without either device having seen the other are judged by
+    the clocks, which is the one place a wrong clock can pick the wrong winner.
+  - **Nothing extra is saved or uploaded for a drag:** the note goes into the pieces whose rank
+    changed and the one dragged, as the rank always did. Stamping every piece was considered and
+    not built (every piece would upload on every drag, and every piece the other device had
+    changed meanwhile would be held); so was a time per piece with the later winning piece by
+    piece (two drags made apart would blend into a list neither device showed).
+  - **A backup file never brings a note in** (`handleConfirmImport` drops it: it dates from
+    another day and lists pieces that may be gone). Choosing "Use the imported order" is a reorder
+    of its own, stamped now, so it is the most recent one.
+  - **Old data and old devices:** a piece nobody has dragged since this existed has no note and
+    behaves exactly as before. A device on the previous version keeps writing ranks and no note;
+    its reorder is dated by nothing, so a noted reorder beats it (found item 17).
 - **A piece held by a refused upload that still knows what it last synced** (its record entry keeps
   the fingerprint of every part as last agreed) **is asked about like any held piece**
   (`heldIdsToSettle`, used by `planSettle`): Pass 121's one-question-at-a-time flow, with the
@@ -2457,6 +2495,32 @@ this device, ... on your other device") and the answer applied; signed out and w
 service the app shows no account surface and the file import still asks about piece order. **Not
 seen:** the real preview with the real test project (the card's "Yours" checks).
 
+**Checked again after "the most recent reorder wins" was added** (same day). `npm test`: 1,554 pass
+(35 more than above: 30 in `test/pieceMerge.test.mjs`, 4 in `test/accountSync.test.mjs`, 1 in
+`test/tabSync.test.mjs`); `npm run build` succeeds. **24 more deliberate breakages, each caught
+by a test** (19 in the note, the list and the drag; 5 in the account code), for example: the
+earlier note wins, the list ignores the note, the first note found instead of the latest, a new
+reorder stamped at plain "now", the engine settling by the fixed side, a drag that does not write
+the piece it moved, one shared note object, a combine that takes the other copy's note. **A new
+simulation of the whole property:** two or three devices with 3 to 6 pieces drag pieces around
+while apart (some drags before the device has seen the others', some after, device clocks up to
+0.4 s off), log practice so real merges happen, and sync in random orders; after a full exchange
+every device shows the SAME list and it is exactly the arrangement of the latest note, not a
+blend. 300 runs (3,030 drags, 990 rounds with two or more drags made apart, 4,568 order parts
+settled by the engine) and, wider, 3,000 runs (30,760 drags, 10,045 such rounds, 48,365 order
+parts settled), all green; so are the earlier simulations at seeds 1 to 3,000 and 1 to 1,000. **In
+a real browser** (the real app against a local stand-in for the account service, two addresses as
+devices, the real drag handler, 2026-10-25): with the automatic switch off, the earlier drag
+uploads first and the later drag's device is held, Review says "Nothing is left to decide", and
+BOTH devices end showing the later drag's list; the reverse (the later drag uploads first, the
+earlier drag's device is held) ends with the later list too and re-uploads nothing; with the
+switch on nothing is held and both end with the later list (the stored ranks of one piece
+disagreed with the list at that moment, which is the case the note exists for); a file import
+whose pieces carry a later-dated note leaves the list alone, and "Use the imported order" changes
+it and the other device follows; dragging a multi-movement work moves it as a block; signed out,
+a drag survives a reload with no account surface. **Not seen:** the real preview with the real
+test project.
+
 **Found, for decisions** (none acted on beyond what is said):
 
 1. **The wider simulation found an over-strict check, on `main` too.** Seed 311 failed before this
@@ -2488,7 +2552,8 @@ seen:** the real preview with the real test project (the card's "Yours" checks).
    Pass 119's old-version warning: reload old tabs after this deploys.
 9. **Answers are not pruned.** A piece that is deleted or gone from the account stays in the list
    until "Ask me again" (500 at most, the newest kept).
-10. **"The most recent reorder wins" is not built**, only the account's order (above).
+10. **"The most recent reorder wins" was not built at first, only the account's order. Built the
+    same day**, when the owner chose it (above); items 16 to 21 are what came with it.
 11. **Old and unchanged: the "Changes from another device" line stays after a combine until the next
     check**, because the last look at the account still shows the other row live. It clears by itself.
 12. **In a restore, leaving both a piece and its "other copy" unticked restores neither**, which is
@@ -2501,10 +2566,36 @@ seen:** the real preview with the real test project (the card's "Yours" checks).
 15. **`MAX_DECLINED` (500) is a hand-picked bound** and is not in `docs/Research.md` (not in the
     card's file list). Nothing depends on the number; it only stops the record growing without end.
 
-**Left open:** items 6 to 10 and 12, 13 and 15 above; a piece held by a refused upload with no recorded
-base still goes to the picker; "always keep both" (deferred, no owner); size and schedule travelling
-together (proposed as its own pass); the automatic update's "applied when you're done" line; and
-the real-project checks.
+**Found while building "the most recent reorder wins":**
+
+16. **A plain drag can still make the other device's pieces "changed on another device".** Pieces
+    are uploaded only if the account row is still at the revision this device knows, and a drag
+    changes the rank of every piece between the old and new place. If the other device had changed
+    any of those pieces meanwhile (practice logged on the phone, say), the upload is refused and
+    the piece is held, with the switch off; Review then says "Nothing is left to decide" and the
+    most recent reorder wins. This is the rule from Pass 111 and was the same before; it is not
+    new, but a reorder makes it easy to see (seen in the browser: a drag on one device with the
+    other device's reorder already uploaded).
+17. **A device on the previous version** (a phone left open) writes ranks and no note, so its
+    reorder is dated by nothing and a noted reorder, however old, beats it. Reload old tabs after
+    this deploys (as for Pass 122b's remembered answers).
+18. **The clock.** Two reorders made without either device having seen the other are judged by
+    their clocks (a device seconds off is harmless; one that is days off could pick the wrong
+    winner). A reorder made after receiving the other's is always later (`nextOrderStamp`), so
+    only a real clash can go wrong, and the cost is that one list wins instead of the other.
+19. **The note lives in the pieces the drag changed (at least two).** If every one of them is later
+    deleted, the arrangement falls back to the stored ranks, which can disagree with each other
+    after two devices dragged apart (a tie, ordered by date added). The next drag fixes it.
+20. **A piece added after the latest drag goes to the end** of the list, as a new piece always did.
+    A piece brought in from a backup file while a note exists now also goes to the end (it used to
+    sit where the file's own rank put it).
+21. **`docs/Algorithms.md`'s merge section** does not yet mention the reorder note (not in the card's
+    file list; same as item 13).
+
+**Left open:** items 6 to 9, 12, 13, 15 and 17 to 21 above; a piece held by a refused upload with no
+recorded base still goes to the picker; "always keep both" (deferred, no owner); size and schedule
+travelling together (proposed as its own pass); the automatic update's "applied when you're done"
+line; and the real-project checks.
 
 ## Setup (test project)
 

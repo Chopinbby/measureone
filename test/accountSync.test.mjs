@@ -4592,6 +4592,84 @@ describe("things the person said no to are remembered on this device (Pass 122b)
     assert.equal(orderChoiceFor({ existing: at(2), imported: at(7), baseParts, kind: "combine" }), "existing", "two copies combined keep the place of the one that is here");
   });
 
+  test("the more recent reorder wins: the dated note a drag leaves decides which side's rank is followed", () => {
+    const base = pieceOf("p1", { sortOrder: 5 });
+    const baseParts = piecePartFingerprints(base);
+    const note = (at, ...ids) => ({ at, ids });
+    const at = (n, noted) => validateAndMigratePiece({ ...viaJson(base), sortOrder: n, ...(noted ? { switcherOrder: noted } : {}) });
+    assert.equal(orderChoiceFor({ existing: at(2, note(200, "p1")), imported: at(7, note(100, "p1")), baseParts }), "existing", "both reordered, this device's note is later: kept (it used to be the account's)");
+    assert.equal(orderChoiceFor({ existing: at(2, note(100, "p1")), imported: at(7, note(200, "p1")), baseParts }), "imported", "both reordered, the account's note is later: followed");
+    assert.equal(orderChoiceFor({ existing: at(2), imported: at(7, note(100, "p1")), baseParts }), "imported", "only the account's has a note: a rank with no note is dated by nothing");
+    assert.equal(orderChoiceFor({ existing: at(2, note(100, "p1")), imported: at(7), baseParts }), "existing", "only this device's has a note");
+    assert.equal(orderChoiceFor({ existing: at(2, note(100, "p1")), imported: at(7, note(100, "p1")), baseParts }), "imported", "the same note on both: the earlier rules, so the account's");
+    assert.equal(orderChoiceFor({ existing: at(2, note(900, "p1")), imported: at(7, note(100, "p1")), baseParts, kind: "combine" }), "existing", "two copies combined keep the place of the one that is here, whatever the notes say");
+    assert.equal(orderChoiceFor({ existing: at(2), imported: at(7), baseParts }), "imported", "no notes anywhere: exactly as before");
+  });
+
+  test("the more recent reorder wins through the real apply step: Get changes and the automatic update agree, and the note travels", () => {
+    const base = pieceOf("p1", { sortOrder: 5 });
+    const note = (at, ...ids) => ({ at, ids });
+    const device = withAccountCopyRecorded(emptyDevice(), USER, { entries: { p1: syncedAs(base, 1) }, checkedAt: 1 });
+    const make = (more, order, noted) => validateAndMigratePiece({ ...viaJson(more), sortOrder: order, ...(noted ? { switcherOrder: noted } : {}) });
+    // different things changed on each side (so the automatic update merges them by part, no real conflict)
+    const mineMore = validateAndMigratePiece({ ...viaJson(base), name: "Mine", updatedAt: 2000 });
+    const theirsMore = validateAndMigratePiece({ ...viaJson(base), notes: "Theirs", updatedAt: 3000 });
+    const run = (mine, theirs, automatic) =>
+      applyAccountMerge({
+        candidates: candidatesOf([theirs, 2]),
+        localPieces: { p1: mine },
+        localTechnique: null,
+        accountRecord: recOf(device),
+        selectedIds: ["p1"],
+        orderChoice: "follow",
+        automatic,
+      });
+    [false, true].forEach((automatic) => {
+      const tag = automatic ? "automatic" : "Get changes";
+      let out = run(make(mineMore, 1, note(200, "p1", "p2")), make(theirsMore, 2, note(100, "p2", "p1")), automatic);
+      assert.deepEqual([out.pieces.p1.sortOrder, out.pieces.p1.switcherOrder], [1, note(200, "p1", "p2")], `${tag}: this device reordered last, so its order is kept`);
+      out = run(make(mineMore, 1, note(100, "p1", "p2")), make(theirsMore, 2, note(200, "p2", "p1")), automatic);
+      assert.deepEqual([out.pieces.p1.sortOrder, out.pieces.p1.switcherOrder], [2, note(200, "p2", "p1")], `${tag}: the other device reordered last, so its order is followed`);
+      out = run(make(mineMore, 1), make(theirsMore, 2, note(100, "p2", "p1")), automatic);
+      assert.deepEqual([out.pieces.p1.sortOrder, out.pieces.p1.switcherOrder], [2, note(100, "p2", "p1")], `${tag}: only the other has a note`);
+      out = run(make(mineMore, 1, note(100, "p1", "p2")), make(theirsMore, 2), automatic);
+      assert.deepEqual([out.pieces.p1.sortOrder, out.pieces.p1.switcherOrder], [1, note(100, "p1", "p2")], `${tag}: only this device has a note`);
+      out = run(make(mineMore, 1), make(theirsMore, 2), automatic);
+      assert.deepEqual([out.pieces.p1.sortOrder, "switcherOrder" in out.pieces.p1], [2, false], `${tag}: no note anywhere: the account's order, and no note appears`);
+      assert.equal(out.counts.merged.length, 1, `${tag}: merged, with no question`);
+    });
+  });
+
+  test("a new piece from the account arrives with its note, and a clean newer copy brings the account's", () => {
+    const noted = pieceOf("n1", { sortOrder: 2, switcherOrder: { at: 50, ids: ["n1", "p1"] } });
+    const fresh = applyAccountMerge({ candidates: candidatesOf([noted, 1]), localPieces: {}, localTechnique: null, accountRecord: recOf(emptyDevice()), selectedIds: null, orderChoice: "follow" });
+    assert.deepEqual(fresh.pieces.n1.switcherOrder, { at: 50, ids: ["n1", "p1"] });
+    const base = pieceOf("p1", { sortOrder: 5 });
+    const theirs = validateAndMigratePiece({ ...viaJson(withMore(base, 2)), sortOrder: 1, switcherOrder: { at: 60, ids: ["p1", "n1"] } });
+    const device = withAccountCopyRecorded(emptyDevice(), USER, { entries: { p1: syncedAs(base, 1) }, checkedAt: 1 });
+    const took = applyAccountMerge({ candidates: candidatesOf([theirs, 2]), localPieces: { p1: base }, localTechnique: null, accountRecord: recOf(device), selectedIds: ["p1"], orderChoice: "follow" });
+    assert.equal(took.counts.took.length, 1, "nothing waiting here: taken as it is");
+    assert.deepEqual(took.pieces.p1.switcherOrder, { at: 60, ids: ["p1", "n1"] });
+  });
+
+  test("two copies being combined: the piece that is here keeps its own note, and the other copy's note (which lists the other copy's id) is not brought in", () => {
+    const run = (hereNote, thereNote) => {
+      const here = named("L1", "Ballade No. 1", "Chopin", { sortOrder: 3, ...(hereNote ? { switcherOrder: hereNote } : {}) });
+      const there = named("R1", "Ballade No. 1", "Chopin", { sortOrder: 9, ...(thereNote ? { switcherOrder: thereNote } : {}) });
+      return applyAccountMerge({
+        candidates: candidatesOf([there, 3]),
+        localPieces: { L1: here },
+        localTechnique: null,
+        accountRecord: recOf(withAccountCopyRecorded(emptyDevice(), USER, { entries: { L1: syncedAs(here, 1) }, checkedAt: 1 })),
+        selectedIds: ["R1"],
+        orderChoice: "follow",
+      }).pieces.L1;
+    };
+    assert.deepEqual(run({ at: 10, ids: ["L1"] }, { at: 99, ids: ["R1"] }).switcherOrder, { at: 10, ids: ["L1"] });
+    assert.equal("switcherOrder" in run(null, { at: 99, ids: ["R1"] }), false, "none here, one there: none");
+    assert.equal(run({ at: 10, ids: ["L1"] }, null).sortOrder, 3);
+  });
+
   test("a piece changed in both places is merged with the order followed, not asked: through the real apply step", () => {
     const base = pieceOf("p1", { sortOrder: 5 });
     const mineMore = validateAndMigratePiece({ ...viaJson(withMore(base, 2)), sortOrder: 5 });

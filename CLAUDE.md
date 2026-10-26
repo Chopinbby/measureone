@@ -514,7 +514,8 @@ and scales always kept (Pass 120 holds a conflicting part and Pass 121 asks the 
 instead, so "most recent wins" is still not built; Pass 122 settled one case by the owner's
 2026-10-23 rule: a deleted piece is deleted everywhere, practice and all, with a 30-day way back;
 Pass 122b stopped the app asking twice: what is left unticked is remembered, piece order follows
-the person with no question, and a refused-upload piece gets Review's plain questions)
+the person with no question (the most recent reorder wins), and a refused-upload piece gets Review's
+plain questions)
 ([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When two copies disagree").
 Design: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md); what a person
 sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109) (flows
@@ -704,11 +705,12 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   kind. **Pass 120 did not change this** (an automatic update holds a conflicting piece
   part instead of resolving it, and Pass 121 asks the person, see below); "the most recent
   change wins" (decided 2026-10-15) is still not built. **One exception since Pass 122b:**
-  `sortOrder` and `createdAt` (`SOFT_PARTS`) are never a conflict: changed on both sides to
-  different values the engine settles them itself (`softWins`, default the other copy, i.e. the
-  account's; tabs pass `"local"`) and lists it in `softSettled`. See "What the person said no
-  to" below. Scales and custom methods are never removed by a merge,
-  and an empty tempo never replaces a real one.
+  `sortOrder`, `switcherOrder` and `createdAt` (`SOFT_PARTS`) are never a conflict: changed on both
+  sides to different values the engine settles them itself and lists it in `softSettled`: the
+  rank and the reorder note go to the side holding the MORE RECENT reorder, and where the notes
+  cannot tell (and always for `createdAt`) to the side `softWins` names (default the other copy,
+  i.e. the account's; tabs pass `"local"`). See "What the person said no to" below. Scales and
+  custom methods are never removed by a merge, and an empty tempo never replaces a real one.
 - **Piece engine.** The "travel together" rule: the sides disagree about
   `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
   changed progress or the marker: one whole-piece conflict. **The reschedule marker is
@@ -1061,31 +1063,47 @@ The app must not ask the same question twice. Rules:
   piece here. A new way to bring a piece back by name must do the same. **Opening a RESTORE forgets
   earlier answers** (the welcome screen has no Settings, so there would be no "Ask me again").
 - **Piece order follows the person; no account flow asks.** `SOFT_PARTS` (`sortOrder`,
-  `createdAt`) are never an engine conflict. The account's flows pass `orderChoice: "follow"`
-  (`orderChoiceFor`, for a piece merged through the import merge, which has no base: same order,
-  nothing to choose; only this device reordered since the recorded base, this device's; otherwise
-  the account's; two combined copies keep the place of the one that is here). The window has no
-  piece-order question for the account (the file import keeps its own). **The default when both
-  sides reordered, "the account's order wins", is the card's PROPOSAL, not the owner's answer**;
-  "the most recent reorder wins" needs a stored note of when the list was last reordered and is not
-  built. Any place that sorts pieces for the switcher uses `compareSwitcherOrder` (ties by date
-  added, then id), or two devices holding the same ranks can show different lists.
+  `switcherOrder`, `createdAt`) are never an engine conflict. The account's flows pass
+  `orderChoice: "follow"` (`orderChoiceFor`, for a piece merged through the import merge, which
+  has no base: the more recent reorder note, when either side has one; else same order, nothing
+  to choose; only this device reordered since the recorded base, this device's; otherwise the
+  account's; two combined copies keep the place of the one that is here, and its note). The
+  window has no piece-order question for the account (the file import keeps its own).
+- **The most recent reorder wins, as a whole list (the owner's answer, 2026-10-25).** Every drag
+  leaves a small dated note, `piece.switcherOrder = { at, ids }` (the moment, and EVERY piece's id
+  in the new order), in the pieces it changes: `planSwitcherMove` (`lib/pieceMerge.js`) decides what
+  is written, `App.jsx`'s `moveGroupTo` writes it, and the ranks are written as before. **The
+  switcher shows `sortPiecesForSwitcher(pieces)`, never `Object.values(pieces).sort(...)`:** the
+  arrangement of the LATEST note held by any piece, pieces it does not list after it by
+  `compareSwitcherOrder` (ties by date added, then id), no note anywhere exactly the old order.
+  A merge keeps the later of two notes (`compareOrderNotes`; same moment: the arrangement's text,
+  one answer everywhere) and the rank with it; `mergeInto` and `orderChoiceFor` apply the same
+  rule, and a combine keeps the note of the piece that is here. **A new reorder is stamped by
+  `nextOrderStamp`** (after every note this device has seen, so a slow clock still wins after
+  receiving the other's reorder; only two reorders made apart are judged by the clocks). **A backup
+  file never brings a note in** (`handleConfirmImport` drops it); "Use the imported order" writes a
+  fresh note. Don't stamp every piece on a drag (it uploads and holds every piece) and don't make
+  it a time per piece (two drags made apart blend into a list neither device showed): both were
+  considered and rejected, and a simulation (`test/pieceMerge.test.mjs`, "devices that reorder apart
+  end with the most recent reorder, as a whole") fails on the blend.
 - **A piece held by a refused upload that still knows what it last synced gets Review's plain
   questions** (`heldIdsToSettle`, used by `planSettle`: held with a recorded list, or held with
   recorded `parts`). One with no recorded base goes to the picker as before; the automatic update
   still never settles it.
-- **Checks.** 1,519 tests; 30 deliberate breakages, all caught; the merge simulations at seeds 1
-  to 3,000 / 1 to 1,000 and a convergence run of 3,000. **Running them wider found a check that was
-  too strict on `main` too** (minutes-mode `daysToLearn`, seed 311): the engine re-works it so a
-  reload gives the same piece; the check was relaxed for that one part and says why. Seen in a
-  real browser against a local stand-in for the account service; **not seen on the real preview**
-  (the card's "Yours" checks).
+- **Checks.** 1,554 tests; 54 deliberate breakages, all caught; the merge simulations at seeds 1
+  to 3,000 / 1 to 1,000, a convergence run of 3,000 and the whole-list reorder simulation at 3,000
+  runs. **Running them wider found a check that was too strict on `main` too** (minutes-mode
+  `daysToLearn`, seed 311): the engine re-works it so a reload gives the same piece; the check was
+  relaxed for that one part and says why. Seen in a real browser against a local stand-in for the
+  account service (two devices dragging apart, switch off and on, a file import, a work dragged as a
+  block, signed out); **not seen on the real preview** (the card's "Yours" checks).
 - **Left open** (details and owners in
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)):
   "Select none" leaves everything off and remembers it; the answers belong to this device and a
-  tab or phone on the previous version drops them when it saves the record; they are not pruned;
-  "most recent reorder wins" is not built; `docs/Algorithms.md`'s merge section does not yet say
-  order and date added are settled by the engine.
+  tab or phone on the previous version drops them when it saves the record (and writes a rank with
+  no note, which a noted reorder beats); they are not pruned; two reorders made apart are judged
+  by the devices' clocks; `docs/Algorithms.md`'s merge section does not yet say order and date
+  added are settled by the engine.
 
 ### Deploying and operating (Pass 114 on)
 
@@ -1298,7 +1316,7 @@ silently.
 - **Pass 122b** — what the person leaves unticked in Get changes or Restore is remembered (a new
   piece is left off, "same piece, other copy" means different pieces), with one "Ask me again about
   what I said no to" button; a name match with no composer is "maybe the same piece" and starts
-  unticked; piece order follows the person between devices with no question (the account's order
-  wins when both reordered: the card's proposal); a piece held by a refused upload gets Review's
-  plain questions.
+  unticked; piece order follows the person between devices with no question (when both reordered,
+  the most recent reorder wins as a whole list, by a dated note every drag leaves); a piece held by
+  a refused upload gets Review's plain questions.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)

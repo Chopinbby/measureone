@@ -1128,9 +1128,14 @@ once for itself.
 **Piece order follows you.** Reorder the list on one device and your other devices follow it (by
 themselves with "Update automatically" on, or on Get changes), with no question: the "Piece order"
 question that used to appear in the Get changes window is gone. If you reordered differently on two
-devices before they synced, the order already in your account is kept, without asking. Two pieces
-that end up with the same place in the list are shown in the order they were added, the same on
-every device. A file import still asks about order, as before.
+devices before they synced, **the most recent reorder wins, as a whole list**, without asking: each
+time you drag a piece the app leaves a dated note of the whole arrangement in the pieces it changed,
+and every device shows the arrangement of the latest note. (Two reorders made without either device
+having seen the other are judged by the devices' clocks.) Pieces added since that reorder follow the
+listed ones. Two pieces that end up with the same place in the list are shown in the order they were
+added, the same on every device. A file import still asks about order, as before, and a file's own
+older arrangement never rearranges your list; "Use the imported order" counts as a reorder you made
+just now.
 
 **A piece held because an upload was refused** (it shows as "changed on another device" with
 **Review**) now gets the same one-question-at-a-time Review as any held piece (flow 15), when the
@@ -1139,5 +1144,4 @@ screen says "Nothing is left to decide for this piece". A piece that has never s
 through the whole-piece choice.
 
 **Not covered:** a way to say "not now" instead of "no" (a row left unticked is a no, and Ask me
-again undoes all of them at once); "most recent reorder wins" (the account's order wins); answers
-that follow you to your other devices.
+again undoes all of them at once); answers that follow you to your other devices.

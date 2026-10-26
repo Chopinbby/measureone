@@ -228,19 +228,117 @@ function sameFingerprints(a, b) {
 // label the device record and the question use for it.
 export const WHOLE_PIECE_PART = "chunk layout and practice";
 
-// Pass 122b: two parts are display arrangement, never data a person would want to be
-// asked about: where the piece sits in the switcher (`sortOrder`) and the date it was
-// added (`createdAt`). Changed on one side only they travel like any part (reorder the
-// list on one device and the others follow). Changed to different values on both sides
-// they are NOT a conflict: the engine settles them itself, in favor of the side the caller
-// names (`softWins`), and lists what it did in `softSettled`. It is always one fixed side,
-// never "whichever device happens to be merging". The account's copy wins for the
-// account's flows (the default): the merged piece then holds exactly the order the account
-// holds, so nothing about the order is left waiting to go up and two devices cannot take
-// turns overwriting each other's order (a simulation in test/pieceMerge.test.mjs checks that
-// devices that have exchanged copies end with the same order). A tab of one browser keeps
-// its own value instead (tabSync.js): the person is working in that tab.
-export const SOFT_PARTS = ["sortOrder", "createdAt"];
+// Pass 122b: three parts are display arrangement, never data a person would want to be
+// asked about: where the piece sits in the switcher (`sortOrder`), the date it was added
+// (`createdAt`) and (below) the note a reorder leaves (`switcherOrder`). Changed on one side
+// only they travel like any part (reorder the list on one device and the others follow).
+// Changed to different values on both sides they are NOT a conflict: the engine settles them
+// itself and lists what it did in `softSettled`. The note decides it: whichever side holds
+// the MORE RECENT reorder wins, for the note and for `sortOrder` (they were written together).
+// When there is nothing to tell them apart (no note on either side, or the same one) it is one
+// fixed side that the caller names (`softWins`), never "whichever device happens to be
+// merging": the account's copy for the account's flows (the default), so nothing about the
+// order is left waiting to go up and two devices cannot take turns overwriting each other's
+// order; a tab of one browser keeps its own value (tabSync.js): the person is working in that
+// tab. `createdAt` always follows `softWins`. (A simulation in test/pieceMerge.test.mjs checks
+// that devices that have exchanged copies end with the same order.)
+export const SOFT_PARTS = ["sortOrder", "createdAt", "switcherOrder"];
+
+// "The most recent reorder wins" (the owner, 2026-10-25). Pieces are stored one row each, so
+// there is no single place to keep the order of the whole list. Instead every drag in the
+// switcher leaves the same small note in the pieces it changes: { at, ids }, the moment of the
+// drag and the whole arrangement (every piece's id, in order). A device shows the arrangement
+// of the LATEST note it holds in any piece, and a merge keeps the later of two notes, so the
+// last drag wins as a whole list however the rows travel and whichever of them reach a device
+// first, and nothing has to be re-saved for the pieces the drag did not move. Pieces the note
+// does not list (added after it) follow the listed ones, by the old rule. No note anywhere:
+// exactly the old order, by `sortOrder`.
+export function isOrderNote(n) {
+  return !!n && typeof n === "object" && !Array.isArray(n) && Number.isFinite(n.at) && Array.isArray(n.ids) && n.ids.every((id) => typeof id === "string");
+}
+
+// 1 if `a` is the more recent note, -1 if `b` is, 0 if neither is (both missing or malformed) or
+// they are the same. A real note beats a missing or malformed one. The same moment but a
+// different arrangement (two devices with the same clock reading, which is all but impossible)
+// is settled by the text of the arrangement, so it is one answer on every device.
+export function compareOrderNotes(a, b) {
+  const va = isOrderNote(a);
+  const vb = isOrderNote(b);
+  if (!va && !vb) return 0;
+  if (va !== vb) return va ? 1 : -1;
+  if (a.at !== b.at) return a.at > b.at ? 1 : -1;
+  const ja = a.ids.join("\u0001");
+  const jb = b.ids.join("\u0001");
+  return ja === jb ? 0 : ja > jb ? 1 : -1;
+}
+
+// The later of two notes (a real one over a missing one), or undefined when neither is one.
+export function laterOrderNote(a, b) {
+  const c = compareOrderNotes(a, b);
+  if (c === 0) return isOrderNote(a) ? a : isOrderNote(b) ? b : undefined;
+  return c > 0 ? a : b;
+}
+
+// The latest reorder note held by any of these pieces (an array or an id-keyed map), or null.
+export function latestSwitcherOrder(pieces) {
+  const list = Array.isArray(pieces) ? pieces : Object.values(pieces || {});
+  let best = null;
+  list.forEach((p) => {
+    const n = p && p.switcherOrder;
+    if (isOrderNote(n) && (best === null || compareOrderNotes(n, best) > 0)) best = n;
+  });
+  return best;
+}
+
+// The moment to stamp a new reorder with: now, but never at or before a reorder this device
+// has already SEEN (its own, or one that came from another device). A device whose clock runs
+// behind still wins when it reorders after receiving the other's reorder; only two reorders
+// made without either device having seen the other are judged by the clocks.
+export function nextOrderStamp(pieces, now = Date.now()) {
+  const latest = latestSwitcherOrder(pieces);
+  const base = Number.isFinite(now) ? now : 0;
+  return latest ? Math.max(base, latest.at + 1) : base;
+}
+
+// A fresh note for the arrangement `ordered` (the pieces, in the order the switcher should show).
+export function makeOrderNote({ ordered, all = ordered, now = Date.now() }) {
+  return { at: nextOrderStamp(all, now), ids: (ordered || []).map((p) => p.id) };
+}
+
+// The list the switcher shows, whole rows flattened: by the latest note where there is one, and
+// the old rule (`compareSwitcherOrder`: rank, date added, id) for any piece it does not list and
+// everywhere when no piece holds a note. A pure function of the pieces, so two devices that hold
+// the same pieces show the same list.
+export function sortPiecesForSwitcher(pieces) {
+  const list = Array.isArray(pieces) ? [...pieces] : Object.values(pieces || {});
+  const note = latestSwitcherOrder(list);
+  if (!note) return list.sort(compareSwitcherOrder);
+  const place = new Map();
+  note.ids.forEach((id, i) => {
+    if (!place.has(id)) place.set(id, i);
+  });
+  return list.sort((a, b) => {
+    const pa = place.get(a && a.id);
+    const pb = place.get(b && b.id);
+    if (pa !== undefined && pb !== undefined) return pa - pb;
+    if (pa !== undefined) return -1;
+    if (pb !== undefined) return 1;
+    return compareSwitcherOrder(a, b);
+  });
+}
+
+// What a drag in the switcher writes. `ordered` is every piece in its NEW order, `movedIds` the
+// pieces of the row that was dragged. A piece gets the new rank when its rank changed (as it
+// always did) and the note when it is one of those or one that was dragged: always at least
+// the pieces that moved, so the note exists wherever the arrangement changed and nowhere else
+// (no extra row is saved, or uploaded, for a drag). Returns [{ id, sortOrder, switcherOrder }].
+export function planSwitcherMove({ ordered, movedIds = [], all = ordered, now = Date.now() }) {
+  const moved = new Set(movedIds);
+  const note = makeOrderNote({ ordered, all, now });
+  return (ordered || []).flatMap((p, i) =>
+    p.sortOrder !== i || moved.has(p.id) ? [{ id: p.id, sortOrder: i, switcherOrder: { at: note.at, ids: [...note.ids] } }] : []
+  );
+}
 
 // The order the switcher shows pieces in (Pass 122b): by `sortOrder` (a piece with none sorts
 // by when it was added, as it always did), and where two pieces hold the same rank by date
@@ -412,7 +510,8 @@ export function unionProgressEntries(mine, theirs) {
 //                and drop out of `conflicts`, so a question about them is never needed
 //   softSettled  (Pass 122b) [{ part, side: "remote" | "local" }]: the display parts
 //                (SOFT_PARTS) both sides changed to different values, settled by the
-//                engine itself for the side `softWins` names. Never in `conflicts`,
+//                engine itself: the side with the more recent reorder note for the note and
+//                the rank, the side `softWins` names otherwise. Never in `conflicts`,
 //                never asked about
 //   reason       for "ask": "no-base" | "different-ids" | "not-pieces"
 //
@@ -430,10 +529,11 @@ export function unionProgressEntries(mine, theirs) {
 // changes nothing the caller should apply. Without `choices` nothing differs.
 //
 // `softWins` (Pass 122b, "remote" by default): which side's value SOFT_PARTS take when
-// both sides changed them to different values. "remote" is the other copy (the account's,
-// in every flow that reads the account); "local" is this device's (a tab of one browser,
-// where the person is working in this tab). Always one fixed side, so that two devices
-// that have exchanged copies end with the same order.
+// both sides changed them to different values and the reorder notes cannot say which came
+// last (and always for the date added). "remote" is the other copy (the account's, in every
+// flow that reads the account); "local" is this device's (a tab of one browser, where the
+// person is working in this tab). Always one fixed side, so that two devices that have
+// exchanged copies end with the same order.
 //
 // Two stamps are not parts. updatedAt is the later of the two. lastLoggedAt is
 // recomputed from the merged sessions (the later of the two unless that date
@@ -535,16 +635,21 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
     else conflictKeys.push(k);
   });
 
-  // Pass 122b: piece order and date added are never a conflict. Changed on one side only
-  // they were taken above like any part; changed on both to different values, the engine
-  // settles them itself, for the side `softWins` names, and says so in `softSettled`.
+  // Pass 122b: piece order, the note a reorder leaves and date added are never a conflict.
+  // Changed on one side only they were taken above like any part; changed on both to
+  // different values, the engine settles them itself and says so in `softSettled`. The note and
+  // the rank (written together by one drag) go to the side that holds the MORE RECENT reorder;
+  // with no way to tell (no note, or the same one) and for the date added, to the side
+  // `softWins` names. Judged the same whichever copy is "local", so two devices agree.
   const softSide = softWins === "local" ? "local" : "remote";
+  const noteCompared = compareOrderNotes(L.switcherOrder, R.switcherOrder);
+  const orderSide = noteCompared > 0 ? "local" : noteCompared < 0 ? "remote" : softSide;
   const softSettled = [];
   SOFT_PARTS.forEach((k) => {
     const i = conflictKeys.indexOf(k);
     if (i < 0) return;
     conflictKeys.splice(i, 1);
-    softSettled.push({ part: k, side: softSide });
+    softSettled.push({ part: k, side: k === "createdAt" ? softSide : orderSide });
   });
 
   // Which schedule mode the merged piece ends up in: the remote's if only the

@@ -508,6 +508,19 @@ describe("[Pass 119] reconcileFromStorage: pieces", () => {
     assert.equal(m.status, "merged");
   });
 
+  test("[Pass 122b] both tabs reordered, each leaving its dated note: the more recent reorder wins, whichever tab it came from", () => {
+    const mineNote = { at: 100, ids: ["p1", "p2"] };
+    const theirNote = { at: 200, ids: ["p2", "p1"] };
+    // the other tab's reorder is the later one: followed (before, this tab's was always kept)
+    let out = reconcile({ p1: { ...base, sortOrder: 1, switcherOrder: mineNote, updatedAt: 10 } }, { p1: clone({ ...base, sortOrder: 7, switcherOrder: theirNote, updatedAt: 20 }) }, { p1: base });
+    let m = out.pieces.merge.p1;
+    assert.deepEqual([m.piece.sortOrder, m.piece.switcherOrder, m.conflicts, m.status], [7, theirNote, [], "merged"]);
+    // this tab's is the later one: kept
+    out = reconcile({ p1: { ...base, sortOrder: 1, switcherOrder: theirNote, updatedAt: 10 } }, { p1: clone({ ...base, sortOrder: 7, switcherOrder: mineNote, updatedAt: 20 }) }, { p1: base });
+    m = out.pieces.merge.p1;
+    assert.deepEqual([m.piece.sortOrder, m.piece.switcherOrder], [1, theirNote]);
+  });
+
   test("[Pass 122b] a tab that did not reorder follows the tab that did", () => {
     const theirs = { ...base, sortOrder: 7, updatedAt: 20 };
     const out = reconcile({ p1: base }, { p1: clone(theirs) }, { p1: base });

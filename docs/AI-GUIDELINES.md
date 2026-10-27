@@ -1177,6 +1177,47 @@ fail" above), and keep the simulation's oracles independent of the engine's own
 fingerprints. Report the confidence honestly ("reasonably confident, not certain")
 rather than rounding up.
 
+## Steps for the owner's hands-on checks start from an empty screen, and say which windows are separate devices
+
+Pass 122b's hand-off first told the owner to run its checks "in two windows, signed in".
+Two ordinary windows of one browser share all their storage, so they are one device (tabs of
+one browser, Pass 119) and no sync check tests anything. Only her question, "how exactly
+should the windows start?", showed it. The corrected hand-off is the model: a normal window
+and a private window (separate storage, so separate devices); the first minutes written as
+exact clicks from an empty address (which button, in which window); what the screen should say
+after each step; a ready-made backup file of throwaway pieces sent in the chat instead of
+asking her to build them by hand; and a note that a shared test account holds leftovers from
+earlier checks. Test the instructions' own claims against the build you are shipping (button
+names, where the list is, what a fresh address shows). **Verify every address you paste**
+(`curl` it and compare the served bundle): the preview address was mistyped in two successive
+messages and a pull-request text.
+
+## When the owner sees something your rig cannot reproduce, log it open with what you tried
+
+On her first run of Pass 122b's reorder check the window she dragged in showed "2 pieces changed
+on another device" part-way through, while the final order came out right in the other window.
+Four attempts to reproduce it locally (a list with leftover pieces above the test ones, several
+drags timed to land as an upload run began, a slow stand-in service, two tabs of one window) all
+uploaded cleanly. The honest handling was: say the main check passed; say what was tried and that
+it did not reproduce; name the candidates without asserting one; ask for the two facts that would
+decide it (which pieces the banner named, whether other windows were open on that account); and
+write it into [Decisions.md](Decisions.md#open-questions) as an open item. Not "works as
+designed", and not a confident cause. It also showed that a long drag touches many pieces, so
+hand checks should use short hops.
+
+## An interrupted break-it-on-purpose run leaves the break in your source: verify the file, and give the run a way to end
+
+During Pass 125 a mutation run (change one rule, run the tests, put the original back) hung on
+a mutant that left a real timer running. Killing it left `stop()` mutated in a brand-new,
+untracked file, and the next plain test run hung too. Only a check that every mutated line's
+original text still occurred exactly once showed what was wrong, because a new file has no `git
+diff` to ask. So: commit or copy a new file before mutating it; run mutation tests with `node
+--test --test-force-exit` and a spawn timeout, so a stuck mutant fails instead of hanging; after
+killing any such run, verify the source against git or the saved copy before doing anything else;
+and don't run a dev server on the same tree during a run. A related trap: a unit test that uses
+a real timer with tiny allowances (20 ms) passed alone and failed inside the full suite. Use a
+fake clock.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

@@ -149,9 +149,10 @@ numbers in particular are explicitly marked "tune after real use".
 ## Account sync timings
 
 Plumbing, not practice science: none of these touches scheduling, confidence or
-what a person practices. They were picked by feel in Passes 111, 115 and 116 and
-were **not tracked here until the 2026-10-15 wrap-up**, against this file's own
-rule that a hand-picked constant must not go untracked. Design:
+what a person practices. They were picked by feel in Passes 111, 115, 116 and 119 to 122b
+and were **not tracked here until the 2026-10-15 wrap-up** (Passes 119 to 122b until the
+2026-10-26 one), against this file's own rule that a hand-picked constant must not go
+untracked. Design:
 [Accounts-and-Backend.md](Accounts-and-Backend.md#keeping-the-backup-current-pass-111)
 and [the Pass 116 section](Accounts-and-Backend.md#noticing-that-another-device-changed-something-pass-116).
 All live in `lib/accountSync.js` unless noted. None has been measured: the owner
@@ -167,8 +168,15 @@ is the only account so far, so "real use" below means hers.
 | Sends remembered per item (Pass 115) | 5 (`MAX_SENT`) | How many recent upload attempts' fingerprints are kept, so a lost confirmation reads as this device's own earlier upload instead of a conflict. Past 5 unconfirmed attempts the oldest is forgotten | How many attempts really pile up before a confirmation lands (a long offline stretch with many edits and retries could pass 5) |
 | Startup delay before the first check of other devices (Pass 116) | 4 seconds (`CHECK_STARTUP_DELAY_MS`, `App.jsx`) | A little after the upload look, so a waiting upload goes first | Same as the upload delay |
 | Check on focus or when the page becomes visible | at most once a minute (`CHECK_FOCUS_GAP_MS`) | How often returning to the window can start a check | How often people switch windows, against how current the "Changes from another device" line has to be |
-| Check on the clock | every 5 minutes while the page is visible (`CHECK_EVERY_MS`) | How stale that line may get | Same |
-| Clock look | every 60 seconds (`CHECK_TICK_MS`) | How often the page asks whether a check is due (a look at the clock, no request) | Not tuned: it only bounds how late a due check can start |
+| Check on the clock | every minute while the page is visible (`CHECK_EVERY_MS`, 60 seconds; it was 5 minutes until Pass 120) | How stale that line may get, and how soon an automatic update (switch on) can arrive. Each check is about 3 KB of ids, revisions and deleted dates | Same |
+| Clock look | every 15 seconds (`CHECK_TICK_MS`; 60 seconds until Pass 120) | How often the page asks whether a check is due (a look at the clock, no request). Short enough that drift cannot space checks a minute or two apart | Not tuned: it only bounds how late a due check can start |
+| Tab lease heartbeat (Pass 119) | 10 seconds (`LEASE_HEARTBEAT_MS`, `lib/tabSync.js`) | How often the one tab of a browser that does the account work says it is alive | How long a real background tab is frozen for, in the browsers people use |
+| Tab lease takeover (Pass 119) | 30 seconds (`LEASE_STALE_MS`) | How long a lease may go unrenewed before another tab takes it over. A takeover is never later than 32 seconds; with a 5-second look it measured at 35 | Same |
+| Tab look (Pass 119) | every 2 seconds (`LEASE_CHECK_MS`) | How often every tab looks at the lease (the holder renews, the others watch) | Same |
+| Lease claim confirmation (Pass 119) | 250 milliseconds (`LEASE_CONFIRM_MS`) | After claiming the lease a tab waits this long and looks again before believing it, so two tabs claiming at once settle on one | The real delay between two processes sharing `localStorage` (a few milliseconds; not measured) |
+| First screen in Review (Pass 121) | 3 (`BULK_MIN`, `lib/settleFlow.js`) | How many practice-record questions that offer "both" it takes before Review opens with one screen ("Both devices' sessions for all N" or "Decide each one") instead of going straight to the first question | How many conflicting records real use produces |
+| Conflicts kept per held piece (Pass 120) | 200 (`MAX_CONFLICTS`, `lib/accountSync.js`) | How many conflicting parts a held piece's device-record entry remembers, so the record cannot grow without end | How many conflicts a real held piece has (not measured) |
+| Answers remembered (Pass 122b) | 500 of each kind (`MAX_DECLINED`) | How many declined pieces, and how many declined pairs, a device remembers per account (the newest are kept). Nothing depends on the number; it only stops the record growing without end | How many a real person ever declines |
 | Recently deleted window (Pass 122) | 30 days (`RECENTLY_DELETED_DAYS`, `lib/recentlyDeleted.js`) | Two things at once: how long "Recently deleted" lists a deleted piece, and how long a deletion made on another device arrives by itself (automatic switch on). An older deletion is only listed, with "Delete it here too" and "Keep it". **Nothing is erased when the window ends**: a deleted piece only ever has `deleted_at` set in the account, so the window bounds what the app offers, not what exists. The owner said yes to "30 days" (2026-10-23); it is her number, not a measured one | How long people really take to notice a piece was deleted by mistake. Keep it at or below however long the account is ever allowed to keep deleted rows |
 
 ## Open research questions

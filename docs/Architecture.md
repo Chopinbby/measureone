@@ -212,27 +212,52 @@ MeasureOne.jsx/
     │   │                                  # read checkAccountChanges, the sorter
     │   │                                  # classifyAccountChanges, the throttle
     │   │                                  # createAccountChecker). The device record's
-    │   │                                  # `parts` (Pass 117, 118) are written here too
+    │   │                                  # `parts` (Pass 117, 118) are written here too.
+    │   │                                  # Passes 120 to 122b: the automatic update
+    │   │                                  # (applyAccountMerge with `automatic`), Review's
+    │   │                                  # questions (planSettle, buildSettleQuestions,
+    │   │                                  # rereadSettleItem), deletions (Pass 122) and
+    │   │                                  # the remembered answers (`declined`,
+    │   │                                  # planDeclines, orderChoiceFor)
     │   ├── pieceMerge.js                  # Pass 117: the merge-by-part ENGINE for one
     │   │                                  # piece (planPieceMerge), plus fingerprint,
     │   │                                  # canonicalPiece and piecePartFingerprints.
     │   │                                  # Pure; never imports the account code (the
-    │   │                                  # account code imports it). Nothing in the
-    │   │                                  # app calls the merge yet (Pass 120 does).
+    │   │                                  # account code imports it). Called by
+    │   │                                  # tabSync.js (Pass 119), the automatic update
+    │   │                                  # (Pass 120) and Review's questions (Pass 121,
+    │   │                                  # its `choices`). Pass 122b: also the piece
+    │   │                                  # list's order (the dated note a drag leaves:
+    │   │                                  # sortPiecesForSwitcher, planSwitcherMove,
+    │   │                                  # compareSwitcherOrder) and the display parts
+    │   │                                  # the engine settles itself (SOFT_PARTS).
     │   │                                  # Algorithms.md#merging-by-part-pass-117
     │   ├── techniqueMerge.js              # Pass 118: the same for the technique
     │   │                                  # library (planTechniqueMerge), plus
     │   │                                  # canonicalTechnique and
-    │   │                                  # techniquePartFingerprints. Same status.
+    │   │                                  # techniquePartFingerprints. Used by the
+    │   │                                  # automatic update (Pass 120), where a base is
+    │   │                                  # recorded.
     │   │                                  # Algorithms.md#merging-the-technique-library-by-part-pass-118
-    │   └── tabSync.js                     # Pass 119: several tabs of one browser.
-    │                                      # reconcileFromStorage (what a tab does about
-    │                                      # what another tab wrote, built on the two merge
-    │                                      # engines), the write-time guard, the busy
-    │                                      # test (isPieceBusy, shared with Pass 120) and
-    │                                      # the lease (createTabLease: one tab does the
-    │                                      # account work). Pure; App.jsx schedules it.
-    │                                      # Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119
+    │   ├── tabSync.js                     # Pass 119: several tabs of one browser.
+    │   │                                  # reconcileFromStorage (what a tab does about
+    │   │                                  # what another tab wrote, built on the two merge
+    │   │                                  # engines), the write-time guard, the busy
+    │   │                                  # test (isPieceBusy, shared with Pass 120) and
+    │   │                                  # the lease (createTabLease: one tab does the
+    │   │                                  # account work). Pure; App.jsx schedules it.
+    │   │                                  # Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119
+    │   ├── settleFlow.js                  # Pass 121: the walk through a held piece's questions
+    │   │                                  # as plain data (startSettle, settleChoose,
+    │   │                                  # settleNext, settleBack, settleView), which
+    │   │                                  # SettleConflictModal draws. Pure.
+    │   │                                  # Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121
+    │   └── recentlyDeleted.js             # Pass 122: the 30-day window (isRecentlyDeleted,
+    │                                      # deletedCutoffIso), what a deletion on another
+    │                                      # device means here (deletionsElsewhere,
+    │                                      # deletedForPerson, recentlyDeletedList) and the
+    │                                      # delete window's wording. Pure.
+    │                                      # Accounts-and-Backend.md#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122
     └── components/
         ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
         │   ScheduleBanner.jsx, Sparkline.jsx,
@@ -243,6 +268,9 @@ MeasureOne.jsx/
         │   PieceCheckRow.jsx                       # per-piece export/import picker
         ├── SignInModal.jsx, ChoosePasswordModal.jsx  # Pass 109/113: sign in; choose or
         │                                              # change a password (App.jsx owns the state)
+        ├── SettleConflictModal.jsx, RecentlyDeletedModal.jsx  # Pass 121/122: Review's one
+        │                                              # question at a time (draws settleFlow's
+        │                                              # settleView); the 30-day Recently deleted list
         ├── fields/                                # editors shared by
         │   │                                       # Wizard and SettingsTab
         │   └── BasicsFields.jsx, SectionsEditor.jsx, DifficultyEditor.jsx,

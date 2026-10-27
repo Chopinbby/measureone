@@ -29,17 +29,20 @@ banner (**Pass 12** — `lib/storage.js`; see
 reads it — the fallback anchor for "never exported yet," so upgrading into
 this feature doesn't make a long-time user look instantly overdue).
 
-**Built (Passes 108 to 118): an account copy.** For a signed-in person the
+**Built (Passes 108 to 122b): an account copy.** For a signed-in person the
 server keeps each piece exactly as it's stored locally (the whole object as one
 JSON value, with the owner, revision and dates beside it, not inside it),
 so this schema stays the one to check. The technique library is one more row
 the same way. What the account service holds is not piece data and is not
 described here: the **device record** (`measureone-account-sync`, a third kind of
 app-level key beside the two above: for each account, the revision and a
-fingerprint of what this device last synced, plus a fingerprint per part, and a
-"held" mark) is in
+fingerprint of what this device last synced, plus a fingerprint per part, a
+"held" mark with the conflicting parts it was held for, the fingerprints of recent
+upload attempts, the automatic-update switch, a deletion this session saw, and, since
+Pass 122b, the pieces and pairs the person said no to) is in
 [Accounts-and-Backend.md](Accounts-and-Backend.md#first-backup-behavior-pass-110)
-(where it is introduced) and in the sections for Passes 111, 115, 117 and 118.
+(where it is introduced) and in the sections for Passes 111, 115, 117, 118, 120, 121, 122
+and 122b.
 
 ```js
 piece = {

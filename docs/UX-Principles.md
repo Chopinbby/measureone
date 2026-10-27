@@ -290,8 +290,35 @@ banner. Only something held, where this device's copy has not been uploaded over
 another device's, gets the red banner with **Review**, on every screen, because
 it won't clear without a person. And what the app merely **notices** about another
 device ("Changes from another device: 3 pieces. Press Get changes.") is a line,
-not a banner, and is never applied unasked (**true until Pass 120**: the owner decided
-on 2026-10-15 that other devices' changes will then be applied automatically when the
-app is opened or returned to, so this line and the held banner should rarely show). See
+not a banner, and is never applied unasked **unless the person turned on "Update
+automatically from other devices"** (Pass 120; off by default, per device). With it on,
+changes that need no decision arrive by themselves and say so in one quiet line in the
+Account panel (never the red banner), and what still needs a person is held and asked
+about. See
 [User-Flows.md](User-Flows.md#12-getting-things-from-your-account-optional-pass-112)
 and [Accounts-and-Backend.md](Accounts-and-Backend.md#keeping-the-backup-current-pass-111).
+
+## The app does not ask the same question twice
+
+Settled in Pass 122b, and it applies to any window that offers things to bring in or
+combine. A question the person has already answered, with a "no", must not come back
+every time the app looks again.
+
+- **What a person leaves unticked is a "no", and the app remembers it** (on this device,
+  per account). A new piece left off is no longer counted by the check that runs every
+  minute, and "these are different pieces" is never offered as a combine again. Nothing is
+  remembered unless the person said it: Cancel remembers nothing, and a row they did not
+  decide about ("newer in your account", "changed in both places") is not a "no".
+- **The window says what unticking means, in the window** (under its introduction and on
+  each row), so a "no" is never a surprise. **Its button works with nothing ticked**
+  ("Leave these off"); without that a person could never say no to a single piece.
+- **One way back, one button:** "Ask me again about what I said no to", in Settings under
+  Account, shown only while something is remembered. Not a list with a button per item.
+  Asking for a piece by name (Keep it, Restore) beats an old "no".
+- **A guess is not offered as a fact.** A name match where one of the two pieces has no
+  composer is "Maybe the same piece" and starts unticked, with the reason beside it.
+- **An arrangement is not a question.** Where the app can tell which of two arrangements
+  the person made last (the order of the piece list), it follows that one without asking.
+
+See [User-Flows.md](User-Flows.md#17-saying-no-and-having-the-app-remember-it-optional-pass-122b)
+and [Accounts-and-Backend.md](Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b).

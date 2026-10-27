@@ -231,18 +231,33 @@ account copy stays in Supabase.
    (below): it is a branch address, and whether an instant rollback moves it
    was never tested.
 
-**Rollback points since go-live (added 2026-10-15).** Every merge to `main` makes an
-ordinary Production deployment, so earlier ones stay listed in Vercel (for as long
-as Vercel keeps them). The app code has changed three times since go-live: the
-deployment of `92e6282` (PR 62) is the last one before Pass 115 (app file
-`index-BquOI88d.js`, accounts on); `b877140` (PR 63) is Pass 115 alone; `8eae8fd`
-(PR 67) is Passes 116 to 118, the current app code (the later merge `8c8d637` is
-docs only). **A rollback across Pass 115 or Pass 118 changes how the technique
-library is fingerprinted** (Pass 115: its last-changed time stopped counting; Pass
-118: a new scale field), so expect each device to upload its library once more
-afterwards, and a second device left open to show "The technique library changed on
-another device". Review clears it and nothing is lost. This is reasoned from the
-fingerprints, not rehearsed.
+**Rollback points since go-live (added 2026-10-15, extended 2026-10-27).** Every merge
+to `main` makes an ordinary Production deployment, so earlier ones stay listed in
+Vercel (for as long as Vercel keeps them). The app code changed three times between
+go-live and 2026-10-15: the deployment of `92e6282` (PR 62) is the last one before
+Pass 115 (app file `index-BquOI88d.js`, accounts on); `b877140` (PR 63) is Pass 115
+alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed five more times
+since, one merge each:** `9864612` (PR 71) is Pass 119 (tabs of one browser),
+`847fada` (PR 72) Pass 120 (changes from other devices arriving by themselves,
+behind a switch that is off by default), `951a640` (PR 73) Pass 121 (Review asks one
+question per conflicting part), `69dbebe` (PR 74) Pass 122 (a piece deleted on one
+device is deleted everywhere) and `0b53445` (PR 75) Pass 122b (what the person said
+no to is remembered, the most recent reorder wins), **the current app code, live
+since 2026-10-27 (app file `index-YBQquKJp.js`)**. The file names of the four before
+it were not recorded when they went live; read one off a deployment's page in
+Vercel before relying on it. The merges `8c8d637`, `209d77a` and `d3a0fa0` (and
+every later documentation-only one) change no app code. **A rollback across Pass 115
+or Pass 118 changes how the technique library is fingerprinted** (Pass 115: its
+last-changed time stopped counting; Pass 118: a new scale field), so expect each
+device to upload its library once more afterwards, and a second device left open to
+show "The technique library changed on another device". Review clears it and nothing
+is lost. **A rollback across Pass 120 or Pass 122b leaves fields in the device record
+that the older app does not know**: across Pass 120, the automatic-update switch and a
+held piece's list of conflicting parts; across Pass 122b, the pieces and pairs the
+person said no to. The older app drops what it does not know the next time it saves
+the record, so the switch reads off, or the "no" answers are forgotten and those
+pieces are offered again. Nothing in the account is erased. Both notes are reasoned
+from the code, not rehearsed.
 
 ### Checking which project a site talks to
 

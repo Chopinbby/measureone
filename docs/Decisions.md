@@ -7899,9 +7899,21 @@ what it rules out.
 
 - **When two copies disagree, the most recent change wins, item by item, and other
   devices' changes are applied automatically (decided by the owner, 2026-10-15).**
-  **Nothing here is built.** The code still follows the Pass 112 rule until Pass 120
-  replaces it. This **supersedes in part** the "never by a clock" Pass 112 entry above
-  and changes what Passes 120 and 121 are.
+  **Status at the 2026-10-26 wrap-up: partly built; the text below is the decision as
+  made and its forecasts, kept as written.** What was built from it: other devices'
+  changes arrive by themselves, behind a switch that is off by default (Pass 120); but
+  Pass 120 **holds** a conflicting part and Pass 121 **asks** about it, so "the most recent
+  change wins" is **not** the rule for a conflicting piece part, and the engines' own
+  conflict rule did not change (the piece engine still keeps this device's value and lists
+  both; the technique engine still keeps the account's, with a notice). The rule IS built in
+  two places: a whole-piece deletion wins (Pass 122, open item (iii) below, the owner's
+  2026-10-23 answer) and a piece's place in the list is settled by the more recent reorder
+  (Pass 122b, 2026-10-25, a dated note rather than a clock on a part; this is the answer to
+  open item (ii) for that one part). Items (i) and (iv) are still open.
+  As first written this said "Nothing here is built. The code still follows the Pass 112
+  rule until Pass 120 replaces it" (true then; Pass 120 replaced it only in part). This
+  **supersedes in part** the "never by a clock" Pass 112 entry above and changes what
+  Passes 120 and 121 are.
   **What was decided** (two direct questions; both answered with the recommended option):
   1. **"Most recent wins", item by item.** For any single value two devices changed
      differently (a tempo, a setting, a check-off or an undo, a piece field), the most
@@ -8187,7 +8199,9 @@ what it rules out.
   **Still open:** a "not now" that is not a "no"; answers that follow the person to other
   devices; a tab or phone on the previous version drops the answers when it saves the record (and
   writes a rank with no note, which a noted reorder beats); "always keep both"; size and schedule
-  travelling together.
+  travelling together; and **an unexplained "pieces changed on another device" banner seen on the
+  owner's first preview run, not reproduced** (the first item of "What the person said no to,
+  and the reorder note (Pass 122b): what is still open" in the open questions below).
 
 ## Open questions
 
@@ -8710,6 +8724,45 @@ oversight to silently fix; surface it instead.
   7. **Pass 118 open items 2 (two lists add up to more than `scalesPerDay`), 7 (the
      technique merge's notices) and 9 (a hold that re-judges itself)** are untouched and
      reachable on a real account now that the engines are called.
+- **What the person said no to, and the reorder note (Pass 122b): what is still open
+  (logged 2026-10-26, from the pass's reviews and the owner's first run on the preview).**
+  The pass was merged and went live on 2026-10-27 (pull request 75, merge commit `0b53445`);
+  the full list of found items is under
+  "Found" in [Accounts-and-Backend.md](Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)
+  (items 1 to 22). The ones that need a decision or more information:
+  1. **An unexplained "N pieces changed on another device" banner (seen 2026-10-26, NOT
+     reproduced, NOT fixed).** On the owner's first run of the preview (a normal window and a
+     private window, one test account, the automatic switch off) she dragged a piece up the
+     list in several short drags, and the window she dragged in showed "2 pieces changed on
+     another device" part-way through and, she thinks, no "Backed up just now"; the other
+     window then showed the final order correctly after Get changes. A held piece means an
+     upload was refused because the account's row had moved on since this device last saw it,
+     so something else changed those two rows. **What was tried, locally, against a stand-in for
+     the account service:** a list like hers (eight pieces, leftover pieces above the test
+     ones), four to six drags in a row one to seven seconds apart, 300 to 600 ms of service
+     delay, drags timed to land just as an upload run started, and two tabs of the same window
+     dragging in turn. Every run uploaded cleanly with nothing held, and an idle second device
+     changed no row. **Candidates, none confirmed:** another window or device still signed in to
+     the same test account (the account is shared with earlier passes' checks and holds leftover
+     pieces); a leftover piece another window had combined or deleted; something specific to the
+     real service. **What would decide it:** the names the banner lists, what Review shows for
+     them, and whether other windows or devices were open on that account. Nothing is lost
+     either way (a held piece is never overwritten, and the reorder note travels in any
+     changed piece), but if it is not a real change from another device it is a false alarm
+     to remove. **Owner of the next step: the owner, who has the two facts.**
+  2. **The piece list could not be dragged past its visible rows** (seen in the same run): a
+     limit since Pass 32a, not part of this pass. **Built separately as Pass 125**, in its own pull
+     request (the list scrolls by itself while a piece is held near its top or bottom edge;
+     whether that request has been merged is not recorded here, so check `git log` for
+     `dragScroll.js` before relying on it).
+  3. **Several short drags touch more pieces than one long one** (a drag re-ranks every piece it
+     passes). With the switch off, any piece another device changed meanwhile is held when
+     this device's upload is refused (found item 16); Review settles it with "Nothing is left
+     to decide". Not new, and made easier to see by reordering. Pass 124 (the switch on by
+     default) and the automatic merge-before-upload soften it.
+  4. **Two reorders made apart are judged by the devices' clocks, and a device on the previous
+     version writes a rank with no note** (found items 17 and 18); and the other found items
+     6 to 9, 12, 13, 15 and 19 to 21 stand as logged.
 - **Technique practice — known gaps found in the Passes 99–100 review.**
   Items 1 and 2 are still open; 3–5 are resolved:
   1. **A check-off just after midnight lands on yesterday's list.**

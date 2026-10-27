@@ -860,10 +860,13 @@ Nothing here is ever removed:
 
 ## Merging by part (Pass 117)
 
-**The engine only. Nothing in the app calls it yet.** "Get changes" and Review
-still go through the whole-piece import merge above (Phase 1); Pass 120 is what
-uses this. It lives in `lib/pieceMerge.js`: pure functions, no clock, no
-network, no React.
+**Where it is used.** It lives in `lib/pieceMerge.js`: pure functions, no clock, no
+network, no React. It is called by three things: the tabs of one browser (Pass 119,
+`lib/tabSync.js`), the automatic update from other devices (Pass 120, behind a switch
+that is off by default) and Review's one-question-at-a-time flow for a held piece (Pass
+121, with the person's answers passed in as `choices`). "Get changes" (the button) still
+merges a piece changed on both sides through the whole-piece import merge above, which
+asks.
 
 **The question it answers.** Two copies of one piece, `local` (this device's)
 and `remote` (the account's), plus `base`: what both agreed on when this device
@@ -897,15 +900,18 @@ recorded ones says which parts that side changed since the base.
 | yes, to value V | yes, to the same V | **agreement**, not a conflict |
 | yes | yes, to a different value | **a conflict for that part only** |
 
-A conflict is **never resolved here**: the merged piece keeps this device's value
-for it, and the result lists the part with both values (`conflicts[]`, each
-`{ part, kind, local, remote, ... }`). Pass 121 was to be the one that asks; **since
-2026-10-15 the owner has chosen that the most recent change wins, item by item**, so
-Pass 120 will pick the most recent value for such a part instead (and apply the
-result automatically), and 121 is left with only what that can't settle (see
-[Decisions.md](Decisions.md#open-questions), "When two copies disagree"). Merging two
-sessions' ladder state inside one chunk is a conflict too, by design: a chunk
-logged on both sides is a conflict for that chunk and no other.
+A conflict is **never resolved here by a rule**: the merged piece keeps this device's
+value for it, and the result lists the part with both values (`conflicts[]`, each
+`{ part, kind, local, remote, ... }`). What happens next belongs to the caller: a tab keeps
+its own value and logs the conflict (Pass 119); the automatic update **holds** the piece and
+records its conflicts in the device record (Pass 120); Review **asks the person**, one plain
+question per conflicting part, and passes the answers back in as `choices` (Pass 121, below).
+The owner's 2026-10-15 decision, that the most recent change wins item by item, is **not**
+built for a conflicting part (see [Decisions.md](Decisions.md#open-questions), "When two
+copies disagree"); the one exception inside this engine is the piece's place in the list
+([below](#display-parts-that-never-conflict-and-the-most-recent-reorder-pass-122b)). Merging
+two sessions' ladder state inside one chunk is a conflict too, by design: a chunk logged on
+both sides is a conflict for that chunk and no other.
 
 `updatedAt` is the later of the two. `lastLoggedAt` is **recomputed from the merged
 piece's sessions** (the rule `validateAndMigratePiece` applies on every load), not
@@ -958,13 +964,73 @@ rewritten together by a resize in Settings but are ordinary parts here, so a res
 one device against a difficulty or section edit on the other leaves an inconsistent
 kept piece (reported as a conflict, never silent). Logged with a proposed fix in
 [Decisions.md](Decisions.md#open-questions) (Merging by part: what is still open,
-item 1); so are the other open items (sidebar order and created date, revival,
-pieces with no recorded snapshot).
+item 1); so are the other open items (revival, pieces with no recorded snapshot; the
+sidebar order and the created date were settled by Pass 122b, below).
+
+### Answers, and the numbers that follow a date (Pass 121)
+
+`choices` (optional) is the person's answers, `{ [part]: "local" | "remote" | "both" }`,
+keyed by a conflict's `part`. A conflict with a valid answer is settled that way; one without
+stays a conflict and keeps this device's value, exactly as when no `choices` are given, so the
+status is `"merged"` only when **every** conflict was answered. `"both"` exists only for a
+chunk's practice record: `unionProgressEntries` adds the two sides' sessions, days practiced
+and focus spots' own sessions together (by content, order of keys ignored), and takes the rest
+of the chunk's record (the ladder state, tempo, a rating or flag) from the side whose latest
+**judged** session is later (a skipped or unconfirmed attempt does not count; a tie goes to this
+device). It does not replay sessions to rebuild the ladder, and a session one side had undone
+comes back if the other still holds it. The whole-piece conflict has two answers only: this
+device's whole piece or the other's. An answer for a part that is not (or no longer) in conflict
+is reported in `unusedChoices` and changes nothing.
+
+In a days-mode schedule a target-date edit regenerates `daysToLearn`, `minutesPerDay` and the
+reschedule marker (`DATE_LINKED_FIELDS`), so when the **date** is in conflict those three go with
+the date the person keeps and are not asked about (`linkedToDate` lists them; the date's question
+says so). With no answer, or no conflict over the date, they are ordinary parts. The question flow
+itself, and what an answer removes, are in
+[Accounts-and-Backend.md](Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121).
+
+### Display parts that never conflict, and the most recent reorder (Pass 122b)
+
+Three top-level fields are display arrangement rather than data a person should be asked
+about: where the piece sits in the switcher (`sortOrder`), the note a reorder leaves
+(`switcherOrder`) and the date the piece was added (`createdAt`). They are `SOFT_PARTS`: changed
+on one side only they travel like any part; changed to different values on **both**, the engine
+settles them itself and says so in `softSettled` (`[{ part, side }]`), never in `conflicts`.
+
+**Which side wins.** The rank and the note go to the side holding the **more recent reorder**
+(the later `switcherOrder.at`; a real note beats a missing or malformed one; the same moment with
+a different arrangement is settled by the arrangement's text, so every device reaches the same
+answer). Where the notes cannot tell (none on either side, or the same one), and always for
+`createdAt`, they go to the side the caller names with `softWins`: `"remote"`, the account's copy,
+by default, or `"local"` for a tab of one browser, where the person is working in this tab. It is
+always one fixed side, so two devices that have exchanged copies end with the same order.
+
+**The note.** Pieces are saved one row each, so nothing holds "the order of the list". Every drag
+in the switcher therefore leaves the same small note, `{ at, ids }` (the moment of the drag and the
+whole arrangement: every piece's id, in order), in the pieces it changes (`planSwitcherMove`). The
+switcher shows `sortPiecesForSwitcher(pieces)`: the arrangement of the **latest note held by any
+piece**; a piece it does not list (added after it) follows the listed ones by the old rule,
+`compareSwitcherOrder` (rank, then date added, then id); with no note anywhere it is exactly the old
+order. So it does not matter which rows of a drag reach a device first, or that a drag left some
+pieces' rows untouched: one changed row carries the whole list. A backup file never brings a note
+in, and "Use the imported order" writes a fresh one.
+
+**The moment.** A new reorder is stamped by `nextOrderStamp`: the later of now and one past the
+latest note this device holds (its own, or one that came from another device), so a device whose
+clock runs behind still wins when it reorders after receiving the other's. Only two reorders made
+apart, neither device having seen the other's, are judged by the clocks.
+
+*Considered and not built:* stamping every piece on a drag (every piece would upload on every drag,
+and every piece the other device had changed meanwhile would be held), and a time per piece with the
+later winning piece by piece (two drags made apart would blend into a list neither device showed;
+the whole-list simulation in `test/pieceMerge.test.mjs` fails on that blend). Why, and the
+checks: [Accounts-and-Backend.md](Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b).
 
 ### What it returns
 
-`planPieceMerge({ local, remote, base })` returns `{ status, merged, conflicts,
-wholePiece, fromRemote, fromLocal, agreed, derived, reason }`:
+`planPieceMerge({ local, remote, base, choices, softWins })` returns `{ status, merged,
+conflicts, wholePiece, fromRemote, fromLocal, agreed, derived, settled, unusedChoices,
+linkedToDate, softSettled, reason }`:
 
 - `"identical"`: both sides hold the same parts. `merged` is `local`.
 - `"local-only"`: the remote is what the base was (nothing of theirs to bring in).
@@ -977,6 +1043,11 @@ wholePiece, fromRemote, fromLocal, agreed, derived, reason }`:
   changes waiting that was recorded before this pass), or two different ids.
   `merged` is `local`; the caller falls back to Phase 1's behavior. A piece with no
   parts but identical sides is still `"identical"`.
+
+`settled` lists the conflicts the caller's `choices` settled (`[]` without any),
+`unusedChoices` the answers that were not (or no longer) for a conflict, `linkedToDate` the
+numbers that follow a conflicting target date, and `softSettled` the display parts the engine
+settled itself (all described above).
 
 Inputs are read in the form loading would give them, never modified, and nothing
 in the result aliases them; the merged piece is in that same loaded form, so
@@ -1000,17 +1071,29 @@ values is reported as a conflict, never silently chosen, and this device's value
 kept; (4) the merged piece is unchanged by `validateAndMigratePiece`; (5) merging
 the same inputs again (cloned, so no cache can mask a difference) gives the same
 result; (6) merging when the remote equals the base returns this device's piece
-untouched. It also checks the chunk-grid rule independently of the engine.
+untouched; and, added in Pass 122b, (7) piece order, its note and the date added are never a
+conflict: changed on both sides to different values, the side with the more recent reorder note
+wins the order (the other copy's value where the notes cannot tell, and for the date) and the
+result says so. It also checks the chunk-grid rule independently of the engine.
 Seeds 1 to 300 with every kind of edit given a real share, and seeds 1 to 100 with an
 everyday mix (mostly sessions); the counts are in the Pass 117 entry of
-[Decisions.md](Decisions.md#accounts-and-backend) and the test prints them.
+[Decisions.md](Decisions.md#accounts-and-backend) and the test prints them. **Pass 122b added
+two more simulations:** two devices reordering at random end, after a full exchange, with the
+same order and date added; and, the whole-list one, two or three devices drag pieces about while
+apart (some drags before a device has seen the others', some after, their clocks a little off),
+log practice so real merges happen, and sync in random orders: after a full exchange every device
+shows the **same** list, and it is exactly the arrangement of the latest note, never a blend of
+two drags. Run wider than the committed counts (seeds to 3,000) before trusting a change to any of
+them.
 
 ## Merging the technique library by part (Pass 118)
 
-**The engine only. Nothing in the app calls it yet.** Backups, "Restore" and "Get
-changes" still merge the library the Pass 104 way (`mergeImportedTechnique`, see
-[Technique library (Pass 104)](#technique-library-pass-104)); Pass 120 is what uses
-this. It lives in `lib/techniqueMerge.js`: pure functions, no clock, no network, no
+**Where it is used.** Only by the automatic update from other devices (Pass 120, behind a switch
+that is off by default), and only where the device record holds a base for the library
+(`mergeTechniqueFromAccount`). Everywhere else, backups, "Restore", "Get changes" and Review,
+and a device with no recorded base, the library is merged the Pass 104 way
+(`mergeImportedTechnique`, see [Technique library (Pass 104)](#technique-library-pass-104)).
+It lives in `lib/techniqueMerge.js`: pure functions, no clock, no network, no
 React. It is [Pass 117's engine](#merging-by-part-pass-117) for the one other thing
 that syncs, and it shares its primitives (`fingerprint`, `toJsonValue`).
 
@@ -1019,9 +1102,9 @@ chunk id means, so a piece sometimes has to ask. The library has no chunk grid:
 every part of it can be put together without asking, so this engine **never returns
 a conflict list and never asks**. Where both devices changed the same thing to
 different values, the **account's value is kept and a notice says so** ("Your other
-device's change to D major was kept."). **Decided 2026-10-15:** Pass 120 changes this
-to the most recent change winning (see [Decisions.md](Decisions.md#open-questions),
-"When two copies disagree"); until then this is what the engine does.
+device's change to D major was kept."). **Decided 2026-10-15** that the most recent change
+should win instead (see [Decisions.md](Decisions.md#open-questions), "When two copies
+disagree"); that is **not built**, and this is still what the engine does.
 `mergeImportedTechnique` (needs no recorded
 "before", never removes anything) stays for backups and for a device with no
 recorded "before".

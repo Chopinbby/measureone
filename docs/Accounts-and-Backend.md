@@ -25,8 +25,8 @@
 > depends on.
 
 **Status: designed (Pass 105, 2026-09-27); Phase 1 built, and live since
-Pass 114 (2026-10-10); Phase 2 begun (Passes 115 to 118, live 2026-10-14 and
-15).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
+Pass 114 (2026-10-10); Phase 2 well under way (Passes 115 to 122b live between
+2026-10-14 and 2026-10-27).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
 [Pass plan](#pass-plan). Since Pass 108 a **test** Supabase project exists with
 the tables and security rules, connected to preview sites and local
 development (see [Setup](#setup-test-project)), and since Pass 114 a separate
@@ -48,12 +48,13 @@ held as "changed on another device" (see
 **Since Pass 114 (2026-10-10) the live site is connected to the production
 project**: a person with an account (invitation only, so far just the owner) gets
 everything above there, and a signed-out visitor sees the app exactly as before.
-**Phase 2 has begun, and is groundwork so far.** Pass 115 made "the same" and
-"changed" trustworthy; since Pass 116 the app **notices**, quietly, that another
-device changed something (it applies nothing); and Passes 117 and 118 built the
-two engines that will merge a piece and the technique library part by part
-(see [Merging by part](#merging-by-part-pass-117) and
-[The technique library by part](#the-technique-library-by-part-pass-118)).
+**Phase 2 began with groundwork.** Pass 115 made "the same" and "changed"
+trustworthy; Pass 116 made the app **notice**, quietly, that another device
+changed something; and Passes 117 and 118 built the two engines that merge a piece
+and the technique library part by part (see [Merging by part](#merging-by-part-pass-117)
+and [The technique library by part](#the-technique-library-by-part-pass-118)).
+**Since Pass 119 every tab of one browser stays in step and only one does the account
+work** (see [Several tabs of one browser](#several-tabs-of-one-browser-pass-119)).
 **Since Pass 120 changes from other devices can arrive by themselves, behind a
 switch that is OFF by default** ("Update automatically from other devices" in the
 Account panel; see [Changes from other devices arrive by
@@ -62,9 +63,17 @@ off the app behaves exactly as after Pass 116: it notices, and "Get changes" and
 Review are the way in, still merging with the import path's own functions. With it
 on, pieces that need no decision are brought in by themselves using the two engines;
 a piece with a conflicting part is held, and Review (Pass 121) asks about each conflicting
-part, one plain question at a time. **Decided 2026-10-15, only partly built:**
-"the most recent change wins item by item" (Decided 6 below) is not built: Pass 120
-holds a conflicting part and Pass 121 asks the person about it instead. See [Pass plan](#pass-plan).
+part, one plain question at a time. **Since Pass 122 a piece deleted on one device is
+deleted on every device, practice included, with a 30-day way back** (see [A piece deleted on
+one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122)).
+**Pass 122b (live since 2026-10-27) makes the app remember what a person said no to, lets the most recent
+reorder win as a whole list, and gives a piece held by a refused upload Review's plain
+questions** (see [What the person said no to is remembered, and order follows
+them](#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)).
+**Decided 2026-10-15, only partly built:** "the most recent change wins item by item"
+(Decided 6 below) is built for a deletion and for a piece's place in the list; for a conflicting
+part of a piece it is not: Pass 120 holds it and Pass 121 asks the person about it instead. See
+[Pass plan](#pass-plan).
 
 ## Decided
 
@@ -94,8 +103,10 @@ alternative it rules out, in [Decisions.md](Decisions.md#accounts-and-backend).
    automatically** when the app is opened or returned to. Practice sessions and
    scales logged on either device are always kept (added together, never chosen
    between); a deletion is still marked, never erased. This **reverses** the
-   2026-10-03 rule that disagreements are never settled by a clock (Pass 112), and
-   nothing is built yet: the code keeps that rule until Pass 120 replaces it. The
+   2026-10-03 rule that disagreements are never settled by a clock (Pass 112). **It is
+   only partly built (2026-10-26):** a whole-piece deletion wins (Pass 122) and the most
+   recent reorder wins (Pass 122b); for a conflicting part of a piece the code still holds
+   it (Pass 120) and asks (Pass 121). The
    reasoning, the cost accepted and four open questions are in
    [Decisions.md](Decisions.md#open-questions) ("When two copies disagree").
 
@@ -287,10 +298,13 @@ changes can arrive by themselves, behind a switch that is off by default):
   in the Account panel; nothing is applied). Built; see
   [Noticing that another device changed something](#noticing-that-another-device-changed-something-pass-116).
 - **117** The merge-by-part engine for a piece, and `parts` in the device record.
-  Built, **nothing uses it yet**; see [Merging by part](#merging-by-part-pass-117).
+  Built; **used by tabs of one browser (119), the automatic update (120) and Review's
+  questions (121)**; see [Merging by part](#merging-by-part-pass-117).
   Shipped with it: a scheduler fix (a chunk done earlier than the day a
   reschedule places it on is not owed there).
-- **118** The same for the technique library. Built, **nothing uses it yet**; see
+- **118** The same for the technique library. Built; **used by the automatic update where
+  the device record holds a base for the library (120)**. "Get changes" and Review still merge
+  the library the older way (`mergeImportedTechnique`). See
   [The technique library by part](#the-technique-library-by-part-pass-118).
 - **119** Keep every tab of one browser in step, and let only one do the account
   work. Built; see [Several tabs of one browser](#several-tabs-of-one-browser-pass-119).
@@ -310,12 +324,14 @@ changes can arrive by themselves, behind a switch that is off by default):
 - **122** A piece deleted on one device is deleted everywhere, with a way back. Built; see [A piece
   deleted on one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
   It was split in two when its card was edited (2026-10-24): this is the deletions half.
-  **122b** Built; see [What the person said no to is remembered, and order follows
+  **122b** Built, live since 2026-10-27; see [What the person said no to is remembered, and order follows
   them](#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b): a remembered
   "no" for a declined combine or a new piece left unticked (and one button to take it back), the
   blank-composer "maybe the same piece" row, piece order that follows the person with no
   question, and plain questions for a piece held by a refused upload.
-- After those: what happens offline.
+- **123** What happens offline: opening the app with no connection. Scoped, not built.
+- **124** Turning the automatic switch on by default, after a real-use trial on the owner's own
+  two devices. Scoped, not built, and only on the owner's word.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring, and an in-app "delete my account", which must exist before
@@ -2521,6 +2537,13 @@ it and the other device follows; dragging a multi-movement work moves it as a bl
 a drag survives a reload with no account surface. **Not seen:** the real preview with the real
 test project.
 
+**After the build (2026-10-27).** The owner merged the pass (pull request 75, merge commit
+`0b53445`) and it is live on both addresses (the deployed bundle contains the new "Ask me again
+about what I said no to" button). Of the card's preview checks she had reported only the first
+(2026-10-26), and that is where the unexplained banner under "Found" came from; results for the
+others were not reported in the conversation that built the pass, so treat it as unseen on a real
+account beyond that first check unless the owner says otherwise.
+
 **Found, for decisions** (none acted on beyond what is said):
 
 1. **The wider simulation found an over-strict check, on `main` too.** Seed 311 failed before this
@@ -2558,13 +2581,15 @@ test project.
     check**, because the last look at the account still shows the other row live. It clears by itself.
 12. **In a restore, leaving both a piece and its "other copy" unticked restores neither**, which is
     what the ticks say, but the other copy's row reads "both are restored".
-13. **`docs/Algorithms.md` (the merge-by-part section) was not updated:** it is not in the card's
-    file list, and it does not say that order and date added are settled by the engine. Proposed:
-    a line there.
+13. ~~**`docs/Algorithms.md` (the merge-by-part section) was not updated:** it is not in the card's
+    file list, and it does not say that order and date added are settled by the engine.~~
+    **Fixed in the 2026-10-26 docs wrap-up** (the section was also stale about the engine being
+    unused; see [Algorithms.md](Algorithms.md#merging-by-part-pass-117)).
 14. **The every-minute check did not fire in the embedded browser pane**, with or without the
     page in front (checks ran on "online", on the buttons, on load). Checked by hand, not a change.
-15. **`MAX_DECLINED` (500) is a hand-picked bound** and is not in `docs/Research.md` (not in the
-    card's file list). Nothing depends on the number; it only stops the record growing without end.
+15. ~~**`MAX_DECLINED` (500) is a hand-picked bound** and is not in `docs/Research.md`.~~
+    Nothing depends on the number; it only stops the record growing without end. **Now listed in
+    [Research.md](Research.md#account-sync-timings)** (2026-10-26 docs wrap-up).
 
 **Found while building "the most recent reorder wins":**
 
@@ -2589,10 +2614,18 @@ test project.
 20. **A piece added after the latest drag goes to the end** of the list, as a new piece always did.
     A piece brought in from a backup file while a note exists now also goes to the end (it used to
     sit where the file's own rank put it).
-21. **`docs/Algorithms.md`'s merge section** does not yet mention the reorder note (not in the card's
-    file list; same as item 13).
+21. ~~**`docs/Algorithms.md`'s merge section** does not yet mention the reorder note.~~ **Fixed in
+    the 2026-10-26 docs wrap-up** (same as item 13).
+22. **An unexplained "N pieces changed on another device" banner on the owner's first preview run
+    (2026-10-26), not reproduced and not fixed.** In short: part-way through several short drags in
+    one window, with the automatic switch off, that window showed the held banner for two pieces
+    and (she thinks) no "Backed up just now"; the other window then showed the right order after Get
+    changes. Four local attempts to reproduce it (a long list with leftover pieces, drags timed to an
+    upload run, a slow service, two tabs of one window) all uploaded cleanly. The full account, the
+    candidates and the two facts that would decide it are in
+    [Decisions.md](Decisions.md#open-questions) (the Pass 122b entry, item 1).
 
-**Left open:** items 6 to 9, 12, 13, 15 and 17 to 21 above; a piece held by a refused upload with no
+**Left open:** items 6 to 9, 12, 17 to 20 and 22 above; a piece held by a refused upload with no
 recorded base still goes to the picker; "always keep both" (deferred, no owner); size and schedule
 travelling together (proposed as its own pass); the automatic update's "applied when you're done"
 line; and the real-project checks.

@@ -186,6 +186,11 @@ other device is lost whichever way "recent" is counted (3 sessions on the laptop
 practice disappears). **Cost accepted:** a device with a wrong clock can win a single
 value by mistake, and a page left open and asleep can briefly act on old information.
 
-**Status: decided, not built.** Until Pass 120 the app only notices another device's
-changes, holds an upload when another device got there first, and the person presses
-Get changes or Review. See [Accounts-and-Backend.md](Accounts-and-Backend.md#decided).
+**Status: decided, partly built (2026-10-26).** Other devices' changes can now arrive by
+themselves (Pass 120), but behind a switch that is **off by default**; with it off the app
+only notices another device's changes and the person presses Get changes or Review. A
+conflicting part of a piece is **held and asked about** (Passes 120 and 121), not settled by
+"the most recent change wins". The rule is built in two places: a deletion wins, practice
+included, with a 30-day way back (Pass 122, the owner's 2026-10-23 answer), and the most recent
+reorder of the piece list wins as a whole list (Pass 122b, 2026-10-25). See
+[Accounts-and-Backend.md](Accounts-and-Backend.md#decided).

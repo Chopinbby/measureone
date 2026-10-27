@@ -1325,3 +1325,7 @@ silently.
   the most recent reorder wins as a whole list, by a dated note every drag leaves); a piece held by
   a refused upload gets Review's plain questions.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)
+- **Pass 125** — the sidebar's piece list scrolls by itself while a piece is dragged near its top or
+  bottom edge, so a piece can be moved to any row in one drag (it shows about seven rows and could
+  only be dragged to rows already in view). `lib/dragScroll.js`; what a drop does is unchanged.
+  [`Decisions.md`](docs/Decisions.md#ux)

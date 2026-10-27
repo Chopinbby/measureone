@@ -97,6 +97,19 @@ precedents above. The panel itself follows the app's existing
 "nothing to offer → render nothing" habit (`ReassessPanel`, the Random Start
 pool below two entries) rather than showing an explanatory empty state.
 
+## Dragging inside a window that scrolls scrolls the window
+
+Settled in Pass 125, for any list the app lets a person reorder by dragging. The sidebar's
+piece list shows about seven rows and scrolls inside that window; before Pass 125 a piece could
+only be dropped on a row already in view, and moving one across a long list took several drags
+(each of which re-ranks every piece it passes). So: **while a dragged row is held near the top
+or bottom edge of its window, the window scrolls that way, faster the closer to the edge, and
+stops the moment the row is dropped, the drag ends, or the pointer leaves.** Do it in the app
+(`lib/dragScroll.js`), not by trusting the browser: Safari, which the owner uses, does not
+reliably scroll a nested window during a native drag. Anything else that becomes draggable inside
+a scrolling window should reuse it. See
+[Decisions.md](Decisions.md#ux).
+
 ## A mode lives inside its tab, not a standing nav entry
 
 When a piece enters a special way of practicing — Interleaved rotation,

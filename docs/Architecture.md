@@ -168,6 +168,11 @@ MeasureOne.jsx/
     │   ├── works.js                      # multi-movement grouping helpers
     │   ├── pieceEdit.js                  # mergeEditedPiece — what Save takes from the edit
     │   │                                  # form's draft vs. keeps from the live piece
+    │   ├── dragScroll.js                 # Pass 125: the sidebar's piece list scrolls by
+    │   │                                  # itself while a piece is dragged near its top or
+    │   │                                  # bottom edge (dragScrollStep, createDragAutoScroller).
+    │   │                                  # Pure arithmetic and a small timer loop; App.jsx
+    │   │                                  # connects it to the list's drag events
     │   ├── coldStart.js                   # Pass 56 — coldStartGateMet,
     │   │                                  # coldStartDueThreshold (live
     │   │                                  # derivation, no persisted

@@ -474,13 +474,16 @@ Movements of the same work are grouped under the work title in that list
 strip on the Overview of any movement — same `switchToPiece` call, just a
 closer-to-hand entry point while working within one work.
 
-**Since Pass 32a**, that list is user-reorderable: up/down controls on each
-row move a standalone piece or an entire work as one block (never an
+**Since Pass 32a**, that list is user-reorderable: dragging the grip on a row
+moves a standalone piece or an entire work as one block (never an
 individual movement within a work — those stay ordered by creation date,
 already grouped together regardless), writing a persisted `piece.sortOrder`
 that the switcher — and every other piece-listing surface, including the
-Export picker — sorts by instead of creation date. See
-[Decisions.md](Decisions.md#ux).
+Export picker — sorts by instead of creation date. **Since Pass 125**, the list
+(which shows about seven rows and scrolls inside that window) also scrolls by
+itself while a piece is held near its top or bottom edge, faster the closer to
+the edge, and stops when the piece is dropped or leaves the list, so a piece can
+be moved to any row in one drag. See [Decisions.md](Decisions.md#ux).
 
 ## 7. Backup and restore
 

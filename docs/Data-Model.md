@@ -219,6 +219,19 @@ piece = {
                          // since order is a whole-list arrangement, not independent
                          // per-piece data. Defaults to "existing" so an import
                          // never moves anything unless the user asks it to.
+  switcherOrder,         // { at: epoch ms, ids: [piece ids, in order] } or absent (Pass 122b,
+                         // "the most recent reorder wins"). Every drag in the switcher leaves
+                         // the same small note in the pieces it changes: when it was made and
+                         // the WHOLE arrangement. The switcher shows the arrangement of the
+                         // LATEST note held by any piece (lib/pieceMerge.js,
+                         // sortPiecesForSwitcher); a piece the note does not list (added after
+                         // it) follows the listed ones by sortOrder; no note anywhere is exactly
+                         // the sortOrder order. Merged copies keep the later note and never
+                         // ask. Absent on a piece nobody has dragged since this existed. A
+                         // backup file never brings one in (a chosen "Use the imported order"
+                         // is stamped as a reorder of its own). sortOrder is still written on
+                         // every drag: it is the fallback when no note is left, and what a
+                         // device on the previous version shows.
   updatedAt,             // epoch ms — bumped on every local mutation (App.jsx's
                          // updatePiece, the single funnel every piece change goes
                          // through per CLAUDE.md). Exists to let mergeImportedPiece

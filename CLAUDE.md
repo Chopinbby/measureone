@@ -512,11 +512,14 @@ automatic update from other devices that is **off by default**. **Decided 2026-1
 only partly built:** the most recent change winning item by item, with practice sessions
 and scales always kept (Pass 120 holds a conflicting part and Pass 121 asks the person about it
 instead, so "most recent wins" is still not built; Pass 122 settled one case by the owner's
-2026-10-23 rule: a deleted piece is deleted everywhere, practice and all, with a 30-day way back)
+2026-10-23 rule: a deleted piece is deleted everywhere, practice and all, with a 30-day way back;
+Pass 122b stopped the app asking twice: what is left unticked is remembered, piece order follows
+the person with no question (the most recent reorder wins), and a refused-upload piece gets Review's
+plain questions)
 ([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When two copies disagree").
 Design: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md); what a person
 sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109) (flows
-10 to 16).
+10 to 17).
 
 ### The account code (Passes 109 to 116)
 
@@ -701,9 +704,13 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   "local-only"` returns `local` itself, untouched), a technique part follows a rule per
   kind. **Pass 120 did not change this** (an automatic update holds a conflicting piece
   part instead of resolving it, and Pass 121 asks the person, see below); "the most recent
-  change wins" (decided 2026-10-15) is still not built. Scales and custom methods are never
-  removed by a merge,
-  and an empty tempo never replaces a real one.
+  change wins" (decided 2026-10-15) is still not built. **One exception since Pass 122b:**
+  `sortOrder`, `switcherOrder` and `createdAt` (`SOFT_PARTS`) are never a conflict: changed on both
+  sides to different values the engine settles them itself and lists it in `softSettled`: the
+  rank and the reorder note go to the side holding the MORE RECENT reorder, and where the notes
+  cannot tell (and always for `createdAt`) to the side `softWins` names (default the other copy,
+  i.e. the account's; tabs pass `"local"`). See "What the person said no to" below. Scales and
+  custom methods are never removed by a merge, and an empty tempo never replaces a real one.
 - **Piece engine.** The "travel together" rule: the sides disagree about
   `totalMeasures`/`chunkMode`/`customChunkSize`/`chunkSplitPoints` and the other side
   changed progress or the marker: one whole-piece conflict. **The reschedule marker is
@@ -861,7 +868,7 @@ default** (Pass 124 may change that). **With it off the app behaves exactly as a
 - **Left open** (details in
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)):
   the "applied when you're done" line is rarely visible; a piece held by a REFUSAL is not
-  settled automatically; a hidden page skips the fresh look before an upload; two upload
+  settled automatically (Review asks about one since Pass 122b); a hidden page skips the fresh look before an upload; two upload
   runs can overlap during it; a piece waiting because it is in use is downloaded again every
   minute; a failed automatic update leaves only a console line; `App.jsx`'s wiring has no
   automated test; `docs/Research.md` still says five minutes.
@@ -942,8 +949,8 @@ question per conflicting part instead; everything else is unchanged. Rules:
   2026-10-21:** "removed" for what an answer throws away, and the first screen.
 - **`planSettle` never throws** (a piece it fails on is in `errored` and goes to the picker, and
   the page says so); it takes `build` so a test can make one fail.
-- **Left open:** a piece held by a REFUSAL gets no questions (Pass 120 for-later item 2; it
-  happened in my own browser run); `foldConflictedProgress` (`tabSync.js`) and
+- **Left open:** a piece held by a REFUSAL with no recorded base still goes to the picker (one
+  that knows what it last synced gets questions since Pass 122b); `foldConflictedProgress` (`tabSync.js`) and
   `unionProgressEntries` are two implementations of "keep both"; **size and schedule travel
   together is not done** (a resize on one device against a difficulty edit on the other still
   gives a piece whose measure count and difficulty list disagree; practice days per week and
@@ -1020,9 +1027,83 @@ what makes this safe. Rules:
   data); pre-Pass-122 combines look like deletions (the owner has made none in the last 30 days,
   so nothing in her account is affected); a card being typed
   into or timed is not "in use", so a removal takes it; the 30 days use this device's clock;
-  Restore next to a same-named piece combines; a deletion held before Pass 122 stays held. **122b
-  is not built** (the remembered "These are different pieces", the blank-composer box, never asking
-  about piece order or date added, questions for a refusal-held piece).
+  Restore next to a same-named piece combines; a deletion held before Pass 122 stays held. (122b,
+  the other half of the card, is built: next section.)
+
+### What the person said no to is remembered, and order follows them (Pass 122b)
+
+The app must not ask the same question twice. Rules:
+
+- **The answers are a device-record field, `accounts[userId].declined = { pieces, pairs }`**
+  (`cleanDeclined`, `lib/accountSync.js`): per account, this device only (never in the account),
+  kept only when something is in it, 500 of each at most (the newest kept), pairs sorted so either
+  way round is one. **It sits beside `autoUpdate`: every function that rebuilds an account's entry
+  (`changeAccount`, `withBackupRecorded`, `readDeviceRecord`) must carry it over**, or the next
+  upload takes the person's "no" back; a test goes through every kind of update. A new place that
+  rebuilds an entry must be added to that test.
+- **One place honors them: `walkAccountCandidates`.** A piece they left off that is not here is
+  skipped (`skippedDeclined`); a declined pair is never matched by name (`matchPoolFor`), so the
+  other copy is an ordinary new piece. Get changes, Restore, Review and the automatic update all go
+  through it. `classifyAccountChanges` keeps a declined piece out of `added` (so the "Changes from
+  another device" line and the automatic fetch leave it alone). **A new way of listing or
+  applying account pieces must go through the walk, or it will offer what was refused.** A piece
+  that IS here is never hidden by a stale answer.
+- **What unticking means is `planDeclines`** (pure, tested): an unticked NEW row is "not on this
+  device" (`pieces`); an unticked "same piece, other copy" row is "different pieces" (the pair, and
+  in Get changes also the copy: `pieces`, so no window opens for it again); in a RESTORE that copy
+  arrives as its own piece when the copy it would have been combined with is coming too
+  (`arrivingIds`). "Newer in your account" and "changed in both places" rows remember nothing.
+  `handleConfirmAccountImport` records the answers BEFORE the apply; Cancel records nothing. The
+  window says what unticking means, and its button works with nothing ticked ("Leave these off").
+  A "maybe the same piece" row (`uncertain`: a name match where either side has no composer) starts
+  unticked; **file import and `findMatchingPiece` are unchanged.**
+- **"Ask me again" is `withDeclinedCleared`** (no request; the last light look is sorted against the
+  record again by `refreshSyncInfo`). **Asking for a piece by name beats an old no:**
+  `bringBackThroughApply` calls `withDeclinedRemoved` first, so Keep it and Restore always bring the
+  piece here. A new way to bring a piece back by name must do the same. **Opening a RESTORE forgets
+  earlier answers** (the welcome screen has no Settings, so there would be no "Ask me again").
+- **Piece order follows the person; no account flow asks.** `SOFT_PARTS` (`sortOrder`,
+  `switcherOrder`, `createdAt`) are never an engine conflict. The account's flows pass
+  `orderChoice: "follow"` (`orderChoiceFor`, for a piece merged through the import merge, which
+  has no base: the more recent reorder note, when either side has one; else same order, nothing
+  to choose; only this device reordered since the recorded base, this device's; otherwise the
+  account's; two combined copies keep the place of the one that is here, and its note). The
+  window has no piece-order question for the account (the file import keeps its own).
+- **The most recent reorder wins, as a whole list (the owner's answer, 2026-10-25).** Every drag
+  leaves a small dated note, `piece.switcherOrder = { at, ids }` (the moment, and EVERY piece's id
+  in the new order), in the pieces it changes: `planSwitcherMove` (`lib/pieceMerge.js`) decides what
+  is written, `App.jsx`'s `moveGroupTo` writes it, and the ranks are written as before. **The
+  switcher shows `sortPiecesForSwitcher(pieces)`, never `Object.values(pieces).sort(...)`:** the
+  arrangement of the LATEST note held by any piece, pieces it does not list after it by
+  `compareSwitcherOrder` (ties by date added, then id), no note anywhere exactly the old order.
+  A merge keeps the later of two notes (`compareOrderNotes`; same moment: the arrangement's text,
+  one answer everywhere) and the rank with it; `mergeInto` and `orderChoiceFor` apply the same
+  rule, and a combine keeps the note of the piece that is here. **A new reorder is stamped by
+  `nextOrderStamp`** (after every note this device has seen, so a slow clock still wins after
+  receiving the other's reorder; only two reorders made apart are judged by the clocks). **A backup
+  file never brings a note in** (`handleConfirmImport` drops it); "Use the imported order" writes a
+  fresh note. Don't stamp every piece on a drag (it uploads and holds every piece) and don't make
+  it a time per piece (two drags made apart blend into a list neither device showed): both were
+  considered and rejected, and a simulation (`test/pieceMerge.test.mjs`, "devices that reorder apart
+  end with the most recent reorder, as a whole") fails on the blend.
+- **A piece held by a refused upload that still knows what it last synced gets Review's plain
+  questions** (`heldIdsToSettle`, used by `planSettle`: held with a recorded list, or held with
+  recorded `parts`). One with no recorded base goes to the picker as before; the automatic update
+  still never settles it.
+- **Checks.** 1,554 tests; 54 deliberate breakages, all caught; the merge simulations at seeds 1
+  to 3,000 / 1 to 1,000, a convergence run of 3,000 and the whole-list reorder simulation at 3,000
+  runs. **Running them wider found a check that was too strict on `main` too** (minutes-mode
+  `daysToLearn`, seed 311): the engine re-works it so a reload gives the same piece; the check was
+  relaxed for that one part and says why. Seen in a real browser against a local stand-in for the
+  account service (two devices dragging apart, switch off and on, a file import, a work dragged as a
+  block, signed out); **not seen on the real preview** (the card's "Yours" checks).
+- **Left open** (details and owners in
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)):
+  "Select none" leaves everything off and remembers it; the answers belong to this device and a
+  tab or phone on the previous version drops them when it saves the record (and writes a rank with
+  no note, which a noted reorder beats); they are not pruned; two reorders made apart are judged
+  by the devices' clocks; `docs/Algorithms.md`'s merge section does not yet say order and date
+  added are settled by the engine.
 
 ### Deploying and operating (Pass 114 on)
 
@@ -1094,11 +1175,11 @@ See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently singled
 "next"; pick from the priority-ordered backlog there. **The accounts work is the one
 thread in motion:** it is mid-Phase 2 (Passes 115 to 118 are built and live; 119, tabs of
 one browser, and 120, automatic updates behind a switch that is off by default, are built),
-121 (a held piece asks one plain question per conflicting part in Review) is built, and 122
-(a piece deleted on one device is deleted everywhere, with a 30-day way back) is built; the
-passes the docs name next are 122b (the remembered "These are different pieces", the
-blank-composer box, never asking about piece order or date added, questions for a piece held
-by a refusal) and 124 (turning the switch on by default). The owner's 2026-10-15 "most recent
+121 (a held piece asks one plain question per conflicting part in Review) is built, 122
+(a piece deleted on one device is deleted everywhere, with a 30-day way back) is built, and so is
+122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
+Review's questions); the passes the docs name next are 123 (what happens offline) and 124 (turning
+the switch on by default). The owner's 2026-10-15 "most recent
 wins" decision is still not built. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
 policy and terms, a real email provider, monitoring, in-app change of email and
@@ -1232,6 +1313,13 @@ silently.
   it is listed; a deletion is no longer held up by practice elsewhere; a combine's duplicate
   carries a `mergedInto` note. Deletions only: the rest of its card is Pass 122b.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122)
+- **Pass 122b** — what the person leaves unticked in Get changes or Restore is remembered (a new
+  piece is left off, "same piece, other copy" means different pieces), with one "Ask me again about
+  what I said no to" button; a name match with no composer is "maybe the same piece" and starts
+  unticked; piece order follows the person between devices with no question (when both reordered,
+  the most recent reorder wins as a whole list, by a dated note every drag leaves); a piece held by
+  a refused upload gets Review's plain questions.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)
 - **Pass 125** — the sidebar's piece list scrolls by itself while a piece is dragged near its top or
   bottom edge, so a piece can be moved to any row in one drag (it shows about seven rows and could
   only be dragged to rows already in view). `lib/dragScroll.js`; what a drop does is unchanged.

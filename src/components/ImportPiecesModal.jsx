@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { X, Upload, CloudDownload } from "lucide-react";
 import { PieceCheckRow } from "./PieceCheckRow";
 import { findMatchingPiece, diffImportedPiece, mergeImportedTechnique } from "../lib/storage";
+import { describeCombineRow, describeCombineBadge, describeUntickedNote } from "../lib/accountSync";
 
 // candidates: the raw piece objects parsed out of the chosen backup file,
 // before any of them have actually been added or merged. existingPieces:
@@ -33,13 +34,24 @@ import { findMatchingPiece, diffImportedPiece, mergeImportedTechnique } from "..
 // removed unless "Delete it here too" is clicked. A duplicate that a combine marked
 // deleted (`mergedInto`) gets only "Delete it here too". A piece changed on
 // both sides ("ask") or to be combined ("combine") always gets the picker.
+//
+// Pass 122b: in the account's window what is left unticked is an answer. A new piece
+// left unticked stays off this device and the app stops mentioning it; a "same piece,
+// other copy" left unticked means "these are different pieces" (App.jsx, handleConfirmAccountImport,
+// remembers both; "Ask me again" in Settings takes them back). A "maybe the same piece" row
+// (`meta.uncertain`: one of the two has no composer) starts unticked, so it is never combined on
+// the strength of a name alone unless the person ticks it. And nobody is asked about piece
+// order here any more: it follows the person between devices (`onImport` is told "follow").
+// The file import is exactly as it was.
 export function ImportPiecesModal({
   candidates, existingPieces, techniqueCandidate = null, existingTechnique = null,
   techniqueUnreadable = false, techniqueSkippedItems = 0, onCancel, onImport,
   source = "file", mode = "changes", rowMeta = null, deletedElsewhere = [], onDeleteHere = null, onKeepHere = null, unreadableCount = 0,
 }) {
   const fromAccount = source === "account";
-  const [selected, setSelected] = useState(() => new Set(candidates.map((_, i) => i)));
+  const [selected, setSelected] = useState(
+    () => new Set(candidates.map((_, i) => i).filter((i) => !(fromAccount && rowMeta && rowMeta[i] && rowMeta[i].uncertain)))
+  );
   const [includeTechnique, setIncludeTechnique] = useState(!!techniqueCandidate);
   const techniquePreview = useMemo(
     () => (techniqueCandidate && existingTechnique ? mergeImportedTechnique(existingTechnique, techniqueCandidate).stats : null),
@@ -79,7 +91,10 @@ export function ImportPiecesModal({
   const updateCount = rows.filter((r) => r.isUpdate).length;
   const newCount = rows.length - updateCount;
   const kindCount = (kind) => rows.filter((r) => r.meta && r.meta.kind === kind).length;
-  const pickerCount = rows.filter((r) => r.hasDivergence).length;
+
+  // Pass 122b: in the account's window, rows left unticked are answers (see above), so the button
+  // must be there even with nothing ticked: otherwise a person could never say no to a piece.
+  const leavesOffRows = fromAccount && rows.some((r) => !selected.has(r.index) && r.meta && (r.meta.kind === "new" || r.meta.kind === "combine"));
 
   const toggle = (index) => {
     setSelected((prev) => {
@@ -132,6 +147,9 @@ export function ImportPiecesModal({
               ? "This file has no pieces, only your technique library."
               : `Found ${rows.length} piece${rows.length === 1 ? "" : "s"} in this file: ${newCount} new, ${updateCount} matching a piece you already have. Choose which to import; a match updates the existing piece instead of duplicating it.`}
           </p>
+          {fromAccount && (kindCount("new") > 0 || kindCount("combine") > 0) && (
+            <p className="wizard-hint">{describeUntickedNote(mode)}</p>
+          )}
           {fromAccount && unreadableCount > 0 && (
             <p className="wizard-hint import-warning">
               {unreadableCount} piece{unreadableCount === 1 ? "" : "s"} in your account couldn't be read and will be skipped.
@@ -167,12 +185,10 @@ export function ImportPiecesModal({
             <button className="ghost-btn" onClick={() => setSelected(new Set(candidates.map((_, i) => i)))}>Select all</button>
             <button className="ghost-btn" onClick={() => setSelected(new Set())}>Select none</button>
           </div>}
-          {(fromAccount ? pickerCount > 0 : updateCount > 0) && (
+          {!fromAccount && updateCount > 0 && (
             <div style={{ margin: "0 0 14px", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
               <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
-                {fromAccount
-                  ? "Piece order: your account may arrange your pieces differently than they're arranged here. Which order should the switcher use for the pieces you merge?"
-                  : "Piece order: this file may list your pieces in a different order than they're arranged here. Which order should the switcher use for matched pieces?"}
+                Piece order: this file may list your pieces in a different order than they're arranged here. Which order should the switcher use for matched pieces?
               </p>
               <div style={{ display: "flex", gap: 8 }}>
                 <button
@@ -187,7 +203,7 @@ export function ImportPiecesModal({
                   className={orderChoice === "imported" ? "primary-btn sm" : "ghost-btn"}
                   onClick={() => setOrderChoice("imported")}
                 >
-                  {fromAccount ? "Use my account's order" : "Use the imported order"}
+                  Use the imported order
                 </button>
               </div>
             </div>
@@ -198,7 +214,7 @@ export function ImportPiecesModal({
                 <PieceCheckRow
                   piece={
                     fromAccount && meta && meta.kind === "combine"
-                      ? { name: piece.name, composer: `Same piece as "${meta.matchName}" here. They'll be combined, and the extra copy in your account is then marked deleted, not erased.` }
+                      ? { name: piece.name, composer: describeCombineRow({ matchName: meta.matchName, uncertain: meta.uncertain, mode }) }
                       : piece
                   }
                   checked={selected.has(index)}
@@ -211,7 +227,7 @@ export function ImportPiecesModal({
                           : meta.kind === "take"
                           ? "Newer in your account"
                           : meta.kind === "combine"
-                          ? "Same piece, other copy"
+                          ? describeCombineBadge(meta.uncertain)
                           : meta.held
                           ? "Changed in both places (held)"
                           : "Changed in both places"}
@@ -282,13 +298,15 @@ export function ImportPiecesModal({
           {!(fromAccount && rows.length === 0 && !techniqueCandidate) && (
             <button
               className="primary-btn"
-              disabled={selected.size === 0 && !includeTechnique}
-              onClick={() => onImport([...selected], ladderChoices, orderChoice, includeTechnique)}
+              disabled={selected.size === 0 && !includeTechnique && !leavesOffRows}
+              onClick={() => onImport([...selected], ladderChoices, fromAccount ? "follow" : orderChoice, includeTechnique)}
             >
               {fromAccount ? <CloudDownload size={15} /> : <Upload size={15} />}
               {selected.size === 0
                 ? fromAccount
-                  ? "Merge technique library"
+                  ? includeTechnique
+                    ? "Merge technique library"
+                    : "Leave these off"
                   : "Import technique library"
                 : fromAccount
                 ? `${mode === "restore" ? "Restore" : "Bring in"} ${selected.size} piece${selected.size === 1 ? "" : "s"}${includeTechnique ? " and technique" : ""}`

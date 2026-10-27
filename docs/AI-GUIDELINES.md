@@ -1218,6 +1218,22 @@ and don't run a dev server on the same tree during a run. A related trap: a unit
 a real timer with tiny allowances (20 ms) passed alone and failed inside the full suite. Use a
 fake clock.
 
+## The owner can merge a pull request while you are still adding to its branch: check before you push
+
+Pass 122b's docs wrap-up was committed and pushed to the pass's branch after its pull request
+(#75) had already been merged (the owner merged it at 00:43 her time on 2026-10-27, from head
+`88a6615`). The push succeeded and the branch looked current, but the commit never reached `main`.
+It was found only by a last look at the pull request's state, and it took a separate
+documentation pull request (#77) to land it. The wrap-up had also written "built, its pull
+request is open" into several documents, which was no longer true. So: before pushing to a
+branch that has an open pull request, and again as the very last step of a wrap-up, run `gh pr
+view <number> --json state,mergedAt,mergeCommit`. If it has merged, branch from `origin/main`
+and bring the work over with `git cherry-pick`; never push to the merged branch again. Write
+status in documents as a checked, dated fact ("merged 2026-10-27, merge commit `0b53445`"), not
+as the state you last saw: "its pull request is open" goes stale the moment she presses the
+button. And land the documentation before you tell her a pull request is ready, or tell her more
+is coming.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

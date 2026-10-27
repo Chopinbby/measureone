@@ -4510,7 +4510,8 @@ by itself while a piece is dragged near its top or bottom edge.**
   list keeps scrolling for up to 0.7 seconds after the pointer leaves it while still in
   the edge zone (the cost of not acting on `dragleave`); and in a browser that already
   scrolls such a list natively the two add up.
-- **Checked.** `npm test`: 1,496 pass (20 new); 19 of 20 deliberate breakages
+- **Checked.** `npm test`: 1,496 pass when built on its own base, 1,574 after Pass 122b
+  was merged in on 2026-10-27 (20 new either way); 19 of 20 deliberate breakages
   caught by a test (the 20th cannot change any output: the ramp is 0 on that
   border either way). In a real browser (the real app, 14 pieces, a synthetic drag
   holding the pointer where a person would): a piece grabbed at the bottom and
@@ -4518,7 +4519,9 @@ by itself while a piece is dragged near its top or bottom edge.**
   first row puts it first, in one drag; the same the other way; scrolling stops
   at once on a drop and on a cancelled drag; held in the middle of the list, or
   with no drag under way, nothing scrolls; an ordinary short drag behaves exactly
-  as before; the phone layout works the same. **Not seen:** Safari itself (not available here; the
+  as before; the phone layout works the same. Tried again on the result of merging `main` in
+  (12 pieces, both directions): the same, and Pass 122b's reorder note is still written by the
+  drop. **Not seen:** Safari itself (not available here; the
   fix does not depend on the browser's own scrolling, which is the point) and a
   real mouse (the pane's driver has no "hold the button down" step).
 

@@ -871,7 +871,7 @@ default** (Pass 124 may change that). **With it off the app behaves exactly as a
   settled automatically (Review asks about one since Pass 122b); a hidden page skips the fresh look before an upload; two upload
   runs can overlap during it; a piece waiting because it is in use is downloaded again every
   minute; a failed automatic update leaves only a console line; `App.jsx`'s wiring has no
-  automated test; `docs/Research.md` still says five minutes.
+  automated test.
 
 ### Settling a held piece, one question at a time (Pass 121)
 
@@ -1102,8 +1102,11 @@ The app must not ask the same question twice. Rules:
   "Select none" leaves everything off and remembers it; the answers belong to this device and a
   tab or phone on the previous version drops them when it saves the record (and writes a rank with
   no note, which a noted reorder beats); they are not pruned; two reorders made apart are judged
-  by the devices' clocks; `docs/Algorithms.md`'s merge section does not yet say order and date
-  added are settled by the engine.
+  by the devices' clocks; and **an unexplained "pieces changed on another device" banner seen on
+  the owner's first preview run (2026-10-26), not reproduced and not fixed** (the first item of
+  the Pass 122b entry in [`docs/Decisions.md`](docs/Decisions.md#open-questions)'s open
+  questions; the two facts that would decide it are the piece names it listed and whether
+  other windows were open on that account).
 
 ### Deploying and operating (Pass 114 on)
 
@@ -1180,7 +1183,8 @@ one browser, and 120, automatic updates behind a switch that is off by default, 
 122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
 Review's questions); the passes the docs name next are 123 (what happens offline) and 124 (turning
 the switch on by default). The owner's 2026-10-15 "most recent
-wins" decision is still not built. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
+wins" decision is only partly built (a deletion and the piece list's order follow it; a
+conflicting part of a piece is held and asked about). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
 policy and terms, a real email provider, monitoring, in-app change of email and
 account deletion) is separate; see Roadmap.md and Accounts-and-Backend.md. Still not

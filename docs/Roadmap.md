@@ -356,23 +356,35 @@ and [Decisions.md](Decisions.md#accounts-and-backend). Since 2026-10-12 a free
 daily backup of the account database runs into a private repository (see
 [Backups of the account copy](Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12)).
 
-**Accounts and backend, Phase 2 so far (Passes 115–118; 115 live since
-2026-10-14, 116 to 118 since 2026-10-15)** — groundwork for changes arriving on
-other devices by themselves. **Nothing arrives by itself yet, and nothing merges
-two devices' copies part by part yet.** Built: "same" and "changed" made
-trustworthy (an upload notes what it is about to send, so a lost confirmation no
-longer reads as a conflict; sessions are compared by content; the technique
-library's last-changed time no longer counts as a change; the Account line shows
-the held message and the normal one together) (115); the app **notices**, quietly,
-that another device changed something, with one added line in the Account panel
-(116); and two merge engines that merge **by part** instead of by whole piece, one
-for a piece and one for the technique library (117, 118), each proved by a seeded
-two-device simulation but **not called by the app yet**. Alongside, a scheduler
-fix: a chunk done earlier than the day a reschedule places it on is no longer
-owed there (a state only merged copies can reach). The first live sighting after
-the deploy, a technique library held as "changed on another device" that cleared
-with nothing to merge, is
-[Pass 118 open item 9](Decisions.md#open-questions). See
+**Accounts and backend, Phase 2 so far (Passes 115–122b; 115 live since
+2026-10-14, 116 to 118 since 2026-10-15, 119 since 2026-10-18, 120 since 2026-10-19,
+121 since 2026-10-23, 122 since 2026-10-25; 122b built)** — changes arriving from
+other devices, and the app staying safe while they do. Built: "same" and "changed"
+made trustworthy (an upload notes what it is about to send, so a lost confirmation no
+longer reads as a conflict; sessions are compared by content; the technique library's
+last-changed time no longer counts as a change) (115); the app **notices**, quietly,
+that another device changed something, with one added line in the Account panel (116);
+two merge engines that merge **by part** instead of by whole piece, one for a piece and
+one for the technique library (117, 118); every tab of one browser kept in step, with
+only one tab doing the account work (119); changes from other devices arriving **by
+themselves**, behind a per-device switch that is **off by default**, with the check
+running every minute (120); a piece held because both devices changed the same part
+asking **one plain question per part** in Review (121); and a piece deleted on one
+device **deleted everywhere**, practice included, with a 30-day "Recently deleted" and a
+"Keep it" (122, the owner's rule of 2026-10-23). **Pass 122b is built:** what a person
+leaves unticked in Get changes or Restore is remembered, with one "Ask me again" button
+to take it back; a name match with no composer is only "maybe the same piece"; the order
+of the piece list follows the person between devices, **the most recent reorder winning
+as a whole list**; and a piece held by a refused upload gets Review's plain questions.
+Alongside, a scheduler fix: a chunk done earlier than the day a reschedule places it on is
+no longer owed there (a state only merged copies can reach). **Not built yet:** what
+happens offline (123) and turning the switch on by default after a real-use trial (124);
+and most of the owner's 2026-10-15 decision, "the most recent change wins, item by item"
+(a conflicting part of a piece is still held and asked about; only a deletion and the
+piece's place in the list follow it). "Always keep both" as a remembered answer, and size
+and schedule travelling together, have no owner. The first live sighting after the Pass
+118 deploy, a technique library held as "changed on another device" that cleared with
+nothing to merge, is [Pass 118 open item 9](Decisions.md#open-questions). See
 [Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115),
 [Decisions.md](Decisions.md#accounts-and-backend) and
 [Algorithms.md](Algorithms.md#merging-by-part-pass-117).
@@ -385,12 +397,11 @@ Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 [Decisions.md](Decisions.md#ux) for the pinned-down panel placement).
 Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale. **The one thread already in motion is the
-accounts work (Phase 2):** the passes the docs name next are 120 (wire the two
-merge engines in and apply other devices' changes automatically when the app is
-opened or returned to, **the most recent change winning item by item, decided
-2026-10-15**), 121 (only what "most recent" can't settle) and 122 (deletions); see
-backlog item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies
-disagree".
+accounts work (Phase 2):** Passes 120 to 122b are built, and the passes the docs name
+next are 123 (what happens offline) and 124 (turning the automatic switch on by default,
+only after the owner has lived with it on her own two devices). The owner's 2026-10-15
+"the most recent change wins, item by item" decision is only partly built; see backlog
+item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagree".
 
 ## Priority-ordered backlog
 
@@ -482,19 +493,19 @@ disagree".
    having enough session history to tune against.
 5. **Accounts and backend, Phases 2 and 3** — Phase 1 (an optional account
    that keeps a checked copy of every piece and the technique library, restore,
-   account settings, live since Pass 114) is Done above, and **Phase 2 has
-   begun** (Passes 115 to 118, Done above). Still to build in **Phase 2**: the two
-   merge engines wired in, with other devices' changes applied automatically and the
-   most recent change winning item by item (120; decided 2026-10-15, which also
-   shrinks 121, the question when two copies disagree, to what "most recent" can't
-   settle), deletions (122), and what happens offline; **Phase 3**, open sign-up, a privacy policy and terms, a
-   real email provider (Supabase's built-in sender reaches only the project's
-   own team and only a couple of messages an hour, which is why the owner's is
-   the only account for now), monitoring, and an in-app change of email and
-   "delete my account" (probably a database function) before strangers can sign
-   up. Phase 1's loose ends are in
-   [Decisions.md](Decisions.md#open-questions). Manual export and the export
-   reminder stay throughout. See
+   account settings, live since Pass 114) is Done above, and **Phase 2 is mostly
+   built** (Passes 115 to 122b, Done above). Still to build in **Phase 2**: what happens
+   offline (123), and turning other devices' changes on by default after a real-use
+   trial (124). Decided but only partly built: the most recent change winning item by
+   item (a deletion and the piece's place in the list follow it; a conflicting part of
+   a piece is held and asked about). No owner yet: "always keep both" as a remembered
+   answer, and size and schedule travelling together. **Phase 3**, open sign-up, a
+   privacy policy and terms, a real email provider (Supabase's built-in sender reaches
+   only the project's own team and only a couple of messages an hour, which is why the
+   owner's is the only account for now), monitoring, and an in-app change of email and
+   "delete my account" (probably a database function) before strangers can sign up.
+   Phase 1's loose ends are in [Decisions.md](Decisions.md#open-questions). Manual
+   export and the export reminder stay throughout. See
    [Accounts-and-Backend.md](Accounts-and-Backend.md) and
    [SOW-Accounts-and-Sync.md](SOW-Accounts-and-Sync.md).
 6. **Merge two split chunks back into one** — explicitly wanted, deliberately

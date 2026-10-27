@@ -1083,3 +1083,65 @@ not listed either; the account still holds it, but only the dashboard can reach 
 one device while the switch is on; deleting your account (Phase 3). Whether "Keep it" should be
 offered on a combined copy (it answers that it can't be kept) is open: see
 Accounts-and-Backend.md, Pass 122 found item 2.
+
+## 17. Saying no, and having the app remember it (optional, Pass 122b)
+
+**Only when signed in with a checked first backup, on a site connected to an account
+service.** Signed out, or on a site with no account service, nothing below appears and the file
+import works exactly as before. Design:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b).
+
+**What leaving a row unticked means.** In the **Get changes** and **Restore** windows (flow 12)
+every row is ticked, except a "maybe" row (below). A line under the intro says it plainly: "A
+piece you leave unticked stays off this device, and the app stops mentioning it. "Ask me again"
+in Settings, under Account, brings it back." (In a restore: "isn't restored".)
+
+- **A new piece** you untick stays off this device. "Changes from another device" stops counting
+  it, Get changes stops listing it, and the automatic update leaves it alone.
+- **"Same piece, other copy"** says what each choice does: ticked, the two are combined (the extra
+  copy in your account is marked deleted, not erased); unticked, they are **different pieces**
+  and this copy stays off this device (in a restore, "both are restored": the unticked copy comes
+  in as its own piece, as long as the copy it would have been combined with is coming too). Either
+  way, the window does not open again for it.
+- **"Maybe the same piece"** is the same row when the name matches but one of the two has no
+  composer, so the app can't be sure. It starts **unticked**; tick it to combine. Left alone, the
+  two are treated as different pieces. A match where both have a composer is as before. A file
+  import is not affected.
+- **Nothing else** is remembered: an unticked "Newer in your account" or "Changed in both places"
+  row is a piece you already have, and it keeps being noticed as before.
+- **"Select none"** unticks everything, so everything is left off. Cancel remembers nothing. If you
+  leave rows off, the button reads **Leave these off** when nothing is ticked.
+
+After a window (and after a Get changes that opens none) the result says what stayed off: "1 piece
+you said no to stays off this device."
+
+**Ask me again.** Settings, under Account, **Ask me again about what I said no to** (it appears
+only while something is remembered, with a line saying what: "You said no to 2 pieces, and that 1
+pair of pieces is different. Pressing this makes the app ask about all of it again."). Pressing it
+forgets every answer on this device and nothing else, makes no request, and the pieces you said no
+to show up at once in "Changes from another device"; the next Get changes offers them again
+(including the question whether two are the same piece). Asking for a piece by name, with **Keep it**
+or **Restore** (flow 16), forgets any answer about that piece too, and so does opening **Restore**
+on the welcome screen (it starts afresh). The answers belong to this device: another device asks
+once for itself.
+
+**Piece order follows you.** Reorder the list on one device and your other devices follow it (by
+themselves with "Update automatically" on, or on Get changes), with no question: the "Piece order"
+question that used to appear in the Get changes window is gone. If you reordered differently on two
+devices before they synced, **the most recent reorder wins, as a whole list**, without asking: each
+time you drag a piece the app leaves a dated note of the whole arrangement in the pieces it changed,
+and every device shows the arrangement of the latest note. (Two reorders made without either device
+having seen the other are judged by the devices' clocks.) Pieces added since that reorder follow the
+listed ones. Two pieces that end up with the same place in the list are shown in the order they were
+added, the same on every device. A file import still asks about order, as before, and a file's own
+older arrangement never rearranges your list; "Use the imported order" counts as a reorder you made
+just now.
+
+**A piece held because an upload was refused** (it shows as "changed on another device" with
+**Review**) now gets the same one-question-at-a-time Review as any held piece (flow 15), when the
+app still knows what the piece looked like when it last synced. If only the order differed the
+screen says "Nothing is left to decide for this piece". A piece that has never synced still goes
+through the whole-piece choice.
+
+**Not covered:** a way to say "not now" instead of "no" (a row left unticked is a no, and Ask me
+again undoes all of them at once); answers that follow you to your other devices.

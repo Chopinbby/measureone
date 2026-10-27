@@ -294,8 +294,11 @@ function decidePiece(M, S, L) {
   if (sameParts(fpM, piecePartFingerprints(L))) return { kind: "reload", storagePiece: S }; // nothing unsaved here: reload
 
   // Changed in both: keep this tab's copy and fold the other's changes in, part
-  // by part, from the base this tab last saved.
-  const plan = planPieceMerge({ local: M, remote: S, base: piecePartFingerprints(L) });
+  // by part, from the base this tab last saved. (Pass 122b: piece order and date added
+  // are never a conflict; between two tabs of one browser, where the person is working
+  // in THIS one, this tab's value is the one kept, exactly as it was when they were
+  // listed as conflicts and this tab's value was kept.)
+  const plan = planPieceMerge({ local: M, remote: S, base: piecePartFingerprints(L), softWins: "local" });
   if (plan.status === "identical") return { kind: "reload", storagePiece: S };
   if (plan.status === "merged" || plan.status === "conflicts") {
     const { piece, folded } = foldConflictedProgress(plan, L, S);

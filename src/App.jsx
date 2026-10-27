@@ -158,8 +158,17 @@ import {
   describeAutoRemoved,
   describeDeletedBanner,
   describeBringBack,
+  // What the person said no to is remembered (Pass 122b)
+  planDeclines,
+  withDeclined,
+  withDeclinedCleared,
+  withDeclinedRemoved,
+  declinedSummary,
+  declinedCount,
+  describeAskMeAgain,
 } from "./lib/accountSync";
 import { startSettle, settleChoose, settleBack, settleNext, settleView, keptPhrases, rereadSettleItem } from "./lib/settleFlow";
+import { compareSwitcherOrder, sortPiecesForSwitcher, planSwitcherMove, makeOrderNote } from "./lib/pieceMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
@@ -237,7 +246,7 @@ function PieceStatusBadge({ status }) {
 // `deletedElsewhere` (Pass 122) is the pieces the account marks deleted that the PERSON is
 // asked about ({ id, name, unsynced }): all of them with the automatic switch off, otherwise
 // the ones older than 30 days and a combine's duplicates. The rest are removed by themselves.
-const NO_SYNC_INFO = { firstBackupDone: false, waiting: 0, held: { pieces: [], technique: false }, backedUpAt: null, failures: 0, running: false, changes: null, deletedElsewhere: [] };
+const NO_SYNC_INFO = { firstBackupDone: false, waiting: 0, held: { pieces: [], technique: false }, backedUpAt: null, failures: 0, running: false, changes: null, deletedElsewhere: [], declined: { pieces: 0, pairs: 0 } };
 const deletedKey = (list) => (list || []).map((d) => `${d.id}:${d.name}:${d.unsynced ? 1 : 0}`).join("|");
 const heldKey = (held) => held.pieces.map((p) => `${p.id}:${p.name}:${p.deletedHere ? 1 : 0}`).join("|") + (held.technique ? "|T" : "");
 const changesKey = (c) =>
@@ -251,7 +260,9 @@ const sameSyncInfo = (a, b) =>
     a.running === b.running &&
     heldKey(a.held) === heldKey(b.held) &&
     changesKey(a.changes) === changesKey(b.changes) &&
-    deletedKey(a.deletedElsewhere) === deletedKey(b.deletedElsewhere));
+    deletedKey(a.deletedElsewhere) === deletedKey(b.deletedElsewhere) &&
+    a.declined.pieces === b.declined.pieces &&
+    a.declined.pairs === b.declined.pairs);
 // How long after startup (or signing in) before the first look at what's waiting.
 const SYNC_STARTUP_DELAY_MS = 2000;
 // ...and before the first light look at what other devices changed, a little
@@ -750,7 +761,9 @@ export default function App() {
         unsynced: !nothingWaitingHere(latestPieces[id], acct.pieces[id]),
       }));
     }
-    const next = { ...snap, deletedElsewhere, failures: syncFailuresRef.current, running: syncRunningRef.current };
+    // Pass 122b: how many "no" answers this device remembers (the button that takes them back)
+    const declined = declinedSummary(accountRecordFor(deviceRecord, userId));
+    const next = { ...snap, deletedElsewhere, declined, failures: syncFailuresRef.current, running: syncRunningRef.current };
     setSyncInfo((prev) => (sameSyncInfo(prev, next) ? prev : next));
     return snap;
   };
@@ -1767,9 +1780,14 @@ export default function App() {
     // own backup of an in-progress piece), that start date is honored so
     // the plan doesn't jump back to day 1.
     const importedAt = Date.now();
+    const reRanked = []; // matched pieces that took the file's place in the list (orderChoice "imported")
     selectedIndices.forEach((index) => {
-      const p = importCandidates[index];
-      if (!p) return;
+      const candidate = importCandidates[index];
+      if (!candidate) return;
+      // A backup file never brings a reorder note along: it dates from another day and lists
+      // pieces that may no longer be here, so it must not rearrange the list. (A chosen
+      // "use the imported order" is stamped as a reorder of its own, below.)
+      const { switcherOrder: _fileNote, ...p } = candidate;
       // Match by id first, then by song identity (name + composer), so
       // re-importing a backup — e.g. after hand-editing minutesPerDay in
       // the exported file — updates the piece it already matches instead
@@ -1804,6 +1822,7 @@ export default function App() {
         }));
         next[match.id] = merged;
         writePieceDirect(match.id, merged);
+        if (merged.sortOrder !== match.sortOrder) reRanked.push(match.id);
         updatedCount++;
       } else {
         const id = next[p.id] ? newId("p") : p.id;
@@ -1821,6 +1840,16 @@ export default function App() {
         createdCount++;
       }
     });
+    if (reRanked.length > 0) {
+      // The person chose the file's order on purpose, which is a reorder: stamped now, so that it
+      // is the most recent one and the list shows what the ranks now say.
+      const ordered = groupPiecesByWork(Object.values(next).sort(compareSwitcherOrder)).flatMap((g) => g.pieces);
+      const note = makeOrderNote({ ordered, all: Object.values(next), now: importedAt });
+      reRanked.forEach((id) => {
+        next[id] = { ...next[id], switcherOrder: { at: note.at, ids: [...note.ids] } };
+        writePieceDirect(id, next[id]);
+      });
+    }
     setPieces(next);
     if (!activePieceId && firstNewId) setActivePieceId(firstNewId);
     // Technique library (Pass 104): merged, never replaced — see
@@ -2016,6 +2045,7 @@ export default function App() {
       techniqueUnreadable: candidates.technique.unreadable,
       marked,
       notMarked,
+      leftOff: out.leftOff,
     });
     if (deletedHere.length > 0) {
       lines = lines.filter((l) => l.text !== "Everything here already matches your account.");
@@ -2087,7 +2117,7 @@ export default function App() {
         candidates,
         selectedIds: null,
         ladderChoices: {},
-        orderChoice: "existing",
+        orderChoice: "follow",
         includeTechnique: targets.technique,
         automatic: true,
         busyIds,
@@ -2187,6 +2217,12 @@ export default function App() {
       }
       const { pieces: localPieces, technique: localTechnique } = syncLatestRef.current;
       if (!localTechnique) return;
+      // Pass 122b: a restore starts afresh. It is only offered on the welcome screen, which has
+      // no Settings, so a "no" given in an earlier restore must not leave the device with no way
+      // to get those pieces back. Whatever is left unticked this time is remembered as usual.
+      if (mode === "restore" && declinedCount(accountRecordFor(readDeviceRecord(), userId)) > 0) {
+        saveDeviceRecord(withDeclinedCleared(readDeviceRecord(), userId));
+      }
       const record = accountRecordFor(readDeviceRecord(), userId);
       const all = accountRowsToCandidates(got.rows);
       if (mode !== "review" && all.pieces.length === 0 && all.deleted.length === 0 && !all.technique.technique) {
@@ -2214,7 +2250,7 @@ export default function App() {
       const visible = plan.items.filter((i) => i.kind !== "same");
       const ask = mode === "restore" ? visible.length > 0 || plan.deletedElsewhere.length > 0 : planNeedsQuestion(plan);
       if (!ask) {
-        await applyAccountFlow({ mode, userId, candidates, selectedIds: null, ladderChoices: {}, orderChoice: "existing", includeTechnique: true, leadLines: opts.leadLines || [] });
+        await applyAccountFlow({ mode, userId, candidates, selectedIds: null, ladderChoices: {}, orderChoice: "follow", includeTechnique: true, leadLines: opts.leadLines || [] });
         return;
       }
       const matchName = (i) =>
@@ -2234,7 +2270,10 @@ export default function App() {
         userId,
         candidates,
         visibleIds: visible.map((i) => i.id),
-        rowMeta: visible.map((i) => ({ kind: i.kind, held: i.held, matchName: matchName(i) })),
+        // Pass 122b: `id` and `matchId` say what the ticks mean afterwards (planDeclines);
+        // `uncertain`: a name match where one of the two has no composer
+        visibleItems: visible.map((i) => ({ id: i.id, kind: i.kind, matchId: i.matchId })),
+        rowMeta: visible.map((i) => ({ kind: i.kind, held: i.held, matchName: matchName(i), uncertain: !!i.uncertain })),
         deletedElsewhere: plan.deletedElsewhere,
         unreadable: plan.unreadable.length,
         techniqueQuiet: plan.technique.available && !techniqueOffered,
@@ -2253,7 +2292,7 @@ export default function App() {
   // are positions in the list the modal showed; the flow keys everything by the
   // account row's id. What the modal didn't list ("already the same") is always
   // applied: it only records the account's copy.
-  const handleConfirmAccountImport = async (selectedIndices, ladderChoicesByIndex = {}, orderChoice = "existing", includeTechnique = false) => {
+  const handleConfirmAccountImport = async (selectedIndices, ladderChoicesByIndex = {}, orderChoice = "follow", includeTechnique = false) => {
     const flow = importAccount;
     if (!flow || accountFlowBusyRef.current) return;
     if (!authSession || flow.userId !== authSession.userId) {
@@ -2262,6 +2301,16 @@ export default function App() {
       return;
     }
     const selected = new Set(selectedIndices.map((i) => flow.visibleIds[i]).filter(Boolean));
+    // Pass 122b: what the person left unticked is an answer. A new piece left unticked is
+    // remembered as "not on this device" and not mentioned again; a "same piece, other
+    // copy" left unticked is remembered as "different pieces" (and, in a restore, comes in as
+    // its own piece). Saved BEFORE the apply, so the apply already honors it, and nothing
+    // is remembered when the window is closed instead.
+    const said = planDeclines({ items: flow.visibleItems || [], selectedIds: [...selected], mode: flow.mode });
+    if (said.pairs.length > 0 || said.pieces.length > 0) {
+      saveDeviceRecord(withDeclined(readDeviceRecord(), flow.userId, { pairs: said.pairs, pieces: said.pieces }));
+    }
+    said.arrivingIds.forEach((id) => selected.add(id));
     flow.candidates.pieces.forEach((c) => {
       if (!flow.visibleIds.includes(c.id)) selected.add(c.id);
     });
@@ -2347,8 +2396,10 @@ export default function App() {
       const rows = (last.rows.pieces || []).map((r) => (r.id === id ? { ...r, deleted_at: null, revision: out.revision } : r));
       checkRowsRef.current = { ...last, rows: { ...last.rows, pieces: rows } };
     }
+    // Pass 122b: asking for this piece by name beats an old "no" about it
+    saveDeviceRecord(withDeclinedRemoved(readDeviceRecord(), userId, [id]));
     const candidates = accountRowsToCandidates({ pieces: [{ id, revision: out.revision, deleted_at: null, data: out.data }], technique: null });
-    await applyAccountFlow({ mode: "changes", userId, candidates, selectedIds: [id], ladderChoices: {}, orderChoice: "existing", includeTechnique: false, leadLines: [lead] });
+    await applyAccountFlow({ mode: "changes", userId, candidates, selectedIds: [id], ladderChoices: {}, orderChoice: "follow", includeTechnique: false, leadLines: [lead] });
   };
 
   const handleKeepDeleted = async (id) => {
@@ -2377,6 +2428,20 @@ export default function App() {
     }
     setImportAccount((prev) => (prev ? { ...prev, deletedElsewhere: prev.deletedElsewhere.filter((d) => d.id !== id) } : prev));
     refreshSyncInfo();
+  };
+
+  // "Ask me again about what I said no to" (Pass 122b): forgets every "no" this device
+  // remembers for this account, so the pieces left off, and the pieces said to be different,
+  // are offered again. It only changes the device record, and nothing in the account. The last
+  // light look at the account is kept and sorted against the record again (refreshSyncInfo),
+  // so the line that counts changes from other devices shows them at once; no request is made.
+  const handleAskMeAgain = () => {
+    if (!authEnabled || !authSession || accountFlowBusyRef.current || backupRunningRef.current) return;
+    const userId = authSession.userId;
+    const had = declinedCount(accountRecordFor(readDeviceRecord(), userId)) > 0;
+    if (had) saveDeviceRecord(withDeclinedCleared(readDeviceRecord(), userId));
+    refreshSyncInfo();
+    setAccountNotice({ lines: describeAskMeAgain({ cleared: had }) });
   };
 
   const loadRecentlyDeleted = async (userId, notice = null) => {
@@ -2536,7 +2601,7 @@ export default function App() {
             },
             selectedIds: [item.id],
             ladderChoices: {},
-            orderChoice: "existing",
+            orderChoice: "follow",
             includeTechnique: false,
             settle: { [item.id]: flow.state.answers },
           });
@@ -4021,9 +4086,10 @@ export default function App() {
     );
   };
 
-  const pieceList = Object.values(pieces).sort(
-    (a, b) => (a.sortOrder ?? a.createdAt ?? 0) - (b.sortOrder ?? b.createdAt ?? 0)
-  );
+  // The list the switcher shows: the arrangement of the most recent reorder (the dated note a
+  // drag leaves in the pieces it changes), the old rank order for anything it does not list.
+  // lib/pieceMerge.js decides; two devices holding the same pieces show the same list.
+  const pieceList = sortPiecesForSwitcher(Object.values(pieces));
   const pieceGroups = groupPiecesByWork(pieceList);
   const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
 
@@ -4040,11 +4106,15 @@ export default function App() {
     const reordered = [...pieceGroups];
     const [moved] = reordered.splice(fromIndex, 1);
     reordered.splice(toIndex, 0, moved);
-    reordered
-      .flatMap((g) => g.pieces)
-      .forEach((p, i) => {
-        if (p.sortOrder !== i) updatePiece((current) => ({ ...current, sortOrder: i }), p.id);
-      });
+    // What is written is decided in lib/pieceMerge.js (planSwitcherMove): the new ranks as
+    // always, and, so that the most recent reorder wins on every device, a dated note of the
+    // whole arrangement in the pieces that changed (and in none that did not).
+    planSwitcherMove({
+      ordered: reordered.flatMap((g) => g.pieces),
+      movedIds: moved.pieces.map((p) => p.id),
+      all: pieceList,
+      now: Date.now(),
+    }).forEach((u) => updatePiece((current) => ({ ...current, sortOrder: u.sortOrder, switcherOrder: u.switcherOrder }), u.id));
   };
 
   return (
@@ -4526,6 +4596,8 @@ export default function App() {
                 onKeepDeleted={handleKeepDeleted}
                 onDeleteDeletedHere={(id) => handleDeleteHereToo(id, { fromWindow: false })}
                 onOpenRecentlyDeleted={handleOpenRecentlyDeleted}
+                declinedSummary={syncInfo.declined}
+                onAskMeAgain={handleAskMeAgain}
                 onChangePassword={openChangePassword}
                 signOutAllAsking={signOutAllAsking && !!authSession}
                 onAskSignOutAll={() => setSignOutAllAsking(true)}

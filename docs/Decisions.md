@@ -4463,6 +4463,60 @@ rather than a new field — and the field's visible label changes from
   confirmed contiguity is free; it did not investigate whether more
   elaborate cross-work ordering rules are needed).
 
+**Decision (Pass 125, the owner's request, 2026-10-27): the piece list scrolls
+by itself while a piece is dragged near its top or bottom edge.**
+
+- **The problem, as reported.** While trying Pass 122b on a preview the owner
+  could not drag a piece "farther than the number of spots visible on the
+  screen" and had to drag it in several hops to reach the top. The sidebar's
+  list shows about seven rows (`max-height: 240px`, `overflow-y: auto`) and
+  scrolls inside that window; a row moves by native drag and drop, and not
+  every browser scrolls such a window while a drag is held at its edge (it did
+  not in her Safari). So a piece could only be dropped on a row already in view.
+  It had been this way since the list became reorderable (Pass 32a), and has
+  nothing to do with Pass 122b. Several hops also touch more pieces than one
+  drag does (a drag re-ranks every piece it passes), which gives a longer list
+  more chances to meet another device's change.
+- **What was built.** `lib/dragScroll.js`. While the dragged piece is within 36 px
+  of the list's top or bottom edge the list scrolls that way, 8 px per 16 ms tick
+  at the edge (or past it) and slower the further from it (a step is never 0
+  inside the zone, and 0 on its inner border); a list too short for two full zones
+  gets two half-height zones. It stops at once on a drop and on the end of a drag
+  (including one released with no drop), and by itself if the list hears nothing
+  from the drag for 700 ms, which is what happens when the pointer leaves the list
+  (a browser fires "dragover" every 50 to 350 ms while a drag is held over it). A
+  `dragleave` is deliberately not used: it fires between rows too, and not every
+  browser reports where the pointer was, so acting on it could stop the scrolling
+  every time a row passed under the pointer (something I could not rule out in
+  Safari from here). `App.jsx` only connects it: the list's `onDragOver` reports
+  the pointer, and a drop and `onDragEnd` stop it. The arithmetic and the
+  timer loop are in the library and tested (`test/dragScroll.test.mjs`); the
+  loop's timer and clock can be replaced so a test never waits.
+- **Calls made** (each one constant in the file, easy to change): the zone is 36 px
+  and the top speed about 500 px a second (about 15 rows a second, only right at
+  the edge: half way into the zone it is half that, and the first pixel in is a
+  slow creep), enough to cross a long list in a couple of seconds; a browser that
+  already scrolls such a window natively (Chrome may) adds its own scrolling to
+  this, so there it moves a little faster than in Safari, which was judged better
+  than detecting the browser; it is scrolling done in JavaScript rather than a
+  taller list (a taller list would push the rest of the sidebar down while it is
+  open and would only move the limit).
+- **Not changed:** what a drop does (`moveGroupTo`), the ranks it writes, the
+  list's height, the mobile layout (the same list, absolutely positioned), touch
+  screens (native drag and drop is a mouse and trackpad feature there as before),
+  and keyboard use (there is none for reordering).
+- **Checked.** `npm test`: 1,496 pass (20 new); 19 of 20 deliberate breakages
+  caught by a test (the 20th cannot change any output: the ramp is 0 on that
+  border either way). In a real browser (the real app, 14 pieces, a synthetic drag
+  holding the pointer where a person would): a piece grabbed at the bottom and
+  held near the top edge reaches the top in about half a second and a drop on the
+  first row puts it first, in one drag; the same the other way; scrolling stops
+  at once on a drop and on a cancelled drag; held in the middle of the list, or
+  with no drag under way, nothing scrolls; an ordinary short drag behaves exactly
+  as before; the phone layout works the same. **Not seen:** Safari itself (not available here; the
+  fix does not depend on the browser's own scrolling, which is the point) and a
+  real mouse (the pane's driver has no "hold the button down" step).
+
 **Decision (user-directed): a chunk's first-encounter card states no BPM at
 all — not the piece's target tempo, not a suggested starting tempo — next
 to its reps requirement. Only reps are stated as a requirement there.**

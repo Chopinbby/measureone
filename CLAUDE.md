@@ -1232,3 +1232,7 @@ silently.
   it is listed; a deletion is no longer held up by practice elsewhere; a combine's duplicate
   carries a `mergedInto` note. Deletions only: the rest of its card is Pass 122b.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122)
+- **Pass 125** — the sidebar's piece list scrolls by itself while a piece is dragged near its top or
+  bottom edge, so a piece can be moved to any row in one drag (it shows about seven rows and could
+  only be dragged to rows already in view). `lib/dragScroll.js`; what a drop does is unchanged.
+  [`Decisions.md`](docs/Decisions.md#ux)

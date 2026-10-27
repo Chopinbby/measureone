@@ -50,6 +50,7 @@ import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
+import { createDragAutoScroller } from "./lib/dragScroll";
 import { mergeEditedPiece } from "./lib/pieceEdit";
 import { PIECE_STATUS_LABEL } from "./lib/constants";
 import {
@@ -277,6 +278,12 @@ export default function App() {
   // own index from the row it fired on).
   const [draggedGroupIndex, setDraggedGroupIndex] = useState(null);
   const [dragOverGroupIndex, setDragOverGroupIndex] = useState(null);
+  // Pass 125: the list shows about seven rows and scrolls inside that window, and not every
+  // browser scrolls it by itself while a row is held near its edge. This does, so a piece can
+  // be dragged to any row in one go (lib/dragScroll.js decides; it never changes what a drop does).
+  const listAutoScrollRef = useRef(null);
+  if (listAutoScrollRef.current === null) listAutoScrollRef.current = createDragAutoScroller();
+  useEffect(() => () => listAutoScrollRef.current.stop(), []);
   const [settingsEditing, setSettingsEditing] = useState(false);
   const [editDraft, setEditDraftState] = useState(null);
   const [dayOverride, setDayOverride] = useState(null);
@@ -4245,7 +4252,12 @@ export default function App() {
                 <ChevronDown size={14} className={switcherOpen ? "rotated" : ""} />
               </button>
               {switcherOpen && (
-                <div className="piece-switcher-list">
+                <div
+                  className="piece-switcher-list"
+                  onDragOver={(e) => {
+                    if (draggedGroupIndex !== null) listAutoScrollRef.current.update(e.currentTarget, e.clientY);
+                  }}
+                >
                   {pieceGroups.map((g, gi) => (
                     <div
                       key={g.workId || g.pieces[0].id}
@@ -4261,6 +4273,7 @@ export default function App() {
                       }}
                       onDrop={(e) => {
                         e.preventDefault();
+                        listAutoScrollRef.current.stop();
                         if (draggedGroupIndex !== null) moveGroupTo(draggedGroupIndex, gi);
                         setDraggedGroupIndex(null);
                         setDragOverGroupIndex(null);
@@ -4276,6 +4289,7 @@ export default function App() {
                             e.dataTransfer.setData("text/plain", String(gi));
                           }}
                           onDragEnd={() => {
+                            listAutoScrollRef.current.stop();
                             setDraggedGroupIndex(null);
                             setDragOverGroupIndex(null);
                           }}

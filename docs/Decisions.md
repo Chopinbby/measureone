@@ -8751,8 +8751,10 @@ oversight to silently fix; surface it instead.
      changed piece), but if it is not a real change from another device it is a false alarm
      to remove. **Owner of the next step: the owner, who has the two facts.**
   2. **The piece list could not be dragged past its visible rows** (seen in the same run): a
-     limit since Pass 32a, not part of this pass. **Built separately as Pass 125**, its own pull
-     request (the list scrolls by itself while a piece is held near its top or bottom edge).
+     limit since Pass 32a, not part of this pass. **Built separately as Pass 125**, in its own pull
+     request (the list scrolls by itself while a piece is held near its top or bottom edge;
+     whether that request has been merged is not recorded here, so check `git log` for
+     `dragScroll.js` before relying on it).
   3. **Several short drags touch more pieces than one long one** (a drag re-ranks every piece it
      passes). With the switch off, any piece another device changed meanwhile is held when
      this device's upload is refused (found item 16); Review settles it with "Nothing is left

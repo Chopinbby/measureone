@@ -146,6 +146,19 @@ numbers in particular are explicitly marked "tune after real use".
 | Library "rotation priority" sort weights | slowness 70%, days since last checked 30% (capped at 21 days) | Display order of the Library's default sort only — never the engine's tiers. Taken from the approved mockup; local constants in `TechniqueLibrary.jsx` | Whether this order actually matches what users want to see first |
 | Week-alternation start date | 2024-01-01, a Monday (`TECHNIQUE_WEEK_PARITY_EPOCH`) | Which calendar weeks count as "even" (4 days) vs. "odd" (3 days) for a scale that is both starred and repertoire | Arbitrary anchor, not a tuning value; changing it only swaps which weeks are 3 vs. 4 |
 
+## Interface constants
+
+Plumbing for how the interface feels, not practice science. Picked by feel in Pass 125 and not
+measured; tracked here so they don't go untracked. All in `lib/dragScroll.js` (the piece list's
+drag-scrolling; see [Decisions.md](Decisions.md#ux)).
+
+| Constant | Value | What it controls | What it should eventually be backed by |
+|---|---|---|---|
+| Drag-scroll zone | 36 px (`DRAG_SCROLL_EDGE`) | How close to the piece list's top or bottom edge a dragged piece must be before the list starts to scroll (a list too short for two zones gets two half-height ones) | Real use with a mouse and a trackpad: too small and the edge is hard to hit, too large and the list moves when it should not |
+| Drag-scroll top speed | 8 px per 16 ms tick, about 500 px a second (`DRAG_SCROLL_MAX_STEP`) | How fast the list scrolls with the piece at (or past) the edge; slower further in, and 0 on the zone's inner border | Same. A browser that already scrolls such a list natively (Chrome may) adds its own on top, so there it feels faster |
+| Drag-scroll tick | 16 milliseconds (`DRAG_SCROLL_TICK_MS`) | How often the scrolling step is applied | Not tuned: about one screen frame |
+| Drag-scroll quiet allowance | 700 milliseconds (`DRAG_SCROLL_STALE_MS`) | How long the list may hear nothing from a drag before it stops scrolling by itself (what the pointer leaving the list looks like). A browser sends "dragover" every 50 to 350 ms while a drag is held over the list, so this has to be longer than that | How often the owner's browsers (Safari) really send it. Too short makes the scrolling stutter; too long keeps it going a moment after the pointer left |
+
 ## Account sync timings
 
 Plumbing, not practice science: none of these touches scheduling, confidence or

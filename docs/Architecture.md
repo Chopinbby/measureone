@@ -168,6 +168,11 @@ MeasureOne.jsx/
     │   ├── works.js                      # multi-movement grouping helpers
     │   ├── pieceEdit.js                  # mergeEditedPiece — what Save takes from the edit
     │   │                                  # form's draft vs. keeps from the live piece
+    │   ├── dragScroll.js                 # Pass 125: the sidebar's piece list scrolls by
+    │   │                                  # itself while a piece is dragged near its top or
+    │   │                                  # bottom edge (dragScrollStep, createDragAutoScroller).
+    │   │                                  # Pure arithmetic and a small timer loop; App.jsx
+    │   │                                  # connects it to the list's drag events
     │   ├── coldStart.js                   # Pass 56 — coldStartGateMet,
     │   │                                  # coldStartDueThreshold (live
     │   │                                  # derivation, no persisted
@@ -225,19 +230,14 @@ MeasureOne.jsx/
     │   │                                  # canonicalTechnique and
     │   │                                  # techniquePartFingerprints. Same status.
     │   │                                  # Algorithms.md#merging-the-technique-library-by-part-pass-118
-    │   ├── tabSync.js                     # Pass 119: several tabs of one browser.
-    │   │                                  # reconcileFromStorage (what a tab does about
-    │   │                                  # what another tab wrote, built on the two merge
-    │   │                                  # engines), the write-time guard, the busy
-    │   │                                  # test (isPieceBusy, shared with Pass 120) and
-    │   │                                  # the lease (createTabLease: one tab does the
-    │   │                                  # account work). Pure; App.jsx schedules it.
-    │   │                                  # Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119
-    │   └── dragScroll.js                  # Pass 125: the sidebar's piece list scrolls by itself
-    │                                      # while a piece is dragged near its top or bottom
-    │                                      # edge (dragScrollStep, createDragAutoScroller).
-    │                                      # Pure arithmetic and a small timer loop; App.jsx
-    │                                      # connects it to the list's drag events.
+    │   └── tabSync.js                     # Pass 119: several tabs of one browser.
+    │                                      # reconcileFromStorage (what a tab does about
+    │                                      # what another tab wrote, built on the two merge
+    │                                      # engines), the write-time guard, the busy
+    │                                      # test (isPieceBusy, shared with Pass 120) and
+    │                                      # the lease (createTabLease: one tab does the
+    │                                      # account work). Pure; App.jsx schedules it.
+    │                                      # Accounts-and-Backend.md#several-tabs-of-one-browser-pass-119
     └── components/
         ├── NumberInput.jsx, MemoryAnchorField.jsx, Manuscript.jsx,
         │   ScheduleBanner.jsx, Sparkline.jsx,

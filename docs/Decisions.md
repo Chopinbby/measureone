@@ -4505,6 +4505,11 @@ by itself while a piece is dragged near its top or bottom edge.**
   list's height, the mobile layout (the same list, absolutely positioned), touch
   screens (native drag and drop is a mouse and trackpad feature there as before),
   and keyboard use (there is none for reordering).
+- **Open (also in the open questions at the end of this file):** it has not been seen in
+  Safari or with a real mouse (the owner's check on the preview is the first real try); the
+  list keeps scrolling for up to 0.7 seconds after the pointer leaves it while still in
+  the edge zone (the cost of not acting on `dragleave`); and in a browser that already
+  scrolls such a list natively the two add up.
 - **Checked.** `npm test`: 1,496 pass (20 new); 19 of 20 deliberate breakages
   caught by a test (the 20th cannot change any output: the ramp is 0 on that
   border either way). In a real browser (the real app, 14 pieces, a synthetic drag
@@ -9671,3 +9676,20 @@ oversight to silently fix; surface it instead.
   piece the halves stayed offered. Not changed — sharing `ReassessPanel`'s
   notion of "today's items" was deliberate — but worth revisiting if it
   confuses anyone.
+
+- **The piece list's drag-scrolling (Pass 125): what is still open (logged 2026-10-27).**
+  Built and checked in a real browser with a synthetic drag; see "Decision (Pass 125 ...)"
+  under the UX heading above. Still open:
+  1. **Not seen in Safari or with a real mouse.** The pane's driver has no "hold the button
+     down" step and Safari is not available where it was built. The fix does not rely on the
+     browser's own scrolling, which is the point, but the owner's first try on the preview is
+     the first time a real drag in her browser meets it. If it stutters, the quiet allowance
+     (`DRAG_SCROLL_STALE_MS`) and the zone are the numbers to look at
+     ([Research.md](Research.md#interface-constants)).
+  2. **It keeps scrolling for up to 0.7 seconds after the pointer leaves the list** while it was in
+     the edge zone, because a `dragleave` (which fires between rows too, and which not every browser
+     reports the position of) is deliberately not used. A drop or the end of the drag stops it at once.
+  3. **Chrome may scroll such a list on its own as well**, so there the speed adds up and is a little
+     faster than in Safari. Not detected, not compensated.
+  4. **No keyboard or touch way to reorder the list** (there never was one); a person who cannot drag
+     cannot reorder.

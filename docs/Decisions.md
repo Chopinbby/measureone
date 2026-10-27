@@ -8726,7 +8726,8 @@ oversight to silently fix; surface it instead.
      reachable on a real account now that the engines are called.
 - **What the person said no to, and the reorder note (Pass 122b): what is still open
   (logged 2026-10-26, from the pass's reviews and the owner's first run on the preview).**
-  The pass is built (its pull request is open); the full list of found items is under
+  The pass was merged and went live on 2026-10-27 (pull request 75, merge commit `0b53445`);
+  the full list of found items is under
   "Found" in [Accounts-and-Backend.md](Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)
   (items 1 to 22). The ones that need a decision or more information:
   1. **An unexplained "N pieces changed on another device" banner (seen 2026-10-26, NOT

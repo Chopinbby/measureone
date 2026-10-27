@@ -25,8 +25,8 @@
 > depends on.
 
 **Status: designed (Pass 105, 2026-09-27); Phase 1 built, and live since
-Pass 114 (2026-10-10); Phase 2 well under way (Passes 115 to 122 live between
-2026-10-14 and 2026-10-25; Pass 122b built).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
+Pass 114 (2026-10-10); Phase 2 well under way (Passes 115 to 122b live between
+2026-10-14 and 2026-10-27).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
 [Pass plan](#pass-plan). Since Pass 108 a **test** Supabase project exists with
 the tables and security rules, connected to preview sites and local
 development (see [Setup](#setup-test-project)), and since Pass 114 a separate
@@ -66,7 +66,7 @@ a piece with a conflicting part is held, and Review (Pass 121) asks about each c
 part, one plain question at a time. **Since Pass 122 a piece deleted on one device is
 deleted on every device, practice included, with a 30-day way back** (see [A piece deleted on
 one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122)).
-**Pass 122b (built) makes the app remember what a person said no to, lets the most recent
+**Pass 122b (live since 2026-10-27) makes the app remember what a person said no to, lets the most recent
 reorder win as a whole list, and gives a piece held by a refused upload Review's plain
 questions** (see [What the person said no to is remembered, and order follows
 them](#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)).
@@ -324,7 +324,7 @@ changes can arrive by themselves, behind a switch that is off by default):
 - **122** A piece deleted on one device is deleted everywhere, with a way back. Built; see [A piece
   deleted on one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
   It was split in two when its card was edited (2026-10-24): this is the deletions half.
-  **122b** Built; see [What the person said no to is remembered, and order follows
+  **122b** Built, live since 2026-10-27; see [What the person said no to is remembered, and order follows
   them](#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b): a remembered
   "no" for a declined combine or a new piece left unticked (and one button to take it back), the
   blank-composer "maybe the same piece" row, piece order that follows the person with no
@@ -2536,6 +2536,13 @@ whose pieces carry a later-dated note leaves the list alone, and "Use the import
 it and the other device follows; dragging a multi-movement work moves it as a block; signed out,
 a drag survives a reload with no account surface. **Not seen:** the real preview with the real
 test project.
+
+**After the build (2026-10-27).** The owner merged the pass (pull request 75, merge commit
+`0b53445`) and it is live on both addresses (the deployed bundle contains the new "Ask me again
+about what I said no to" button). Of the card's preview checks she had reported only the first
+(2026-10-26), and that is where the unexplained banner under "Found" came from; results for the
+others were not reported in the conversation that built the pass, so treat it as unseen on a real
+account beyond that first check unless the owner says otherwise.
 
 **Found, for decisions** (none acted on beyond what is said):
 

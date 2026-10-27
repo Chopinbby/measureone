@@ -358,7 +358,7 @@ daily backup of the account database runs into a private repository (see
 
 **Accounts and backend, Phase 2 so far (Passes 115–122b; 115 live since
 2026-10-14, 116 to 118 since 2026-10-15, 119 since 2026-10-18, 120 since 2026-10-19,
-121 since 2026-10-23, 122 since 2026-10-25; 122b built)** — changes arriving from
+121 since 2026-10-23, 122 since 2026-10-25, 122b since 2026-10-27)** — changes arriving from
 other devices, and the app staying safe while they do. Built: "same" and "changed"
 made trustworthy (an upload notes what it is about to send, so a lost confirmation no
 longer reads as a conflict; sessions are compared by content; the technique library's
@@ -371,7 +371,7 @@ themselves**, behind a per-device switch that is **off by default**, with the ch
 running every minute (120); a piece held because both devices changed the same part
 asking **one plain question per part** in Review (121); and a piece deleted on one
 device **deleted everywhere**, practice included, with a 30-day "Recently deleted" and a
-"Keep it" (122, the owner's rule of 2026-10-23). **Pass 122b is built:** what a person
+"Keep it" (122, the owner's rule of 2026-10-23). **Pass 122b (live):** what a person
 leaves unticked in Get changes or Restore is remembered, with one "Ask me again" button
 to take it back; a name match with no composer is only "maybe the same piece"; the order
 of the piece list follows the person between devices, **the most recent reorder winning
@@ -397,7 +397,7 @@ Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 [Decisions.md](Decisions.md#ux) for the pinned-down panel placement).
 Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale. **The one thread already in motion is the
-accounts work (Phase 2):** Passes 120 to 122b are built, and the passes the docs name
+accounts work (Phase 2):** Passes 120 to 122b are built and live, and the passes the docs name
 next are 123 (what happens offline) and 124 (turning the automatic switch on by default,
 only after the owner has lived with it on her own two devices). The owner's 2026-10-15
 "the most recent change wins, item by item" decision is only partly built; see backlog

@@ -1096,7 +1096,8 @@ The app must not ask the same question twice. Rules:
   `daysToLearn`, seed 311): the engine re-works it so a reload gives the same piece; the check was
   relaxed for that one part and says why. Seen in a real browser against a local stand-in for the
   account service (two devices dragging apart, switch off and on, a file import, a work dragged as a
-  block, signed out); **not seen on the real preview** (the card's "Yours" checks).
+  block, signed out); **not seen on the real preview** (the card's "Yours" checks: the owner
+  reported only the first, on 2026-10-26, and merged the pass on 2026-10-27).
 - **Left open** (details and owners in
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)):
   "Select none" leaves everything off and remembers it; the answers belong to this device and a
@@ -1181,7 +1182,7 @@ one browser, and 120, automatic updates behind a switch that is off by default, 
 121 (a held piece asks one plain question per conflicting part in Review) is built, 122
 (a piece deleted on one device is deleted everywhere, with a 30-day way back) is built, and so is
 122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
-Review's questions); the passes the docs name next are 123 (what happens offline) and 124 (turning
+Review's questions; live since 2026-10-27); the passes the docs name next are 123 (what happens offline) and 124 (turning
 the switch on by default). The owner's 2026-10-15 "most recent
 wins" decision is only partly built (a deletion and the piece list's order follow it; a
 conflicting part of a piece is held and asked about). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two

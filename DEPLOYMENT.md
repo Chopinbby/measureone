@@ -236,15 +236,16 @@ to `main` makes an ordinary Production deployment, so earlier ones stay listed i
 Vercel (for as long as Vercel keeps them). The app code changed three times between
 go-live and 2026-10-15: the deployment of `92e6282` (PR 62) is the last one before
 Pass 115 (app file `index-BquOI88d.js`, accounts on); `b877140` (PR 63) is Pass 115
-alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed six more times
+alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed seven more times
 since, one merge each:** `9864612` (PR 71) is Pass 119 (tabs of one browser),
 `847fada` (PR 72) Pass 120 (changes from other devices arriving by themselves,
 behind a switch that is off by default), `951a640` (PR 73) Pass 121 (Review asks one
 question per conflicting part), `69dbebe` (PR 74) Pass 122 (a piece deleted on one
 device is deleted everywhere), `0b53445` (PR 75) Pass 122b (what the person said
-no to is remembered, the most recent reorder wins; app file `index-YBQquKJp.js`) and
-`3fccc8c` (PR 76) Pass 125 (the piece list scrolls while a piece is dragged), **the
-current app code, live since 2026-10-27 (app file `index-OJehj1yX.js`)**. The file
+no to is remembered, the most recent reorder wins; app file `index-YBQquKJp.js`),
+`3fccc8c` (PR 76) Pass 125 (the piece list scrolls while a piece is dragged; app file
+`index-OJehj1yX.js`) and `038f256` (PR 79) Pass 123 (the app opens with no connection),
+**the current app code, live since 2026-10-28 (app file `index-78o7whRf.js`)**. The file
 names of the four before 122b were not recorded when they went live; read one off a
 deployment's page in Vercel before relying on it. The merges `8c8d637`, `209d77a` and `d3a0fa0` (and
 every later documentation-only one) change no app code. **A rollback across Pass 115
@@ -258,8 +259,11 @@ held piece's list of conflicting parts; across Pass 122b, the pieces and pairs t
 person said no to. The older app drops what it does not know the next time it saves
 the record, so the switch reads off, or the "no" answers are forgotten and those
 pieces are offered again. Nothing in the account is erased. A rollback across Pass
-125 only takes the scrolling back; it changes no stored data. These notes are
-reasoned from the code, not rehearsed.
+125 only takes the scrolling back; it changes no stored data. **A rollback across Pass
+123 serves no worker file, but a device that already has the worker keeps it** (what a
+browser does when its worker file is missing was not tried), so use the way back below,
+not a rollback, to take the worker off. These notes are reasoned from the code, not
+rehearsed.
 
 ### The offline worker, and turning it off (Pass 123)
 

@@ -1148,3 +1148,26 @@ through the whole-piece choice.
 
 **Not covered:** a way to say "not now" instead of "no" (a row left unticked is a no, and Ask me
 again undoes all of them at once); answers that follow you to your other devices.
+
+## 18. Opening the app with no connection (optional, Pass 123)
+
+**What you do:** nothing to turn on. Open the app once with a connection, in a normal window (some
+private windows don't allow what comes next). From then on, with no connection (airplane mode, a practice
+room with no wifi), the same address opens the app with your pieces, and practice works as it always did.
+It works signed in or not.
+
+**What you see while signed in and offline.** Changes you make are saved on this device. After an attempt
+to back up fails, Settings, Account says "Working offline. Everything is saved on this device and will
+back up when you're connected." in place of "The account service isn't answering" and of any "changed on
+another device" message. When the connection returns the app tries again at once and backs up by itself,
+and the line goes back to "Backed up ..." (if the first try is too early for the connection, the next is
+30 seconds later).
+
+**New versions.** With a connection you always get the newest version; the saved copy is used only when
+the network fails.
+
+**Not covered:** opened offline after the sign-in's hour has run out, Account may look signed out
+("Checking your account...", then "Sign in") until the connection returns, with nothing lost; offline,
+text uses fallback fonts; a private window may not open offline, and Safari clears a site's saved data
+after about a week without a visit; installing to the home screen is not offered. Design and checks:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#opening-the-app-with-no-connection-pass-123).

@@ -8266,6 +8266,23 @@ what it rules out.
   owner's first preview run, not reproduced** (the first item of "What the person said no to,
   and the reorder note (Pass 122b): what is still open" in the open questions below).
 
+- **Pass 123 — the app opens with no connection (2026-10-28).** `public/sw.js` (new),
+  `src/main.jsx`, `lib/accountSync.js` (`describeSyncStatus`'s `offline`), `App.jsx`,
+  `test/browser-compat.test.mjs`, tests and the docs. The design, the checks and the found items are
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#opening-the-app-with-no-connection-pass-123).
+  **The owner's answers (2026-10-28):** option A, a small hand-written service worker (the others were a
+  plugin, `vite-plugin-pwa`, and nothing), and the wording "Working offline. Everything is saved on this
+  device and will back up when you're connected." **Why A:** no new dependency, a few dozen lines, the
+  easiest to reason about and to switch off. Its risk, a browser stuck on an old version, is met by asking
+  the network first for the page and by a way back (a self-removing worker swapped in for the file) that
+  was tried before the pass was handed over. **Calls made while building it, for her to overrule:** a
+  warm-up when the worker is installed (otherwise the app opens offline only from the visit after next),
+  one failed attempt is enough for the offline wording, `skipWaiting` and `clients.claim`, a cap of 60
+  saved files, `update()` on every visit, and the Safari-compatibility test extended to `public/`.
+  **Deferred on the card:** installing to the home screen, background sync and push, saving the account
+  service's answers. **Seen by the owner:** the laptop run and the phone's Safari, on the preview before
+  the merge (pull request 79). What is still open is in the open questions below.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -9811,3 +9828,22 @@ oversight to silently fix; surface it instead.
      faster than in Safari. Not detected, not compensated.
   4. **No keyboard or touch way to reorder the list** (there never was one); a person who cannot drag
      cannot reorder.
+
+- **Opening the app with no connection (Pass 123): what is still open (logged 2026-10-28).** Shipped as
+  pull request 79; see "Pass 123" under Accounts and backend above. Still open:
+  1. **Opened offline after the sign-in's hour has run out, the Account section looks signed out** until
+     the connection returns ("Checking your account..." for up to about a minute, then "Sign in"; no
+     "Working offline" line). Nothing is lost: the stored session, the device record and the pieces are
+     untouched, and it flipped back to signed in within seconds of reconnecting in the stand-in test.
+     **The owner's call:** leave it, or show the stored account as signed in with the offline line while
+     offline (display only, leaving `authSession`, which gates all syncing, alone).
+  2. **A connected but dead network** (wifi with no internet) waits for the browser's own timeout before
+     the saved copy is used. A short timeout fixes the wait but would sometimes show a one-visit-old page
+     on a slow connection. Not decided.
+  3. **A device signed in before Pass 123 may lack the saved account library file until its second
+     visit**, and nothing asks for the library again when the connection returns (a reload does).
+     Reasoned from `attachAuthListener` and `loadBackend`, not tried.
+  4. **Fonts come from Google over the network**, so offline the app uses fallback fonts.
+  5. **No automated test of the worker's routing is committed** (not on the card's file list); a small
+     test with a fake `self`, `caches` and `fetch` was offered.
+  6. **The "new version shows" check was done locally only**, not on a preview address.

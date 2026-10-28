@@ -25,8 +25,8 @@
 > depends on.
 
 **Status: designed (Pass 105, 2026-09-27); Phase 1 built, and live since
-Pass 114 (2026-10-10); Phase 2 well under way (Passes 115 to 122b live between
-2026-10-14 and 2026-10-27).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
+Pass 114 (2026-10-10); Phase 2 well under way (Passes 115 to 123 live between
+2026-10-14 and 2026-10-28).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
 [Pass plan](#pass-plan). Since Pass 108 a **test** Supabase project exists with
 the tables and security rules, connected to preview sites and local
 development (see [Setup](#setup-test-project)), and since Pass 114 a separate
@@ -329,7 +329,7 @@ changes can arrive by themselves, behind a switch that is off by default):
   "no" for a declined combine or a new piece left unticked (and one button to take it back), the
   blank-composer "maybe the same piece" row, piece order that follows the person with no
   question, and plain questions for a piece held by a refused upload.
-- **123** What happens offline: opening the app with no connection. Built; see [Opening the app with
+- **123** What happens offline: opening the app with no connection. Built, live since 2026-10-28; see [Opening the app with
   no connection](#opening-the-app-with-no-connection-pass-123): a small service worker
   (`public/sw.js`), the status wording "Working offline", and a documented way to turn the worker
   off everywhere.
@@ -2738,9 +2738,7 @@ hashed files immutable) and a local stand-in for the account service:
    from DEPLOYMENT.md, and the next visit with a connection left no registration and no saved copy
    within about two seconds. (The throwaway branch was deleted afterwards.)
 
-**Not seen by anyone yet:** the browser's own airplane mode (the pane has no such switch, so "no
-connection" here was a stopped server, and the browser's offline flag was set through its own events for
-the wording), Safari, and a phone: those are the owner's checks on the pull request's preview.
+**Seen by the owner (2026-10-28, on the preview of pull request 79, before it merged):** on the laptop, signed in with a first backup made, Wi-Fi off, the app reopened with her pieces, and the Account line read "Working offline. Everything is saved on this device and will back up when you're connected." (it replaced the red held message for the technique library, as designed); after Wi-Fi came back the line read "Backed up 1 minute ago", so the offline change went up by itself. On the phone, Safari opened the app offline after one visit. Pull request 79 was merged that morning (merge commit `038f256`, 10:51 her time) and the three live addresses serve `index-78o7whRf.js` and `/sw.js`. **Not seen by anyone:** the "new version shows" check on a preview (done locally only), and the signed-out look after a long offline spell (found item 1) in her browser. Her laptop run also showed what the first backup of a fresh browser does to a test account that already has a technique library: the library is held ("changed on another device") until Review.
 
 **Calls made while building it, for the owner to overrule**
 

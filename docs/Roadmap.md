@@ -356,9 +356,9 @@ and [Decisions.md](Decisions.md#accounts-and-backend). Since 2026-10-12 a free
 daily backup of the account database runs into a private repository (see
 [Backups of the account copy](Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12)).
 
-**Accounts and backend, Phase 2 so far (Passes 115–122b; 115 live since
+**Accounts and backend, Phase 2 so far (Passes 115–123; 115 live since
 2026-10-14, 116 to 118 since 2026-10-15, 119 since 2026-10-18, 120 since 2026-10-19,
-121 since 2026-10-23, 122 since 2026-10-25, 122b since 2026-10-27)** — changes arriving from
+121 since 2026-10-23, 122 since 2026-10-25, 122b since 2026-10-27, 123 since 2026-10-28)** — changes arriving from
 other devices, and the app staying safe while they do. Built: "same" and "changed"
 made trustworthy (an upload notes what it is about to send, so a lost confirmation no
 longer reads as a conflict; sessions are compared by content; the technique library's
@@ -376,9 +376,12 @@ leaves unticked in Get changes or Restore is remembered, with one "Ask me again"
 to take it back; a name match with no composer is only "maybe the same piece"; the order
 of the piece list follows the person between devices, **the most recent reorder winning
 as a whole list**; and a piece held by a refused upload gets Review's plain questions.
+**Pass 123 (live):** the app opens with no connection after one visit with one, through a small
+hand-written service worker, and the Account line says "Working offline" when the browser
+reports no connection; swapping one file turns the worker off everywhere (DEPLOYMENT.md).
 Alongside, a scheduler fix: a chunk done earlier than the day a reschedule places it on is
-no longer owed there (a state only merged copies can reach). **Not built yet:** what
-happens offline (123) and turning the switch on by default after a real-use trial (124);
+no longer owed there (a state only merged copies can reach). **Not built yet:**
+turning the switch on by default after a real-use trial (124);
 and most of the owner's 2026-10-15 decision, "the most recent change wins, item by item"
 (a conflicting part of a piece is still held and asked about; only a deletion and the
 piece's place in the list follow it). "Always keep both" as a remembered answer, and size
@@ -397,8 +400,8 @@ Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 [Decisions.md](Decisions.md#ux) for the pinned-down panel placement).
 Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale. **The one thread already in motion is the
-accounts work (Phase 2):** Passes 120 to 122b are built and live, and the passes the docs name
-next are 123 (what happens offline) and 124 (turning the automatic switch on by default,
+accounts work (Phase 2):** Passes 120 to 123 are built and live, and the pass the docs name
+next is 124 (turning the automatic switch on by default,
 only after the owner has lived with it on her own two devices). The owner's 2026-10-15
 "the most recent change wins, item by item" decision is only partly built; see backlog
 item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagree".
@@ -493,10 +496,9 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    having enough session history to tune against.
 5. **Accounts and backend, Phases 2 and 3** — Phase 1 (an optional account
    that keeps a checked copy of every piece and the technique library, restore,
-   account settings, live since Pass 114) is Done above, and **Phase 2 is mostly
-   built** (Passes 115 to 122b, Done above). Still to build in **Phase 2**: what happens
-   offline (123), and turning other devices' changes on by default after a real-use
-   trial (124). Decided but only partly built: the most recent change winning item by
+   account settings, live since Pass 114) is Done above, and **Phase 2 is almost
+   built** (Passes 115 to 123, Done above). Still to build in **Phase 2**: turning other
+   devices' changes on by default after a real-use trial (124). Decided but only partly built: the most recent change winning item by
    item (a deletion and the piece's place in the list follow it; a conflicting part of
    a piece is held and asked about). No owner yet: "always keep both" as a remembered
    answer, and size and schedule travelling together. **Phase 3**, open sign-up, a

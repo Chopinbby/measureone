@@ -521,7 +521,7 @@ plain questions)
 ([`docs/Decisions.md`](docs/Decisions.md#open-questions), "When two copies disagree").
 Design: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md); what a person
 sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109) (flows
-10 to 17).
+10 to 18).
 
 ### The account code (Passes 109 to 116)
 
@@ -1215,7 +1215,7 @@ one browser, and 120, automatic updates behind a switch that is off by default, 
 (a piece deleted on one device is deleted everywhere, with a 30-day way back) is built, and so is
 122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
 Review's questions; live since 2026-10-27); 123 (the app opens with no connection, a small service
-worker) is built, and the pass the docs name next is 124 (turning the switch on by default, only after
+worker; live since 2026-10-28) is built, and the pass the docs name next is 124 (turning the switch on by default, only after
 the owner has lived with it). The owner's 2026-10-15 "most recent
 wins" decision is only partly built (a deletion and the piece list's order follow it; a
 conflicting part of a piece is held and asked about). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two

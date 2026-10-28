@@ -1234,6 +1234,18 @@ as the state you last saw: "its pull request is open" goes stale the moment she 
 button. And land the documentation before you tell her a pull request is ready, or tell her more
 is coming.
 
+## An offline check can pass for the wrong reason, and a preview exists per commit
+
+In Pass 123 the first offline test served the app with a plain file server that sends no cache
+headers. With the server stopped the page still opened, from the browser's own cache, with no service
+worker involved at all. What showed it: asking the page whether the worker served it
+(`performance.getEntriesByType("navigation")[0].workerStart > 0`), and then serving with the live
+host's headers (page `max-age=0, must-revalidate`) so a stopped server really means no page. State
+what served the thing you are checking, not only that it appeared. Related Vercel facts: a second
+branch at the same commit gets no preview of its own (its address answers DEPLOYMENT_NOT_FOUND), and
+the commit status API is keyed by commit, so it reads "success" for a deployment that does not exist
+for that branch; push a distinct commit and poll the address itself.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

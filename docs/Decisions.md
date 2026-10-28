@@ -4505,11 +4505,11 @@ by itself while a piece is dragged near its top or bottom edge.**
   list's height, the mobile layout (the same list, absolutely positioned), touch
   screens (native drag and drop is a mouse and trackpad feature there as before),
   and keyboard use (there is none for reordering).
-- **Open (also in the open questions at the end of this file):** it has not been seen in
-  Safari or with a real mouse (the owner's check on the preview is the first real try); the
+- **Open (also in the open questions at the end of this file):** the
   list keeps scrolling for up to 0.7 seconds after the pointer leaves it while still in
   the edge zone (the cost of not acting on `dragleave`); and in a browser that already
-  scrolls such a list natively the two add up.
+  scrolls such a list natively the two add up. (It was first not seen in Safari or with a
+  real mouse; the owner's check on the preview, 2026-10-27, worked.)
 - **Checked.** `npm test`: 1,496 pass when built on its own base, 1,574 after Pass 122b
   was merged in on 2026-10-27 (20 new either way); 19 of 20 deliberate breakages
   caught by a test (the 20th cannot change any output: the ramp is 0 on that
@@ -4521,9 +4521,10 @@ by itself while a piece is dragged near its top or bottom edge.**
   with no drag under way, nothing scrolls; an ordinary short drag behaves exactly
   as before; the phone layout works the same. Tried again on the result of merging `main` in
   (12 pieces, both directions): the same, and Pass 122b's reorder note is still written by the
-  drop. **Not seen:** Safari itself (not available here; the
-  fix does not depend on the browser's own scrolling, which is the point) and a
-  real mouse (the pane's driver has no "hold the button down" step).
+  drop. The pane's driver has no "hold the button down" step and Safari is not
+  available where it was built, so all of the above used a synthetic drag. **Seen by the
+  owner** in Safari, with a real drag, on the preview of pull request 76 on 2026-10-27:
+  the check worked. Pull request 76 was merged the same day.
 
 **Decision (user-directed): a chunk's first-encounter card states no BPM at
 all — not the piece's target tempo, not a suggested starting tempo — next
@@ -8815,8 +8816,7 @@ oversight to silently fix; surface it instead.
   2. **The piece list could not be dragged past its visible rows** (seen in the same run): a
      limit since Pass 32a, not part of this pass. **Built separately as Pass 125**, in its own pull
      request (the list scrolls by itself while a piece is held near its top or bottom edge;
-     whether that request has been merged is not recorded here, so check `git log` for
-     `dragScroll.js` before relying on it).
+     pull request 76, merged 2026-10-27, and the owner saw it work in Safari).
   3. **Several short drags touch more pieces than one long one** (a drag re-ranks every piece it
      passes). With the switch off, any piece another device changed meanwhile is held when
      this device's upload is refused (found item 16); Review settles it with "Nothing is left
@@ -9796,14 +9796,14 @@ oversight to silently fix; surface it instead.
   confuses anyone.
 
 - **The piece list's drag-scrolling (Pass 125): what is still open (logged 2026-10-27).**
-  Built and checked in a real browser with a synthetic drag; see "Decision (Pass 125 ...)"
-  under the UX heading above. Still open:
-  1. **Not seen in Safari or with a real mouse.** The pane's driver has no "hold the button
-     down" step and Safari is not available where it was built. The fix does not rely on the
-     browser's own scrolling, which is the point, but the owner's first try on the preview is
-     the first time a real drag in her browser meets it. If it stutters, the quiet allowance
-     (`DRAG_SCROLL_STALE_MS`) and the zone are the numbers to look at
-     ([Research.md](Research.md#interface-constants)).
+  Built and checked in a real browser with a synthetic drag, then seen working in Safari by
+  the owner (pull request 76, merged 2026-10-27); see "Decision (Pass 125 ...)"
+  under the UX heading above. Still open (items 2 to 4; item 1 is resolved):
+  1. **Resolved 2026-10-27: seen working in Safari.** The pane's driver has no "hold the
+     button down" step and Safari is not available where it was built, so the owner's try on
+     the preview was the first time a real drag in her browser met it, and it worked. Only if
+     it ever stutters: the quiet allowance (`DRAG_SCROLL_STALE_MS`) and the zone are the
+     numbers to look at ([Research.md](Research.md#interface-constants)).
   2. **It keeps scrolling for up to 0.7 seconds after the pointer leaves the list** while it was in
      the edge zone, because a `dragleave` (which fires between rows too, and which not every browser
      reports the position of) is deliberately not used. A drop or the end of the drag stops it at once.

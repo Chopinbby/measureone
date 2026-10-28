@@ -334,7 +334,14 @@ changes can arrive by themselves, behind a switch that is off by default):
   (`public/sw.js`), the status wording "Working offline", and a documented way to turn the worker
   off everywhere.
 - **124** Turning the automatic switch on by default, after a real-use trial on the owner's own
-  two devices. Scoped, not built, and only on the owner's word.
+  two devices. Scoped, not built, and only on the owner's word. **On 2026-10-28 the owner chose to wait with
+  the flip until Phase 3.** When it is built, the device record must remember an explicit OFF as well as an
+  ON (today only an ON is stored: `autoUpdateOn`, `withAutoUpdate`, `changeAccount`), so it is more than one
+  line; see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 124 re-scoped".
+- **126** The most recent change wins, item by item: the rest of the owner's 2026-10-15 decision (a part both
+  devices changed differently is settled by recency instead of held and asked about; practice is combined,
+  never chosen between). Scoped 2026-10-28, not built; its first step is the owner's choice of how "most
+  recent" is measured. Placed ahead of 124's flip.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring, and an in-app "delete my account", which must exist before

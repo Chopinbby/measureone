@@ -815,7 +815,9 @@ that saved last silently replaced the other's work and a deleted piece came back
 ### Changes from other devices arrive by themselves (Pass 120)
 
 A switch in the Account panel, **"Update automatically from other devices", OFF by
-default** (Pass 124 may change that). **With it off the app behaves exactly as after Pass
+default** (Pass 124 may change that; on 2026-10-28 the owner chose to wait with the flip until
+Phase 3, and a flip must also store an explicit OFF: today only an ON is stored, see
+[`docs/Decisions.md`](docs/Decisions.md#accounts-and-backend), "Pass 124 re-scoped"). **With it off the app behaves exactly as after Pass
 116** (it notices; Get changes is the way in). Rules:
 
 - **The switch is in the device record, per account** (`accounts[userId].autoUpdate`, kept
@@ -1013,6 +1015,11 @@ what makes this safe. Rules:
 - **The words come from tested functions** (`deleteWindowCopy`, `describeDeletedBanner`,
   `describeBringBack`, `describeAutoRemoved`); the delete window says "Delete everywhere" only when
   signed in with a checked first backup (`syncsToAccount`), otherwise it is the old permanent wording.
+  Both carry one more line (`KEEP_HISTORY_HINT`, 2026-10-28): archive the piece instead (or pause it,
+  since Archive is locked until its plan is finished) to keep its practice history. **History is not
+  stored apart from the pieces** (`computePracticeHistory`, the all-pieces heatmap and week totals read
+  `piece.progress`), so a deleted piece vanishes from every chart; a kept-after-delete record was
+  considered and is not built, no owner.
 - **Recently deleted** asks the account only for rows deleted in the last 30 days
   (`fetchDeletedPieces`, `gte`), changes nothing by being opened, and restores only through the
   step above.
@@ -1215,8 +1222,11 @@ one browser, and 120, automatic updates behind a switch that is off by default, 
 (a piece deleted on one device is deleted everywhere, with a 30-day way back) is built, and so is
 122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
 Review's questions; live since 2026-10-27); 123 (the app opens with no connection, a small service
-worker; live since 2026-10-28) is built, and the pass the docs name next is 124 (turning the switch on by default, only after
-the owner has lived with it). The owner's 2026-10-15 "most recent
+worker; live since 2026-10-28) is built, and the passes the docs name next are 126 (**scoped
+2026-10-28, not built:** the most recent change wins, item by item, whose first step is the owner's
+choice of how "most recent" is measured; placed ahead of 124's flip) and 124 (turning the switch on by
+default; **on 2026-10-28 the owner chose to wait with the flip until Phase 3**, and it is only ever built
+on her word). The owner's 2026-10-15 "most recent
 wins" decision is only partly built (a deletion and the piece list's order follow it; a
 conflicting part of a piece is held and asked about). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy

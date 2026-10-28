@@ -16,6 +16,7 @@ import {
   describeDeletedAgo,
   recentlyDeletedList,
   deleteWindowCopy,
+  KEEP_HISTORY_HINT,
 } from "../src/lib/recentlyDeleted.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -245,11 +246,22 @@ describe("the delete window's words (Pass 122)", () => {
     assert.equal(c.confirmLabel, "Delete everywhere");
   });
 
+  test("both cases point to archiving as the way to keep the practice history (2026-10-28)", () => {
+    [true, false].forEach((syncs) => {
+      const c = deleteWindowCopy({ name: "Etude", syncs });
+      assert.equal(c.hint, KEEP_HISTORY_HINT);
+      assert.match(c.hint, /keep its practice history/);
+      assert.match(c.hint, /Archive the piece instead/);
+      // Archive is locked until the plan is finished, so the way out for a piece mid-plan is named too.
+      assert.match(c.hint, /pause it/);
+    });
+  });
+
   test("a blank name reads as 'this piece', and nothing here has an em dash", () => {
     assert.match(deleteWindowCopy({ name: "", syncs: false }).body, /removes "this piece"/);
     [true, false].forEach((syncs) => {
       const c = deleteWindowCopy({ name: "X", syncs });
-      assert.equal(/—/.test(c.body + c.confirmLabel), false);
+      assert.equal(/—/.test(c.body + c.hint + c.confirmLabel), false);
     });
     [describeDeletedAgo(ago(DAY), NOW), describeDeletedAgo(ago(5 * DAY), NOW)].forEach((t) => assert.equal(/—/.test(t), false));
   });

@@ -32,6 +32,17 @@ test("no randomUUID anywhere in src/ (unsupported before Safari 15.4)", () => {
   assert.deepEqual(offenders, []);
 });
 
+// Files in public/ (the service worker, Pass 123) are copied into the build exactly as
+// written: Vite never rewrites them, so nothing makes their syntax safe for Safari 14 and
+// the two rules above have to hold for them by hand.
+test("no regex lookbehind and no randomUUID in public/ (these files are shipped untouched)", () => {
+  const offenders = (existsSync("public") ? sourceFiles("public") : []).filter((f) => {
+    const text = readFileSync(f, "utf8");
+    return /\(\?<[=!]/.test(text) || text.includes("randomUUID");
+  });
+  assert.deepEqual(offenders, []);
+});
+
 // The same lookbehind rule, applied to what actually ships. The checks above
 // read src/ only, but a library's code (the Supabase client, from Pass 109 on)
 // goes into the build without ever passing through src/. This reads

@@ -167,15 +167,23 @@ export function recentlyDeletedList(rows, { now = Date.now() } = {}) {
   return items;
 }
 
+// The delete window's one-line pointer to the way of keeping a piece's practice history
+// (2026-10-28). History is worked out from the pieces that exist, so deleting a piece
+// removes it from every chart; an archived piece keeps it. Archive is locked until the
+// piece's plan is finished (Settings), so Pause is named for a piece that is still mid-plan.
+export const KEEP_HISTORY_HINT =
+  "Want to keep its practice history? Archive the piece instead, or pause it if its plan isn't finished yet.";
+
 // The delete window's words. Signed in with a checked first backup the deletion goes to
 // the account and every other device, and can be undone for a while; otherwise it is
-// what it always was (this browser only, permanent).
+// what it always was (this browser only, permanent). `hint` is the same in both cases.
 export function deleteWindowCopy({ name, syncs }) {
   const shown = typeof name === "string" && name !== "" ? name : "this piece";
   const lead = `Are you sure you want to delete this piece and all its progress? This removes "${shown}" (every chunk, session log, and revival history) from`;
-  if (!syncs) return { body: `${lead} this browser, permanently. It can't be undone.`, confirmLabel: "Delete permanently" };
+  if (!syncs) return { body: `${lead} this browser, permanently. It can't be undone.`, hint: KEEP_HISTORY_HINT, confirmLabel: "Delete permanently" };
   return {
     body: `${lead} this device and from every other device on your account. You can bring it back from Recently deleted in Settings for ${RECENTLY_DELETED_DAYS} days, without any practice that was never backed up.`,
+    hint: KEEP_HISTORY_HINT,
     confirmLabel: "Delete everywhere",
   };
 }

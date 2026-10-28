@@ -30,6 +30,7 @@ export function DeletePieceModal({ piece, syncsToAccount = false, onCancel, onCo
         </div>
         <div className="modal-body">
           <p className="wizard-hint">{copy.body}</p>
+          <p className="wizard-hint">{copy.hint}</p>
           <label className="field">
             <span>
               Type <strong>{targetName || "the piece name"}</strong> to confirm

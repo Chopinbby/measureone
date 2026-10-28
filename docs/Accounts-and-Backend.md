@@ -2728,6 +2728,15 @@ hashed files immutable) and a local stand-in for the account service:
    left no registration and no saved copy after one visit with a connection, did not loop on the
    next, and with the server stopped the app no longer opened.
 7. **`npm run dev`**: no worker, nothing saved.
+8. **On a real preview address** (https, the live host): `/sw.js` is served as
+   `application/javascript` with `cache-control: public, max-age=0, must-revalidate` (the page the
+   same; the hashed files too, so the host does not mark them immutable, and the worker's
+   "saved copy first" saves those revalidations), and a file that does not exist is a real 404,
+   not the page. The worker registered, took control and saved `/` and the entry file on a first
+   visit. **The way back was rehearsed there** on a throwaway branch's preview: the real worker
+   registered at that address, a second commit replaced `public/sw.js` with the self-removing worker
+   from DEPLOYMENT.md, and the next visit with a connection left no registration and no saved copy
+   within about two seconds. (The throwaway branch was deleted afterwards.)
 
 **Not seen by anyone yet:** the browser's own airplane mode (the pane has no such switch, so "no
 connection" here was a stopped server, and the browser's offline flag was set through its own events for

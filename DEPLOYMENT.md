@@ -321,7 +321,9 @@ self.addEventListener("activate", function (event) {
 
 **To see that it worked,** once a device has opened the new version online: in Safari
 (Develop menu on), Develop, Service Workers lists nothing for the address; or turn the
-connection off and open the app, which no longer opens, as before Pass 123.
+connection off and open the app, which no longer opens, as before Pass 123. Rehearsed
+during Pass 123 (2026-10-28), locally and on a preview address: after one visit with a
+connection the device had no worker and no saved copies.
 
 ### Checking which project a site talks to
 

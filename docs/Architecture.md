@@ -30,11 +30,15 @@
   (Pass 109), a checked first backup (Pass 110), every later change sent by
   itself (Pass 111), restore and "Get changes" (Pass 112), change password
   and sign out of all devices (Pass 113), and a quiet notice when another
-  device changed something (Pass 116). **Changes still never arrive by
-  themselves:** the engines that will merge two devices' copies part by part
-  (Passes 117, 118) are built but not yet called. Signed out, or with no
-  connection settings, the app is exactly the `localStorage`-only app and makes
-  no account request. See [Accounts-and-Backend.md](Accounts-and-Backend.md).
+  device changed something (Pass 116). **Changes from other devices arrive by
+  themselves only behind a per-device switch that is off by default** (Pass 120,
+  using the engines that merge two devices' copies part by part, Passes 117
+  and 118); otherwise "Get changes" brings them in. A piece deleted on one
+  device is deleted everywhere, with a 30-day way back (Pass 122). Signed out,
+  or with no connection settings, the app is exactly the `localStorage`-only
+  app and makes no account request. Since Pass 123 a small service worker
+  (`public/sw.js`) lets built versions open with no connection, signed in or
+  not. See [Accounts-and-Backend.md](Accounts-and-Backend.md).
 - No React Router — navigation is a simple `activeTab` string in state,
   switched via a sidebar.
 
@@ -58,6 +62,13 @@ MeasureOne.jsx/
 ├── index.html
 ├── package.json
 ├── vite.config.js
+├── public/sw.js                # Pass 123: the offline worker (a service worker). Copied
+│                               # into the build UNTOUCHED (Vite never rewrites files in
+│                               # public/), so it is plain ES5; registered by src/main.jsx
+│                               # in built versions only. Saves the page and /assets/ for
+│                               # opening with no connection; leaves everything else to the
+│                               # browser. How to change it and how to turn it off:
+│                               # DEPLOYMENT.md, "The offline worker, and turning it off".
 ├── test/                       # `npm test` — node:test, run against the
 │                               # real lib/ modules via a small loader hook
 │                               # (extensionless-loader.mjs) that lets Node
@@ -69,9 +80,12 @@ MeasureOne.jsx/
 │                               # lib/history.js exists (Pass 20). One
 │                               # exception: browser-compat.test.mjs (Pass
 │                               # 101) scans all of src/ for syntax the
-│                               # Safari 14 build target can't parse.
+│                               # Safari 14 build target can't parse (and,
+│                               # since Pass 123, public/ too).
 └── src/
-    ├── main.jsx                 # ReactDOM entry point, just mounts <App />
+    ├── main.jsx                 # ReactDOM entry point, just mounts <App />; in
+    │                            # built versions also registers public/sw.js
+    │                            # (Pass 123) once the page has loaded
     ├── App.jsx                  # state + layout only — ~4,400 lines; renders
     │                            # the sidebar and whichever tab is active,
     │                            # owns updatePiece and every handler passed

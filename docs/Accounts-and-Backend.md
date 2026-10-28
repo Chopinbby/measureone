@@ -329,7 +329,10 @@ changes can arrive by themselves, behind a switch that is off by default):
   "no" for a declined combine or a new piece left unticked (and one button to take it back), the
   blank-composer "maybe the same piece" row, piece order that follows the person with no
   question, and plain questions for a piece held by a refused upload.
-- **123** What happens offline: opening the app with no connection. Scoped, not built.
+- **123** What happens offline: opening the app with no connection. Built; see [Opening the app with
+  no connection](#opening-the-app-with-no-connection-pass-123): a small service worker
+  (`public/sw.js`), the status wording "Working offline", and a documented way to turn the worker
+  off everywhere.
 - **124** Turning the automatic switch on by default, after a real-use trial on the owner's own
   two devices. Scoped, not built, and only on the owner's word.
 
@@ -2629,6 +2632,161 @@ account beyond that first check unless the owner says otherwise.
 recorded base still goes to the picker; "always keep both" (deferred, no owner); size and schedule
 travelling together (proposed as its own pass); the automatic update's "applied when you're done"
 line; and the real-project checks.
+
+## Opening the app with no connection (Pass 123)
+
+**What it does.** Practice has always worked offline once the app is open: the working copy is on
+the device, and Pass 111 keeps changes waiting until the connection comes back. What did not work
+was *opening* the app with no connection (a closed tab, a phone in a practice room with no wifi):
+the browser had nothing to open. Since Pass 123 a small service worker, `public/sw.js`, keeps a
+copy of the page and of the app's own files in the browser, so a device that has opened the app
+once with a connection opens it again without one. It does this for everyone, signed in or not,
+and in a build with no account service too.
+
+**The decision (the owner, 2026-10-28): a small hand-written worker.** The card's three options
+were A, a few dozen lines of hand-written code with no new dependency; B, `vite-plugin-pwa`
+(more features, such as an install prompt and a file list, but a new dependency and its
+configuration); and C, nothing (opening still needs a connection). She chose A and confirmed
+the wording "Working offline. Everything is saved on this device and will back up when you're
+connected." The risk A carries is the one the card named: a worker lives on the live address and
+keeps the app's code, so a mistake could leave a browser stuck on an old version. That is why the
+page is always asked of the network first, and why there is a way back
+([DEPLOYMENT.md](../DEPLOYMENT.md#the-offline-worker-and-turning-it-off-pass-123)) that was
+tried before the pass was handed over.
+
+**The rules `public/sw.js` follows, and must keep following**
+
+- **The page** (`/`, a navigation): ask the network first. A good answer is shown and also saved.
+  If the network fails, the saved copy is shown. With nothing saved, the browser shows its own
+  offline page, exactly as it would with no worker. So while there is a connection a new
+  version always shows, and the app can never be stuck on an old page.
+- **The app's own files** (`/assets/...`, whose names change whenever their content does): the
+  saved copy if there is one, otherwise fetch and save. The on-demand account library file is an
+  ordinary file under `/assets/`, so it is saved the first time the app asks for it while the
+  worker is in charge.
+- **Everything else is left alone**, so the browser handles it as if the worker did not exist:
+  every request to another website (the account service, Google Fonts), every request that is not
+  a GET, a request with a `Range` header, and any other path (including `/sw.js` itself).
+  **Never handle an account-service request**: the revision rule ("save only if still at revision
+  N") must see the real answer every time, and a saved answer would hide it.
+- **When it is installed** it saves the page and the files the page names straight away (the
+  "warm-up"), so the app opens offline from the very next visit and not the one after; anything
+  that cannot be fetched then is saved the first time it is asked for, and a failed warm-up never
+  fails the install. It then takes over at once (`skipWaiting`, `clients.claim`).
+- **Versions and size.** `VERSION` at the top of the file names the saved copies; **change it
+  whenever the file changes**, and caches made by other versions are deleted when the new one
+  takes over. At most 60 saved `/assets/` copies are kept (dozens of versions of the app, each
+  adding about one file), oldest first, so the store cannot grow without end; whatever is missing
+  is saved again at the next visit that needs it.
+- **Only built versions register it** (`src/main.jsx`, `import.meta.env.PROD`), after the page has
+  loaded, and every visit asks the browser to look for a changed worker (`update()`, with
+  `updateViaCache: "none"`). That request is also how the way back reaches a device. A browser
+  that refuses a worker (some private windows, older browsers) keeps working as it always did.
+- **Plain ES5.** Files in `public/` are copied into the build untouched, so nothing rewrites newer
+  syntax for the Safari 14 build target; `test/browser-compat.test.mjs` now checks `public/` for
+  the two things it checks `src/` for (regex lookbehind, `randomUUID`).
+
+**The status line.** `describeSyncStatus` (`lib/accountSync.js`) takes `offline`, which
+`App.jsx` keeps as `browserOffline` from the browser's own `online` and `offline` events (only on a
+site with an account service). When the browser says there is no connection and an attempt has
+failed (one failure is enough: the browser has already said why), the Account line reads
+`OFFLINE_STATUS_TEXT`, "Working offline. Everything is saved on this device and will back up
+when you're connected." It sits in the same place as "isn't answering": quiet tone, and it
+replaces the held message too. With no failure yet, or with the browser saying it is online, nothing
+changes: a plain failed check still says "The account service isn't answering." The `online` event
+already retried at once and forgot the back-off; the line goes back to normal with it.
+
+**Not built, on purpose** (the card): installing to the home screen (a manifest and icons),
+background sync and push, and saving the account service's answers.
+
+**Checked.** `npm test` 1,576 pass (two new: the wording rule and the `public/` compatibility
+guard), `npm run build` succeeds. Eight deliberate breakages of the wording rule, each caught by a
+test (needing the not-answering count, firing before any failure, treating any truthy value as
+offline, removing the line, ignoring the browser, changing the words, the wrong tone, "not
+answering" saying offline); the compatibility guard fails when a lookbehind or `randomUUID` is put
+in `public/sw.js`. In the Browser pane (Chromium), with built versions served from a local folder
+by a small server that sends the live host's cache headers (the page revalidated every time,
+hashed files immutable) and a local stand-in for the account service:
+
+1. **A clean first visit**: the worker registered, activated and took control, and had already
+   saved `/` and the entry file.
+2. **Opened with the server stopped** (no build with an account service, nothing signed in): the
+   page opened, served by the worker, after exactly one earlier visit.
+3. **A new build on the same address, with a connection**: the next open showed the new version
+   and loaded only its files; the old file stayed saved but was not used.
+4. **What the worker handles**, from a throwaway instrumented copy that recorded every request
+   a controlled page made (not committed): the page and `/assets/` files were handled; five GETs
+   and a POST to the account service, Google Fonts, `/sw.js`, another path and a POST to `/` were
+   all left to the browser.
+5. **Signed in, opened with both the web server and the account service stopped**: it opened with
+   its pieces, and the account library file had been saved the first time it was asked for. A change made
+   offline read "1 change waiting to back up", then (the browser still saying online) "The account
+   service isn't answering. Everything is still saved on this device.", then (the browser saying
+   offline too) "Working offline. ...". With both servers started again the change reached the
+   account by itself and the line read "Backed up just now".
+6. **The way back**: the self-removing worker, extracted from DEPLOYMENT.md and served as `/sw.js`,
+   left no registration and no saved copy after one visit with a connection, did not loop on the
+   next, and with the server stopped the app no longer opened.
+7. **`npm run dev`**: no worker, nothing saved.
+
+**Not seen by anyone yet:** the browser's own airplane mode (the pane has no such switch, so "no
+connection" here was a stopped server, and the browser's offline flag was set through its own events for
+the wording), Safari, and a phone: those are the owner's checks on the pull request's preview.
+
+**Calls made while building it, for the owner to overrule**
+
+- **The warm-up at install** is not on the card. Without it the app would open offline only from the
+  visit after next (a first visit saves nothing the page had already fetched), against the card's
+  "from the following visit".
+- **One failure is enough** for the offline wording while "isn't answering" still needs two, because
+  the browser's own flag is not a guess.
+- **`skipWaiting` and `clients.claim`**: a changed worker takes over at once, including in tabs
+  that are already open. The way back needs that. The cost is that an old page can find its saved
+  files replaced under it, which online only means fetching them again.
+- **A cap of 60 saved files** and `update()` on every visit (one tiny request) are mine.
+- **The way back deletes only caches whose names start with `measureone-app-`.**
+- **`test/browser-compat.test.mjs` was extended** to `public/`, as proposed in the hand-off; it is
+  not on the card's file list.
+- **`docs/Architecture.md`** also had a paragraph still saying changes "never arrive by themselves"
+  (true before Pass 120); it is corrected.
+
+**Found, for decisions** (none acted on beyond what is said)
+
+1. **Opened offline when the sign-in's hour has run out: the Account section looks signed out.**
+   This is the card's "confirm and report". With a stored session whose access token has expired
+   (the app has not been online for more than about an hour), a cold open with no connection
+   **does not sign the person out**: the stored session, the device record and every piece are
+   untouched, the app opens and practice works. But the account library cannot refresh the token
+   while offline, so for up to about a minute the Account section says "Checking your account..."
+   and then shows the signed-out view ("Sign in ...") until the connection returns. There is no
+   "Working offline" line then, because that line belongs to a signed-in session. Seen against
+   the stand-in: when it came back and the window was visible, the library refreshed the token
+   within seconds and the section read "Signed in as ..." again with nothing pressed. (By the
+   design in "Keeping the backup current", a change made meanwhile is found by comparing and goes
+   up once the session is back; not tried in this state.) While the token is still good (the
+   first hour after it was issued) a cold open offline shows the signed-in view and the "Working
+   offline" line, which is what was tried above. **Proposed, not built:** while offline with a stored session, show the stored account
+   (its email) as signed in with the offline line, for display only, leaving `authSession` (which
+   gates all syncing) alone. Needs the owner's call because it changes what "signed in" shows.
+2. **A connected but dead network** (wifi with no internet) is not "offline" to the browser, so
+   the page open waits for the browser's own timeout before the saved copy is used, and the
+   status says "isn't answering", not "Working offline". A short timeout before falling back would
+   fix the wait, at the cost of sometimes showing a one-visit-old page on a slow connection.
+3. **A device signed in before Pass 123 may not have saved the account library file yet.** The
+   file is saved the first time the app asks for it while the worker is in charge, which is the
+   second visit. An offline open before then cannot load it, the app looks signed out, and
+   nothing asks for it again when the connection returns (a reload does). Reasoned from
+   `attachAuthListener` and `loadBackend`, not tried. The warm-up could also save the files the
+   entry file names; not done.
+4. **Fonts.** The app takes its fonts from Google Fonts over the network, so by the card's rule the
+   worker leaves them alone, and offline the app uses the system's fallback fonts and looks a
+   little different. Seen in the requests, not on screen.
+5. **Browsers and storage.** A browser that refuses a worker (some private windows) cannot open
+   offline, and Safari removes a site's saved data, the worker's copies included, after about a
+   week without a visit (the same rule that already applies to the pieces).
+6. **No automated test of the worker's routing is committed**: it is not on the card's file
+   list, and a throwaway check of the same behavior was run instead (item 4 above). A small test
+   that loads `public/sw.js` with a fake `self`, `caches` and `fetch` would pin it; offered.
 
 ## Setup (test project)
 

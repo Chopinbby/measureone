@@ -72,6 +72,8 @@ MeasureOne.jsx/
 ├── package.json
 ├── vite.config.js
 ├── DEPLOYMENT.md      # Vercel setup, the live site's settings, rolling back
+├── public/sw.js       # Pass 123: the offline worker, copied into the build untouched
+│                      # (so plain ES5); see "Opening the app with no connection" below
 ├── scripts/           # check-rls.mjs: the account security check (Pass 114);
 │                      # not part of the app or of `npm test`
 ├── supabase/migrations/   # the account database's two SQL files; applied by
@@ -1109,6 +1111,36 @@ The app must not ask the same question twice. Rules:
   questions; the two facts that would decide it are the piece names it listed and whether
   other windows were open on that account).
 
+### Opening the app with no connection (Pass 123)
+
+A small hand-written service worker, `public/sw.js`, lets a device that has opened the app once
+with a connection open it again without one (the owner chose it over a plugin or nothing,
+2026-10-28). Rules:
+
+- **It handles the page (a navigation to `/`) and `/assets/` files, and nothing else: never an
+  account-service request, never a non-GET, never another origin.** What it does not handle is
+  left to the browser. Every upload rests on the real answer to "save only if still at revision
+  N"; a saved answer would hide it. A new kind of request for the worker is a decision, not a tweak.
+- **The page is network first, the files cache first.** Network first is what stops the app being
+  stuck on an old page while there is a connection: don't "improve" it to cache first.
+- **Change `VERSION` in the file whenever the file changes**, and try the change on a preview
+  address first: a merge to `main` puts it on every device that has the worker, at its next
+  online visit.
+- **Plain ES5.** Vite copies `public/` untouched, so nothing rewrites newer syntax for Safari 14;
+  `test/browser-compat.test.mjs` checks `public/` for the lookbehind and `randomUUID` rules.
+- **The way back is a documented, tried file swap** (`DEPLOYMENT.md`, "The offline worker, and
+  turning it off"): replace `public/sw.js` with the self-removing worker there, and each device
+  drops the worker at its next online visit. Remove the registration in `src/main.jsx` only later.
+- **The status wording:** `describeSyncStatus`'s `offline` is the browser's own flag
+  (`App.jsx`'s `browserOffline`); one failed attempt while it says offline reads "Working
+  offline", otherwise "isn't answering" still needs two.
+- **Left open** (details and numbers in
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#opening-the-app-with-no-connection-pass-123)):
+  opened offline after the sign-in's hour has run out, the Account section looks signed out until the
+  connection returns (nothing is lost); a connected but dead network waits for the browser's own
+  timeout; fonts come from Google over the network so offline text uses fallback fonts; no
+  automated test of the worker's routing is committed.
+
 ### Deploying and operating (Pass 114 on)
 
 - **A merge to `main` now ships to real accounts.** Anything touching
@@ -1182,8 +1214,9 @@ one browser, and 120, automatic updates behind a switch that is off by default, 
 121 (a held piece asks one plain question per conflicting part in Review) is built, 122
 (a piece deleted on one device is deleted everywhere, with a 30-day way back) is built, and so is
 122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
-Review's questions; live since 2026-10-27); the passes the docs name next are 123 (what happens offline) and 124 (turning
-the switch on by default). The owner's 2026-10-15 "most recent
+Review's questions; live since 2026-10-27); 123 (the app opens with no connection, a small service
+worker) is built, and the pass the docs name next is 124 (turning the switch on by default, only after
+the owner has lived with it). The owner's 2026-10-15 "most recent
 wins" decision is only partly built (a deletion and the piece list's order follow it; a
 conflicting part of a piece is held and asked about). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
@@ -1325,6 +1358,12 @@ silently.
   the most recent reorder wins as a whole list, by a dated note every drag leaves); a piece held by
   a refused upload gets Review's plain questions.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)
+- **Pass 123** — the app opens with no connection after one visit with one: a small hand-written
+  service worker, `public/sw.js` (page network first, `/assets/` files cache first, everything else
+  left to the browser), registered by `src/main.jsx` in built versions only; the Account line says
+  "Working offline" when the browser reports no connection and an attempt has failed; the worker can
+  be turned off everywhere by swapping the file (`DEPLOYMENT.md`).
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#opening-the-app-with-no-connection-pass-123)
 - **Pass 125** — the sidebar's piece list scrolls by itself while a piece is dragged near its top or
   bottom edge, so a piece can be moved to any row in one drag (it shows about seven rows and could
   only be dragged to rows already in view). `lib/dragScroll.js`; what a drop does is unchanged.

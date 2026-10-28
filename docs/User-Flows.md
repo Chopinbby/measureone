@@ -1025,7 +1025,11 @@ the practice goes with it. The way back is her addition.
 device and from every other device on your account", that you can bring it back from **Recently
 deleted** in Settings for 30 days, "without any practice that was never backed up". You type the
 piece's name to confirm, and the button reads **Delete everywhere** (signed out it reads **Delete
-permanently**). Your account keeps the piece's data, marked deleted: nothing is erased.
+permanently**). Your account keeps the piece's data, marked deleted: nothing is erased. Under the
+warning is one more line: "Want to keep its practice history? Archive the piece instead, or pause it
+if its plan isn't finished yet." (Deleting a piece removes its practice from every chart, because the
+history is worked out from the pieces that exist; an archived or paused piece keeps it. Archive is
+locked until a piece's plan is finished.)
 
 **On your other devices**, what happens depends on the switch of flow 14:
 1. **Switch on, deleted in the last 30 days:** the piece is removed by itself within about a

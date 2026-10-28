@@ -7973,6 +7973,9 @@ what it rules out.
   2026-10-23 answer) and a piece's place in the list is settled by the more recent reorder
   (Pass 122b, 2026-10-25, a dated note rather than a clock on a part; this is the answer to
   open item (ii) for that one part). Items (i) and (iv) are still open.
+  **2026-10-28: the rest of the rule is scoped as Pass 126** (a new card, ahead of Pass 124's
+  flip); its first step is the owner's choice of how "most recent" is measured, which is open
+  item (ii) for every other part. See "Pass 124 re-scoped" under Accounts and backend.
   As first written this said "Nothing here is built. The code still follows the Pass 112
   rule until Pass 120 replaces it" (true then; Pass 120 replaced it only in part). This
   **supersedes in part** the "never by a clock" Pass 112 entry above and changes what
@@ -8282,6 +8285,48 @@ what it rules out.
   **Deferred on the card:** installing to the home screen, background sync and push, saving the account
   service's answers. **Seen by the owner:** the laptop run and the phone's Safari, on the preview before
   the merge (pull request 79). What is still open is in the open questions below.
+
+- **Pass 124 re-scoped, Pass 126 added, and the delete window points to Archive (2026-10-28).**
+  Planning, with one built exception: the delete window's one line (`lib/recentlyDeleted.js`,
+  `DeletePieceModal.jsx`, `test/recentlyDeleted.test.mjs`). Nothing else here is built. **The owner's
+  answers, given while getting ready to run Pass 124:**
+  1. **Turning the automatic switch on by default waits until Phase 3.** Pass 124 stays on the
+     backlog, built only on her word. **Why:** she gave no reason herself; the framing put to her, which
+     she accepted, was that hers is the only account, so a default only matters for a new device or a
+     future invitee, and she would turn the switch on by hand anyway. Until then Phase 2 is built and the
+     switch is off by default, as since Pass 120.
+  2. **When the flip is built, each device remembers an explicit OFF (confirmed).** The card called it "a
+     one-line change". It is not: the device record keeps `autoUpdate` only while it is ON
+     (`autoUpdateOn` is `autoUpdate === true`; `changeAccount` deletes a `false`), so with a default of
+     ON a device where the person switched it off would read as "never chose" and come back on after its
+     next upload. A device that never chose reads ON; one that switched it off stays off. This touches
+     `lib/accountSync.js` (`autoUpdateOn`, `withAutoUpdate`, `changeAccount`, the entry cleaning),
+     `App.jsx`'s starting state, `SettingsTab`'s default and a test for every way the record is rebuilt
+     (the Pass 120 carry-over rule). **Rollback caveat:** reverting the default does not switch off a
+     device where the switch was turned on by hand; the per-device switch is the real way back.
+  3. **The card's deletion scenario is rewritten for Pass 122.** Switch on: the other device removes a
+     deletion from the last 30 days by itself (a quiet line; the red banner only for practice there the
+     deleted copy lacks), and Restore brings it back. Switch off, or older than 30 days: it is listed,
+     with "Keep it" and "Delete it here too".
+  4. **"The most recent change wins, item by item" becomes its own card, Pass 126, placed ahead of 124.**
+     The backlog's rule is that new work gets a new number and is never folded into an old card. Its
+     first step, before any code, is the owner's choice of how "most recent" is measured (open item (ii) of
+     the 2026-10-15 decision): the piece's `updatedAt`, a dated note per part (the way Pass 122b's reorder
+     note works), or when the change reached the account; it also names what a wrong device clock can do
+     (open item (iv)). Practice is combined, never chosen between. Size and schedule travelling together
+     stays out of it. Not built. Running 126 before 124's flip is recommended and hers to confirm.
+  5. **Deleting a piece removes its practice history from every chart, and she is fine with that.** That is
+     a consequence of how history is held: nothing stores it apart from the pieces
+     (`computePracticeHistory`, the all-pieces page's 14-day heatmap and week totals are all worked out
+     from `piece.progress` of the pieces that exist), so a deleted piece vanishes from all of them. The
+     technique library is separate and unaffected; exports saved earlier still contain the piece. **Asked:
+     should deleting offer to keep the history?** A record kept per deleted piece is not small: it would
+     have to be stored, synced, merged, exported, imported and restored by "Keep it", all inside the
+     guarded account code. **Not built, no owner.** **Built instead:** one line under the delete
+     window's warning, "Want to keep its practice history? Archive the piece instead, or pause it if its
+     plan isn't finished yet." (`KEEP_HISTORY_HINT`). Pause is named because Archive is locked until the
+     piece's plan is actually finished. An archived or paused piece stays in the all-pieces page's charts
+     (the page is given every piece whatever its status).
 
 ## Open questions
 

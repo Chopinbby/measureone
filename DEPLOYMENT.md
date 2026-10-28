@@ -261,6 +261,70 @@ pieces are offered again. Nothing in the account is erased. A rollback across Pa
 125 only takes the scrolling back; it changes no stored data. These notes are
 reasoned from the code, not rehearsed.
 
+### The offline worker, and turning it off (Pass 123)
+
+Since Pass 123 the app registers a small service worker, `public/sw.js`, so that it can
+open with no connection. It saves the page and the app's own files in the browser, asks
+the network first for the page (so a new version always shows while there is a
+connection), and leaves everything else alone: the account service, fonts, any other
+site and every request that is not a GET. Only built versions register it, never
+`npm run dev`. Pieces, the technique library and the device record are never in its
+storage. Design and what was seen:
+[Accounts-and-Backend.md](docs/Accounts-and-Backend.md#opening-the-app-with-no-connection-pass-123).
+
+**Changing it.** Change `VERSION` at the top of `public/sw.js` whenever that file
+changes (saved copies made by other versions are deleted when the new one takes
+over), try the change on a preview address first, and remember that a merge to `main`
+puts it on the live addresses.
+
+**Turning it off everywhere (the way back).** If the worker ever causes trouble:
+
+1. Replace the whole of `public/sw.js` with the self-removing worker below. The file
+   name and place must not change: browsers look for changes to that exact address.
+2. Merge it like any change (a branch and a pull request).
+3. Each device that has the worker picks the change up the next time the app is opened
+   with a connection (the page asks on every visit), clears the saved copies and
+   removes the worker. Pieces, technique data, the device record and the account are
+   not touched. A device that stays offline keeps the old worker until it is online
+   and the app has been opened once.
+4. Optional, later: remove the registration block at the end of `src/main.jsx`. Until
+   then every visit installs the self-removing worker once more and it removes itself
+   again, which does no harm.
+
+```js
+/* MeasureOne offline worker, switched off (Pass 123, the way back). Replaces public/sw.js. */
+self.addEventListener("install", function () {
+  self.skipWaiting();
+});
+self.addEventListener("activate", function (event) {
+  event.waitUntil(
+    caches
+      .keys()
+      .then(function (names) {
+        return Promise.all(
+          names
+            .filter(function (name) {
+              return name.indexOf("measureone-app-") === 0;
+            })
+            .map(function (name) {
+              return caches.delete(name);
+            })
+        );
+      })
+      .then(function () {
+        return self.registration.unregister();
+      })
+  );
+});
+// No fetch handler: every request goes straight to the network.
+```
+
+**To see that it worked,** once a device has opened the new version online: in Safari
+(Develop menu on), Develop, Service Workers lists nothing for the address; or turn the
+connection off and open the app, which no longer opens, as before Pass 123. Rehearsed
+during Pass 123 (2026-10-28), locally and on a preview address: after one visit with a
+connection the device had no worker and no saved copies.
+
 ### Checking which project a site talks to
 
 The project's address is built into the app file, so a deployed site can be

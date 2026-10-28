@@ -1387,14 +1387,23 @@ export function describeHeldBanner(held) {
   };
 }
 
+// Said instead of "isn't answering" while the browser itself reports no connection.
+export const OFFLINE_STATUS_TEXT = "Working offline. Everything is saved on this device and will back up when you're connected.";
+
 // The one quiet line in the Account panel, or null (before the first backup,
 // or nothing to say). The account service not answering replaces everything
 // (it's the more urgent message). Otherwise the held message (if any) and the
 // normal line are shown TOGETHER (Pass 115): the held message, then what's
 // true of everything else: changes waiting, else when it was last backed up.
-//   tone: "ok" (backed up), "quiet" (waiting, or not answering), "problem" (held)
-export function describeSyncStatus({ now, firstBackupDone, backedUpAt, waiting, held, failures }) {
+// Pass 123: when the browser says there is no connection (`offline`) and an
+// attempt has failed, the line says so in plain words instead, in the same
+// place as "not answering" (so it replaces everything too, and one failure is
+// enough: the browser has already said why). With no failure yet, or with the
+// browser saying it is online, nothing changes.
+//   tone: "ok" (backed up), "quiet" (waiting, offline, or not answering), "problem" (held)
+export function describeSyncStatus({ now, firstBackupDone, backedUpAt, waiting, held, failures, offline }) {
   if (!firstBackupDone) return null;
+  if (offline === true && failures >= 1) return { tone: "quiet", text: OFFLINE_STATUS_TEXT };
   if (failures >= NOT_ANSWERING_AFTER) {
     return { tone: "quiet", text: "The account service isn't answering. Everything is still saved on this device." };
   }

@@ -453,6 +453,22 @@ export default function App() {
   const [signOutNotice, setSignOutNotice] = useState(null);
   const authListenerRef = useRef(false);
   const authLinkHandledRef = useRef(false);
+  // Whether the browser itself says there is no connection (Pass 123). Only the Account
+  // status line reads it: with a failed attempt behind it, the line says "Working offline"
+  // instead of "isn't answering" (describeSyncStatus). Kept current by the browser's own
+  // online and offline events, and only listened for on a site with an account service.
+  const [browserOffline, setBrowserOffline] = useState(() => isBackendConfigured() && typeof navigator !== "undefined" && navigator.onLine === false);
+  useEffect(() => {
+    if (!authEnabled) return;
+    const update = () => setBrowserOffline(navigator.onLine === false);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    update();
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
   // First backup to the account (Pass 110, lib/accountSync.js). Kept here, not
   // in SettingsTab, so a backup that's running, and its result, survive
   // leaving the Settings tab. `userId` is whose backup this is: a result is
@@ -4590,7 +4606,7 @@ export default function App() {
                 onCancelBackUp={handleCancelBackUp}
                 syncActive={syncInfo.firstBackupDone}
                 syncRunning={syncInfo.running}
-                syncStatus={authSession ? describeSyncStatus({ now: syncClock, ...syncInfo }) : null}
+                syncStatus={authSession ? describeSyncStatus({ now: syncClock, ...syncInfo, offline: browserOffline }) : null}
                 accountChangesText={authSession ? describeAccountChanges(syncInfo.changes) : null}
                 backupRunning={backup.running}
                 backupLines={authSession && backup.userId === authSession.userId && backup.result ? describeBackupResult(backup.result) : []}

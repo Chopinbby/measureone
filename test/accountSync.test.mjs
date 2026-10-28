@@ -51,6 +51,7 @@ import {
   deletePieceRow,
   describeAgo,
   describeSyncStatus,
+  OFFLINE_STATUS_TEXT,
   describeHeld,
   describeHeldBanner,
   // Pass 117
@@ -1174,6 +1175,30 @@ describe("timing and the status line (Pass 111)", () => {
     assert.match(status({ held, waiting: 3 }).text, /changed on another device/, "held beats waiting");
     assert.match(status({ held, waiting: 3, failures: NOT_ANSWERING_AFTER }).text, /isn't answering/, "not answering beats held");
     assert.match(status({ waiting: 3 }).text, /waiting/, "waiting beats backed up");
+  });
+
+  test("[Pass 123] with the browser saying there is no connection, a failed attempt says 'working offline'", () => {
+    const text = "Working offline. Everything is saved on this device and will back up when you're connected.";
+    assert.equal(OFFLINE_STATUS_TEXT, text, "the exact wording the owner confirmed");
+    const quiet = { tone: "quiet", text };
+    // offline + at least one failed attempt: the offline line, however many failures
+    assert.deepEqual(status({ offline: true, failures: 1 }), quiet);
+    assert.deepEqual(status({ offline: true, failures: NOT_ANSWERING_AFTER }), quiet);
+    assert.deepEqual(status({ offline: true, failures: 9, waiting: 4 }), quiet, "changes waiting does not change it");
+    // like "not answering", it replaces a held message (the more urgent thing to say)
+    const held = { pieces: [{ id: "b", name: "Ballade No. 1" }], technique: false };
+    assert.deepEqual(status({ offline: true, failures: 1, held }), quiet);
+    // nothing has failed yet: the usual line, offline or not
+    assert.deepEqual(status({ offline: true, failures: 0 }), { tone: "ok", text: "Backed up just now" });
+    assert.equal(status({ offline: true, failures: 0, waiting: 2 }).text, "2 changes waiting to back up");
+    // a plain failed check is still "isn't answering": the browser saying it is online, or not saying anything at all
+    assert.match(status({ offline: false, failures: NOT_ANSWERING_AFTER }).text, /isn't answering/);
+    assert.match(status({ failures: NOT_ANSWERING_AFTER }).text, /isn't answering/, "no offline flag, as before Pass 123");
+    assert.equal(status({ offline: false, failures: 1, waiting: 2 }).text, "2 changes waiting to back up", "one failure while online says nothing new");
+    // only when the browser really says so: anything that is not true does not count
+    assert.equal(status({ offline: "yes", failures: 1, waiting: 2 }).text, "2 changes waiting to back up");
+    // before the first backup there is no status line at all, offline or not
+    assert.equal(status({ offline: true, failures: 3, firstBackupDone: false }), null);
   });
 
   test("the banner names what's held and says what happens next", () => {

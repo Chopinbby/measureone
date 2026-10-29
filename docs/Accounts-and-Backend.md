@@ -340,8 +340,9 @@ changes can arrive by themselves, behind a switch that is off by default):
   line; see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 124 re-scoped".
 - **126** The most recent change wins, item by item: the rest of the owner's 2026-10-15 decision (a part both
   devices changed differently is settled by recency instead of held and asked about; practice is combined,
-  never chosen between). Scoped 2026-10-28, not built; its first step is the owner's choice of how "most
-  recent" is measured. Placed ahead of 124's flip.
+  never chosen between). Scoped 2026-10-28, not built; **step 1 was answered the same day** (each setting is
+  stamped when it changes, for single-value settings only; collections and whole shapes are still asked about;
+  see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1"). Placed ahead of 124's flip.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring, and an in-app "delete my account", which must exist before

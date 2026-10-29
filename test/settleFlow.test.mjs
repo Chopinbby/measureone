@@ -406,7 +406,7 @@ const practicedMore = (p, ids, day, durationSeconds, extra = {}) =>
   });
 const durationsOf = (p, id) => (p.progress[id].sessions || []).map((s) => s.durationSeconds).sort((a, b) => a - b);
 
-describe("the first screen with real pieces (Pass 121 follow-up)", () => {
+describe("practice both devices logged is combined, so real pieces never get the first screen (Pass 126)", () => {
   const base = makePiece();
   const mine = practicedMore(base, CHUNKS, 2, 90, { targetDate: "2026-11-01" });
   const theirs = practicedMore(base, CHUNKS, 3, 120, { targetDate: "2026-11-15" });
@@ -420,21 +420,18 @@ describe("the first screen with real pieces (Pass 121 follow-up)", () => {
   };
   const candidatesOf = (remote = theirs, revision = 2) => accountRowsToCandidates({ pieces: [acctRow(remote, revision)], technique: null });
 
-  test("four chunks practiced on both devices make one first screen, and the answers apply to every one of them", () => {
+  test("four chunks practiced on both devices are not asked about: no first screen, one question (the date, changed at the same moment on both), every session kept", () => {
     const planned = planSettle({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: heldRecord() });
     const item = planned.items[0];
-    assert.equal(item.questions.length, 5, "the date and four practice records");
-    assert.equal(hasBulkStep(item), true);
+    assert.deepEqual(item.questions.map((q) => q.part), ["targetDate"], "only the date: the four practice records are combined");
+    assert.equal(hasBulkStep(item), false);
     let st = startSettle(item);
-    assert.equal(st.stage, "bulk");
-    st = settleNext(item, settleChoose(item, st, "all")).state;
-    assert.equal(settleView(item, st).question.part, "targetDate");
+    assert.equal(st.stage, "question");
     st = settleNext(item, settleChoose(item, st, "local")).state;
     assert.equal(st.stage, "recap");
     const view = settleView(item, st);
-    assert.deepEqual(view.recap.keeps, ["This device's target date", "Both devices' sessions for all 4 practice records"]);
-    assert.deepEqual(view.recap.warnings, []);
-    // the summary's button applies: these answers, through the one apply step
+    assert.deepEqual(view.recap.keeps, ["This device's target date"]);
+    assert.deepEqual(view.recap.warnings, [], "nothing is removed: practice is combined, not chosen between");
     assert.equal(settleNext(item, st).applies, true);
     const out = applyAccountMerge({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: heldRecord(), selectedIds: ["p1"], includeTechnique: false, settle: { p1: st.answers } });
     assert.deepEqual(out.settledIds, ["p1"]);
@@ -444,24 +441,12 @@ describe("the first screen with real pieces (Pass 121 follow-up)", () => {
     assert.equal(out.entries.p1.revision, 2);
   });
 
-  test("'Decide each one' with real pieces: the removal warnings name the records and count the sessions", () => {
+  test("whichever date is kept, no session goes with the other one", () => {
     const item = planSettle({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: heldRecord() }).items[0];
-    let st = settleNext(item, settleChoose(item, startSettle(item), "each")).state;
-    const picks = { targetDate: "remote", "progress:c1": "local", "progress:c5": "both", "progress:c9": "remote", "progress:c13": "both" };
-    while (st.stage === "question") {
-      const q = questionsToAsk(item, st)[st.index];
-      st = settleNext(item, settleChoose(item, st, picks[q.part])).state;
-    }
-    assert.equal(st.stage, "recap");
-    const warnings = settleView(item, st).recap.warnings;
-    assert.equal(warnings.length, 2);
-    assert.match(warnings[0], /^For mm\. 1.4: the session logged on your other device will be removed, from your account too\. This can't be undone\.$/);
-    assert.match(warnings[1], /^For mm\. 9.12: the session logged on this device will be removed\. This can't be undone\.$/);
+    const st = settleNext(item, settleChoose(item, startSettle(item), "remote")).state;
     const out = applyAccountMerge({ candidates: candidatesOf(), localPieces: { p1: mine }, accountRecord: heldRecord(), selectedIds: ["p1"], includeTechnique: false, settle: { p1: st.answers } });
     assert.deepEqual(out.settledIds, ["p1"]);
-    assert.deepEqual(durationsOf(out.pieces.p1, "c1"), [60, 90], "this device's record: the other device's session is gone");
-    assert.deepEqual(durationsOf(out.pieces.p1, "c5"), [60, 90, 120]);
-    assert.deepEqual(durationsOf(out.pieces.p1, "c9"), [60, 120], "the other device's record: this device's session is gone");
+    CHUNKS.forEach((id) => assert.deepEqual(durationsOf(out.pieces.p1, id), [60, 90, 120], id));
     assert.equal(out.pieces.p1.targetDate, "2026-11-15");
   });
 });
@@ -494,7 +479,9 @@ describe("the account moved on while the person was deciding (Pass 121 follow-up
   });
 
   test("the account moved, but nothing the person decided on changed: go ahead, with the NEW revision (not the one read earlier)", () => {
-    const moved = validateAndMigratePiece({ ...viaJson(theirs), notes: "added on the other device since", updatedAt: theirs.updatedAt + 500 });
+    // (the same updatedAt: a later one would make the other device's change to the date the more recent one,
+    // which settles it and leaves nothing to decide: a different case, below)
+    const moved = validateAndMigratePiece({ ...viaJson(theirs), notes: "added on the other device since" });
     const out = reread([acctRow(moved, 3)]);
     assert.equal(out.outcome, "apply");
     assert.equal(out.item.revision, 3);
@@ -506,7 +493,7 @@ describe("the account moved on while the person was deciding (Pass 121 follow-up
       accountRecord: rec,
       selectedIds: ["p1"],
       includeTechnique: false,
-      settle: { p1: { targetDate: "local", "progress:c1": "both" } },
+      settle: { p1: { targetDate: "local" } },
     });
     assert.deepEqual(applied.settledIds, ["p1"]);
     assert.equal(applied.entries.p1.revision, 3);
@@ -514,23 +501,37 @@ describe("the account moved on while the person was deciding (Pass 121 follow-up
     assert.deepEqual(durationsOf(applied.pieces.p1, "c1"), [60, 90, 120]);
   });
 
-  test("another session was logged on the other device: the numbers in the warnings changed, so the question is asked again, with a reason", () => {
-    const more = practicedMore(theirs, ["c1"], 4, 150);
+  test("another session was logged on the other device: practice is combined, not asked, so nothing the person decided on changed and the new session comes with it", () => {
+    const more = practicedMore(theirs, ["c1"], 4, 150, { updatedAt: theirs.updatedAt });
     const out = reread([acctRow(more, 3)]);
-    assert.equal(out.outcome, "again");
+    assert.equal(out.outcome, "apply");
     assert.equal(out.item.revision, 3);
-    assert.match(out.notice, /^Something changed while you were deciding/);
-    const chunk = out.item.questions.find((q) => q.part === "progress:c1");
-    assert.match(chunk.options.find((o) => o.value === "local").hint, /^The 2 sessions logged on your other device will be removed/);
-    const restarted = startSettle(out.item, out.notice);
-    assert.deepEqual([restarted.stage, restarted.answers, restarted.notice], ["question", {}, out.notice], "from the start, nothing answered");
+    assert.deepEqual(out.item.questions.map((q) => q.part), ["targetDate"]);
+    const applied = applyAccountMerge({
+      candidates: { pieces: [out.item.candidate], deleted: [], unreadable: [], technique: { technique: null, revision: null, unreadable: false, skippedItems: 0 } },
+      localPieces: { p1: mine },
+      accountRecord: rec,
+      selectedIds: ["p1"],
+      includeTechnique: false,
+      settle: { p1: { targetDate: "local" } },
+    });
+    assert.deepEqual(durationsOf(applied.pieces.p1, "c1"), [60, 90, 120, 150], "this device's, the first, and both of the other device's");
   });
 
-  test("the other device changed a value that is being decided: asked again", () => {
-    const again = validateAndMigratePiece({ ...viaJson(theirs), targetDate: "2026-12-24", updatedAt: theirs.updatedAt + 500 });
+  test("the other device changed the value being decided, at the same moment: asked again with the new value", () => {
+    const again = validateAndMigratePiece({ ...viaJson(theirs), targetDate: "2026-12-24" });
     const out = reread([acctRow(again, 3)]);
     assert.equal(out.outcome, "again");
     assert.match(out.item.questions.find((q) => q.part === "targetDate").text, /Dec 24/);
+  });
+
+  test("the other device changed the value being decided, LATER than this device did: the more recent change settles it, nothing is left to ask, and the person is told", () => {
+    const later = validateAndMigratePiece({ ...viaJson(theirs), targetDate: "2026-12-24", updatedAt: theirs.updatedAt + 500 });
+    const out = reread([acctRow(later, 3)]);
+    assert.equal(out.outcome, "again");
+    assert.equal(out.item.status, "ready");
+    assert.deepEqual(out.item.questions, []);
+    assert.match(out.notice, /nothing is left to decide now/);
   });
 
   test("the other device went back to what it was: nothing is left to decide, and the person is told", () => {

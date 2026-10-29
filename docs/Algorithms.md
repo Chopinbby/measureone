@@ -906,12 +906,12 @@ value for it, and the result lists the part with both values (`conflicts[]`, eac
 its own value and logs the conflict (Pass 119); the automatic update **holds** the piece and
 records its conflicts in the device record (Pass 120); Review **asks the person**, one plain
 question per conflicting part, and passes the answers back in as `choices` (Pass 121, below).
-The owner's 2026-10-15 decision, that the most recent change wins item by item, is **not**
-built for a conflicting part (see [Decisions.md](Decisions.md#open-questions), "When two
-copies disagree"); the one exception inside this engine is the piece's place in the list
-([below](#display-parts-that-never-conflict-and-the-most-recent-reorder-pass-122b)). Merging
-two sessions' ladder state inside one chunk is a conflict too, by design: a chunk logged on
-both sides is a conflict for that chunk and no other.
+**Since Pass 126** two kinds of conflict are answered by the engine itself, see
+[The most recent change wins](#the-most-recent-change-wins-pass-126) below: a single-value setting
+goes to the more recent change, and a chunk's practice record both sides changed is combined. What is
+left (a collection, a whole shape, the chunk grid, a tie) is a conflict as described here. The piece's
+place in the list is the older exception
+([below](#display-parts-that-never-conflict-and-the-most-recent-reorder-pass-122b)).
 
 `updatedAt` is the later of the two. `lastLoggedAt` is **recomputed from the merged
 piece's sessions** (the rule `validateAndMigratePiece` applies on every load), not
@@ -1101,10 +1101,11 @@ that syncs, and it shares its primitives (`fingerprint`, `toJsonValue`).
 chunk id means, so a piece sometimes has to ask. The library has no chunk grid:
 every part of it can be put together without asking, so this engine **never returns
 a conflict list and never asks**. Where both devices changed the same thing to
-different values, the **account's value is kept and a notice says so** ("Your other
-device's change to D major was kept."). **Decided 2026-10-15** that the most recent change
-should win instead (see [Decisions.md](Decisions.md#open-questions), "When two copies
-disagree"); that is **not built**, and this is still what the engine does.
+different values, **one value is kept and a notice says so**. Since Pass 126 that is the **more recent
+change** for a scale's octaves and hands, the two settings and a task's method plan ("Your other device's
+change to D major was kept (it was made later).", or "This device's ..." when this device's was later;
+the account's value on a tie); the account's value still decides the rest ("Your other device's change
+to D major was kept.").
 `mergeImportedTechnique` (needs no recorded
 "before", never removes anything) stays for backups and for a device with no
 recorded "before".
@@ -1297,6 +1298,41 @@ device changed nothing, the merge is exactly the remote's library**; and at the 
 edit, and 1 to 100 with an everyday mix (mostly check-offs and tempos); the counts are
 in the Pass 118 entry of [Decisions.md](Decisions.md#accounts-and-backend) and the test
 prints them.
+
+## The most recent change wins (Pass 126)
+
+How the two merge engines settle a contest without asking, for the settings the owner approved
+(Decisions.md "Pass 126 step 1" and "the list of settings"). The design and what a person sees are in
+[Accounts-and-Backend.md](Accounts-and-Backend.md#the-most-recent-change-wins-pass-126).
+
+**Measuring "more recent".** `piece.settingTimes[field]` is the moment a listed setting last changed (written
+by `updatePiece`, `stampChangedSettings`); with no note the piece's `updatedAt` stands in. For two copies,
+`compareRecency` is 1, -1 or 0 (a tie, also when neither has any time). The technique library keeps
+`partTimes` for `octaves:<id>`, `hands:<id>` and the two `setting:` keys, falls back to its `updatedAt`
+(always for `taskPlan:`), and on a tie keeps the account's value.
+
+**The piece engine, in order** (`planPieceMerge`): per part, changed on one side only is taken, the same on both
+is agreement, different on both is a conflict. Then the soft parts (Pass 122b). Then, if `recency` is on,
+for each listed field in conflict (`scheduleMode` and `targetDate` first, so the schedule is read in the mode
+that won): an answer the person already gave is left alone; the numbers worked out from the target date are
+skipped while the date is in play (they follow it); otherwise a non-tie goes to the later copy and is
+listed in `recencySettled`, a tie stays a conflict. The work id follows the work title. Then the numbers
+that follow the date follow the date's winner. Then each remaining progress conflict is `combinedPractice`
+(unless `combinePractice` is off or the person answered it). What is still in `conflicts` is asked.
+
+**The merged notes** are computed so that either copy as "local" gives the same result: values that agree take
+the later note; a value taken from one side takes that side's note (none if it had none); a contest takes the
+winner's note, or its `updatedAt` if it had none, which is the moment that decided it.
+
+**Practice** (`unionProgressEntries`): sessions, days practiced and focus-spot sessions by content; with a base
+entry (`baseProgress`) anything in the base that is missing from exactly one side stays removed. Whose
+non-session fields (ladder state, tempo) win is decided by the later judged session; a tie by the smaller
+fingerprint, so both directions agree.
+
+**Convergence.** Two devices that merge each other's copy from the same base end with the same piece except for
+the display arrangement (Pass 122b, one fixed side) and the order focus spots are listed in; the simulation
+checks it after every merge that asked nothing (`(11)` in `test/pieceMerge.test.mjs`). Run it wider before
+trusting a change: `SIM_RUNS=3000 npm test`.
 
 ## Adaptive review
 

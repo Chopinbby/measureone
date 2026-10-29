@@ -42,6 +42,8 @@ import {
   planSwitcherMove,
 } from "../src/lib/pieceMerge.js";
 import { fingerprint as accountSyncFingerprint } from "../src/lib/accountSync.js";
+import { RECENCY_FIELDS, stampChangedSettings, settingTime } from "../src/lib/settingTimes.js";
+import { DATE_LINKED_FIELDS } from "../src/lib/pieceMerge.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers: pieces, sessions, a seeded random source                  */
@@ -49,6 +51,13 @@ import { fingerprint as accountSyncFingerprint } from "../src/lib/accountSync.js
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => isDeepStrictEqual(clone(a), clone(b));
+
+// Pass 126 made two of the engine's old conflicts into answers (a single-value setting is
+// settled by the more recent change, a chunk's practice record is combined). The Pass 117 and
+// 121 tests below check the MECHANISM of a conflict that is listed and answered, on fixtures
+// built before that, so they run with those two rules switched off. What the engine does by
+// default is checked in the Pass 126 tests (the last describes in this file).
+const LEGACY = { recency: false, combinePractice: false };
 
 // A complete piece, in the shape the app saves, loaded the way the app loads it.
 function makePiece(over = {}) {
@@ -193,7 +202,8 @@ function unlogSession(piece, chunkId, day) {
 const partsOfTruth = (piece) => {
   const out = {};
   Object.keys(piece).forEach((k) => {
-    if (k === "progress" || k === "updatedAt" || k === "lastLoggedAt") return;
+    // settingTimes (Pass 126) is the dated notes, not a part: they decide a conflict
+    if (k === "progress" || k === "updatedAt" || k === "lastLoggedAt" || k === "settingTimes") return;
     out[k] = piece[k];
   });
   Object.keys(piece.progress || {}).forEach((id) => {
@@ -285,7 +295,7 @@ describe("merging by part: each rule (Pass 117)", () => {
       updatedAt: 10,
     });
   const edit = (piece, patch, stamp = 20) => ({ ...piece, ...patch, updatedAt: stamp });
-  const plan = (local, remote, from) => planPieceMerge({ local, remote, base: piecePartFingerprints(from) });
+  const plan = (local, remote, from) => planPieceMerge({ ...LEGACY, local, remote, base: piecePartFingerprints(from) });
 
   test("unchanged on both sides: nothing to do, the piece comes back untouched", () => {
     const b = base();
@@ -448,7 +458,7 @@ describe("merging by part: each rule (Pass 117)", () => {
     const mine = edit(b, { name: "Mine" }, 30);
     const theirs = edit(b, { notes: "Theirs" }, 40);
     for (const noBase of [undefined, null, {}]) {
-      const r = planPieceMerge({ local: mine, remote: theirs, base: noBase });
+      const r = planPieceMerge({ ...LEGACY, local: mine, remote: theirs, base: noBase });
       assert.equal(r.status, "ask");
       assert.equal(r.reason, "no-base");
       assert.equal(r.merged, mine);
@@ -459,7 +469,7 @@ describe("merging by part: each rule (Pass 117)", () => {
   test("two different pieces are never merged", () => {
     const b = base();
     const other = { ...clone(b), id: "p2" };
-    const r = planPieceMerge({ local: b, remote: other, base: piecePartFingerprints(b) });
+    const r = planPieceMerge({ ...LEGACY, local: b, remote: other, base: piecePartFingerprints(b) });
     assert.equal(r.status, "ask");
     assert.equal(r.reason, "different-ids");
     assert.equal(planPieceMerge({ local: null, remote: b, base: {} }).reason, "not-pieces");
@@ -468,12 +478,12 @@ describe("merging by part: each rule (Pass 117)", () => {
   test("when the remote copy is what the base was, this device's piece comes back untouched", () => {
     const b = base();
     const mine = { ...logSession(b, "c9", { day: 2, loggedAt: 261 }), name: "Mine", updatedAt: 30 };
-    const r = planPieceMerge({ local: mine, remote: clone(b), base: piecePartFingerprints(b) });
+    const r = planPieceMerge({ ...LEGACY, local: mine, remote: clone(b), base: piecePartFingerprints(b) });
     assert.equal(r.status, "local-only");
     assert.equal(r.merged, mine, "the same object, not a copy");
     // even when the remote's updatedAt is later (it was touched without changing anything)
     const touched = { ...clone(b), updatedAt: 999 };
-    assert.equal(planPieceMerge({ local: mine, remote: touched, base: piecePartFingerprints(b) }).merged, mine);
+    assert.equal(planPieceMerge({ ...LEGACY, local: mine, remote: touched, base: piecePartFingerprints(b) }).merged, mine);
   });
 
   test("when this device hasn't changed anything, the remote's changes are simply taken", () => {
@@ -491,12 +501,12 @@ describe("merging by part: each rule (Pass 117)", () => {
     const theirs = edit(logSession(b, "c13", { day: 2, loggedAt: 381 }), { name: "Theirs" }, 40);
     const snapshot = [clone(mine), clone(theirs), clone(piecePartFingerprints(b))];
     const baseParts = piecePartFingerprints(b);
-    const r = planPieceMerge({ local: mine, remote: theirs, base: baseParts });
+    const r = planPieceMerge({ ...LEGACY, local: mine, remote: theirs, base: baseParts });
     assert.ok(same(mine, snapshot[0]) && same(theirs, snapshot[1]) && same(baseParts, snapshot[2]));
     r.merged.progress.c9.sessions.push({ nope: true });
     r.conflicts[0].local = "scribbled";
     assert.ok(same(mine, snapshot[0]), "writing to the result doesn't reach the input");
-    assert.equal(planPieceMerge({ local: mine, remote: theirs, base: baseParts }).conflicts[0].local, "Mine");
+    assert.equal(planPieceMerge({ ...LEGACY, local: mine, remote: theirs, base: baseParts }).conflicts[0].local, "Mine");
   });
 
   test("a piece in the app's own shape (not yet through a reload) merges into the shape a reload would give", () => {
@@ -504,7 +514,7 @@ describe("merging by part: each rule (Pass 117)", () => {
     // a chunk's first record as the app builds it: no tier1Done, no troubleSpots, no ladder fields
     const rawLocal = { ...clone(b), name: "Mine", progress: { ...clone(b.progress), c9: { doneDays: [2], sessions: [{ day: 2, loggedAt: 291, loggedDate: "2026-03-02" }] } }, updatedAt: 30 };
     const rawRemote = { ...clone(b), notes: "Theirs", updatedAt: 40 };
-    const r = planPieceMerge({ local: rawLocal, remote: rawRemote, base: piecePartFingerprints(b) });
+    const r = planPieceMerge({ ...LEGACY, local: rawLocal, remote: rawRemote, base: piecePartFingerprints(b) });
     assert.equal(r.status, "merged");
     assert.ok(same(r.merged, validateAndMigratePiece(clone(r.merged))), "the merged piece is already in the form a reload gives");
     assert.equal(r.merged.progress.c9.tier1Done, false);
@@ -584,7 +594,7 @@ describe("a reschedule on one device, a session on another (Pass 117)", () => {
       const oracle = { ...loggedFirst, progress: { ...work, c9: doneOn(loggedDay) }, rescheduleMarker: computeRescheduleRemainder(loggedFirst, cs, getEffectiveTimeline(loggedFirst, cs)).marker };
 
       for (const [local, remote] of [[a, b], [b, a]]) {
-        const r = planPieceMerge({ local, remote, base: piecePartFingerprints(b0) });
+        const r = planPieceMerge({ ...LEGACY, local, remote, base: piecePartFingerprints(b0) });
         assert.equal(r.status, "merged", "no conflict, no question");
         assert.deepEqual(r.conflicts, []);
         assert.ok(same(r.merged.rescheduleMarker, a.rescheduleMarker), "the marker is A's, untouched");
@@ -619,7 +629,7 @@ describe("a reschedule on one device, a session on another (Pass 117)", () => {
     const b0 = rescheduled(fresh());
     const mine = { ...b0, progress: { c1: doneOn(12) }, updatedAt: 50 };
     const theirs = { ...b0, progress: { c5: doneOn(12) }, updatedAt: 60 };
-    const r = planPieceMerge({ local: mine, remote: theirs, base: piecePartFingerprints(b0) });
+    const r = planPieceMerge({ ...LEGACY, local: mine, remote: theirs, base: piecePartFingerprints(b0) });
     assert.equal(r.status, "merged");
     assert.deepEqual(Object.keys(r.merged.progress).sort(), ["c1", "c5"]);
   });
@@ -628,7 +638,7 @@ describe("a reschedule on one device, a session on another (Pass 117)", () => {
     const b0 = fresh();
     const a = rescheduled(b0);
     const c = { ...rescheduled(b0), rescheduleMarker: { ...a.rescheduleMarker, asOfDay: 9 }, updatedAt: 40 };
-    const r = planPieceMerge({ local: a, remote: c, base: piecePartFingerprints(b0) });
+    const r = planPieceMerge({ ...LEGACY, local: a, remote: c, base: piecePartFingerprints(b0) });
     assert.deepEqual(r.conflicts.map((x) => [x.part, x.kind]), [["rescheduleMarker", "field"]]);
   });
 });
@@ -659,7 +669,8 @@ describe("a reschedule on one device, a session on another (Pass 117)", () => {
 // not from the engine's fingerprints, so the checks don't depend on the code
 // they check.
 describe("two simulated devices (Pass 117)", () => {
-  const RUNS = 300;
+  // SIM_RUNS=3000 npm test runs the wider check CLAUDE.md asks for before trusting an engine change.
+  const RUNS = Number(process.env.SIM_RUNS) || 300;
   const ROUNDS = 6;
 
   function startingPiece(rng) {
@@ -717,7 +728,8 @@ describe("two simulated devices (Pass 117)", () => {
       if (piece.scheduleMode === "minutes") next = { ...piece, minutesPerDay: pickOf(rng, [20, 30, 45, 60]), practiceDaysPerWeek: pickOf(rng, [5, 6, 7]) };
       else {
         const daysToLearn = pickOf(rng, [14, 21, 28, 35]);
-        next = { ...piece, daysToLearn, targetDate: addDaysISO(piece.startDate, daysToLearn - 1), practiceDaysPerWeek: pickOf(rng, [5, 6, 7]) };
+        // (Pass 126: like the Settings form, which works minutes per day out from the date in this mode)
+        next = { ...piece, daysToLearn, minutesPerDay: 5 * Math.ceil(420 / daysToLearn / 5), targetDate: addDaysISO(piece.startDate, daysToLearn - 1), practiceDaysPerWeek: pickOf(rng, [5, 6, 7]) };
       }
     } else if (kind === "difficulty") {
       const measureDifficulty = [...piece.measureDifficulty];
@@ -792,6 +804,10 @@ describe("two simulated devices (Pass 117)", () => {
         outcome: pickOf(rng, ["pass", "pass", "soft-miss", "fail"]),
       });
     }
+    // Pass 126: like App.jsx's updatePiece, every change to a single-value setting leaves a
+    // dated note on it; one edit in four is made as a device on the previous version would make
+    // it (no note), so the piece's updatedAt stands in.
+    if (next !== piece && rng() < 0.75) next = stampChangedSettings(piece, next, stamp);
     return reload(next, stamp);
   }
 
@@ -814,6 +830,8 @@ describe("two simulated devices (Pass 117)", () => {
       tally[r.status] = (tally[r.status] || 0) + 1;
       tally.partConflicts += r.conflicts.length;
       tally.chunkConflicts += r.conflicts.filter((c) => c.kind === "progress").length;
+      tally.recency = (tally.recency || 0) + r.recencySettled.length;
+      tally.combined = (tally.combined || 0) + r.combinedPractice.length;
 
       // the inputs are untouched
       assert.ok(same(local, input.local) && same(remote, input.remote) && same(d.base, input.base), `inputs unchanged (${where})`);
@@ -872,6 +890,31 @@ describe("two simulated devices (Pass 117)", () => {
           if (k === "daysToLearn" && mt.scheduleMode === "minutes") return;
           const cl = changed(lt, k);
           const cr = changed(rt, k);
+          // (10) Pass 126: when the target date was changed on both sides to different values and
+          // the more recent change settled it, the numbers worked out from it (days to learn,
+          // minutes per day, the reschedule marker) go with the date that was kept, even one only
+          // one side changed: a date edit regenerates them, so pairing one device's date with the
+          // other's numbers would give a plan that does not add up. (The same rule as when the
+          // person answered the date's question, Pass 121.)
+          const dateSettled = r.recencySettled.some((x) => x.part === "targetDate");
+          if (dateSettled && DATE_LINKED_FIELDS.includes(k) && (cl || cr) && mt.scheduleMode === "days") {
+            assert.equal(conflictKeys.has(k), false, `(10) ${k}: follows the date, never asked (${where})`);
+            const dateSide = same(mt.targetDate, lt.targetDate) ? lt : rt;
+            assert.ok(same(mt[k], dateSide[k]), `(10) ${k}: goes with the date that was kept (${where})`);
+            tally.followers = (tally.followers || 0) + 1;
+            return;
+          }
+          // (10b) Pass 126: minutes per day is worked out from the date in this mode. Changed on both sides
+          // to different values while the date changed on ONE side only, it goes with the side that
+          // changed the date, never paired with the other side's date.
+          const dateOnLeft = changed(lt, "targetDate");
+          const dateOnRight = changed(rt, "targetDate");
+          if (k === "minutesPerDay" && mt.scheduleMode === "days" && cl && cr && !same(lt[k], rt[k]) && dateOnLeft !== dateOnRight) {
+            assert.equal(conflictKeys.has(k), false, `(10b) ${k}: goes with the date, never asked (${where})`);
+            assert.ok(same(mt[k], (dateOnLeft ? lt : rt)[k]), `(10b) ${k}: goes with the side that changed the date (${where})`);
+            tally.followersOneSide = (tally.followersOneSide || 0) + 1;
+            return;
+          }
           if (!cl && !cr) assert.ok(same(mt[k], lt[k]), `unchanged part ${k} (${where})`);
           else if (cl && !cr) assert.ok(same(mt[k], lt[k]), `(2) ${k}: only this device changed it (${where})`);
           else if (!cl && cr) assert.ok(same(mt[k], rt[k]), `(2) ${k}: only the other side changed it (${where})`);
@@ -893,6 +936,38 @@ describe("two simulated devices (Pass 117)", () => {
             assert.ok(r.softSettled.some((s) => s.part === k && s.side === side), `(7) ${k}: said so in softSettled (${where})`);
             tally.softSettled = (tally.softSettled || 0) + 1;
             if (k !== "createdAt" && side === "local") tally.orderByNote = (tally.orderByNote || 0) + 1;
+          } else if (k.startsWith("progress:")) {
+            // (8) Pass 126: a chunk's practice record both devices changed is combined, never a
+            // question: every session either side holds is in it (the sim only adds sessions
+            // here, undoes included, since an undo is a session fewer on the side that made it).
+            assert.equal(conflictKeys.has(k), false, `(8) ${k}: practice is never a conflict (${where})`);
+            assert.ok(r.combinedPractice.some((c) => c.part === k), `(8) ${k}: said so in combinedPractice (${where})`);
+            tally.combinedChecked = (tally.combinedChecked || 0) + 1;
+            const wanted = new Set([...sessionKeysInPart(k, lt[k]), ...sessionKeysInPart(k, rt[k])]);
+            const had = sessionKeysInPart(k, mt[k]);
+            wanted.forEach((x) => {
+              // a session either side logged since the base must be there; one both sides still
+              // hold from before is there too (the sim's undo removes it from ONE side, and
+              // without a base copy the engine brings it back, as documented)
+              assert.ok(had.has(x), `(8) ${k}: session ${x} is in the combined record (${where})`);
+            });
+          } else if (RECENCY_FIELDS.includes(k) && !(DATE_LINKED_FIELDS.includes(k) && mt.scheduleMode === "days" && changed(lt, "targetDate") && changed(rt, "targetDate") && !same(lt.targetDate, rt.targetDate))) {
+            // (9) Pass 126: a single-value setting both devices changed differently goes to the one
+            // that changed it more recently, judged here from the two copies' own dated notes (or
+            // their updatedAt where one has none), not from the engine. A tie is not guessed.
+            const tl = settingTime(L, k);
+            const tr = settingTime(R, k);
+            if (tl === tr) {
+              assert.ok(conflictKeys.has(k), `(9) ${k}: a tie stays a conflict (${where})`);
+              assert.ok(same(mt[k], lt[k]), `(9) ${k}: and this device's value is kept (${where})`);
+              tally.ties = (tally.ties || 0) + 1;
+            } else {
+              const side = tl > tr ? "local" : "remote";
+              assert.equal(conflictKeys.has(k), false, `(9) ${k}: the more recent change settles it (${where})`);
+              assert.ok(same(mt[k], (side === "local" ? lt : rt)[k]), `(9) ${k}: the ${side} copy's value wins (${where})`);
+              assert.ok(r.recencySettled.some((x) => x.part === k && x.side === side), `(9) ${k}: said so in recencySettled (${where})`);
+              tally.recencyChecked = (tally.recencyChecked || 0) + 1;
+            }
           } else {
             assert.ok(conflictKeys.has(k), `(3) ${k}: changed on both to different values is reported (${where})`);
             assert.ok(same(mt[k], lt[k]), `(3) ${k}: this device's value is kept (${where})`);
@@ -903,6 +978,31 @@ describe("two simulated devices (Pass 117)", () => {
         // nothing is in softSettled that was not a soft part changed on both sides
         r.softSettled.forEach((s) => assert.ok(SOFT_PARTS.includes(s.part) && changed(lt, s.part) && changed(rt, s.part) && !same(lt[s.part], rt[s.part]), `(7) no false softSettled on ${s.part} (${where})`));
         conflictKeys.forEach((k) => assert.ok(changed(lt, k) && changed(rt, k) && !same(lt[k], rt[k]), `no false conflict on ${k} (${where})`));
+        r.recencySettled.forEach((x) => assert.ok(RECENCY_FIELDS.includes(x.part) && changed(lt, x.part) && changed(rt, x.part) && !same(lt[x.part], rt[x.part]), `(9) no false recencySettled on ${x.part} (${where})`));
+        // (11) Pass 126: when nothing is asked, the two devices end IDENTICAL whichever of them
+        // does the merging (the same base, the roles swapped), except for the display
+        // arrangement, which one fixed side decides (SOFT_PARTS, Pass 122b), and the order focus
+        // spots are listed in.
+        if (r.status === "merged") {
+          const swapped = planPieceMerge({ local: remote, remote: local, base: d.base });
+          if (swapped.status === "merged") {
+            const strip = (piece) => {
+              const out = { ...partsOfTruth(piece), settingTimes: piece.settingTimes || null };
+              SOFT_PARTS.forEach((k) => delete out[k]);
+              Object.keys(out).forEach((k) => {
+                if (k.startsWith("progress:") && out[k] && Array.isArray(out[k].troubleSpots)) {
+                  out[k] = { ...out[k], troubleSpots: [...out[k].troubleSpots].sort((a, b) => String(a.id).localeCompare(String(b.id))) };
+                }
+              });
+              return out;
+            };
+            const sa = strip(merged);
+            const sb = strip(swapped.merged);
+            const differing = [...new Set([...Object.keys(sa), ...Object.keys(sb)])].filter((k) => !same(sa[k], sb[k]));
+            assert.deepEqual(differing, [], `(11) the same piece whichever device merges (${where})`);
+            tally.converged = (tally.converged || 0) + 1;
+          }
+        }
         // (1) every session either side logged since the base is in the merged piece or in a conflict
         const have = sessionKeys(merged);
         r.conflicts.forEach((c) => {
@@ -962,13 +1062,19 @@ describe("two simulated devices (Pass 117)", () => {
     const tally = simulate("every kind of edit", EVERY_KIND, RUNS);
     assert.ok(tally.merges > RUNS, "the simulation really merged");
     assert.ok((tally.merged || 0) > 0 && (tally.conflicts || 0) > 0 && (tally["whole-piece-conflict"] || 0) > 0, "it exercised clean merges, part conflicts and whole-piece conflicts");
-    assert.ok(tally.partConflicts > 0 && tally.chunkConflicts > 0, "and single-part conflicts");
+    assert.ok(tally.partConflicts > 0, "and single-part conflicts (what recency cannot settle is still asked)");
+    assert.equal(tally.chunkConflicts, 0, "but never a practice record: that is combined");
+    assert.ok((tally.combinedChecked || 0) > 0, "a chunk logged on both sides was combined");
+    assert.ok((tally.recencyChecked || 0) > 0, "a setting changed on both sides was settled by the more recent change");
+    assert.ok((tally.followers || 0) > 0, "and the numbers worked out from the target date followed the date");
+    assert.ok((tally.followersOneSide || 0) > 0, "and minutes per day went with the one side that changed the date");
+    assert.ok((tally.converged || 0) > 0, "and two devices that merged each other's copy ended identical");
     assert.ok((tally.softSettled || 0) > 0, "and piece order or date added changed on both sides (settled by the engine, never a conflict)");
     assert.ok((tally.orderByNote || 0) > 0, "and a reorder note on this device beat the other copy's order (the more recent reorder wins)");
   });
 
   test("100 more runs with an everyday mix (mostly practice sessions): the same seven invariants", () => {
-    const tally = simulate("everyday mix", EVERYDAY, 100);
+    const tally = simulate("everyday mix", EVERYDAY, Number(process.env.SIM_RUNS) ? Math.ceil(Number(process.env.SIM_RUNS) / 3) : 100);
     assert.ok((tally.merged || 0) > 0);
   });
 });
@@ -1109,11 +1215,11 @@ describe("settling each conflict the way the person said (Pass 121)", () => {
     const theirs = edit(logSession(b, "c5", { day: 3, loggedAt: 311, bpm: 90 }), { name: "Theirs" }, 40);
     return { b, mine, theirs, base: fromBase(b) };
   };
-  const settle = (local, remote, base, choices) => planPieceMerge({ local, remote, base, choices });
+  const settle = (local, remote, base, choices) => planPieceMerge({ ...LEGACY, local, remote, base, choices });
 
   test("no answers at all: exactly what the engine always gave (conflicts listed, this device's values kept)", () => {
     const { mine, theirs, base } = conflicted();
-    const without = planPieceMerge({ local: mine, remote: theirs, base });
+    const without = planPieceMerge({ ...LEGACY, local: mine, remote: theirs, base });
     const withEmpty = settle(mine, theirs, base, {});
     assert.equal(without.status, "conflicts");
     assert.deepEqual(without.conflicts.map((c) => c.part).sort(), ["name", "progress:c5"]);
@@ -1215,7 +1321,7 @@ describe("settling each conflict the way the person said (Pass 121)", () => {
     const theirs = edit(b, { scheduleMode: "days" }, 40);
     // a base that neither side still holds, so both read as having changed it
     const base = { ...fromBase(b), scheduleMode: "an-older-value" };
-    assert.deepEqual(planPieceMerge({ local: mine, remote: theirs, base }).conflicts.map((c) => c.part), ["scheduleMode"]);
+    assert.deepEqual(planPieceMerge({ ...LEGACY, local: mine, remote: theirs, base }).conflicts.map((c) => c.part), ["scheduleMode"]);
     assert.equal(settle(mine, theirs, base, { scheduleMode: "remote" }).merged.scheduleMode, "days");
     assert.equal(settle(mine, theirs, base, { scheduleMode: "local" }).merged.scheduleMode, "minutes");
   });
@@ -1374,14 +1480,14 @@ describe("150 seeded pairs of copies, every conflict settled a random valid way 
       A = { ...A, updatedAt: 100 + intIn(rng, 0, 50) };
       B = { ...B, updatedAt: 100 + intIn(rng, 0, 50) };
       const base = piecePartFingerprints(b0);
-      const first = planPieceMerge({ local: A, remote: B, base });
+      const first = planPieceMerge({ ...LEGACY, local: A, remote: B, base });
       if (first.status !== "conflicts") continue;
       withConflicts++;
       const choices = {};
       first.conflicts.forEach((c) => {
         choices[c.part] = pickOf(rng, c.kind === "progress" ? ["local", "remote", "both"] : ["local", "remote"]);
       });
-      const done = planPieceMerge({ local: A, remote: B, base, choices });
+      const done = planPieceMerge({ ...LEGACY, local: A, remote: B, base, choices });
       const where = `seed ${seed}`;
       assert.equal(done.status, "merged", where);
       assert.deepEqual(done.conflicts, [], where);
@@ -2008,5 +2114,408 @@ describe("devices that reorder apart end with the most recent reorder, as a whol
     assert.ok(tally.drags > 500, `drags were made (${tally.drags})`);
     assert.ok(tally.apart > 100, `devices really dragged apart (${tally.apart})`);
     assert.ok(tally.settled > 100, `and the engine really settled order parts (${tally.settled})`);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  The more recent change wins, and practice is combined (Pass 126)   */
+/* ------------------------------------------------------------------ */
+
+describe("a setting both devices changed: the more recent change wins (Pass 126)", () => {
+  const base = () => makePiece({ updatedAt: 10, notes: "", targetBPM: 100 });
+  // `notes` writes the dated notes the way updatePiece does; `at` is the piece's updatedAt
+  const change = (piece, patch, at, notes = null) => ({ ...piece, ...patch, updatedAt: at, ...(notes ? { settingTimes: { ...(piece.settingTimes || {}), ...notes } } : {}) });
+  const merge = (local, remote, from, extra = {}) => planPieceMerge({ local, remote, base: piecePartFingerprints(from), ...extra });
+
+  test("the later dated note wins, in either direction and whichever device merges: nothing is asked", () => {
+    const b = base();
+    const early = change(b, { targetBPM: 120, status: "paused" }, 50, { targetBPM: 30, status: 30 });
+    const late = change(b, { targetBPM: 140, status: "archived" }, 40, { targetBPM: 45, status: 45 });
+    [[early, late], [late, early]].forEach(([mine, theirs], i) => {
+      const r = merge(mine, theirs, b);
+      const who = i === 0 ? "this device holds the earlier" : "this device holds the later";
+      assert.equal(r.status, "merged", who);
+      assert.deepEqual(r.conflicts, [], who);
+      assert.equal(r.merged.targetBPM, 140, who);
+      assert.equal(r.merged.status, "archived", who);
+      assert.deepEqual(r.recencySettled.map((x) => [x.part, x.side]).sort(), i === 0 ? [["status", "remote"], ["targetBPM", "remote"]] : [["status", "local"], ["targetBPM", "local"]], who);
+    });
+  });
+
+  test("each setting is judged on its own note: one side wins one setting, the other side wins another", () => {
+    const b = base();
+    const mine = change(b, { name: "Mine", status: "paused" }, 90, { name: 70, status: 20 });
+    const theirs = change(b, { name: "Theirs", status: "archived" }, 60, { name: 25, status: 55 });
+    const r = merge(mine, theirs, b);
+    assert.equal(r.merged.name, "Mine");
+    assert.equal(r.merged.status, "archived");
+    assert.deepEqual(r.recencySettled.map((x) => [x.part, x.side, x.localTime, x.remoteTime]).sort(), [["name", "local", 70, 25], ["status", "remote", 20, 55]]);
+  });
+
+  test("a note beats updatedAt: practice logged later does not win a setting the other device changed later", () => {
+    const b = base();
+    // this device changed the tempo at 20, then logged until 99; the other device changed it at 40 and did nothing after
+    const mine = change(logSession(b, "c5", { day: 2, loggedAt: 211 }), { targetBPM: 120 }, 99, { targetBPM: 20 });
+    const theirs = change(b, { targetBPM: 140 }, 40, { targetBPM: 40 });
+    const r = merge(mine, theirs, b);
+    assert.equal(r.merged.targetBPM, 140);
+    assert.ok(sessionKeys(r.merged).has("c5|211"), "and the practice came along");
+  });
+
+  test("a setting with no note falls back to the piece's updatedAt, on either side or both", () => {
+    const b = base();
+    const plainEarly = change(b, { notes: "early" }, 50);
+    const plainLate = change(b, { notes: "late" }, 80);
+    assert.equal(merge(plainEarly, plainLate, b).merged.notes, "late");
+    assert.equal(merge(plainLate, plainEarly, b).merged.notes, "late");
+    // a note against none: the note's moment against the other piece's updatedAt
+    const noted = change(b, { notes: "noted" }, 60, { notes: 70 });
+    assert.equal(merge(noted, plainLate, b).merged.notes, "late", "70 is earlier than the other piece's 80");
+    assert.equal(merge(plainLate, noted, b).merged.notes, "late");
+    assert.equal(merge(noted, plainEarly, b).merged.notes, "noted", "70 is later than the other piece's 50");
+  });
+
+  test("the same moment is a tie: nothing is guessed, this device's value is kept and it is listed", () => {
+    const b = base();
+    const mine = change(b, { name: "Mine" }, 50, { name: 30 });
+    const theirs = change(b, { name: "Theirs" }, 50, { name: 30 });
+    const r = merge(mine, theirs, b);
+    assert.equal(r.status, "conflicts");
+    assert.deepEqual(r.conflicts.map((c) => [c.part, c.local, c.remote]), [["name", "Mine", "Theirs"]]);
+    assert.equal(r.merged.name, "Mine");
+    assert.deepEqual(r.recencySettled, []);
+    // no idea at all (no notes and no updatedAt on either side) is a tie too
+    const blind = (name) => ({ ...clone(b), name });
+    const a1 = blind("A");
+    const a2 = blind("B");
+    delete a1.updatedAt;
+    delete a2.updatedAt;
+    assert.equal(planPieceMerge({ local: a1, remote: a2, base: piecePartFingerprints(b) }).status, "conflicts");
+  });
+
+  test("a setting changed to the same value on both is agreement, not a contest", () => {
+    const b = base();
+    const r = merge(change(b, { name: "Same", status: "paused" }, 50, { name: 30, status: 30 }), change(b, { name: "Same" }, 60, { name: 55 }), b);
+    assert.deepEqual([r.recencySettled, r.conflicts, r.agreed], [[], [], ["name"]]);
+    assert.equal(r.merged.settingTimes.name, 55, "the later of the two notes");
+    assert.deepEqual(r.merged.settingTimes, merge(change(b, { name: "Same" }, 60, { name: 55 }), change(b, { name: "Same", status: "paused" }, 50, { name: 30, status: 30 }), b).merged.settingTimes, "whichever device merges");
+  });
+
+  test("two copies that hold the same values but different times are 'identical': nothing to bring in, this device's copy untouched", () => {
+    const b = base();
+    const mine = change(b, { name: "Same" }, 50, { name: 30 });
+    const r = merge(mine, change(b, { name: "Same" }, 60, { name: 55 }), b);
+    assert.equal(r.status, "identical");
+    assert.equal(r.merged, mine);
+  });
+
+  test("an answer the person already gave beats the clock", () => {
+    const b = base();
+    const mine = change(b, { name: "Mine" }, 50, { name: 30 });
+    const theirs = change(b, { name: "Theirs" }, 90, { name: 80 });
+    assert.equal(merge(mine, theirs, b, { choices: { name: "local" } }).merged.name, "Mine");
+    const r = merge(mine, theirs, b, { choices: { name: "local" } });
+    assert.deepEqual(r.settled.map((x) => [x.part, x.choice]), [["name", "local"]]);
+    assert.deepEqual(r.recencySettled, []);
+  });
+
+  test("switched off (recency: false) it is the old rule: a conflict, this device's value kept", () => {
+    const b = base();
+    const mine = change(b, { name: "Mine" }, 50, { name: 30 });
+    const theirs = change(b, { name: "Theirs" }, 90, { name: 80 });
+    const r = merge(mine, theirs, b, { recency: false });
+    assert.equal(r.status, "conflicts");
+    assert.equal(r.merged.name, "Mine");
+  });
+
+  test("the dated notes of the merged piece are the same whichever device merges", () => {
+    const b = base();
+    const mine = change(b, { name: "Mine", status: "paused", composer: "C" }, 90, { name: 70, status: 20 });
+    const theirs = change(b, { name: "Theirs", status: "archived", notes: "n" }, 60, { name: 25, status: 55, notes: 58 });
+    const here = merge(mine, theirs, b).merged;
+    const there = merge(theirs, mine, b).merged;
+    assert.deepEqual(here.settingTimes, there.settingTimes);
+    // name: the winner's note. status: the winner's note. notes: only theirs changed it, so their note.
+    // composer: only mine changed it and had no note, so none (updatedAt stands in from then on).
+    assert.deepEqual(here.settingTimes, { name: 70, status: 55, notes: 58 });
+    assert.deepEqual([here.name, here.status, here.notes, here.composer], ["Mine", "archived", "n", "C"]);
+  });
+
+  test("a winner that had no note of its own is stamped with its updatedAt, the moment that decided it", () => {
+    const b = base();
+    const mine = change(b, { name: "Mine" }, 90); // no note
+    const theirs = change(b, { name: "Theirs" }, 60, { name: 30 });
+    const r = merge(mine, theirs, b);
+    assert.equal(r.merged.name, "Mine");
+    assert.equal(r.merged.settingTimes.name, 90);
+    assert.deepEqual(r.merged.settingTimes, merge(theirs, mine, b).merged.settingTimes);
+  });
+
+  test("the merged piece survives a reload unchanged, notes and all", () => {
+    const b = base();
+    const r = merge(change(b, { name: "Mine" }, 50, { name: 30 }), change(b, { name: "Theirs" }, 60, { name: 40 }), b);
+    assert.ok(same(r.merged, validateAndMigratePiece(clone(r.merged))));
+  });
+});
+
+describe("what the more recent change never settles: collections, shapes and the chunk grid (Pass 126)", () => {
+  const base = () => makePiece({ updatedAt: 10 });
+  const merge = (local, remote, from) => planPieceMerge({ local, remote, base: piecePartFingerprints(from) });
+  const rec = (n) => [{ id: `r${n}`, label: `Take ${n}`, url: `https://example.test/${n}` }];
+
+  [
+    ["recordings", rec(1), rec(2)],
+    ["documents", [{ id: "d1", label: "Score", url: "https://example.test/s" }], [{ id: "d2", label: "Parts", url: "https://example.test/p" }]],
+    ["memoryAnchors", { c1: { note: "slow down" } }, { c1: { note: "watch the thumb" } }],
+    ["bpmZones", [{ id: "z1", name: "A", start: 1, end: 8, bpm: 80 }], [{ id: "z2", name: "B", start: 1, end: 8, bpm: 90 }]],
+    ["recurringPairs", [{ a: 1, b: 9 }], [{ a: 2, b: 10 }]],
+    ["recurringMode", "simple", "basic"],
+    ["recurringMeasures", 4, 8],
+    ["otherKeys", [{ tonic: "D", quality: "major" }], [{ tonic: "E", quality: "minor" }]],
+    ["measureDifficulty", Array(32).fill(2), Array(32).fill(3)],
+    ["sections", [{ id: "s1", name: "A", start: 1, end: 16 }, { id: "s2", name: "B", start: 17, end: 32 }], [{ id: "s1", name: "X", start: 1, end: 32 }]],
+    ["customChunkSize", 8, 6],
+    ["chunkMode", "custom", "auto"],
+  ].forEach(([field, mineValue, theirValue]) => {
+    test(`${field}: changed on both, however much later the other one was, it is still asked`, () => {
+      const b = base();
+      const patchMine = field === "chunkMode" || field === "customChunkSize" ? { chunkMode: "custom", customChunkSize: 8 } : { [field]: mineValue };
+      const patchTheirs = field === "chunkMode" || field === "customChunkSize" ? { chunkMode: "custom", customChunkSize: 6 } : { [field]: theirValue };
+      const mine = { ...b, ...patchMine, updatedAt: 20, settingTimes: { name: 15 } };
+      const theirs = { ...b, ...patchTheirs, updatedAt: 99 };
+      const r = merge(mine, theirs, b);
+      assert.equal(r.status, "conflicts", field);
+      assert.ok(r.conflicts.some((c) => c.part === field || (field === "chunkMode" && c.part === "customChunkSize")), `${field} is in conflict`);
+      assert.deepEqual(r.recencySettled, [], "recency settled nothing here");
+    });
+  });
+
+  test("the chunk grid on one side against practice on the other is still the whole-piece question", () => {
+    const b = base();
+    const grid = { ...b, chunkMode: "custom", customChunkSize: 8, updatedAt: 20 };
+    const practiced = { ...logSession(b, "c5", { day: 2, loggedAt: 211 }), updatedAt: 99 };
+    assert.equal(merge(grid, practiced, b).status, "whole-piece-conflict");
+    assert.equal(merge(practiced, grid, b).status, "whole-piece-conflict");
+  });
+
+  test("the reschedule marker, revival and the ladder settings are shapes: asked, not settled by the clock", () => {
+    const b = base();
+    const marker = (n) => ({ asOfDay: n, remainingChunkOrder: [], remainingConnectorIds: [], previous: null });
+    const r = merge({ ...b, rescheduleMarker: marker(3), updatedAt: 20 }, { ...b, rescheduleMarker: marker(5), updatedAt: 99 }, b);
+    assert.deepEqual(r.conflicts.map((c) => c.part), ["rescheduleMarker"]);
+    const l1 = { ...b.ladderConfig, stabilizing: { ...b.ladderConfig.stabilizing, intervalDays: 3 } };
+    const l2 = { ...b.ladderConfig, stabilizing: { ...b.ladderConfig.stabilizing, intervalDays: 5 } };
+    assert.deepEqual(merge({ ...b, ladderConfig: l1, updatedAt: 20 }, { ...b, ladderConfig: l2, updatedAt: 99 }, b).conflicts.map((c) => c.part), ["ladderConfig"]);
+  });
+});
+
+describe("settings that follow another setting go with it (Pass 126)", () => {
+  const merge = (local, remote, from, extra = {}) => planPieceMerge({ local, remote, base: piecePartFingerprints(from), ...extra });
+
+  test("the work id goes with the work title, never paired with the other device's title", () => {
+    const b = makePiece({ updatedAt: 10 });
+    const mine = { ...b, workName: "Mine", workId: "w_mine", updatedAt: 50, settingTimes: { workName: 30 } };
+    const theirs = { ...b, workName: "Theirs", workId: "w_theirs", updatedAt: 60, settingTimes: { workName: 55 } };
+    const r = merge(mine, theirs, b);
+    assert.equal(r.status, "merged");
+    assert.deepEqual([r.merged.workName, r.merged.workId], ["Theirs", "w_theirs"]);
+    const back = merge(theirs, mine, b);
+    assert.deepEqual([back.merged.workName, back.merged.workId], ["Theirs", "w_theirs"], "whichever device merges");
+    assert.deepEqual(r.conflicts, []);
+  });
+
+  test("a title that ties leaves the work id as it was: asked, as before", () => {
+    const b = makePiece({ updatedAt: 10 });
+    const mine = { ...b, workName: "Mine", workId: "w_mine", updatedAt: 50 };
+    const theirs = { ...b, workName: "Theirs", workId: "w_theirs", updatedAt: 50 };
+    const r = merge(mine, theirs, b);
+    assert.deepEqual(r.conflicts.map((c) => c.part).sort(), ["workId", "workName"]);
+  });
+
+  test("in a finish-by-a-date schedule the numbers worked out from the target date go with the date that was kept", () => {
+    const b = makePiece({ updatedAt: 10, scheduleMode: "days", daysToLearn: 21, minutesPerDay: 30, targetDate: "2026-03-21" });
+    const mine = { ...b, targetDate: "2026-04-01", daysToLearn: 32, minutesPerDay: 20, updatedAt: 50, settingTimes: { targetDate: 40, minutesPerDay: 40 } };
+    const theirs = { ...b, targetDate: "2026-04-15", daysToLearn: 46, minutesPerDay: 15, updatedAt: 70, settingTimes: { targetDate: 65, minutesPerDay: 65 } };
+    [[mine, theirs], [theirs, mine]].forEach(([l, r], i) => {
+      const out = merge(l, r, b);
+      assert.equal(out.status, "merged", `role ${i}`);
+      assert.deepEqual([out.merged.targetDate, out.merged.daysToLearn, out.merged.minutesPerDay], ["2026-04-15", 46, 15], "their date with THEIR days and minutes, never a mix");
+    });
+    const settled = merge(mine, theirs, b).recencySettled.map((x) => x.part);
+    assert.deepEqual(settled, ["targetDate"], "only the date is reported: the rest went with it");
+  });
+
+  test("a numbers change only one side made still goes with the date that was kept (a date edit regenerates them)", () => {
+    const b = makePiece({ updatedAt: 10, scheduleMode: "days", daysToLearn: 21, minutesPerDay: 30, targetDate: "2026-03-21" });
+    const mine = { ...b, targetDate: "2026-04-01", updatedAt: 50, settingTimes: { targetDate: 40 } };
+    const theirs = { ...b, targetDate: "2026-04-15", minutesPerDay: 15, updatedAt: 70, settingTimes: { targetDate: 65, minutesPerDay: 65 } };
+    const out = merge(mine, theirs, b);
+    assert.deepEqual([out.merged.targetDate, out.merged.minutesPerDay], ["2026-04-15", 15]);
+    const flipped = merge({ ...mine, settingTimes: { targetDate: 90 } }, theirs, b);
+    assert.deepEqual([flipped.merged.targetDate, flipped.merged.minutesPerDay], ["2026-04-01", 30], "this device's date, and the numbers that go with it");
+  });
+
+  test("the date moved on ONE device and both devices re-saved: minutes per day goes with the device that moved the date, whichever is later", () => {
+    const b = makePiece({ updatedAt: 10, scheduleMode: "days", daysToLearn: 21, minutesPerDay: 30, targetDate: "2026-03-21" });
+    // found while reviewing: this laptop renamed the piece (a Save worked minutes per day out from the OLD date, later), the
+    // phone moved the date out by a month (days and minutes worked out from the new date, earlier). The clock must not pick
+    // the laptop's minutes for the phone's date.
+    const laptop = { ...b, name: "Renamed", minutesPerDay: 15, updatedAt: 5000, settingTimes: { name: 5000, minutesPerDay: 5000 } };
+    const phone = { ...b, targetDate: "2026-04-22", daysToLearn: 52, minutesPerDay: 9, updatedAt: 4000, settingTimes: { targetDate: 4000, minutesPerDay: 4000 } };
+    [[laptop, phone], [phone, laptop]].forEach(([l, r], i) => {
+      const out = merge(l, r, b);
+      assert.equal(out.status, "merged", `role ${i}`);
+      assert.deepEqual([out.merged.name, out.merged.targetDate, out.merged.daysToLearn, out.merged.minutesPerDay], ["Renamed", "2026-04-22", 52, 9], `role ${i}: the phone's date with the phone's days and minutes`);
+      assert.deepEqual(out.recencySettled, [], "name was changed on one side only, and minutes went with the date: nothing was a contest");
+      assert.deepEqual(out.conflicts, []);
+    });
+    // and the other way round: the laptop moved the date, the phone only re-saved
+    const moved = { ...b, targetDate: "2026-04-22", daysToLearn: 52, minutesPerDay: 9, updatedAt: 4000, settingTimes: { targetDate: 4000, minutesPerDay: 4000 } };
+    const resaved = { ...b, notes: "x", minutesPerDay: 15, updatedAt: 9000, settingTimes: { notes: 9000, minutesPerDay: 9000 } };
+    [[moved, resaved], [resaved, moved]].forEach(([l, r], i) => assert.deepEqual([merge(l, r, b).merged.targetDate, merge(l, r, b).merged.minutesPerDay], ["2026-04-22", 9], `role ${i}`));
+    // the notes of the merged piece are the same whichever device merges
+    assert.deepEqual(merge(laptop, phone, b).merged.settingTimes, merge(phone, laptop, b).merged.settingTimes);
+  });
+
+  test("the date unchanged on both sides: minutes per day is an ordinary setting and the later change settles it", () => {
+    const b = makePiece({ updatedAt: 10, scheduleMode: "days", daysToLearn: 21, minutesPerDay: 30, targetDate: "2026-03-21" });
+    const mine = { ...b, minutesPerDay: 20, updatedAt: 50, settingTimes: { minutesPerDay: 40 } };
+    const theirs = { ...b, minutesPerDay: 25, updatedAt: 70, settingTimes: { minutesPerDay: 65 } };
+    const out = merge(mine, theirs, b);
+    assert.equal(out.merged.minutesPerDay, 25);
+    assert.deepEqual(out.recencySettled.map((x) => [x.part, x.side]), [["minutesPerDay", "remote"]]);
+  });
+
+  test("a date that ties is a question, and the numbers stay ordinary parts until it is answered", () => {
+    const b = makePiece({ updatedAt: 10, scheduleMode: "days", daysToLearn: 21, minutesPerDay: 30, targetDate: "2026-03-21" });
+    const mine = { ...b, targetDate: "2026-04-01", minutesPerDay: 20, updatedAt: 50 };
+    const theirs = { ...b, targetDate: "2026-04-15", minutesPerDay: 15, updatedAt: 50 };
+    const out = merge(mine, theirs, b);
+    assert.deepEqual(out.conflicts.map((c) => c.part).sort(), ["minutesPerDay", "targetDate"], "neither settled by the clock");
+    assert.deepEqual(out.linkedToDate, ["minutesPerDay"]);
+    // and an answer settles the date and what follows it, as it always did
+    const answered = merge(mine, theirs, b, { choices: { targetDate: "remote" } });
+    assert.deepEqual([answered.merged.targetDate, answered.merged.minutesPerDay, answered.status], ["2026-04-15", 15, "merged"]);
+  });
+
+  test("in a minutes-per-day schedule minutes per day is a setting like any other, and days to learn is worked out from it", () => {
+    const b = makePiece({ updatedAt: 10, scheduleMode: "minutes", minutesPerDay: 30 });
+    const mine = { ...b, minutesPerDay: 20, updatedAt: 50, settingTimes: { minutesPerDay: 30 } };
+    const theirs = { ...b, minutesPerDay: 45, updatedAt: 60, settingTimes: { minutesPerDay: 55 } };
+    const out = merge(mine, theirs, b);
+    assert.equal(out.status, "merged");
+    assert.equal(out.merged.minutesPerDay, 45);
+    assert.deepEqual(out.recencySettled.map((x) => [x.part, x.side]), [["minutesPerDay", "remote"]]);
+    assert.ok(same(out.merged, validateAndMigratePiece(clone(out.merged))), "and days to learn is what a reload would work out");
+  });
+
+  test("the schedule mode is settled first, and the schedule is read in the mode that won", () => {
+    const b = makePiece({ updatedAt: 10, scheduleMode: "days", daysToLearn: 21, minutesPerDay: 30, targetDate: "2026-03-21" });
+    const mine = { ...b, scheduleMode: "minutes", minutesPerDay: 20, updatedAt: 50, settingTimes: { scheduleMode: 40, minutesPerDay: 40 } };
+    const theirs = { ...b, targetDate: "2026-04-15", daysToLearn: 46, updatedAt: 70, settingTimes: { targetDate: 65 } };
+    const out = merge(mine, theirs, b);
+    assert.equal(out.merged.scheduleMode, "minutes");
+    assert.equal(out.merged.minutesPerDay, 20);
+  });
+});
+
+describe("practice both devices logged is combined, never asked (Pass 126)", () => {
+  const base = () =>
+    makePiece({
+      updatedAt: 10,
+      progress: { c1: { doneDays: [1], sessions: [{ day: 1, loggedAt: 100, loggedDate: "2026-03-01", cleanReps: 3, bpm: 80, outcome: "pass" }] }, c5: { doneDays: [], sessions: [] } },
+    });
+  const merge = (local, remote, from, extra = {}) => planPieceMerge({ local, remote, base: piecePartFingerprints(from), ...extra });
+  const tags = (piece, id) => (piece.progress[id].sessions || []).map((s) => s.loggedAt);
+
+  test("the same chunk logged on both: every session, in the order logged, whichever device merges, and nothing is asked", () => {
+    const b = base();
+    const mine = logSession(b, "c5", { day: 2, loggedAt: 211 });
+    const theirs = logSession(logSession(b, "c5", { day: 2, loggedAt: 311 }), "c5", { day: 3, loggedAt: 312 });
+    [[mine, theirs], [theirs, mine]].forEach(([l, r], i) => {
+      const out = merge(l, r, b);
+      assert.equal(out.status, "merged", `role ${i}`);
+      assert.deepEqual(out.conflicts, []);
+      assert.deepEqual(tags(out.merged, "c5"), [211, 311, 312]);
+      assert.deepEqual(out.merged.progress.c5.doneDays, [2, 3]);
+      assert.deepEqual(out.combinedPractice, [{ part: "progress:c5", id: "c5" }]);
+    });
+  });
+
+  test("the two merge directions give the same record, even when nothing says whose is later", () => {
+    const b = base();
+    const spot = (id, at) => ({ id, name: id, position: "5", startMeasure: 5, endMeasure: 5, length: null, fromSetup: false, resolved: false, resolvedBpm: null, resolvedAt: null, sessions: [{ loggedAt: at, loggedDate: "2026-03-02", durationSeconds: 60 }] });
+    const mine = { ...b, progress: { ...b.progress, c5: { doneDays: [], sessions: [], troubleSpots: [spot("fs_a", 21)], currentBPM: 70 } }, updatedAt: 20 };
+    const theirs = { ...b, progress: { ...b.progress, c5: { doneDays: [], sessions: [], troubleSpots: [spot("fs_b", 22)], currentBPM: 90 } }, updatedAt: 30 };
+    const here = merge(mine, theirs, b).merged.progress.c5;
+    const there = merge(theirs, mine, b).merged.progress.c5;
+    const ids = (e) => e.troubleSpots.map((s) => s.id).sort();
+    assert.deepEqual(ids(here), ["fs_a", "fs_b"]);
+    assert.deepEqual(ids(there), ["fs_a", "fs_b"]);
+    assert.equal(here.currentBPM, there.currentBPM, "a tie goes to the same record whichever device merges");
+  });
+
+  test("a chunk only one side logged still just comes across; the other chunks are untouched", () => {
+    const b = base();
+    const mine = logSession(b, "c5", { day: 2, loggedAt: 211 });
+    const theirs = logSession(logSession(b, "c5", { day: 2, loggedAt: 311 }), "c9", { day: 2, loggedAt: 312 });
+    const out = merge(mine, theirs, b);
+    assert.deepEqual(tags(out.merged, "c9"), [312]);
+    assert.deepEqual(out.combinedPractice.map((c) => c.id), ["c5"]);
+    assert.deepEqual(out.fromRemote, ["progress:c9"]);
+  });
+
+  test("the ladder state follows the record whose latest judged session is later", () => {
+    const b = base();
+    const early = logSession(b, "c5", { day: 2, loggedAt: 211, bpm: 70 });
+    const late = logSession(b, "c5", { day: 3, loggedAt: 900, bpm: 95 });
+    const out = merge(early, late, b);
+    assert.equal(out.merged.progress.c5.currentBPM, 95);
+    assert.equal(merge(late, early, b).merged.progress.c5.currentBPM, 95, "whichever device merges");
+  });
+
+  test("with the copy both started from, a session one side undid stays undone; without it, it comes back (and says so)", () => {
+    const b = logSession(base(), "c1", { day: 2, loggedAt: 150 });
+    const withoutOld = unlogSession(b, "c1", 2); // this side undid the day-2 session
+    const mine = logSession(withoutOld, "c1", { day: 3, loggedAt: 210 });
+    const theirs = logSession(b, "c1", { day: 4, loggedAt: 310 }); // the other side kept it and logged one
+    const withBase = merge(mine, theirs, b, { baseProgress: canonicalPiece(b).progress });
+    assert.deepEqual(tags(withBase.merged, "c1"), [100, 210, 310], "150 was undone here and is not brought back");
+    const without = merge(mine, theirs, b);
+    assert.deepEqual(tags(without.merged, "c1"), [100, 150, 210, 310], "no copy to tell an undo from a session never seen: it comes back");
+  });
+
+  test("a record one side removed and the other changed is kept (practice is never dropped to settle a contest)", () => {
+    const b = base();
+    const removed = { ...b, progress: { c5: b.progress.c5 }, updatedAt: 20 };
+    const changed = logSession(b, "c1", { day: 2, loggedAt: 211 });
+    const out = merge(removed, changed, b);
+    assert.equal(out.status, "merged");
+    assert.deepEqual(tags(out.merged, "c1"), [100, 211]);
+  });
+
+  test("switched off (combinePractice: false) it is the old rule: a conflict for that chunk", () => {
+    const b = base();
+    const out = merge(logSession(b, "c5", { day: 2, loggedAt: 211 }), logSession(b, "c5", { day: 2, loggedAt: 311 }), b, { combinePractice: false });
+    assert.equal(out.status, "conflicts");
+    assert.deepEqual(out.conflicts.map((c) => c.part), ["progress:c5"]);
+  });
+
+  test("an answer the person already gave for a record still applies as given", () => {
+    const b = base();
+    const mine = logSession(b, "c5", { day: 2, loggedAt: 211 });
+    const theirs = logSession(b, "c5", { day: 2, loggedAt: 311 });
+    const out = merge(mine, theirs, b, { choices: { "progress:c5": "remote" } });
+    assert.deepEqual(tags(out.merged, "c5"), [311]);
+    assert.deepEqual(out.combinedPractice, []);
+  });
+
+  test("every session either device logged is in the merged piece (lastLoggedAt too), and it survives a reload", () => {
+    const b = base();
+    const mine = logSession(b, "c5", { day: 4, loggedAt: 211 });
+    const theirs = logSession(b, "c5", { day: 2, loggedAt: 311 });
+    const out = merge(mine, theirs, b);
+    assert.equal(out.merged.lastLoggedAt, "2026-03-04");
+    assert.ok(same(out.merged, validateAndMigratePiece(clone(out.merged))));
   });
 });

@@ -28,8 +28,8 @@
 /* ------------------------------------------------------------------ */
 
 import { PIECE_KEY_PREFIX } from "./constants";
-import { validateAndMigratePiece, validateAndMigrateTechnique, mergeSessionArrays, TECHNIQUE_KEY } from "./storage";
-import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints, planPieceMerge } from "./pieceMerge";
+import { validateAndMigratePiece, validateAndMigrateTechnique, TECHNIQUE_KEY } from "./storage";
+import { isObject, canonicalPiece, piecePartFingerprints, planPieceMerge } from "./pieceMerge";
 import { techniquePartFingerprints, planTechniqueMerge } from "./techniqueMerge";
 
 const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
@@ -163,99 +163,24 @@ function migrateStoredPiece(raw, id) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Folding sessions that a part-by-part merge would drop              */
+/*  Practice both tabs logged                                          */
 /* ------------------------------------------------------------------ */
 
-// Pass 117's engine treats one chunk's whole progress entry (its sessions
-// included) as a single part. Two tabs that each logged a session on the SAME
-// chunk therefore conflict, and the engine keeps this tab's entry whole, which
-// would drop the other tab's session. Practice history is the one thing that
-// must never silently disappear, so for a conflicted progress entry this tab's
-// copy is kept AND the sessions (and done days, and focus-spot sessions) the
-// other tab added since the last save are added to it. Anything one side
-// removed since then stays removed (an undo is not undone). The entry's ladder
-// state (stage, due date, tempo) stays this tab's: it is a function of the
-// sessions, and rebuilding it is not this pass's job (docs/Algorithms.md).
-
-const contentKey = (value) => fingerprint(value);
-
-function sessionsAddedSince(base, theirs) {
-  const before = new Set((base || []).map(contentKey));
-  return (theirs || []).filter((s) => !before.has(contentKey(s))).map(toJsonValue);
-}
-
-function foldSessionLists(kept, theirs, base) {
-  const added = sessionsAddedSince(base, theirs);
-  const merged = mergeSessionArrays(kept || [], added);
-  // Keep them in the order they were logged when every one says when.
-  if (merged.every((s) => s && typeof s.loggedAt === "number")) {
-    return merged.map((s, i) => ({ s, i })).sort((a, b) => a.s.loggedAt - b.s.loggedAt || a.i - b.i).map((x) => x.s);
-  }
-  return merged;
-}
-
-function foldDoneDays(kept, theirs, base) {
-  const have = new Set([...(kept || []), ...(base || [])]);
-  const extra = (theirs || []).filter((d) => !have.has(d));
-  return extra.length ? [...(kept || []), ...extra].sort((a, b) => a - b) : kept || [];
-}
-
-function foldSpots(kept, theirs, base) {
-  const mine = Array.isArray(kept) ? kept : [];
-  const others = Array.isArray(theirs) ? theirs : [];
-  const before = Array.isArray(base) ? base : [];
-  if (!others.length) return kept;
-  const out = mine.map((spot) => {
-    const other = others.find((s) => s && spot && s.id === spot.id);
-    if (!other) return spot;
-    const baseSpot = before.find((s) => s && s.id === spot.id);
-    const added = sessionsAddedSince(baseSpot && baseSpot.sessions, other.sessions);
-    return added.length ? { ...spot, sessions: mergeSessionArrays(spot.sessions || [], added) } : spot;
+// A chunk's practice record that BOTH tabs changed is combined by Pass 117's engine (since Pass
+// 126; before that this file had a fold of its own, and the account path had none): every
+// session either tab added, the days practiced, the focus spots' own sessions. It is given the
+// copy this tab last saved (`baseProgress`), so a session one tab undid since then stays undone
+// and is not brought back by the other tab still holding it. What the engine cannot do is
+// rebuild the ladder state (stage, due date, tempo) from the sessions: it comes from the record
+// whose latest judged session is later (docs/Algorithms.md).
+// How many sessions the combined record added to this tab's own, per chunk, for the report.
+function foldedReport(plan, mine) {
+  const mineProgress = (mine && mine.progress) || {};
+  return (plan.combinedPractice || []).map((c) => {
+    const before = ((mineProgress[c.id] && mineProgress[c.id].sessions) || []).length;
+    const after = ((plan.merged.progress[c.id] && plan.merged.progress[c.id].sessions) || []).length;
+    return { id: c.id, sessions: after - before };
   });
-  // A spot only the other tab has and the last save never had was added there.
-  others.forEach((other) => {
-    if (other && !mine.some((s) => s && s.id === other.id) && !before.some((s) => s && s.id === other.id)) out.push(toJsonValue(other));
-  });
-  return out;
-}
-
-function latestLoggedDate(progress) {
-  let latest = null;
-  Object.keys(progress || {}).forEach((id) => {
-    ((progress[id] && progress[id].sessions) || []).forEach((s) => {
-      if (s && s.loggedDate && (!latest || s.loggedDate > latest)) latest = s.loggedDate;
-    });
-  });
-  return latest;
-}
-
-// `plan` is planPieceMerge's answer; `base` and `storage` are the piece as this
-// tab last saved it and as storage holds it now.
-function foldConflictedProgress(plan, base, storagePiece) {
-  const conflicted = plan.conflicts.filter((c) => c.kind === "progress");
-  if (!conflicted.length) return { piece: plan.merged, folded: [] };
-  const baseProgress = canonicalPiece(base).progress || {};
-  const theirProgress = canonicalPiece(storagePiece).progress || {};
-  const progress = { ...plan.merged.progress };
-  const folded = [];
-  conflicted.forEach((c) => {
-    const theirs = theirProgress[c.id];
-    if (!isObject(theirs)) return;
-    const mine = progress[c.id];
-    if (!isObject(mine)) {
-      // This tab holds no entry for it: take the other tab's rather than lose it.
-      progress[c.id] = toJsonValue(theirs);
-      folded.push({ id: c.id, sessions: (theirs.sessions || []).length });
-      return;
-    }
-    const before = isObject(baseProgress[c.id]) ? baseProgress[c.id] : {};
-    const sessions = foldSessionLists(mine.sessions, theirs.sessions, before.sessions);
-    const doneDays = foldDoneDays(mine.doneDays, theirs.doneDays, before.doneDays);
-    const troubleSpots = foldSpots(mine.troubleSpots, theirs.troubleSpots, before.troubleSpots);
-    progress[c.id] = { ...mine, sessions, doneDays, ...(troubleSpots !== undefined ? { troubleSpots } : {}) };
-    folded.push({ id: c.id, sessions: sessions.length - (mine.sessions || []).length });
-  });
-  return { piece: { ...plan.merged, progress, lastLoggedAt: latestLoggedDate(progress) }, folded };
 }
 
 /* ------------------------------------------------------------------ */
@@ -298,11 +223,12 @@ function decidePiece(M, S, L) {
   // are never a conflict; between two tabs of one browser, where the person is working
   // in THIS one, this tab's value is the one kept, exactly as it was when they were
   // listed as conflicts and this tab's value was kept.)
-  const plan = planPieceMerge({ local: M, remote: S, base: piecePartFingerprints(L), softWins: "local" });
+  // (Pass 126: a setting both tabs changed goes to the more recent change; a tie keeps this
+  // tab's value. A chunk both tabs logged is combined, with this tab's last save as the base.)
+  const plan = planPieceMerge({ local: M, remote: S, base: piecePartFingerprints(L), softWins: "local", baseProgress: canonicalPiece(L).progress || {} });
   if (plan.status === "identical") return { kind: "reload", storagePiece: S };
   if (plan.status === "merged" || plan.status === "conflicts") {
-    const { piece, folded } = foldConflictedProgress(plan, L, S);
-    return { kind: "merge", piece, storagePiece: S, status: plan.status, conflicts: plan.conflicts, folded };
+    return { kind: "merge", piece: plan.merged, storagePiece: S, status: plan.status, conflicts: plan.conflicts, folded: foldedReport(plan, canonicalPiece(M)) };
   }
   // A grid change against progress, or nothing to compare from: it can't be put
   // together here. This tab's copy is kept (and will be written over storage's);

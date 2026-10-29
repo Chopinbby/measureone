@@ -34,8 +34,10 @@ import {
   techniquePartKey as K,
   canonicalTechnique,
   techniqueItemTitle,
+  stampChangedTechnique,
 } from "../src/lib/techniqueMerge.js";
 import { fingerprint as pieceMergeFingerprint } from "../src/lib/pieceMerge.js";
+import { partTime } from "../src/lib/settingTimes.js";
 import { fingerprint as accountFingerprint, canonicalTechnique as accountCanonicalTechnique } from "../src/lib/accountSync.js";
 import { itemTitle } from "../src/components/tabs/technique/format.js";
 import { addDaysISO } from "../src/lib/utils.js";
@@ -448,21 +450,46 @@ describe("a scale's settings merge by part (Pass 118)", () => {
     assert.ok(r.agreed.includes(K.octaves("d")));
   });
 
-  test("changed on both to different values: the account's value is kept, with a notice and no question", () => {
+  test("changed on both to different values: the MORE RECENT change is kept (Pass 126), with a notice and no question", () => {
     const base = withList();
-    const a = editItem(base, "d", { octaves: 3 });
-    const b = editItem(base, "d", { octaves: 4 });
-    // this device holds A, the account holds B: the account's 4
+    const a = editItem(base, "d", { octaves: 3 }); // made first
+    const b = editItem(base, "d", { octaves: 4 }); // made later
+    // this device holds A, the account holds B, which is later: 4
     const r = merge(a, b, base);
     assert.equal(r.status, "merged");
     assert.equal(item(r.merged, "d").octaves, 4);
-    assert.deepEqual(r.notices.map((n) => n.text), ["Your other device's change to D major was kept."]);
-    assert.deepEqual(r.notices[0], { kind: "kept-other-device", part: "scale", id: "d", title: "D major", fields: ["octaves"], text: "Your other device's change to D major was kept." });
+    assert.deepEqual(r.notices.map((n) => n.text), ["Your other device's change to D major was kept (it was made later)."]);
+    assert.deepEqual(r.notices[0], { kind: "kept-more-recent", side: "remote", part: "scale", id: "d", title: "D major", fields: ["octaves"], text: "Your other device's change to D major was kept (it was made later)." });
     assert.deepEqual(r.resolved.map((x) => [x.part, x.kept, x.local, x.remote]), [[K.octaves("d"), "remote", 3, 4]]);
-    // and the other way round, this device holds B: now the account's value is A's 3
+    // and the other way round, this device holds B, the later one: now THIS device's 4 is kept
     const back = merge(b, a, base);
-    assert.equal(item(back.merged, "d").octaves, 3);
-    assert.deepEqual(back.notices.map((n) => n.text), ["Your other device's change to D major was kept."]);
+    assert.equal(item(back.merged, "d").octaves, 4, "the later change wins whichever side holds it");
+    assert.deepEqual(back.notices.map((n) => n.text), ["This device's change to D major was kept (it was made later)."]);
+    assert.deepEqual(back.resolved.map((x) => x.kept), ["local"]);
+  });
+
+  test("at the same moment nothing says which is later: the account's value, as before", () => {
+    const base = withList();
+    const a = reload({ ...editItem(base, "d", { octaves: 3 }), updatedAt: 5000 });
+    const b = reload({ ...editItem(base, "d", { octaves: 4 }), updatedAt: 5000 });
+    assert.equal(item(merge(a, b, base).merged, "d").octaves, 4);
+    assert.equal(item(merge(b, a, base).merged, "d").octaves, 3);
+  });
+
+  test("a dated note on the part beats the library's updatedAt: logging later does not win a setting that was changed earlier", () => {
+    const base = withList();
+    // this device changed the octaves at 2000 and then checked off tasks until 9000; the account's copy
+    // changed them at 3000 and did nothing after. The octaves were last changed on the account's copy.
+    const a = reload({ ...editItem(base, "d", { octaves: 3 }), updatedAt: 9000, partTimes: { [K.octaves("d")]: 2000 } });
+    const b = reload({ ...editItem(base, "d", { octaves: 4 }), updatedAt: 3000, partTimes: { [K.octaves("d")]: 3000 } });
+    const r = merge(a, b, base);
+    assert.equal(item(r.merged, "d").octaves, 4);
+    assert.equal(r.merged.partTimes[K.octaves("d")], 3000, "the merged library carries the moment that decided it");
+    // without the notes the library's updatedAt stands in, and the later logging wins
+    const plainA = reload({ ...editItem(base, "d", { octaves: 3 }), updatedAt: 9000 });
+    const plainB = reload({ ...editItem(base, "d", { octaves: 4 }), updatedAt: 3000 });
+    assert.equal(item(merge(plainA, plainB, base).merged, "d").octaves, 3);
+    assert.equal(merge(plainA, plainB, base).merged.partTimes[K.octaves("d")], 9000, "the winner's updatedAt is written as its note");
   });
 
   test("two settings of one scale in conflict make one notice naming it once", () => {
@@ -478,7 +505,7 @@ describe("a scale's settings merge by part (Pass 118)", () => {
   test("the notice says arpeggio and minor form the way the app does", () => {
     const base = library({ items: [scale("r", "Eb", "minor", { form: "arpeggio" })], walkPosition: 0 });
     const r = merge(editItem(base, "r", { octaves: 3 }), editItem(base, "r", { octaves: 4 }), base);
-    assert.equal(r.notices[0].text, "Your other device's change to E♭ minor arpeggio was kept.");
+    assert.equal(r.notices[0].text, "Your other device's change to E♭ minor arpeggio was kept (it was made later).");
   });
 
   test("changing the check octaves keeps its tempo with them: one side only travels", () => {
@@ -656,14 +683,19 @@ describe("the settings merge by part (Pass 118)", () => {
     });
   });
 
-  test("the same setting changed to different values: the account's, with a notice", () => {
+  test("the same setting changed to different values: the more recent change, with a notice", () => {
     const base = withList();
-    const r = merge(setSetting(base, "scalesPerDay", 4), setSetting(base, "scalesPerDay", 2), base);
+    const early = setSetting(base, "scalesPerDay", 4);
+    const late = setSetting(base, "scalesPerDay", 2);
+    const r = merge(early, late, base);
     assert.equal(r.merged.settings.scalesPerDay, 2);
-    assert.deepEqual(r.notices.map((n) => n.text), ["Your other device's change to the number of scales a day was kept."]);
+    assert.deepEqual(r.notices.map((n) => n.text), ["Your other device's change to the number of scales a day was kept (it was made later)."]);
+    const back = merge(late, early, base);
+    assert.equal(back.merged.settings.scalesPerDay, 2, "whichever side holds the later change");
+    assert.deepEqual(back.notices.map((n) => n.text), ["This device's change to the number of scales a day was kept (it was made later)."]);
     const m = merge(setSetting(base, "minutesPerScale", 7), setSetting(base, "minutesPerScale", 9), base);
     assert.equal(m.merged.settings.minutesPerScale, 9);
-    assert.deepEqual(m.notices.map((n) => n.text), ["Your other device's change to the minutes per scale was kept."]);
+    assert.deepEqual(m.notices.map((n) => n.text), ["Your other device's change to the minutes per scale was kept (it was made later)."]);
   });
 });
 
@@ -1105,7 +1137,8 @@ describe("backups still merge the library the old way (Pass 118)", () => {
 /* ------------------------------------------------------------------ */
 
 describe("two simulated devices (Pass 118)", () => {
-  const RUNS = 300;
+  // SIM_RUNS=3000 npm test runs the wider check CLAUDE.md asks for before trusting an engine change.
+  const RUNS = Number(process.env.SIM_RUNS) || 300;
   const ROUNDS = 6;
   const START = "2026-10-05";
   const MAJORS = ["C", "G", "D", "A", "E", "B", "F#", "Db", "Ab", "Eb", "Bb", "F"];
@@ -1184,6 +1217,10 @@ describe("two simulated devices (Pass 118)", () => {
       next = setSetting(t, name, name === "scalesPerDay" ? intIn(rng, 2, 5) : intIn(rng, 3, 10));
     }
     if (!next || next === t) next = t.items.length ? toggleStar(t, anyId()) : t;
+    // Pass 126: like App.jsx's updateTechnique, a change to octaves, hands or a setting leaves a dated note
+    // on it; one edit in four is made as a device on the previous version would (no note), so the
+    // library's updatedAt stands in.
+    if (next !== t && rng() < 0.75) next = reload(stampChangedTechnique(t, next, next.updatedAt));
     return next;
   }
 
@@ -1304,10 +1341,13 @@ describe("two simulated devices (Pass 118)", () => {
             return;
           }
           if (!bi) return; // not in the base on a side that has it: nothing to compare with
-          ["starred", "inRotation", "hands"].forEach((f) => {
+          ["starred", "inRotation"].forEach((f) => {
             assert.equal(m[f], threeWay(bi[f], li[f], ri[f], (l, r) => r), `${id}.${f} (${where})`);
           });
-          assert.equal(m.octaves, threeWay(bi.octaves, li.octaves, ri.octaves, (l, r) => r), `${id}.octaves (${where})`);
+          assert.equal(m.hands, threeWay(bi.hands, li.hands, ri.hands, (l, r) => (partTime(L, `hands:${id}`) > partTime(R, `hands:${id}`) ? l : r)), `${id}.hands (${where})`);
+          // octaves and hands: the more recent change (the dated note, else updatedAt), the account's on a tie
+          const recent = (key) => (l, r) => (partTime(L, key) > partTime(R, key) ? l : r);
+          assert.equal(m.octaves, threeWay(bi.octaves, li.octaves, ri.octaves, recent(`octaves:${id}`)), `${id}.octaves (${where})`);
           assert.ok(same({ f: m.form, t: m.tonic, q: m.quality }, { f: li.form, t: li.tonic, q: li.quality }), `${id} is the same scale (${where})`);
 
           // the tempo check: one side's change, the newer check, a real tempo over an empty one, then the
@@ -1372,7 +1412,9 @@ describe("two simulated devices (Pass 118)", () => {
         });
         const customIds = new Set([...L.customMethods, ...R.customMethods].map((x) => x.id));
         assert.ok(same(new Set(M.customMethods.map((x) => x.id)), customIds) && M.customMethods.length === customIds.size, `custom methods are the union (${where})`);
-        ["scalesPerDay", "minutesPerScale"].forEach((name) => assert.equal(M.settings[name], threeWay(B.settings[name], L.settings[name], R.settings[name], (l, r) => r), `setting ${name} (${where})`));
+        ["scalesPerDay", "minutesPerScale"].forEach((name) =>
+          assert.equal(M.settings[name], threeWay(B.settings[name], L.settings[name], R.settings[name], (l, r) => (partTime(L, `setting:${name}`) > partTime(R, `setting:${name}`) ? l : r)), `setting ${name} (${where})`)
+        );
 
         /* ---- today's list ---- */
         const LL = L.dayList, RL = R.dayList;
@@ -1527,8 +1569,9 @@ describe("two simulated devices (Pass 118)", () => {
   });
 
   test("100 more runs with an everyday mix (mostly check-offs and tempos): the same invariants", () => {
-    const tally = simulate("everyday mix", EVERYDAY, 100);
+    const runs = Number(process.env.SIM_RUNS) ? Math.ceil(Number(process.env.SIM_RUNS) / 3) : 100;
+    const tally = simulate("everyday mix", EVERYDAY, runs);
     assert.ok((tally.merged || 0) > 0);
-    assert.equal(tally.converged, 100);
+    assert.equal(tally.converged, runs);
   });
 });

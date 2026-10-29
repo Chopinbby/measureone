@@ -25,12 +25,15 @@
 /*  Per part: unchanged on both sides, nothing to do; changed on one   */
 /*  side only, take that side's value; changed on both to the same     */
 /*  value, agreement; changed on both to different values, a CONFLICT  */
-/*  for that part only. The engine never DECIDES a conflict: the       */
-/*  merged piece keeps THIS device's value for it and the result lists */
-/*  it with both values. Pass 121 asks the person, and passes the      */
-/*  answers back in as `choices`: only then is a conflict settled, and */
-/*  only the way the person said ("local", "remote", or, for a         */
-/*  chunk's practice record, "both" = every session from both sides).  */
+/*  for that part only. Since Pass 126 two kinds of conflict are no    */
+/*  longer questions: a SINGLE-VALUE setting (lib/settingTimes.js, the */
+/*  list in RECENCY_FIELDS) is settled by whichever side changed it    */
+/*  more recently, and a chunk's practice record is COMBINED (every    */
+/*  session from both sides). Every other conflict is still left to    */
+/*  the person: the merged piece keeps THIS device's value for it and  */
+/*  the result lists it with both values. Pass 121 asks, and passes    */
+/*  the answers back in as `choices`: only then is such a conflict     */
+/*  settled, and only the way the person said ("local" or "remote").   */
 /*                                                                     */
 /*  This file also owns the primitives the account code compares with  */
 /*  (fingerprint, canonicalPiece), so that the engine never has to     */
@@ -40,6 +43,7 @@
 
 import { validateAndMigratePiece, mergeSessionArrays } from "./storage";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
+import { RECENCY_FIELDS, compareRecency, settingTime, hasSettingNote } from "./settingTimes";
 
 /* ------------------------------------------------------------------ */
 /*  Primitives shared with lib/accountSync.js                          */
@@ -133,10 +137,12 @@ export function canonicalPiece(piece) {
 /*  Parts                                                              */
 /* ------------------------------------------------------------------ */
 
-// Never parts: `progress` itself (its entries are the parts), and the two
-// stamps that merge by "the later of the two" (updatedAt) or are derived from
-// the sessions themselves (lastLoggedAt, which every load recomputes).
-const NEVER_PARTS = new Set(["progress", "updatedAt", "lastLoggedAt"]);
+// Never parts: `progress` itself (its entries are the parts), and the stamps that merge by
+// their own rule: "the later of the two" (updatedAt), derived from the sessions themselves
+// (lastLoggedAt, which every load recomputes), or the dated notes of Pass 126 (settingTimes:
+// the notes decide a conflict, so they can never be a conflict themselves; this file writes
+// the merged notes).
+const NEVER_PARTS = new Set(["progress", "updatedAt", "lastLoggedAt", "settingTimes"]);
 
 export const PROGRESS_PART_PREFIX = "progress:";
 
@@ -413,25 +419,62 @@ function inLoggedOrder(sessions) {
 // or hand-edited data) must not make the union throw, only read as having none.
 const listOf = (v) => (Array.isArray(v) ? v : []);
 
-function unionDoneDays(a, b) {
-  const days = [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])].filter((d) => Number.isFinite(d));
+function unionDoneDays(a, b, before) {
+  const A = (Array.isArray(a) ? a : []).filter((d) => Number.isFinite(d));
+  const B = (Array.isArray(b) ? b : []).filter((d) => Number.isFinite(d));
+  if (!Array.isArray(before)) return [...new Set([...A, ...B])].sort((x, y) => x - y);
+  // With the copy both sides started from: a day that was there and is missing from ONE side
+  // was taken away on that side (an undo), and stays away.
+  const was = new Set(before);
+  const inA = new Set(A);
+  const inB = new Set(B);
+  const days = [...A.filter((d) => !(was.has(d) && !inB.has(d))), ...B.filter((d) => !(was.has(d) && !inA.has(d)))];
   return [...new Set(days)].sort((x, y) => x - y);
+}
+
+// The sessions of two copies of one list, added together by content. With `before` (the copy
+// both started from) a session that was there and is missing from ONE side was removed on that
+// side (an undo), and stays removed; without it nothing can tell an undo from a session the
+// other side never saw, so it comes back.
+function unionSessionLists(a, b, before) {
+  const A = listOf(a);
+  const B = listOf(b);
+  if (!Array.isArray(before)) return inLoggedOrder(mergeSessionArrays(A, B));
+  const key = (x) => fingerprint(x);
+  const was = new Set(before.map(key));
+  const inA = new Set(A.map(key));
+  const inB = new Set(B.map(key));
+  return inLoggedOrder(
+    mergeSessionArrays(
+      A.filter((x) => !(was.has(key(x)) && !inB.has(key(x)))),
+      B.filter((x) => !(was.has(key(x)) && !inA.has(key(x))))
+    )
+  );
 }
 
 // Focus spots (a chunk's `troubleSpots`) hold logged practice time of their own.
 // A spot only one side has is kept; a spot both sides have keeps the leading
 // side's own fields and gets both sides' sessions.
-function unionSpots(lead, follow) {
+function unionSpots(lead, follow, before) {
   if (!Array.isArray(lead) && !Array.isArray(follow)) return lead;
   const first = Array.isArray(lead) ? lead : [];
   const second = Array.isArray(follow) ? follow : [];
-  const out = first.map((spot) => {
+  const prior = Array.isArray(before) ? before : null;
+  const was = (spot) => (prior && isObject(spot) ? prior.find((p) => isObject(p) && p.id === spot.id) : undefined);
+  const out = [];
+  first.forEach((spot) => {
     const twin = isObject(spot) ? second.find((s) => isObject(s) && s.id === spot.id) : null;
-    if (!twin) return spot;
-    return { ...spot, sessions: inLoggedOrder(mergeSessionArrays(listOf(spot.sessions), listOf(twin.sessions))) };
+    if (!twin) {
+      // Only on the leading side. If both started with it, the other side removed it.
+      if (was(spot)) return;
+      out.push(spot);
+      return;
+    }
+    const prev = was(spot);
+    out.push({ ...spot, sessions: unionSessionLists(spot.sessions, twin.sessions, prev ? listOf(prev.sessions) : undefined) });
   });
   second.forEach((s) => {
-    if (isObject(s) && !first.some((f) => isObject(f) && f.id === s.id)) out.push(s);
+    if (isObject(s) && !first.some((f) => isObject(f) && f.id === s.id) && !was(s)) out.push(s);
   });
   return out;
 }
@@ -452,12 +495,19 @@ function unionSpots(lead, follow) {
 // side had undone comes back if the other side still holds it: there is no
 // "before" copy here to tell an undo from a session the other side never saw.
 // Returns a plain JSON value, or undefined when neither side has the entry.
-export function unionProgressEntries(mine, theirs) {
+//
+// `before` (Pass 126, optional): the copy of the entry both sides started from, when the caller
+// has one (tabs of one browser keep the piece they last saved). With it, an undo on one side is
+// not undone: a session, a day or a focus spot that was in `before` and is missing from exactly
+// one side stays removed. Without it (the account's device record keeps fingerprints, not
+// copies) everything is added back, as described above.
+export function unionProgressEntries(mine, theirs, before) {
   const a = isObject(mine) ? mine : null;
   const b = isObject(theirs) ? theirs : null;
   if (!a && !b) return undefined;
   if (!a) return toJsonValue(b);
   if (!b) return toJsonValue(a);
+  const prior = isObject(before) ? before : null;
   const ta = latestJudgedSessionTime(a);
   const tb = latestJudgedSessionTime(b);
   const otherIsLater = tb !== null && (ta === null || tb > ta);
@@ -465,10 +515,10 @@ export function unionProgressEntries(mine, theirs) {
   const follow = otherIsLater ? a : b;
   const out = {
     ...lead,
-    sessions: inLoggedOrder(mergeSessionArrays(listOf(a.sessions), listOf(b.sessions))),
-    doneDays: unionDoneDays(a.doneDays, b.doneDays),
+    sessions: unionSessionLists(a.sessions, b.sessions, prior ? listOf(prior.sessions) : undefined),
+    doneDays: unionDoneDays(a.doneDays, b.doneDays, prior ? prior.doneDays : undefined),
   };
-  const spots = unionSpots(lead.troubleSpots, follow.troubleSpots);
+  const spots = unionSpots(lead.troubleSpots, follow.troubleSpots, prior ? prior.troubleSpots : undefined);
   if (spots !== undefined) out.troubleSpots = spots;
   return toJsonValue(out);
 }
@@ -508,6 +558,15 @@ export function unionProgressEntries(mine, theirs) {
 //                (DATE_LINKED_FIELDS). They are listed in `conflicts` or merged as
 //                ever until the date is answered; once it is, they follow it as a unit
 //                and drop out of `conflicts`, so a question about them is never needed
+//   recencySettled (Pass 126) [{ part, side: "remote" | "local", localTime, remoteTime }]: the
+//                single-value settings (RECENCY_FIELDS) both sides changed to different values,
+//                settled by whichever side changed them MORE RECENTLY (the dated note on the
+//                setting, else the piece's updatedAt: lib/settingTimes.js). A tie is not guessed:
+//                it stays in `conflicts`. Settings that follow another (the work id follows the
+//                work title; in a days-mode schedule the numbers worked out from the target
+//                date follow the date) are not listed: they went with it
+//   combinedPractice (Pass 126) [{ part, id }]: a chunk's practice record both sides changed,
+//                combined (unionProgressEntries) instead of asked about
 //   softSettled  (Pass 122b) [{ part, side: "remote" | "local" }]: the display parts
 //                (SOFT_PARTS) both sides changed to different values, settled by the
 //                engine itself: the side with the more recent reorder note for the note and
@@ -535,6 +594,14 @@ export function unionProgressEntries(mine, theirs) {
 // person is working in this tab). Always one fixed side, so that two devices that have
 // exchanged copies end with the same order.
 //
+// `recency` (Pass 126, true by default): settle the single-value settings by the more recent
+// change. false: they are conflicts, kept as this device's and listed, as before.
+// `combinePractice` (Pass 126, true by default): combine a chunk's practice record that both
+// sides changed. false: it is a conflict, as before. `baseProgress` (optional): the progress
+// entries both sides started from ({ [chunk id]: entry }), for a caller that holds a copy of
+// the base (tabs of one browser do); with it, a session removed on one side is not brought
+// back by the other (see unionProgressEntries).
+//
 // Two stamps are not parts. updatedAt is the later of the two. lastLoggedAt is
 // recomputed from the merged sessions (the later of the two unless that date
 // belongs to a session the merged piece doesn't hold: an undo, or the remote
@@ -546,7 +613,7 @@ export function unionProgressEntries(mine, theirs) {
 // reschedule's extension as a floor. So it is taken like any part when one side
 // changed it, the larger when both did, and the whole schedule is reconciled
 // once more at the end.
-export function planPieceMerge({ local, remote, base, choices = null, softWins = "remote" }) {
+export function planPieceMerge({ local, remote, base, choices = null, softWins = "remote", recency = true, combinePractice = true, baseProgress = null }) {
   const result = (status, extra = {}) => ({
     status,
     merged: local,
@@ -560,6 +627,8 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
     unusedChoices: [],
     linkedToDate: [],
     softSettled: [],
+    recencySettled: [],
+    combinedPractice: [],
     reason: null,
     ...extra,
   });
@@ -652,12 +721,64 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
     softSettled.push({ part: k, side: k === "createdAt" ? softSide : orderSide });
   });
 
+  // Pass 126: a single-value setting both sides changed to different values goes to whichever
+  // side changed it MORE RECENTLY (the dated note, else updatedAt: lib/settingTimes.js). A tie,
+  // or nothing to compare, is not guessed: it stays a conflict. A setting the person has
+  // already answered for is theirs to settle. Two settings decide how the others are read, so
+  // they go first: the schedule mode (which fields the schedule uses) and the target date (the
+  // numbers worked out from it, below).
+  const recencySettled = [];
+  const followsDateSide = []; // [{ part, side }] derived numbers that went with the one side that changed the date
+  const timeOf = (piece, k) => settingTime(piece, k);
+  const modeNow = () => {
+    const r = recencySettled.find((x) => x.part === "scheduleMode");
+    const remote_ = fromRemote.includes("scheduleMode") || (r && r.side === "remote") || (conflictKeys.includes("scheduleMode") && answers.scheduleMode === "remote");
+    return remote_ ? R.scheduleMode : L.scheduleMode;
+  };
+  if (recency) {
+    const order = ["scheduleMode", "targetDate", ...RECENCY_FIELDS.filter((k) => k !== "scheduleMode" && k !== "targetDate")];
+    order.forEach((k) => {
+      const i = conflictKeys.indexOf(k);
+      if (i < 0 || isValidChoice("field", answers[k])) return;
+      // The numbers worked out from the target date are not settled one by one in a days-mode
+      // schedule: they go with the date, so one device's date is never paired with the other's
+      // numbers. While the date is in play (a contest, settled below or left a tie) that is the
+      // date's winner (below). When the date changed on ONE side only, the number goes with that
+      // side (its Save worked the number out from the new date; the other side's was worked out
+      // from the old one). Where the date changed on neither side, minutes per day is an ordinary
+      // setting and the more recent change settles it.
+      if (DATE_LINKED_FIELDS.includes(k) && modeNow() === "days") {
+        const dateIn = conflictKeys.includes("targetDate") || recencySettled.some((x) => x.part === "targetDate");
+        if (dateIn) return;
+        const dateOnlyHere = changedL("targetDate") && !changedR("targetDate");
+        const dateOnlyThere = changedR("targetDate") && !changedL("targetDate");
+        if (dateOnlyHere || dateOnlyThere) {
+          conflictKeys.splice(i, 1);
+          followsDateSide.push({ part: k, side: dateOnlyHere ? "local" : "remote" });
+          return;
+        }
+      }
+      const cmp = compareRecency(L, R, k);
+      if (cmp === 0) return;
+      conflictKeys.splice(i, 1);
+      recencySettled.push({ part: k, side: cmp > 0 ? "local" : "remote", localTime: timeOf(L, k), remoteTime: timeOf(R, k) });
+    });
+  }
+  // The work id is worked out from the work title and goes with it.
+  const titleSettled = recencySettled.find((x) => x.part === "workName");
+  const idLinked = !!titleSettled && (changedL("workId") || changedR("workId"));
+  if (idLinked) {
+    [conflictKeys, fromLocal, fromRemote, agreed].forEach((list) => {
+      const j = list.indexOf("workId");
+      if (j >= 0) list.splice(j, 1);
+    });
+  }
+
   // Which schedule mode the merged piece ends up in: the remote's if only the
-  // remote changed it, or if the person settled a conflict over it that way; this
-  // device's otherwise (an unsettled conflict keeps this device's).
-  const modeFromRemote =
-    fromRemote.includes("scheduleMode") || (conflictKeys.includes("scheduleMode") && answers.scheduleMode === "remote");
-  const modeAfter = modeFromRemote ? R.scheduleMode : L.scheduleMode;
+  // remote changed it, or if the person (or the more recent change) settled a
+  // conflict over it that way; this device's otherwise (an unsettled conflict
+  // keeps this device's).
+  const modeAfter = modeNow();
   const derived = [];
   let daysToLearnFromRemote = false;
   if (modeAfter === "minutes" && (changedL("daysToLearn") || changedR("daysToLearn"))) {
@@ -674,9 +795,10 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
   // Pass 121: the numbers worked out from a conflicting target date (DATE_LINKED_FIELDS).
   // Answered, they follow that answer and are taken out of every list below, so what
   // was merged one by one a moment ago cannot pair one device's date with the other's.
-  const dateLinkable = modeAfter === "days" && conflictKeys.includes("targetDate");
+  const dateRecency = recencySettled.find((x) => x.part === "targetDate");
+  const dateLinkable = modeAfter === "days" && (conflictKeys.includes("targetDate") || !!dateRecency);
   const linkedToDate = dateLinkable ? DATE_LINKED_FIELDS.filter((k) => changedL(k) || changedR(k)) : [];
-  const dateAnswer = dateLinkable && isValidChoice("field", answers.targetDate) ? answers.targetDate : null;
+  const dateAnswer = dateLinkable ? (dateRecency ? dateRecency.side : isValidChoice("field", answers.targetDate) ? answers.targetDate : null) : null;
   if (dateAnswer) {
     [conflictKeys, fromLocal, fromRemote, agreed].forEach((list) => {
       linkedToDate.forEach((k) => {
@@ -690,16 +812,22 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
   // with no valid answer stays a conflict and keeps this device's value, as ever.
   const settled = [];
   const stillOpen = [];
+  const combinedPractice = [];
   conflictKeys.forEach((k) => {
     const kind = isProgressPart(k) ? "progress" : "field";
     if (isValidChoice(kind, answers[k])) settled.push({ part: k, kind, choice: answers[k] });
+    // Pass 126: practice is never chosen between. A chunk's record both sides changed is
+    // combined: every session from both, the rest from the side that practiced last.
+    else if (kind === "progress" && combinePractice) combinedPractice.push({ part: k, id: k.slice(PROGRESS_PART_PREFIX.length) });
     else stillOpen.push(k);
   });
   const unusedChoices = Object.keys(answers).filter((k) => !conflictKeys.includes(k));
 
   const merged = { ...L };
   const progress = isObject(L.progress) ? { ...L.progress } : {};
+  const tookRemote = new Set();
   const takeFromRemote = (k) => {
+    tookRemote.add(k);
     if (isProgressPart(k)) {
       const id = k.slice(PROGRESS_PART_PREFIX.length);
       if (isObject(R.progress) && Object.prototype.hasOwnProperty.call(R.progress, id)) progress[id] = R.progress[id];
@@ -712,6 +840,9 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
   };
   fromRemote.forEach(takeFromRemote);
   softSettled.filter((s) => s.side === "remote").forEach((s) => takeFromRemote(s.part)); // "local": already in `merged`
+  recencySettled.filter((s) => s.side === "remote").forEach((s) => takeFromRemote(s.part)); // "local": already in `merged`
+  followsDateSide.filter((s) => s.side === "remote").forEach((s) => takeFromRemote(s.part)); // "local": already in `merged`
+  if (idLinked && titleSettled.side === "remote") takeFromRemote("workId");
   if (daysToLearnFromRemote) takeFromRemote("daysToLearn");
   if (dateAnswer === "remote") linkedToDate.forEach(takeFromRemote); // "this device's": already in `merged`
   settled.forEach(({ part, choice }) => {
@@ -725,7 +856,42 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
     }
     // "local": this device's value is already in `merged`
   });
+  combinedPractice.forEach(({ id }) => {
+    // A tie (neither record has a later judged session) goes to "this device" in
+    // unionProgressEntries. Here "this device" is the record with the smaller fingerprint, the
+    // same one whichever copy is local, so two devices that merge each other's copy end with
+    // the same record.
+    const mine = isObject(L.progress) ? L.progress[id] : undefined;
+    const theirs = isObject(R.progress) ? R.progress[id] : undefined;
+    const swap = mine !== undefined && theirs !== undefined && fingerprint(theirs) < fingerprint(mine);
+    const joined = unionProgressEntries(swap ? theirs : mine, swap ? mine : theirs, isObject(baseProgress) ? baseProgress[id] : undefined);
+    if (joined === undefined) delete progress[id];
+    else progress[id] = joined;
+  });
   merged.progress = progress;
+
+  // Pass 126: the dated notes of the merged piece, worked out the same whichever copy is
+  // "local", so two devices that merge each other's copies end with the same notes. For a
+  // setting both copies hold the same value for: the later note either holds. For one that
+  // came from a single side: that side's note (none if it had none; the piece's updatedAt
+  // stands in for it from then on). For a conflict the more recent change settled: the moment
+  // that decided it (the winner's note, or its updatedAt where it had none).
+  const times = {};
+  RECENCY_FIELDS.forEach((k) => {
+    const winner = recencySettled.find((x) => x.part === k);
+    let at = 0;
+    if (fpL[k] === fpR[k]) {
+      at = Math.max(hasSettingNote(L, k) ? L.settingTimes[k] : 0, hasSettingNote(R, k) ? R.settingTimes[k] : 0);
+    } else {
+      const fromR = tookRemote.has(k);
+      const source = fromR ? R : L;
+      if (winner) at = settingTime(source, k);
+      else if (hasSettingNote(source, k)) at = source.settingTimes[k];
+    }
+    if (at > 0) times[k] = at;
+  });
+  if (Object.keys(times).length > 0) merged.settingTimes = times;
+  else delete merged.settingTimes;
 
   const lt = timestamp(local);
   const rt = timestamp(remote);
@@ -761,5 +927,7 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
     unusedChoices,
     linkedToDate,
     softSettled,
+    recencySettled,
+    combinedPractice,
   });
 }

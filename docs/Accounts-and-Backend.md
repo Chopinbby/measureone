@@ -70,10 +70,11 @@ one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-ever
 reorder win as a whole list, and gives a piece held by a refused upload Review's plain
 questions** (see [What the person said no to is remembered, and order follows
 them](#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)).
-**Decided 2026-10-15, only partly built:** "the most recent change wins item by item"
-(Decided 6 below) is built for a deletion and for a piece's place in the list; for a conflicting
-part of a piece it is not: Pass 120 holds it and Pass 121 asks the person about it instead. See
-[Pass plan](#pass-plan).
+**Decided 2026-10-15, built for single-value settings in Pass 126:** "the most recent change wins
+item by item" (Decided 6 below) is built for a deletion, for a piece's place in the list and (Pass 126) for
+the single-value settings the owner approved; a collection, a whole shape, the chunk grid and a tie are still
+held and asked about (Pass 120 holds, Pass 121 asks). See [The most recent change wins](#the-most-recent-change-wins-pass-126)
+and [Pass plan](#pass-plan).
 
 ## Decided
 
@@ -320,7 +321,8 @@ changes can arrive by themselves, behind a switch that is off by default):
 - **121** A piece held with a recorded list of conflicting parts asks one plain question per
   part in Review, instead of the whole-piece picker. Built; see [Settling a held piece, one
   question at a time](#settling-a-held-piece-one-question-at-a-time-pass-121). It asks; it does
-  not decide: **the 2026-10-15 "most recent wins" decision is still not built.**
+  not decide: **the 2026-10-15 "most recent wins" decision was not built by it; Pass 126 built it** (for
+  single-value settings), which leaves Review with far fewer questions.
 - **122** A piece deleted on one device is deleted everywhere, with a way back. Built; see [A piece
   deleted on one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
   It was split in two when its card was edited (2026-10-24): this is the deletions half.
@@ -340,9 +342,9 @@ changes can arrive by themselves, behind a switch that is off by default):
   line; see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 124 re-scoped".
 - **126** The most recent change wins, item by item: the rest of the owner's 2026-10-15 decision (a part both
   devices changed differently is settled by recency instead of held and asked about; practice is combined,
-  never chosen between). Scoped 2026-10-28, not built; **step 1 was answered the same day** (each setting is
-  stamped when it changes, for single-value settings only; collections and whole shapes are still asked about;
-  see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1"). Placed ahead of 124's flip.
+  never chosen between). Scoped 2026-10-28, **step 1 answered the same day, built 2026-10-29** (not merged until
+  she says so); see [The most recent change wins](#the-most-recent-change-wins-pass-126) and
+  [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1" and "Pass 126 build". Placed ahead of 124's flip.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring, and an in-app "delete my account", which must exist before
@@ -1524,7 +1526,8 @@ service: tabs stay in step, no lease key, no account request. **Not seen on the 
    edge. Pass 120's "most recent wins, item by item" applied to that part would drop one side's
    sessions, which the same decision says must always be kept. `foldConflictedProgress`
    (`lib/tabSync.js`, not exported) does the right thing for tabs; Pass 120 needs the same fold,
-   so it should be moved into `lib/pieceMerge.js` (not touched here) or exported.
+   so it should be moved into `lib/pieceMerge.js` (not touched here) or exported. **Done in Pass 126**:
+   the fold is gone and the engine combines the record (`unionProgressEntries`, with `baseProgress` for tabs).
 2. **A grid change in one tab against progress in the other can't be put together**
    (the engine's "travel together" case, Decisions.md open item (i)). For tabs this tab's copy is
    kept, so the other side's sessions (keyed by the old chunk ids) are dropped; it is reported in
@@ -1691,7 +1694,7 @@ same test).
 4. **The fold Pass 119 wrote** (same chunk logged on two devices) is not used here: that case
    is a conflict and is held. If Pass 121 decides "most recent wins" for a chunk entry, it
    must move `foldConflictedProgress` (`lib/tabSync.js`) into `lib/pieceMerge.js`, or
-   sessions would be dropped. **Pass 121 did not move it** (`tabSync.js` was outside its
+   sessions would be dropped. (**Done in Pass 126**: one combine, in the engine.) **Pass 121 did not move it** (`tabSync.js` was outside its
    list): it wrote `unionProgressEntries` in `lib/pieceMerge.js` for the "both devices'
    sessions" answer, so there are now two implementations of "keep both".
 5. **A grid change in one place against practice in the other is held too** (the card
@@ -2802,6 +2805,99 @@ hashed files immutable) and a local stand-in for the account service:
 6. **No automated test of the worker's routing is committed**: it is not on the card's file
    list, and a throwaway check of the same behavior was run instead (item 4 above). A small test
    that loads `public/sw.js` with a fake `self`, `caches` and `fetch` would pin it; offered.
+
+## The most recent change wins (Pass 126)
+
+The owner's 2026-10-15 decision, built for **single-value settings** (the list she approved on 2026-10-28:
+Decisions.md "Pass 126 step 1" and "the list of settings"). Before it, a piece changed on both devices whose
+parts conflicted was held by the automatic update and Review asked a question for each part, one of which was
+every chunk practiced on both devices. After it, Review is left with what a clock cannot decide.
+
+**What happens**
+
+- A **single-value setting** both devices changed to different values goes to the one changed **more recently**
+  (name, composer, work title, notes, status, "learned elsewhere", target tempo, home key, overall-confidence
+  rating, last played date, start date, schedule mode, target date, minutes per day, practice days per week,
+  the focus-spot switch and its minutes). Nothing is asked.
+- A **chunk's practice record** both devices changed is **combined**: every session either holds, the days
+  practiced, the focus spots' own sessions; the tempo and stage from the record whose latest judged session is
+  later. Nothing is asked and no session is dropped.
+- **Still asked in Review:** the collections and whole shapes (per-chunk notes, recordings, documents,
+  per-measure difficulty, sections, the recurring material, tempo zones, the maintenance-ladder settings,
+  revival, the reschedule marker, other keys), the chunk grid (total measures, chunk mode and size, split
+  points: the "size and schedule travel together" case), a **tie** (the same moment, different values: never
+  guessed), and a grid change against practice (open item (i)).
+- The **technique library**: a scale's octaves and hands, the two settings and a task's method plan follow the
+  same rule (the account's value wins a tie). Tempo checks keep their exact times; practiced dates and done tasks
+  stay combined; the walk stays as it is.
+- **What the person sees:** one quiet line in the Account panel next to "Updated from another device", for
+  example "Kept the more recent change on Ballade No. 1: target tempo (from your other device) and notes (from
+  this device)." Never the page-wide banner, no "put it back" (the owner's call). A tab of one browser says nothing.
+
+**How "more recent" is measured**
+
+- Each listed setting gets a **dated note** in `piece.settingTimes` when it changes (`updatePiece` calls
+  `stampChangedSettings`; `lib/settingTimes.js`). Where a setting has no note, the piece's `updatedAt` stands in.
+  The library has the same in `partTimes` for octaves, hands and the two settings (`updateTechnique` calls
+  `stampChangedTechnique`); a task's method plan falls back to the library's `updatedAt` always, because its keys
+  would grow with every day's list.
+- A note is never earlier than a note the piece already holds, so a device whose clock runs behind still stamps
+  after changes it has received. **Device clocks are otherwise trusted** (no guard: the owner's call).
+- Notes are **not parts** (a conflict is decided by them, so they can never be one) and **loading never adds
+  them**. The merged piece's notes are worked out the same whichever copy is "local": the later note either
+  holds where the values agree, the changing side's note where one side changed, the moment that decided it
+  for a contest.
+- **Followers** go with their leader and are never settled alone: `workId` with the work title; in a
+  finish-by-a-date schedule `daysToLearn`, `minutesPerDay` and the reschedule marker with the target date (even a
+  change only one side made: a date edit regenerates them). A date that ties leaves them as ordinary parts, as
+  they were. Minutes per day also goes with the **one** device that changed the date when both devices changed
+  it (each Save worked it out from its own date), so a device's date is never paired with the other's minutes.
+
+**Where it applies**
+
+- The automatic update (`engineVerdict`, `applyAccountMerge`) and Review (`planSettle` runs the engine again, so
+  a piece held before the pass shows only what is still asked) and tabs of one browser (`tabSync`: the later
+  change wins, a tie keeps this tab's; `foldConflictedProgress` is gone, the engine's combine does it, given the
+  copy the tab last saved so an undo is not undone).
+- **Get changes and the file import do not use the engines** and are unchanged.
+
+**One thing found while building, fixed** (the Pass 120 technique bug, for pieces). A piece whose parts are
+identical to the account's can still differ in what is not a part (`updatedAt`, now the dated notes). Recording
+the ACCOUNT's fingerprint for it made this device's copy read as changed, so it went up and the other device did
+the same, trading the piece. It existed for `updatedAt` before this pass (a probe showed one piece waiting after
+an update). `engineVerdict` now marks an identical result and `applyAccountMerge` records this device's own
+fingerprint for it; a test runs both directions.
+
+**Left open** (owners in brackets)
+
+1. A device on the previous version writes no notes, so its changes fall back to `updatedAt`, which any later
+   practice moves. [Only until every device has the new version.]
+2. Device clocks are trusted, as the owner decided. [Revisit if a wrong clock is ever seen.]
+3. A refused upload merged late (`reapplyOnto`) leaves no quiet line; it returns `recencySettled` but the
+   caller does not show it. [A small addition.]
+4. The account path brings back a session that one device undid and the other still holds (the device record
+   keeps fingerprints, not copies, so there is no base entry); tabs do not. [Pass 121's deferred item.]
+5. Every Settings save re-derives `minutesPerDay` in a days-mode schedule and can stamp it, so a stale stored
+   value is "changed" once. Harmless (found in the browser on a hand-made piece), noted.
+6. The practice question, its first screen and its removal warnings are dormant: kept and tested on the old
+   plan, reached by nothing. [Remove on purpose.]
+7. `App.jsx`'s wiring (`updatePiece`, `updateTechnique`, the quiet line) has no automated test; it was checked
+   in a browser against a stand-in service (two addresses as two devices).
+8. An equal-count collection reads "1 recording on both devices, but the two plans differ in detail" in Review
+   (a wording that was there before). [Pre-existing.]
+9. **Found in the pre-commit review (2026-10-29), logged, not fixed:** (a) "Reschedule all" writes `targetDate`
+   (extending a piece past its date) for the pieces that are not open through `writePieceDirect`, without a dated
+   note, so a stale older note can understate that change; (b) the import merge (Get changes, a file) chooses
+   `settingTimes` as one lump by the generic rule, which can disagree with the values it chose field by field;
+   (c) during the days a phone or tab still runs the previous version, its edits write no note, so an older
+   inherited note can beat its newer edit (worse than the plain `updatedAt` fallback), and that version drops
+   the library's `partTimes` when it loads and saves; ask about phones and old tabs by name at hand-off;
+   (d) a piece already held before the deploy stays held until Review (the automatic update skips held
+   pieces) even when nothing is left to ask; (e) a technique notice says "(it was made later)" on a tie or when
+   no time is known, and names "your other device" for a scale whose octaves and hands were settled to different
+   sides; (f) Review's settle result lines do not mention settings the clock settled; (g) the work id is not
+   derived from the title text, it is a random id made when a title is first entered (the rule still behaves
+   correctly). Tidy: an unused import in `tabSync.js`, a no-op line in one test. [None blocks building on this.]
 
 ## Setup (test project)
 

@@ -908,6 +908,12 @@ decision is brought in by itself, with no button:
 - If the piece that is **open** changed, one quiet blue line at the top of the page, which
   you can dismiss and which goes when you open another piece: **"This piece was updated
   from another device."** No other piece makes a banner.
+- **(Pass 126, wording proposed)** When both devices changed the same single setting and the app
+  kept the more recent change, the same Account-panel line adds a sentence: **"Kept the more recent
+  change on Ballade No. 1: target tempo (from your other device) and notes (from this device)."** (for
+  the technique library: **"Kept the more recent change in the technique library: D major (from your
+  other device)."**). There is nothing to press and no "put it back"; a wrong value is one setting you
+  can retype. Practice logged on both devices is simply kept from both, with no line.
 
 **Two devices practicing at the same moment.** Before an upload goes up the app takes one
 light look at your account first. If the other device has just uploaded, yours merges its
@@ -924,8 +930,14 @@ changes.
 
 **Only on sites connected to an account service, signed in.** It is the second half of flow 14:
 when "Update automatically from other devices" finds a piece that **both** devices changed in
-the same place (the same chunk practiced on both, or the same setting changed on both), it
-can't merge the two for you, so it **holds** the piece: your device keeps its own copy,
+the same place and can't tell which to keep, it can't merge the two for you, so it **holds** the
+piece. **Since Pass 126 that is rarer:** a setting you changed on both devices (the name, the target
+tempo, the target date, the notes and the other single settings) goes to the **more recent** change by
+itself, and practice you logged on both devices is **kept from both** by itself; Review is left with
+collections (recordings, documents, chunk notes, difficulty, sections), the chunk layout, and two changes
+made at the very same moment. When the app settles a setting this way, the Account panel says so quietly
+("Kept the more recent change on Ballade No. 1: target tempo (from your other device).") and there is
+nothing to press. The held piece: your device keeps its own copy,
 nothing is lost on either side, and the red banner "1 piece changed on another device" with
 **Review** appears (also under the Account buttons in Settings). Pressing **Review** now asks
 **one plain question for each thing that was changed on both**, instead of the whole-piece

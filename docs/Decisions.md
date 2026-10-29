@@ -8034,7 +8034,9 @@ what it rules out.
   fingerprint per part, not a time. What exists is the piece's `updatedAt`, each
   session's own time and, for the technique library, the library's `updatedAt` and each
   tempo's exact time. Options: the piece's `updatedAt` as the stand-in for any part both
-  sides changed, or a time kept per part.
+  sides changed, or a time kept per part. **Answered 2026-10-28 (Pass 126 step 1): a time
+  kept per setting, with `updatedAt` as the fallback where there is none, for single-value
+  settings only;** see "Pass 126 step 1" under Accounts and backend.
   (iii) ~~**Deletions (Pass 122):** if one device deletes a piece and the other practices
   it later, "the later action wins" means either the piece comes back or the practice is
   lost; it needs her answer.~~ **Answered 2026-10-23, built in Pass 122:** "If a piece is
@@ -8042,7 +8044,8 @@ what it rules out.
   lost." A deletion always wins, before or after the other device's practice, with a 30-day
   way back; see the Pass 122 entry below.
   (iv) **A wrong device clock** is not guarded against; the account's own order of
-  arrival could break a near tie. Not designed.
+  arrival could break a near tie. Not designed. **Decided 2026-10-28 (Pass 126 step 1): no
+  guard for now**; see the same entry.
 
 - **Pass 119 — every tab of one browser stays in step, and one does the account work
   (2026-10-16 to 2026-10-18).** `lib/tabSync.js` (new), `App.jsx`, and the docs; merged as
@@ -8327,6 +8330,59 @@ what it rules out.
      plan isn't finished yet." (`KEEP_HISTORY_HINT`). Pause is named because Archive is locked until the
      piece's plan is actually finished. An archived or paused piece stays in the all-pieces page's charts
      (the page is given every piece whatever its status).
+
+- **Pass 126 step 1: how "most recent" is measured (2026-10-28).** The owner's answers to the
+  card's first step: options put to her, four questions, **all four answered with the recommended
+  option**. No code yet. **What "recent" can be measured from today** (what the options rest on):
+  a session has an exact time (`loggedAt`; Pass 121 already combines sessions and takes the ladder
+  state from the side with the later judged session); a piece has one `updatedAt`, set by
+  `updatePiece` on every change, logging included; the technique library has one `updatedAt`, set by
+  `updateTechnique` on every change, plus an exact time on each tempo check (`lastCheckedAt`); the
+  account stamps every row with `updated_at` (a database trigger, one clock for all devices) and a
+  revision, per row and never read by the app today; Pass 122b's reorder note is the one place "most
+  recent" already exists for a part.
+  1. **Measure: B, a dated note on each setting when it changes (open item (ii)).** Rejected:
+     **A**, the piece's `updatedAt` stands in (nothing stored, but logging moves it too, so a device
+     that did anything later wins the setting: the laptop edits the target tempo at 8:00 and logs at
+     9:00, the phone edits it at 8:30 and logs at 8:45, and the laptop's older edit wins); **C**,
+     whoever syncs last (no clocks, but a phone reconnecting at 11:00 with a 9:30 edit overwrites a
+     10:00 edit made elsewhere, the picture the owner rejected on 2026-10-15; in effect today's "this
+     device's value is kept" without the question). Where a setting has no note (a device on the
+     previous version drops the notes, or the piece predates them) it falls back to A. The technique
+     library gets the same per setting; its tempo checks keep their exact times, its practiced dates
+     and done tasks stay combined, and its walk stays as it is. **Left to the build, and to be
+     reported:** whether the notes count toward "changed" (if they do, every device uploads each
+     piece once after the deploy: Pass 118 open item 9); stamps never earlier than any stamp the
+     device has already seen (as `nextOrderStamp` does for reorders); a tie-break that is the same on
+     both devices, so they end identical.
+  2. **Collections and whole shapes are NOT settled by recency; they are still held and asked
+     about.** The fields: per-chunk notes (`memoryAnchors`), `recordings`, `documents`, per-measure
+     difficulty (`measureDifficulty`) and `sections`. **Why:** a part is a whole top-level field
+     (`pieceParts`), so settling one by recency would let the later device's whole set win and the
+     other device's added note or recording vanish silently, and they are the owner's own writing;
+     Review's question is rare and loses nothing. Rejected: recency for them with a quiet line (can
+     lose an added item), and combining the items (notes, recordings and documents have ids, so
+     adding is natural, but it makes the pass bigger and changes how parts are cut: a follow-on if it
+     ever bites; per-measure difficulty and sections are shapes that cannot be added together). **The
+     build lists which top-level fields count as single values and which as collections or shapes, and
+     shows the owner the list before using it.**
+  3. **What is shown when recency settles a value: one quiet line in the Account panel** naming what
+     was kept and from which device. Rejected: also keeping the replaced value for 30 days with a
+     "Put it back" button (more to store and build). A wrong value is one setting that can be
+     retyped; practice is never discarded.
+  4. **No wrong-clock guard for now (open item (iv)).** A and B trust device clocks. A device set
+     from the network is off by well under a second; a hand-set clock wins or loses every contested
+     value for as long as it is wrong, and only where both devices changed the same single setting
+     apart. Rejected for now: a notice when a device's clock differs from the account's `updated_at`
+     by more than 5 minutes (a small addition: the app does not read that column today). Revisit if a
+     wrong clock is ever seen.
+  **Why all four are the recommended option:** the owner's 2026-10-15 picture is "the latest action
+  is what was meant", and B is the only option that matches it in the ordinary case where both
+  devices have since done other things to the piece; it extends what already exists (the reorder
+  note, the tempo times). **Scope consequence for the card:** the build settles single-value settings
+  (names, dates, targets, status and so on, and the technique library's octaves, hands, scales per
+  day, minutes per scale and a task's method plan) and leaves the rest as it is. **Not built.** The
+  backlog card says step 1 is answered, so a fresh chat does not ask again.
 
 ## Open questions
 

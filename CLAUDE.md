@@ -1223,8 +1223,10 @@ one browser, and 120, automatic updates behind a switch that is off by default, 
 122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
 Review's questions; live since 2026-10-27); 123 (the app opens with no connection, a small service
 worker; live since 2026-10-28) is built, and the passes the docs name next are 126 (**scoped
-2026-10-28, not built:** the most recent change wins, item by item, whose first step is the owner's
-choice of how "most recent" is measured; placed ahead of 124's flip) and 124 (turning the switch on by
+2026-10-28, not built:** the most recent change wins, item by item; **step 1 was answered 2026-10-28:**
+each setting is stamped when it changes (the piece's `updatedAt` as the fallback), for single-value
+settings only, while collections and whole shapes are still held and asked about, with a quiet line
+and no wrong-clock guard, see Decisions.md "Pass 126 step 1"; placed ahead of 124's flip) and 124 (turning the switch on by
 default; **on 2026-10-28 the owner chose to wait with the flip until Phase 3**, and it is only ever built
 on her word). The owner's 2026-10-15 "most recent
 wins" decision is only partly built (a deletion and the piece list's order follow it; a

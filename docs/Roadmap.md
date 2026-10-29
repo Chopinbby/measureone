@@ -403,7 +403,8 @@ Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale. **The one thread already in motion is the
 accounts work (Phase 2):** Passes 120 to 123 are built and live, and the passes the docs name
 next are 126 (the most recent change wins, item by item: the rest of the owner's 2026-10-15
-decision, whose first step is her choice of how "most recent" is measured) and 124 (turning the
+decision; step 1 was answered on 2026-10-28: each setting is stamped when it changes, for single-value
+settings only, see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1") and 124 (turning the
 automatic switch on by default; on 2026-10-28 the owner chose to wait with the flip until
 Phase 3, so it is not scheduled, and it is only ever built on her word). The owner's 2026-10-15
 "the most recent change wins, item by item" decision is only partly built; see backlog

@@ -403,11 +403,12 @@ Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale. **The one thread already in motion is the
 accounts work (Phase 2):** Passes 120 to 123 are built and live, and the passes the docs name
 next are 126 (the most recent change wins, item by item: the rest of the owner's 2026-10-15
-decision; step 1 was answered on 2026-10-28: each setting is stamped when it changes, for single-value
-settings only, see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1") and 124 (turning the
+decision; step 1 was answered on 2026-10-28 and **the pass was built on 2026-10-29, merged only on her
+word**: see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 build") and 124 (turning the
 automatic switch on by default; on 2026-10-28 the owner chose to wait with the flip until
 Phase 3, so it is not scheduled, and it is only ever built on her word). The owner's 2026-10-15
-"the most recent change wins, item by item" decision is only partly built; see backlog
+"the most recent change wins, item by item" decision is built for single-value settings (Pass 126);
+collections, whole shapes, the chunk grid and a tie are still asked; see backlog
 item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagree".
 
 ## Priority-ordered backlog
@@ -503,10 +504,10 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    account settings, live since Pass 114) is Done above, and **Phase 2 is almost
    built** (Passes 115 to 123, Done above). Still to build in **Phase 2**: turning other
    devices' changes on by default after a real-use trial (124; the owner chose on 2026-10-28
-   to wait with the flip until Phase 3). Decided but only partly built: the most recent change
-   winning item by item (scoped on 2026-10-28 as Pass 126, to run ahead of 124's flip; today a
-   deletion and the piece's place in the list follow it, and a conflicting part of
-   a piece is held and asked about). No owner yet: "always keep both" as a remembered
+   to wait with the flip until Phase 3). Built, awaiting her merge: the most recent change
+   winning item by item (Pass 126, 2026-10-29, to run ahead of 124's flip; a deletion, the piece's place in
+   the list and every single-value setting follow it; collections, whole shapes, the chunk grid and a tie
+   are still held and asked about). No owner yet: "always keep both" as a remembered
    answer, and size and schedule travelling together. **Phase 3**, open sign-up, a
    privacy policy and terms, a real email provider (Supabase's built-in sender reaches
    only the project's own team and only a couple of messages an hour, which is why the

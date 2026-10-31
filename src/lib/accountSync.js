@@ -1829,6 +1829,35 @@ export function needsMergeBeforeUpload({ pieces, technique, accountRecord, chang
   return { pieceIds, technique: techniqueFirst };
 }
 
+// Pass 126 follow-up (the reconnect hold). With the switch on, an upload run takes
+// its own look at the account before it sends anything, and what it does next is
+// decided here. `look` is what App.jsx's requestCheck reports: { fresh, applied, why }.
+//   applied  the look also brought something in: stop here, the merged result goes up
+//            in the next run, after the usual quiet period
+//   fresh    the look was taken and believed, so the picture of the account is current:
+//            send
+//   neither  DO NOT SEND. A run that sends without knowing what the account holds is
+//            the one that is refused and held ("changed on another device") although
+//            the two copies would have merged. That is what happened when a phone came
+//            back online: the "online" look was already running, this run's own look
+//            was declined, and the run went on with an old picture. So wait and look
+//            again: shortly when the look was declined, not believed or the page was
+//            busy; after the usual retry gap when the service didn't answer (that look
+//            already counted toward the same "isn't answering" count an upload would);
+//            not at all when this tab no longer does the account work or the person
+//            signed out.
+// A missing `look` is "neither", never "send".
+export const BEFORE_UPLOAD_RETRY_MS = 2000;
+const NOTHING_TO_DO_HERE = new Set(["not-ready", "no-lease", "no-backup", "cancelled"]);
+export function uploadAfterLook(look) {
+  if (look && look.applied) return { action: "stop" };
+  if (look && look.fresh) return { action: "send" };
+  const why = look && look.why;
+  if (NOTHING_TO_DO_HERE.has(why)) return { action: "stop" };
+  if (why === "failed") return { action: "wait", afterFailure: true };
+  return { action: "wait", afterMs: BEFORE_UPLOAD_RETRY_MS };
+}
+
 export const PIECE_UPDATED_NOTE = "This piece was updated from another device.";
 
 export function andList(names, cap = 3) {
@@ -1854,6 +1883,30 @@ export function describeAutoUpdate({ names = [], technique = false, removed = []
     lines.push(`Updated from another device: ${text}.`);
   }
   if (gone.length > 0) lines.push(`Removed because ${gone.length === 1 ? "it was" : "they were"} deleted on another device: ${andList(gone)}.`);
+  return lines.length > 0 ? lines.join(" ") : null;
+}
+
+// Pass 126: the quiet line when "the most recent change wins" settled something by itself (the
+// Account panel, never the page-wide banner). Says what was kept and from which device, no more.
+//   pieces:    [{ name, parts: [{ part, side: "local" | "remote" }] }]   (applyAccountMerge's `recency`)
+//   technique: [{ kind, side, title }]   (the engine's notices of kind "kept-more-recent")
+//   "Kept the more recent change on Ballade No. 1: target tempo (from your other device) and notes (from this device)."
+//   "Kept the more recent change on Etude, Nocturne and Ballade No. 1."
+//   "Kept the more recent change in the technique library: D major (from your other device)."
+// Null when nothing was settled this way.
+export function describeRecencySettled({ pieces = [], technique = [] } = {}) {
+  const from = (side) => (side === "local" ? "from this device" : "from your other device");
+  const lines = [];
+  const named = (pieces || []).filter((p) => p && p.parts && p.parts.length > 0);
+  if (named.length === 1) {
+    const one = named[0];
+    const things = one.parts.map(({ part, side }) => `${labelOfField(part).toLowerCase()} (${from(side)})`);
+    lines.push(`Kept the more recent change on ${one.name}: ${andList(things, 4)}.`);
+  } else if (named.length > 1) {
+    lines.push(`Kept the more recent change on ${andList([...new Set(named.map((p) => p.name))])}.`);
+  }
+  const tech = (technique || []).filter((n) => n && n.kind === "kept-more-recent");
+  if (tech.length > 0) lines.push(`Kept the more recent change in the technique library: ${andList(tech.map((n) => `${n.title} (${from(n.side)})`), 4)}.`);
   return lines.length > 0 ? lines.join(" ") : null;
 }
 
@@ -2045,7 +2098,10 @@ export function withPieceDropped(deviceRecord, userId, id) {
 // Pass 120, automatic updates only: a piece changed on both sides, with a
 // recorded base (the fingerprint of each part as last synced), goes to Pass 117's
 // engine instead of a question.
-//   kind "merge"    every part merges cleanly: `merged` is the piece to keep
+//   kind "merge"    every part merges cleanly: `merged` is the piece to keep. (Pass 126: that includes
+//                   a setting both sides changed that the more recent change settled, and a chunk's
+//                   practice record both sides changed, combined. `recencySettled` lists the former
+//                   for the quiet line in the Account panel.)
 //   kind "conflict" a part (or the whole piece) was changed differently on both
 //                   sides: nothing is merged, `conflicts` lists which parts
 //                   (fingerprints only), to be held until Pass 121 asks
@@ -2053,7 +2109,7 @@ export function withPieceDropped(deviceRecord, userId, id) {
 //   kind "ask"      the engine can't tell (no usable base): left as it always was
 function engineVerdict(local, remote, baseParts) {
   const plan = planPieceMerge({ local, remote, base: baseParts });
-  if (plan.status === "merged") return { kind: "merge", merged: plan.merged };
+  if (plan.status === "merged") return { kind: "merge", merged: plan.merged, recencySettled: plan.recencySettled || [], combinedPractice: plan.combinedPractice || [] };
   if (plan.status === "conflicts" || plan.status === "whole-piece-conflict") {
     const conflicts =
       plan.status === "whole-piece-conflict"
@@ -2061,7 +2117,14 @@ function engineVerdict(local, remote, baseParts) {
         : plan.conflicts.map((c) => ({ part: c.part, kind: c.kind, local: c.localFingerprint, remote: c.remoteFingerprint, base: c.baseFingerprint }));
     return { kind: "conflict", conflicts };
   }
-  if (plan.status === "identical" || plan.status === "local-only") return { kind: "same" };
+  // `identical`: the two copies hold the same value for every part. They can still differ in what is not
+  // a part (updatedAt, and since Pass 126 the dated notes), so as with the technique library
+  // (Pass 120) the caller must not record the ACCOUNT's fingerprint for it: this device's copy would
+  // then read as "changed", go up, and the other device would do the same, trading the piece back and
+  // forth. A "local-only" piece (the account's copy is what this device last synced) is different: what
+  // this device holds beyond it IS a change waiting.
+  if (plan.status === "identical") return { kind: "same", identical: true };
+  if (plan.status === "local-only") return { kind: "same" };
   return { kind: "ask" };
 }
 
@@ -2265,6 +2328,7 @@ export function applyAccountMerge({
   const needsYou = [];
   const names = { added: [], took: [], merged: [] };
   const updatedIds = []; // existing pieces whose copy here was replaced or merged
+  const recency = []; // Pass 126: [{ id, name, parts: [{ part, side }] }] settings the more recent change settled
   const settledIds = []; // Pass 121: held pieces settled by the person's answers
   const upToDateIds = []; // Pass 121: already matching (or a clean newer copy) by the time the answers came: nothing to settle
   const unsettled = []; // Pass 121: answered, but not every conflict was (or a new one appeared), or the piece is gone: nothing changed
@@ -2315,9 +2379,13 @@ export function applyAccountMerge({
       // that comes from the account keeps the account's created date.
       next[d.id] = Number.isFinite(d.piece.createdAt) ? { ...d.merged, createdAt: d.piece.createdAt } : d.merged;
       entries[d.id] = rowEntry;
-      counts.merged.push(d.name);
-      names.merged.push(d.name);
+      // (Pass 126) Named as it reads NOW, after the merge: when the name itself was what the more
+      // recent change settled, the account's old name would read as a piece that no longer exists.
+      const mergedName = pieceName(next[d.id]);
+      counts.merged.push(mergedName);
+      names.merged.push(mergedName);
       updatedIds.push(d.id);
+      if (d.recencySettled && d.recencySettled.length > 0) recency.push({ id: d.id, name: mergedName, parts: d.recencySettled.map(({ part, side }) => ({ part, side })) });
     } else if (d.kind === "new") {
       const createdAt = Number.isFinite(d.piece.createdAt) ? d.piece.createdAt : now + index;
       next[d.id] = validateAndMigratePiece({ ...d.piece, createdAt });
@@ -2330,7 +2398,9 @@ export function applyAccountMerge({
         next[d.id] = { ...next[d.id], createdAt: d.piece.createdAt };
         counts.aligned += 1;
       }
-      entries[d.id] = rowEntry;
+      // (Pass 126) Same by parts but not to the letter: this device's own fingerprint is the one it is
+      // synced to, so nothing reads as waiting and the two devices do not trade the piece.
+      entries[d.id] = d.identical && next[d.id] ? { ...rowEntry, fingerprint: pieceFingerprint(next[d.id]) } : rowEntry;
       counts.same += 1;
       if (settle) upToDateIds.push(d.id);
     } else if (d.kind === "take") {
@@ -2351,6 +2421,7 @@ export function applyAccountMerge({
         entries[d.id] = rowEntry;
         settledIds.push(d.id);
         updatedIds.push(d.id);
+        if (plan.recencySettled && plan.recencySettled.length > 0) recency.push({ id: d.id, name: d.name, parts: plan.recencySettled.map(({ part, side }) => ({ part, side })) });
       } else {
         unsettled.push({ id: d.id, name: d.name, status: plan.status, reason: "changed" });
       }
@@ -2425,7 +2496,12 @@ export function applyAccountMerge({
     const merged = mergeImportedTechnique(localTechnique, t.technique);
     // Automatic: Pass 118's engine where a base is recorded (the import merge,
     // which never asks, where it isn't).
-    if (automatic) merged.technique = mergeTechniqueFromAccount(localTechnique, t.technique, techniqueEntry && techniqueEntry.parts);
+    let techniqueNotices = [];
+    if (automatic) {
+      const planned = planTechniqueFromAccount(localTechnique, t.technique, techniqueEntry && techniqueEntry.parts);
+      merged.technique = planned.technique;
+      techniqueNotices = planned.notices;
+    }
     const accountParts = techniquePartFingerprints(t.technique);
     // Automatic only (Pass 118 open item 5, owner Pass 120): the library kept here can
     // equal the account's BY PARTS and still differ by whole-library fingerprint (a
@@ -2445,6 +2521,8 @@ export function applyAccountMerge({
       // its parts, like a piece's entry above.
       entry: { revision: t.revision, fingerprint: techniqueFingerprint(inSyncByParts ? merged.technique : t.technique), parts: accountParts },
       clearedHeld: !!(accountRecord && accountRecord.technique && accountRecord.technique.held),
+      // Pass 126: where both devices changed the same thing and the more recent change was kept
+      notices: techniqueNotices.filter((n) => n.kind === "kept-more-recent"),
     };
     if (technique.clearedHeld) counts.clearedHeld += 1;
   }
@@ -2464,6 +2542,9 @@ export function applyAccountMerge({
     needsYou,
     names,
     updatedIds,
+    // Pass 126: [{ id, name, parts: [{ part, side: "local" | "remote" }] }]: settings both devices changed
+    // differently that the more recent change settled (automatic updates and settling; else empty)
+    recency,
     // Pass 121 (settle only; empty otherwise)
     settledIds,
     upToDateIds,
@@ -2550,7 +2631,7 @@ export function reapplyOnto({ current, accountPiece, baseParts }) {
   if (!baseParts || Object.keys(baseParts).length === 0) return { piece: current, held: [{ part: WHOLE_PIECE_PART, kind: "whole-piece", local: null, remote: null, base: null }] };
   const verdict = engineVerdict(current, accountPiece, baseParts);
   if (verdict.kind === "merge") {
-    return { piece: Number.isFinite(accountPiece.createdAt) ? { ...verdict.merged, createdAt: accountPiece.createdAt } : verdict.merged, held: null };
+    return { piece: Number.isFinite(accountPiece.createdAt) ? { ...verdict.merged, createdAt: accountPiece.createdAt } : verdict.merged, held: null, recencySettled: verdict.recencySettled };
   }
   if (verdict.kind === "same") return { piece: current, held: null };
   return { piece: current, held: verdict.conflicts || [{ part: WHOLE_PIECE_PART, kind: "whole-piece", local: null, remote: null, base: null }] };
@@ -2560,16 +2641,23 @@ export function reapplyOnto({ current, accountPiece, baseParts }) {
 // where the record holds a base for it; where it doesn't, or the engine can't
 // tell, the import merge that never asks and never removes anything. Never throws.
 export function mergeTechniqueFromAccount(localTechnique, accountTechnique, baseParts) {
+  return planTechniqueFromAccount(localTechnique, accountTechnique, baseParts).technique;
+}
+
+// The same, with what the engine says it did (Pass 126): `notices` lists where both devices changed
+// the same thing and the more recent change was kept (and from which side), for the quiet line.
+//   { technique, notices }
+export function planTechniqueFromAccount(localTechnique, accountTechnique, baseParts) {
   try {
     if (baseParts && Object.keys(baseParts).length > 0) {
       const plan = planTechniqueMerge({ local: localTechnique, remote: accountTechnique, base: baseParts });
-      if (plan.status === "merged") return plan.merged;
-      if (plan.status === "identical" || plan.status === "local-only") return localTechnique;
+      if (plan.status === "merged") return { technique: plan.merged, notices: plan.notices };
+      if (plan.status === "identical" || plan.status === "local-only") return { technique: localTechnique, notices: [] };
     }
   } catch (e) {
     /* fall back to the import merge */
   }
-  return mergeImportedTechnique(localTechnique, accountTechnique).technique;
+  return { technique: mergeImportedTechnique(localTechnique, accountTechnique).technique, notices: [] };
 }
 
 // The device record after a merge: each merged piece (and the technique library)

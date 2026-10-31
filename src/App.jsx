@@ -142,10 +142,12 @@ import {
   withPieceHeld,
   autoUpdateTargets,
   needsMergeBeforeUpload,
+  uploadAfterLook,
   fetchChangedAccountRows,
   mergeTechniqueFromAccount,
   reapplyOnto,
   describeAutoUpdate,
+  describeRecencySettled,
   describeAutoPending,
   PIECE_UPDATED_NOTE,
   // Settling a held piece one question at a time (Pass 121)
@@ -170,6 +172,8 @@ import {
 } from "./lib/accountSync";
 import { startSettle, settleChoose, settleBack, settleNext, settleView, keptPhrases, rereadSettleItem } from "./lib/settleFlow";
 import { compareSwitcherOrder, sortPiecesForSwitcher, planSwitcherMove, makeOrderNote } from "./lib/pieceMerge";
+import { stampChangedSettings } from "./lib/settingTimes";
+import { stampChangedTechnique } from "./lib/techniqueMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
@@ -834,23 +838,30 @@ export default function App() {
     }, Math.max(0, delayMs));
   };
 
-  const requestCheck = async (trigger) => {
+  // Says what came of the look: { fresh, applied, why }. `fresh`: it was taken and
+  // believed, so checkRowsRef now holds the account as it is. `applied`: it also brought
+  // something in. `why`, when it wasn't fresh, is for runSync (uploadAfterLook, lib/accountSync.js).
+  // `beforeUpload` is runSync's own look: it is needed even while the page is in the
+  // background (the upload goes out anyway), and it is not put off with a timer of its own
+  // when something is busy (runSync waits and asks again).
+  const requestCheck = async (trigger, { beforeUpload = false } = {}) => {
+    const skipped = (why) => ({ fresh: false, applied: false, why });
     const { userId, loaded: isLoaded } = syncLatestRef.current;
-    if (!authEnabled || !userId || !isLoaded) return;
-    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-    if (!holdsLease()) return; // another tab does the looking (Pass 119)
-    if (!hasRecordedBackup(readDeviceRecord(), userId)) return;
+    if (!authEnabled || !userId || !isLoaded) return skipped("not-ready");
+    if (!beforeUpload && typeof document !== "undefined" && document.visibilityState !== "visible") return skipped("hidden");
+    if (!holdsLease()) return skipped("no-lease"); // another tab does the looking (Pass 119)
+    if (!hasRecordedBackup(readDeviceRecord(), userId)) return skipped("no-backup");
     const isBusy = () => backupRunningRef.current || accountFlowBusyRef.current || syncRunningRef.current;
     if (isBusy()) {
-      scheduleCheck(2000, trigger); // look again once it's finished
-      return;
+      if (!beforeUpload) scheduleCheck(2000, trigger); // look again once it's finished
+      return skipped("busy");
     }
     if (!checkerRef.current) checkerRef.current = createAccountChecker();
     const generation = syncGenRef.current;
     const recordBefore = accountRecordFor(readDeviceRecord(), userId);
     const out = await checkerRef.current.run({ trigger, userId, visible: true });
-    if (!out.ran) return;
-    if (syncGenRef.current !== generation) return; // signed out, or another account, meanwhile
+    if (!out.ran) return skipped(out.why); // "running": another look (say the "online" one) is in flight
+    if (syncGenRef.current !== generation) return skipped("cancelled"); // signed out, or another account, meanwhile
     syncFailuresRef.current = nextFailureCount(syncFailuresRef.current, checkOutcome(out));
     // Rows read while an upload, a backup or "Get changes" was changing the
     // record could already include this device's own upload without the
@@ -863,7 +874,8 @@ export default function App() {
     refreshSyncInfo();
     // Pass 120: with the switch on, what the check found is brought in now.
     const updated = usable ? await runAutoUpdate("check") : null;
-    return { applied: !!(updated && updated.applied) };
+    const why = usable ? null : out.result.status !== "ok" ? (out.result.reason === "signed-out" ? "cancelled" : "failed") : "unusable";
+    return { fresh: usable, applied: !!(updated && updated.applied), why };
   };
 
   // One upload run: send what's waiting (the library does it, one item at a
@@ -902,9 +914,23 @@ export default function App() {
     // first (never the data: ids, revisions, deleted dates, about 3 KB). If it
     // brought something in, this run stops and the merged result goes up in the
     // next one, after the usual quiet period.
+    // Pass 126 follow-up: NO FRESH LOOK, NO UPLOAD. The look used to be skipped without a
+    // word when the page was in the background, or when another look was already running
+    // (the browser's "online" event starts one at the same moment it starts this run), and
+    // the run then went on from an old picture of the account, was refused, and held a piece
+    // that would have merged. Now a look that didn't happen or wasn't believed makes the run
+    // wait and look again (uploadAfterLook decides, and is tested); the refusal below stays
+    // as the last safety net, for the seconds between the look and the upload.
     if (autoUpdateOn(readDeviceRecord(), userId)) {
-      const looked = await requestCheck("startup");
-      if (looked && looked.applied) return;
+      const looked = await requestCheck("startup", { beforeUpload: true });
+      const next = uploadAfterLook(looked);
+      if (next.action === "stop") return;
+      if (next.action === "wait") {
+        const gap = next.afterFailure ? retryGapMs(syncFailuresRef.current) : next.afterMs;
+        if (next.afterFailure) syncNextAttemptRef.current = Date.now() + gap;
+        scheduleSync(gap);
+        return;
+      }
     }
     const mergeRecord = readDeviceRecord();
     const lastRead = checkRowsRef.current;
@@ -1480,7 +1506,12 @@ export default function App() {
       // piece changes go through updatePiece) so mergeImportedPiece can tell
       // "this device has newer state than the file being re-imported" from
       // "the file actually is the newer copy" — see storage.js.
-      return { ...prev, [targetId]: { ...next, updatedAt: Date.now() } };
+      //
+      // Pass 126: and every single-value setting this change moved gets a dated note
+      // ("the most recent change wins", lib/settingTimes.js). A merge, a reload from another
+      // tab and an import never come through here, so they never write one.
+      const now = Date.now();
+      return { ...prev, [targetId]: { ...stampChangedSettings(current, next, now), updatedAt: now } };
     });
   };
 
@@ -1620,12 +1651,15 @@ export default function App() {
     };
   }
 
-  function updateTechnique(updater) {
+  // `stamp: false` for a library that arrives from somewhere else (an import, an update from another
+  // device): it carries its own dated notes (Pass 126) and its changes are nobody's change here.
+  function updateTechnique(updater, { stamp = true } = {}) {
     setTechnique((prev) => {
       if (!prev) return prev;
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (!next || next === prev) return prev;
-      return { ...next, updatedAt: Date.now() };
+      const now = Date.now();
+      return { ...(stamp ? stampChangedTechnique(prev, next, now) : next), updatedAt: now };
     });
   }
 
@@ -1882,7 +1916,7 @@ export default function App() {
     let techniqueStats = null;
     if (includeTechnique && importTechnique && technique) {
       techniqueStats = mergeImportedTechnique(technique, importTechnique).stats;
-      updateTechnique((t) => withTopUp(mergeImportedTechnique(t, importTechnique).technique));
+      updateTechnique((t) => withTopUp(mergeImportedTechnique(t, importTechnique).technique), { stamp: false });
     }
     const { unreadable: techniqueUnreadable, skippedItems } = importTechniqueInfo;
     setImportCandidates(null);
@@ -2016,7 +2050,7 @@ export default function App() {
     if (out.technique && out.technique.changed) {
       const accountTechnique = candidates.technique.technique;
       const baseParts = record.technique && record.technique.parts;
-      updateTechnique((t) => withTopUp(automatic ? mergeTechniqueFromAccount(t, accountTechnique, baseParts) : mergeImportedTechnique(t, accountTechnique).technique));
+      updateTechnique((t) => withTopUp(automatic ? mergeTechniqueFromAccount(t, accountTechnique, baseParts) : mergeImportedTechnique(t, accountTechnique).technique), { stamp: false });
     }
     refreshSyncInfo();
     // Whatever this device holds beyond the account's copy is now an ordinary
@@ -2027,11 +2061,15 @@ export default function App() {
     if (automatic) {
       // Told quietly, in the Account panel; the page-wide banner only when something was lost
       // (practice that went with a removed piece) or the piece that was open just went (Pass 122).
-      const text = describeAutoUpdate({
+      const updatedText = describeAutoUpdate({
         names: [...out.names.added, ...out.names.took, ...out.names.merged],
         technique: !!(out.technique && out.technique.changed),
         removed: out.removed.map((r) => r.name),
       });
+      // Pass 126: where both devices changed the same setting, the more recent change was kept: said
+      // quietly here, with whose it was, and nothing to press.
+      const keptText = describeRecencySettled({ pieces: out.recency, technique: out.technique ? out.technique.notices : [] });
+      const text = [updatedText, keptText].filter(Boolean).join(" ");
       if (text) setAutoNotice({ text });
       const removedLines = describeAutoRemoved(out.removed, openRemovedName);
       if (removedLines.length > 0) setAccountNotice({ lines: removedLines });

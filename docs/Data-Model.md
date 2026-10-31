@@ -235,6 +235,12 @@ piece = {
                          // is stamped as a reorder of its own). sortOrder is still written on
                          // every drag: it is the fallback when no note is left, and what a
                          // device on the previous version shows.
+  settingTimes,          // optional (Pass 126): { [setting]: epoch ms } — when each
+                         // single-value setting (lib/settingTimes.js, RECENCY_FIELDS)
+                         // last changed, written by updatePiece and by a merge, never by
+                         // a load; a piece that has none carries no field. The later one
+                         // wins when two devices changed the same setting differently;
+                         // updatedAt stands in where a setting has no note. Not a part.
   updatedAt,             // epoch ms — bumped on every local mutation (App.jsx's
                          // updatePiece, the single funnel every piece change goes
                          // through per CLAUDE.md). Exists to let mergeImportedPiece
@@ -1202,6 +1208,10 @@ The schema is `validateAndMigrateTechnique` / `defaultTechnique`
                                 // the check-off changed, for uncompleteTask,
                                 // plus the check octaves at the time
   settings: { scalesPerDay: 3, minutesPerScale: 5 }, // defaults only, no UI in v1
+  partTimes?: { [part key]: epoch ms }, // Pass 126 — when a scale's octaves (`octaves:<id>`),
+                                // hands (`hands:<id>`) or one of the two settings
+                                // (`setting:<name>`) last changed; absent until one has.
+                                // The later change wins a contest; updatedAt stands in
   updatedAt: epoch ms | null,
 }
 ```

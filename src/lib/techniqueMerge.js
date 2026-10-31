@@ -9,8 +9,11 @@
 /*  side, and can the changes be put together without asking anyone?   */
 /*  Unlike a piece, the answer here is ALWAYS yes: the library has no  */
 /*  chunk grid to disagree about, and where both sides changed the     */
-/*  same thing differently the account's value is kept and a notice    */
-/*  says so (never a question).                                        */
+/*  same thing differently one value is kept and a notice says so      */
+/*  (never a question). Since Pass 126 that is the MORE RECENT change  */
+/*  for a scale's octaves and hands, the two settings and a task's     */
+/*  method plan (the account's on a tie); the account's value still    */
+/*  decides the rest.                                                  */
 /*                                                                     */
 /*  The library is split into PARTS, each with a fingerprint. The      */
 /*  device record keeps those fingerprints as of the last sync         */
@@ -37,10 +40,15 @@
 /*  same way, because it changes the same parts the check-off did);    */
 /*  changed on both to the same value, agreement; changed on both to   */
 /*  different values, a rule per kind of part:                         */
-/*    - a scale's octaves or hands, and the settings: the account's    */
-/*      (remote) value is kept, and a notice says so. (A yes/no part,  */
-/*      starred or switched on, can't conflict: changed on both sides  */
-/*      means changed to the same other value.)                        */
+/*    - a scale's octaves or hands, the settings and a task's method   */
+/*      plan (Pass 126): the MORE RECENT change is kept, judged by the */
+/*      dated note on the part (`partTimes`: octaves, hands and the    */
+/*      two settings) or, where it has none, by the library's own      */
+/*      updatedAt (always, for a task's plan: its keys would grow with */
+/*      every day's list). A tie keeps the account's (remote) value.   */
+/*      A notice says which was kept. (A yes/no part, starred or       */
+/*      switched on, can't conflict: changed on both sides means       */
+/*      changed to the same other value.)                              */
 /*    - the tempo check: the newer check wins, an empty tempo never    */
 /*      replaces a real one (mergeImportedTechnique's rules); on the   */
 /*      same date a real tempo beats an empty one, and two different   */
@@ -52,7 +60,7 @@
 /*      part, so a use added on either side is kept, one undone on one */
 /*      side only is gone, and the later date wins when both changed   */
 /*    - a task: done on either side wins (a completion survives unless */
-/*      undone on one side ONLY); the account's for the rest           */
+/*      undone on one side ONLY); the plan as above                    */
 /*    - the walk position: the account's, then see "the walk" below    */
 /*  Scales and custom methods are never removed by a merge: one that   */
 /*  is on one side only is kept (the app has no way to delete one      */
@@ -90,6 +98,7 @@
 import { validateAndMigrateTechnique } from "./storage";
 import { isObject, toJsonValue, fingerprint } from "./pieceMerge";
 import { nextWalkPosition } from "./technique";
+import { cleanPartTimes, isTimedTechniquePart, partTime, nextPartStamp } from "./settingTimes";
 
 /* ------------------------------------------------------------------ */
 /*  The canonical form                                                 */
@@ -212,6 +221,24 @@ export function techniqueParts(technique) {
 // as the account holds it. Not cached: the library is small.
 export function techniquePartFingerprints(technique) {
   return printParts(techniqueParts(technique));
+}
+
+// `next` is `prev` after a change a person made. Returns `next` carrying a fresh dated note for
+// every octaves / hands / settings part whose value differs from `prev`'s (a part that is new,
+// like a scale just added, is not a change to it), and the very same object when none did. A
+// merge writes its own notes (below) and never calls this.
+export function stampChangedTechnique(prev, next, now = Date.now()) {
+  if (!isObject(prev) || !isObject(next) || prev === next) return next;
+  const before = partsOfCanonical(canonicalTechnique(prev));
+  const after = partsOfCanonical(canonicalTechnique(next));
+  const changed = Object.keys(after).filter((k) => isTimedTechniquePart(k) && Object.prototype.hasOwnProperty.call(before, k) && fingerprint(before[k]) !== fingerprint(after[k]));
+  if (changed.length === 0) return next;
+  const at = nextPartStamp(next, now);
+  const times = { ...(cleanPartTimes(next.partTimes) || {}) };
+  changed.forEach((k) => {
+    times[k] = at;
+  });
+  return { ...next, partTimes: times };
 }
 
 /* ------------------------------------------------------------------ */
@@ -436,6 +463,19 @@ export function planTechniqueMerge({ local, remote, base }) {
   };
   const keepRemoteQuietly = keepRemote(null);
 
+  // Pass 126: where both sides changed the same part differently, the MORE RECENT change (the
+  // dated note on the part, else the library's updatedAt); a tie keeps the account's. `after`
+  // is told which side won, for the notice. Recorded in `recency` so the merged notes below can
+  // carry the moment that decided it.
+  const recency = new Map();
+  const byRecency = (after) => (l, r, k) => {
+    const tl = partTime(L, k);
+    const tr = partTime(R, k);
+    const side = tl > tr ? "local" : "remote";
+    recency.set(k, { side, tie: tl === tr });
+    if (after) after(k, side);
+    return side === "local" ? l : r;
+  };
   /* ---- a completion one side undid and the other did again ---- */
   // Today's list, same date: both sides changed the same task (so a one-sided
   // undo isn't this), one done and one not. Whichever side's library changed
@@ -457,10 +497,10 @@ export function planTechniqueMerge({ local, remote, base }) {
   }
 
   /* ---- scales ---- */
-  const itemNotes = new Map(); // id -> Set of field names the account's value was kept for
-  const note = (id, field) => {
-    if (!itemNotes.has(id)) itemNotes.set(id, new Set());
-    itemNotes.get(id).add(field);
+  const itemNotes = new Map(); // id -> Map of field name -> "local" | "remote": whose value was kept
+  const note = (id, field, side = "remote") => {
+    if (!itemNotes.has(id)) itemNotes.set(id, new Map());
+    itemNotes.get(id).set(field, side);
   };
   const tempoTies = new Set();
   const checkFrom = new Map(); // scale id -> the side whose tempo check was taken ("local" or "remote"), where one side's was
@@ -484,8 +524,8 @@ export function planTechniqueMerge({ local, remote, base }) {
     // sides means changed to the same other value, which is agreement.
     const starred = pick(K.starred(id), keepRemoteQuietly) === true;
     const inRotation = pick(K.rotation(id), keepRemoteQuietly) !== false;
-    const octaves = pick(K.octaves(id), keepRemote(() => note(id, "octaves")));
-    const hands = pick(K.hands(id), keepRemote(() => note(id, "hands")));
+    const octaves = pick(K.octaves(id), byRecency((k, side) => note(id, "octaves", side)));
+    const hands = pick(K.hands(id), byRecency((k, side) => note(id, "hands", side)));
     let check;
     const kCheck = K.check(id);
     if (undoWins.has(id)) {
@@ -570,10 +610,10 @@ export function planTechniqueMerge({ local, remote, base }) {
   });
 
   /* ---- settings ---- */
-  const settingNotes = [];
+  const settingNotes = []; // [{ name, side }]
   const settings = {};
   ["scalesPerDay", "minutesPerScale"].forEach((name) => {
-    settings[name] = pick(K.setting(name), keepRemote(() => settingNotes.push(name)));
+    settings[name] = pick(K.setting(name), byRecency((k, side) => settingNotes.push({ name, side })));
   });
 
   /* ---- today's list ---- */
@@ -629,7 +669,7 @@ export function planTechniqueMerge({ local, remote, base }) {
         tasks.push(copy(lt || rt));
         return;
       }
-      const plan = pick(K.taskPlan(date, itemId), keepRemoteQuietly);
+      const plan = pick(K.taskPlan(date, itemId), byRecency(null));
       // A completion survives unless it was undone on ONE side only: changed on
       // one side, that side's; changed on both, done if either is done.
       // (A part left out is a task that isn't done.)
@@ -718,6 +758,23 @@ export function planTechniqueMerge({ local, remote, base }) {
   const walkPosition = settleWalk(pickedWalk, items, dayList ? dayList.tasks : [], walkSide === "local" ? "remote" : walkSide === "remote" ? "local" : null, sideOfTask);
   if (walkPosition !== pickedWalk) derived.push("walk");
 
+  /* ---- the dated notes of the merged library (Pass 126) ---- */
+  // Worked out the same whichever copy is "local": for a part both sides hold the same value
+  // for, the later note either holds; for one only a single side changed, that side's note (none
+  // if it had none, and the library's updatedAt stands in from then on); for a conflict the more
+  // recent change settled, the moment that decided it (the winner's note, else its updatedAt).
+  const timedKeys = [...items.flatMap((it) => [K.octaves(it.id), K.hands(it.id)]), K.setting("scalesPerDay"), K.setting("minutesPerScale")];
+  const noteOf = (T, k) => (isObject(T.partTimes) && Number.isFinite(T.partTimes[k]) && T.partTimes[k] > 0 ? T.partTimes[k] : 0);
+  const partTimes = {};
+  timedKeys.forEach((k) => {
+    let at;
+    if (recency.has(k)) at = partTime(recency.get(k).side === "local" ? L : R, k);
+    else if (fromLocal.has(k)) at = noteOf(L, k);
+    else if (fromRemote.has(k)) at = noteOf(R, k);
+    else at = Math.max(noteOf(L, k), noteOf(R, k));
+    if (at > 0) partTimes[k] = at;
+  });
+
   /* ---- put together ---- */
   const lt = timestamp(local);
   const rt = timestamp(remote);
@@ -730,6 +787,7 @@ export function planTechniqueMerge({ local, remote, base }) {
     walkPosition,
     dayList,
     settings,
+    ...(Object.keys(partTimes).length > 0 ? { partTimes } : {}),
     updatedAt: lt || rt ? Math.max(lt, rt) : null,
   };
   const merged = toJsonValue(validateAndMigrateTechnique(toJsonValue(draft)));
@@ -737,11 +795,23 @@ export function planTechniqueMerge({ local, remote, base }) {
   /* ---- the notices ---- */
   const notices = [];
   const itemById = new Map(merged.items.map((it) => [it.id, it]));
+  // Whose value was kept, in words. A change kept because it was made later says so; the rest of
+  // the account's rules (the scale's identity, the check octaves of a tied tempo) keep the old
+  // wording.
+  const keptWords = (side) => (side === "local" ? "This device's" : "Your other device's");
   itemNotes.forEach((fields, id) => {
     const it = itemById.get(id);
     if (!it) return;
     const title = techniqueItemTitle(it);
-    notices.push({ kind: "kept-other-device", part: "scale", id, title, fields: sorted(fields), text: `Your other device's change to ${title} was kept.` });
+    const names = sorted(fields.keys());
+    const recent = names.filter((f) => f === "octaves" || f === "hands");
+    const sides = new Set(names.map((f) => fields.get(f)));
+    if (recent.length > 0 && recent.length === names.length) {
+      const side = sides.size === 1 ? [...sides][0] : "remote";
+      notices.push({ kind: "kept-more-recent", side, part: "scale", id, title, fields: names, text: `${keptWords(side)} change to ${title} was kept (it was made later).` });
+    } else {
+      notices.push({ kind: "kept-other-device", part: "scale", id, title, fields: names, text: `Your other device's change to ${title} was kept.` });
+    }
   });
   tempoTies.forEach((id) => {
     const it = itemById.get(id);
@@ -749,8 +819,8 @@ export function planTechniqueMerge({ local, remote, base }) {
     const title = techniqueItemTitle(it);
     notices.push({ kind: "kept-other-device", part: "tempo", id, title, text: `Your other device's tempo for ${title} was kept.` });
   });
-  settingNotes.forEach((name) => {
-    notices.push({ kind: "kept-other-device", part: "setting", id: name, title: SETTING_WORDS[name], text: `Your other device's change to ${SETTING_WORDS[name]} was kept.` });
+  settingNotes.forEach(({ name, side }) => {
+    notices.push({ kind: "kept-more-recent", side, part: "setting", id: name, title: SETTING_WORDS[name], text: `${keptWords(side)} change to ${SETTING_WORDS[name]} was kept (it was made later).` });
   });
 
   return result("merged", {

@@ -8466,7 +8466,8 @@ what it rules out.
      sentences that describe the old behavior.**
   9. **The practice question and its first screen are now unreachable** and were kept (tested on the
      engine's old plan, `LEGACY`), not removed. Deleting tested code the owner has not asked to lose is a
-     separate decision.
+     separate decision. **Decided 2026-10-31 (the owner: "if nothing is lost, go ahead and delete the old
+     question screens"): deleted** (item 13).
   10. **Found in the pre-commit review (2026-10-29) and fixed:** with the date changed on one device only and
      both devices having re-saved (so both changed minutes per day, each worked out from its own date), the
      clock settled minutes per day on its own and could pair one device's date with the other's minutes: a
@@ -8502,6 +8503,23 @@ what it rules out.
      piece (the dated note, `updatedAt`), from one place, and `handleConfirmReschedule` calls it. Days to learn
      and the marker follow the date and get no note of their own; a minutes-mode piece (no date written) gets
      none. A regression test fails without it. The wiring in `App.jsx` itself is not tested, as before.
+  13. **The old question screens deleted (the owner, 2026-10-31: "if nothing is lost, go ahead and delete the
+     old question screens").** The check for "nothing is lost" was made before any code was removed: in
+     `planPieceMerge` a practice record both sides changed can only end in `stillOpen` (and so in a question)
+     when `combinePractice` is false, and nothing in the app passes false; a pre-Pass-126 hold that lists a
+     practice record is planned afresh by the engine and lands on "Nothing is left to decide"; the
+     `removalHint` counting belonged to the practice question only, while the red-box warning for the
+     whole-piece answers is separate and stays. Removed: `progressQuestion`, `removalHint`,
+     `describeProgressTarget`, `progressOrder` (`lib/accountSync.js`); the "bulk" stage, `BULK_MIN`,
+     `bulkParts`, `hasBulkStep`, `questionsToAsk`, the grouping in `keptPhrases` (`lib/settleFlow.js`); the two
+     "bulk" conditionals in `SettleConflictModal.jsx`; and the tests that only exercised them. Kept: the
+     engine's `combinePractice` / `recency` options and its "both" answer (its own tests use them),
+     `unionProgressEntries`, `removalWarnings` (the whole-piece answers). One safety net added:
+     `buildSettleQuestions` throws on a plan that still holds a practice-record conflict, so `planSettle`
+     sends the piece to the whole-piece picker and says it was not asked about, rather than asking fewer
+     questions than there are conflicts; a test pins it. Seen in a browser (the two-address rig): a recordings
+     question, a "ready" piece (an old-style practice hold) and the whole-piece warning each walked to the
+     end, no console errors. The old code is in git before the commit.
   **Checks.** 1,668 tests; 18 deliberate breakages, all caught (the earlier change wins, a tie is guessed,
   a collection added to the list, a session dropped, an undo undone, a note stamped earlier, no note
   written, notes materialized on load, notes that depend on who merges, the work id or the date's numbers
@@ -8513,10 +8531,12 @@ what it rules out.
   two devices): the same two settings renamed on both while offline, the later wins on both, nothing asked,
   no banner, B's Account panel says what was kept; the same chunk logged on both, both sessions on both;
   the account revision still afterwards. **Not seen on the real preview with the real test project** (the
-  card's "Yours" checks: her phone as the second device). **After item 11:** 1,673 tests and one more
-  deliberate breakage (a missing or declined look sends), caught. Her online Composer clash and her
-  practice-combine check (Full pass 2 to 4 on both devices) passed on the preview before the fix; the
-  reconnect and airplane-mode check is for the rebuilt preview.
+  card's "Yours" checks: her phone as the second device). **After items 11 to 13:** 1,669 tests (the
+  deleted screens took their own tests with them) and three more deliberate breakages, all caught (a
+  missing or declined look sends; "Reschedule all" stops stamping; the question builder stops refusing a
+  leftover practice conflict). Her three "Yours" checks passed on
+  the preview: the online Composer clash, the practice combine (Full pass 2 to 4 on both devices) and
+  the reconnect with the phone really offline ("Working offline" seen), after the fix.
 
 ## Open questions
 

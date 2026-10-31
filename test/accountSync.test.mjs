@@ -1253,10 +1253,6 @@ const withMore = (p, day, updatedAt = (p.updatedAt || 0) + 1000) =>
 // practice record is not (it is combined), and a single setting is not (the later change wins).
 const withRecording = (p, n, updatedAt = (p.updatedAt || 0) + 1000) =>
   validateAndMigratePiece({ ...viaJson(p), updatedAt, recordings: [{ id: `r${n}`, label: `Take ${n}`, url: `https://example.test/${n}` }] });
-// What the engine did before Pass 126 for the two rules that became answers (the more recent change
-// settles a single setting; a practice record both devices changed is combined). Used where a test
-// needs the old plan to exercise code that is kept but no longer reached (the practice question).
-const LEGACY = { recency: false, combinePractice: false };
 // Account rows, as readAccountRows gives them.
 const acctRow = (p, revision = 1, extra = {}) => ({ id: p.id, revision, deleted_at: null, data: reorder(viaJson(p)), ...extra });
 // A device record in which each piece is recorded as synced at a revision.
@@ -3269,7 +3265,6 @@ describe("the check runs every minute, and the page asks often enough (Pass 120)
 
 describe("settling a held piece, one question at a time (Pass 121)", () => {
   const NOW = Date.parse("2026-10-19T12:00:00Z");
-  const DASH = "\u2013"; // formatRange's en dash: "mm. 1\u20134"
   const base = pieceOf("p1", { targetDate: "2026-10-20" });
   const edited = (p, patch) => validateAndMigratePiece({ ...viaJson(p), ...patch, updatedAt: (p.updatedAt || 0) + 1000 });
   // The same chunk practiced differently on both devices (Pass 126: combined, never asked), and what IS
@@ -3283,7 +3278,6 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
       { id: "r4", label: "Take 4", url: "https://example.test/4" },
     ],
   });
-  const legacyPlan = (local = mine, remote = theirs) => planPieceMerge({ ...LEGACY, local, remote, base: accountRecordFor(heldDevice(), USER).pieces.p1.parts });
   const tech = viaJson(technique);
 
   // The device record as Pass 120 leaves it for a piece it held: synced at revision 1, held,
@@ -3337,7 +3331,7 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.equal(item.questions.some((q) => q.kind === "progress"), false, "both devices practiced the chunk, and nobody is asked");
   });
 
-  test("the proposed wording, word for word: any other part, and (kept for the old rule) a chunk's practice record", () => {
+  test("the proposed wording, word for word", () => {
     const [recordingsQ, dateQ] = planFor().items[0].questions;
     assert.equal(dateQ.text, "Target date: Nov 1 on this device, Nov 15 on your other device.");
     assert.equal(recordingsQ.text, "Recordings: 1 recording on this device, 2 recordings on your other device.");
@@ -3345,14 +3339,6 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
       assert.deepEqual(q.options.map((o) => [o.value, o.label]), [["local", "This device's"], ["remote", "The other device's"]]);
       assert.equal(/\u2014/.test(JSON.stringify(q)), false, "no em dash in anything the person reads");
     });
-    // Since Pass 126 no real piece reaches the practice question (the engine combines a record both
-    // devices changed), but the wording is kept and checked on the engine's old plan.
-    const chunkQ = buildSettleQuestions({ plan: legacyPlan(), piece: mine }).find((q) => q.part === "progress:c1");
-    assert.equal(chunkQ.text, `You practiced mm. 1${DASH}4 on both devices since you last synced.`);
-    assert.deepEqual(chunkQ.options.map((o) => [o.value, o.label]), [["both", "Both devices' sessions"], ["local", "This device's"], ["remote", "The other device's"]]);
-    assert.equal(chunkQ.options[0].recommended, true, "'both' is the recommended one");
-    assert.equal(chunkQ.options.filter((o) => o.recommended).length, 1);
-    assert.equal(/\u2014/.test(JSON.stringify(chunkQ)), false);
   });
 
   test("dates carry the year only when it isn't this year; long values get a line each", () => {
@@ -3369,23 +3355,12 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.ok(notes[1].length < 80);
   });
 
-  test("a field nobody wrote a label for still reads as a sentence; practice keys and chunk kinds are named", () => {
+  test("a field nobody wrote a label for still reads as a sentence", () => {
     const pure = buildSettleQuestions({
       plan: { status: "conflicts", conflicts: [{ part: "fooBarBaz", kind: "field", field: "fooBarBaz", local: 1, remote: 2 }] },
-      piece: mine,
       year: 2026,
     });
     assert.equal(pure[0].text, "Foo bar baz: 1 on this device, 2 on your other device.");
-    // each side has sessions the other lacks, which is what 'since you last synced' means here
-    const entry = (n, start) => ({ doneDays: [1], sessions: Array.from({ length: n }, (_, i) => ({ day: 1, loggedAt: start + i, bpm: 60 + i })) });
-    const nameOf = (id, local, remote) =>
-      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: `progress:${id}`, kind: "progress", id, local, remote }] }, piece: mine, year: 2026 })[0];
-    assert.equal(nameOf("__consolidation__", entry(2, 10), entry(3, 100)).text, "You practiced the full run-through on both devices since you last synced.");
-    assert.equal(nameOf("__cold_start__", entry(2, 10), entry(3, 100)).title, "Practice record: the cold-start check");
-    assert.equal(nameOf("sr_s1", entry(2, 10), entry(3, 100)).title, "Practice record: the run-through of A", "a section by its name");
-    const transition = generateAllChunks(mine).all.find((c) => c.kind === "transition");
-    assert.match(nameOf(transition.id, entry(2, 10), entry(3, 100)).title, /^Practice record: the transition at mm\. /);
-    assert.equal(nameOf("c999", entry(2, 10), entry(3, 100)).title, "Practice record: a chunk that is no longer in the plan");
   });
 
   test("numbers worked out from a conflicting target date are not a question of their own: the date's question says they follow it, and the answer settles all three", () => {
@@ -3404,12 +3379,12 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.deepEqual([local.pieces.p1.targetDate, local.pieces.p1.daysToLearn, local.pieces.p1.minutesPerDay], ["2026-11-01", 16, 20], "this device's date with this device's days and minutes");
     // a question builder handed the engine's plan directly asks the same
     const live = planPieceMerge({ local: here, remote: there, base: accountRecordFor(device, USER).pieces.p1.parts });
-    assert.deepEqual(buildSettleQuestions({ plan: live, piece: here, year: 2026 }).map((q) => q.part), ["targetDate"]);
+    assert.deepEqual(buildSettleQuestions({ plan: live, year: 2026 }).map((q) => q.part), ["targetDate"]);
   });
 
   test("a number no date can hold does not break the question, and a real created date reads as a date", () => {
     const ask = (local, remote) =>
-      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "createdAt", kind: "field", field: "createdAt", local, remote }] }, piece: mine, year: 2026 })[0].text;
+      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "createdAt", kind: "field", field: "createdAt", local, remote }] }, year: 2026 })[0].text;
     assert.equal(ask(Date.parse("2026-10-03T12:00:00Z"), 9e18), "Date added: Oct 3 on this device, not set on your other device.");
     assert.equal(ask(Date.parse("2026-10-03T12:00:00Z"), Date.parse("2026-10-05T12:00:00Z")), "Date added: Oct 3 on this device, Oct 5 on your other device.");
   });
@@ -3421,29 +3396,39 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
         conflicts: [{ part: "targetDate", kind: "field", field: "targetDate", local: "2026-11-01", remote: "2026-11-15" }],
         linkedToDate: ["daysToLearn", "minutesPerDay", "rescheduleMarker"],
       },
-      piece: mine,
       year: 2026,
     })[0];
     assert.equal(q.detail, "Days to learn, minutes per day and reschedule follow the target date you keep.");
     const same = buildSettleQuestions({
       plan: { status: "conflicts", conflicts: [{ part: "rescheduleMarker", kind: "field", field: "rescheduleMarker", local: { asOfDay: 3, a: 1 }, remote: { asOfDay: 3, a: 2 } }] },
-      piece: mine,
       year: 2026,
     })[0];
     assert.equal(same.text, "Reschedule: rescheduled on day 3 on both devices, but the two plans differ in detail.");
   });
 
-  test("when only one side added sessions there is no 'both'; when one side removed the record, only the two", () => {
-    const shared = { day: 1, loggedAt: 10, bpm: 60 };
-    const one = { doneDays: [1], sessions: [shared, { day: 2, loggedAt: 20, bpm: 70 }] };
-    const other = { doneDays: [1], sessions: [shared], flag: "rough" };
-    const q = buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local: one, remote: other }] }, piece: mine, year: 2026 })[0];
-    assert.equal(q.text, `The practice record for mm. 1${DASH}4 was changed differently on the two devices.`);
-    assert.equal(q.detail, "Sessions: 2 on this device, 1 on your other device.");
-    assert.deepEqual(q.options.map((o) => o.value), ["local", "remote"]);
-    const gone = buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local: one, remote: undefined }] }, piece: mine, year: 2026 })[0];
-    assert.equal(gone.text, `The practice record for mm. 1${DASH}4 is on this device, but your other device no longer has it.`);
-    assert.deepEqual(gone.options.map((o) => o.value), ["local", "remote"]);
+  test("[Pass 126, screens deleted 2026-10-31] a practice-record conflict is never silently skipped: the builder refuses it, and the piece goes to the whole-piece picker with a line saying so", () => {
+    // The engine no longer produces one (it combines a record both devices changed), and the question about
+    // one was deleted. If a plan ever holds one anyway, asking fewer questions than there are conflicts would
+    // leave it unanswered; so the builder throws, and planSettle (which never throws) sends the piece to the
+    // picker and lists it as not asked about.
+    const one = { doneDays: [1], sessions: [{ day: 1, loggedAt: 10, bpm: 60 }, { day: 2, loggedAt: 20, bpm: 70 }] };
+    const other = { doneDays: [1], sessions: [{ day: 1, loggedAt: 10, bpm: 60 }], flag: "rough" };
+    const plan = {
+      status: "conflicts",
+      conflicts: [
+        { part: "targetDate", kind: "field", field: "targetDate", local: "2026-11-01", remote: "2026-11-15" },
+        { part: "progress:c1", kind: "progress", id: "c1", local: one, remote: other },
+      ],
+    };
+    assert.throws(() => buildSettleQuestions({ plan, year: 2026 }), /practice-record conflict/);
+    const planned = planSettle({
+      candidates: candidatesOf(),
+      localPieces: { p1: mine },
+      accountRecord: accountRecordFor(heldDevice(), USER),
+      now: NOW,
+      build: ({ year }) => buildSettleQuestions({ plan, year }),
+    });
+    assert.deepEqual([planned.items, planned.fallbackIds, planned.errored.map((e) => e.id)], [[], ["p1"], ["p1"]]);
   });
 
   test("the whole-piece conflict is one question, with what each choice removes said plainly (and flagged, so the summary can repeat it)", () => {
@@ -3589,53 +3574,9 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     assert.match(bad[0].text, /^Etude changed again while you were deciding, so nothing was changed and it is still held\./);
   });
 
-  test("an answer that removes sessions says so, with the number, and is flagged; keeping both removes none (the old plan: no real piece reaches this since Pass 126)", () => {
-    const chunkQ = buildSettleQuestions({ plan: legacyPlan(), piece: mine }).find((q) => q.part === "progress:c1"); // one extra session on each device
-    const opt = (q, v) => q.options.find((o) => o.value === v);
-    assert.equal(opt(chunkQ, "local").hint, "The session logged on your other device will be removed, from your account too. This can't be undone.");
-    assert.equal(opt(chunkQ, "remote").hint, "The session logged on this device will be removed. This can't be undone.");
-    assert.equal(opt(chunkQ, "local").removes, true);
-    assert.equal(opt(chunkQ, "remote").removes, true);
-    assert.equal(opt(chunkQ, "both").removes, undefined, "keeping both removes no session");
-    assert.equal(chunkQ.target, `mm. 1${DASH}4`, "what the summary names the record by");
-    // more than one: counted, and each side's own number
-    const moreHere = withMore(withMore(base, 2), 4);
-    const q = buildSettleQuestions({ plan: legacyPlan(moreHere, theirs), piece: moreHere }).find((x) => x.part === "progress:c1");
-    assert.equal(opt(q, "local").hint, "The session logged on your other device will be removed, from your account too. This can't be undone.");
-    assert.equal(opt(q, "remote").hint, "The 2 sessions logged on this device will be removed. This can't be undone.");
-    assert.equal(/\u2014/.test(JSON.stringify(q)), false, "no em dash");
-  });
-
-  test("an answer that would remove nothing says nothing: the other side only changed the rest of the record, or has no record", () => {
-    const shared = { day: 1, loggedAt: 10, bpm: 60 };
-    const one = { doneDays: [1], sessions: [shared, { day: 2, loggedAt: 20, bpm: 70 }, { day: 3, loggedAt: 30, bpm: 80 }] };
-    const other = { doneDays: [1], sessions: [shared], flag: "rough" };
-    const ask = (local, remote) => buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local, remote }] }, piece: mine, year: 2026 })[0];
-    const hints = (q) => q.options.map((o) => [o.value, o.hint || null, !!o.removes]);
-    assert.deepEqual(hints(ask(one, other)), [
-      ["local", null, false],
-      ["remote", "The 2 sessions logged on this device will be removed. This can't be undone.", true],
-    ]);
-    assert.deepEqual(hints(ask(one, undefined)), [
-      ["local", null, false],
-      ["remote", "The 3 sessions logged on this device will be removed. This can't be undone.", true],
-    ]);
-    assert.deepEqual(hints(ask(undefined, other)), [
-      ["local", "The session logged on your other device will be removed, from your account too. This can't be undone.", true],
-      ["remote", null, false],
-    ]);
-  });
-
-  test("a practice record that is not a list of sessions does not break the question", () => {
-    const ask = (local, remote) => buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "progress:c1", kind: "progress", id: "c1", local, remote }] }, piece: mine, year: 2026 })[0];
-    const q = ask({ sessions: "x", doneDays: 3 }, { sessions: 7 });
-    assert.equal(q.text, `The practice record for mm. 1${DASH}4 was changed differently on the two devices.`);
-    assert.equal(q.detail, "Sessions: 0 on this device, 0 on your other device.");
-  });
-
   test("difficulty ratings are counted in the singular where there is one measure", () => {
     const ask = (local, remote) =>
-      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "measureDifficulty", kind: "field", field: "measureDifficulty", local, remote }] }, piece: mine, year: 2026 })[0].text;
+      buildSettleQuestions({ plan: { status: "conflicts", conflicts: [{ part: "measureDifficulty", kind: "field", field: "measureDifficulty", local, remote }] }, year: 2026 })[0].text;
     assert.equal(ask([1, 3, 1], [1, 1, 1]), "Difficulty ratings: 1 difficult measure on this device, every measure workable on your other device.");
     assert.equal(ask([1, 3, 3], [2, 1, 1]), "Difficulty ratings: 2 difficult measures on this device, 1 challenging measure on your other device.");
     assert.equal(ask([3, 2], [1, 1]), "Difficulty ratings: 1 difficult and 1 challenging measures on this device, every measure workable on your other device.");
@@ -3731,9 +3672,9 @@ describe("settling a held piece, one question at a time (Pass 121)", () => {
     const twoDevice = { version: 1, accounts: { [USER]: autoRec({ p1: syncedAs(base, 1), p2: syncedAs(other, 1) }) } };
     const twoRun = runAuto({ local: { p1: mine, p2: otherMine }, rows: [[theirs, 2], [otherTheirs, 2]], record: accountRecordFor(twoDevice, USER) });
     const twoHeld = twoRun.held.reduce((r, h) => withPieceHeld(r, USER, h.id, h.conflicts), twoDevice);
-    const failsForP1 = ({ plan, piece, year }) => {
-      if (piece === mine) throw new Error("this one cannot be built");
-      return buildSettleQuestions({ plan, piece, year });
+    const failsForP1 = ({ plan, year }) => {
+      if (plan.merged && plan.merged.id === "p1") throw new Error("this one cannot be built");
+      return buildSettleQuestions({ plan, year });
     };
     const mixed = planSettle({
       candidates: accountRowsToCandidates({ pieces: [acctRow(theirs, 2), acctRow(otherTheirs, 2)], technique: null }),
@@ -4991,7 +4932,7 @@ describe("a piece changed on both devices that the more recent change can settle
   test("Review's questions only name what the clock cannot settle", () => {
     const mine = changed(base, { targetBPM: 120, recordings: [{ id: "r1", label: "A", url: "https://example.test/a" }] }, 5000, { targetBPM: 4000 });
     const theirs = changed(base, { targetBPM: 140, recordings: [{ id: "r2", label: "B", url: "https://example.test/b" }] }, 6000, { targetBPM: 5500 });
-    const q = buildSettleQuestions({ plan: planPieceMerge({ local: mine, remote: theirs, base: piecePartFingerprints(base) }), piece: mine });
+    const q = buildSettleQuestions({ plan: planPieceMerge({ local: mine, remote: theirs, base: piecePartFingerprints(base) }) });
     assert.deepEqual(q.map((x) => x.part), ["recordings"]);
   });
 });

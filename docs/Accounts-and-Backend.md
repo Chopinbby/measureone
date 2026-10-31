@@ -1834,11 +1834,11 @@ as before.
   or from the "ready" screen), with a test that walks every path and checks no earlier step
   applies.
 - **The walk is plain data** (`lib/settleFlow.js`, new in the follow-up, tested in
-  `test/settleFlow.test.mjs`). `state = { stage, index, answers, bulk, notice }` and pure
+  `test/settleFlow.test.mjs`). `state = { stage, index, answers, bulk, notice }` (`bulk` and the "bulk" stage were deleted 2026-10-31, see below) and pure
   functions: `startSettle`, `settleChoose`, `settleNext`, `settleBack`, `settleView`. `App.jsx`
   only calls them and `SettleConflictModal` only draws what `settleView` returns (it used to
   decide the order itself, where nothing could be tested).
-- **The first screen** (`BULK_MIN` = 3). When three or more practice-record questions offer
+- **[Deleted 2026-10-31, with the practice-record question itself: since Pass 126 the engine combines practice, so nothing reached it. The owner: "if nothing is lost, go ahead and delete the old question screens." Described here as it was.]** **The first screen** (`BULK_MIN` = 3). When three or more practice-record questions offer
   "both devices' sessions", the walk starts with one question for all of them: "You practiced N
   parts of this piece on both devices since you last synced." with **Both devices' sessions for
   all N** (recommended) and **Decide each one**. "All" answers each of them "both" and they are
@@ -2915,7 +2915,11 @@ this pass depends on to keep its promise that nothing is asked.
 - **Left open.** (a) A look that keeps being declined or unbelieved for a long time retries every two seconds
   forever (each retry costs a timer, not a request, until the look runs); (b) a service whose light read is broken but
   whose writes work would now stop uploads with the switch on until the read works (the same read the every-minute
-  check makes, so the Account line would also say "isn't answering"); (c) not tried on the owner's real phone yet.
+  check makes, so the Account line would also say "isn't answering"). **Seen on the owner's real phone, 2026-10-31:**
+  the phone really offline ("Working offline" showed), the laptop changed the Composer first and the phone later,
+  the phone reconnected and stayed on screen: its Account section showed "Updated from another device: Sync test.
+  Kept the more recent change on Sync test: composer (from this device).", the laptop's Composer changed to the
+  phone's value within minutes, nothing red named the piece.
 
 **Left open** (owners in brackets)
 
@@ -2928,8 +2932,15 @@ this pass depends on to keep its promise that nothing is asked.
    keeps fingerprints, not copies, so there is no base entry); tabs do not. [Pass 121's deferred item.]
 5. Every Settings save re-derives `minutesPerDay` in a days-mode schedule and can stamp it, so a stale stored
    value is "changed" once. Harmless (found in the browser on a hand-made piece), noted.
-6. The practice question, its first screen and its removal warnings are dormant: kept and tested on the old
-   plan, reached by nothing. [Remove on purpose.]
+6. **[Done 2026-10-31, on the owner's word: "if nothing is lost, delete the old question screens."]** The practice
+   question, its first screen and its per-session removal warnings were dormant (reached by nothing) and are deleted,
+   with their tests. Nothing a person could reach was lost: a practice record both devices changed is combined, a
+   piece an older version held for that reason lands on "Nothing is left to decide", and the whole-piece question
+   keeps its red-box warning. `buildSettleQuestions` throws on a plan that still holds a practice-record conflict,
+   so `planSettle` sends the piece to the whole-piece picker instead of asking fewer questions than there are
+   conflicts (tested). Kept: the engine's `combinePractice` / `recency` options and its "both" answer (engine API
+   for its own tests), `unionProgressEntries`. Seen in a browser: a recordings question, a "ready" piece and the
+   whole-piece warning each walk to the end. The old code is in git before that commit.
 7. `App.jsx`'s wiring (`updatePiece`, `updateTechnique`, the quiet line) has no automated test; it was checked
    in a browser against a stand-in service (two addresses as two devices).
 8. An equal-count collection reads "1 recording on both devices, but the two plans differ in detail" in Review

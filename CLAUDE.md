@@ -921,12 +921,15 @@ question per conflicting part instead; everything else is unchanged. Rules:
 - **The walk through a piece's screens is plain data in `lib/settleFlow.js`** (tested in
   `test/settleFlow.test.mjs`): `startSettle`, `settleChoose`, `settleNext`, `settleBack`,
   `settleView`. `App.jsx` calls them and `SettleConflictModal` draws `settleView`'s result; put
-  any new "what comes next" rule there, not in the component. Screens: a **first screen** when
-  `BULK_MIN` (3) or more practice-record questions offer "both" ("Both devices' sessions for all
-  N" / "Decide each one"; it is a shortcut to the same answers), the questions, then the
-  **summary** (what is kept, one line for the first screen's group; in a red box what the chosen
-  answers **remove**, from the options flagged `removes`), then the apply. Nothing is chosen
-  for the person.
+  any new "what comes next" rule there, not in the component. Screens: the questions, one at a
+  time, then the **summary** (what is kept; in a red box what the chosen answers **remove**, from
+  the options flagged `removes`, which today is the whole-piece question only), then the apply.
+  Nothing is chosen for the person. (A first screen for three or more practice records answered
+  at once, and the practice-record question itself, were **deleted 2026-10-31** on her word: since
+  Pass 126 the engine combines practice, so nothing reached them. `buildSettleQuestions` THROWS on
+  a plan that still holds a practice-record conflict, so `planSettle` sends that piece to the
+  whole-piece picker and says it was not asked about, never silently asking fewer questions than
+  there are conflicts; a test pins it. Old behavior is in git before that commit.)
 - **The account is read again at the summary's button** (`rereadSettleItem`,
   `fetchChangedAccountRows` for that one id), because the questions were made when Review opened
   and a stale row made the settled piece's upload be refused and the piece held again with no
@@ -935,13 +938,15 @@ question per conflicting part instead; everything else is unchanged. Rules:
   record takes the new revision); different questions start the walk over with a note and apply
   nothing; a row that is gone is "gone". **If the account can't be read, nothing is applied** and
   the summary stays with a message (applying to a copy that may be old is what this exists to
-  stop). Don't make "same questions" looser: a changed number of sessions that would be removed
-  is a different question.
-- **What an answer removes is said plainly and counted** (`removalHint`): keeping this device's
-  record removes the other device's sessions from the account too; keeping the other's removes
-  this device's, which the account never had. Nothing is said when no session would go. The
-  whole-piece answers are always flagged `removes`.
-- **"Both devices' sessions"** is `unionProgressEntries` (`lib/pieceMerge.js`): the sessions,
+  stop). Don't make "same questions" looser: a changed value in a question's wording (or a
+  changed warning) is a different question.
+- **What an answer removes is said plainly** and repeated on the summary: the whole-piece answers
+  are flagged `removes` (keeping this device's piece removes the other device's practice and
+  changes from the account too; keeping the other's removes this device's, which the account never
+  had). The per-session counting (`removalHint`, "The 2 sessions logged on ... will be removed")
+  belonged to the deleted practice-record question and is gone with it.
+- **"Both devices' sessions"** (no longer an answer anyone is asked, since Pass 126 the engine
+  does it for every chunk both devices changed) is `unionProgressEntries` (`lib/pieceMerge.js`): the sessions,
   the days practiced and focus spots' own sessions are unioned by content (Pass 115's
   comparison); everything else in the chunk's record (the ladder state, tempo, but also a
   rating or flag) comes from the side whose latest JUDGED session is later (a skipped or
@@ -957,7 +962,8 @@ question per conflicting part instead; everything else is unchanged. Rules:
   the date, they are ordinary parts (`linkedToDate` in `planPieceMerge`'s result).
 - **The wording is partly proposed:** the two sentences are the pass card's; the hints under each
   option, the "Recommended" tag and the whole-piece sentence are additions. **Confirmed
-  2026-10-21:** "removed" for what an answer throws away, and the first screen.
+  2026-10-21:** "removed" for what an answer throws away (the first screen, also confirmed then, was
+  deleted 2026-10-31).
 - **`planSettle` never throws** (a piece it fails on is in `errored` and goes to the picker, and
   the page says so); it takes `build` so a test can make one fail.
 - **Left open:** a piece held by a REFUSAL with no recorded base still goes to the picker (one
@@ -1208,9 +1214,14 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   `applyAccountMerge` "same"): two copies with the same values and different `updatedAt` or notes would
   each read as changed and trade the piece. Found with a probe while building (it existed for `updatedAt`
   before this pass); fixed the way Pass 120 fixed the technique library.
-- **Dormant, not removed:** Review's practice-record question, its first screen (`BULK_MIN`) and the
-  `removalHint` warnings. Nothing reaches them (the engine combines practice); they are tested on the
-  old plan (`LEGACY` in `test/accountSync.test.mjs`). Remove them on purpose, not by accident.
+- **Removed 2026-10-31 (her word: "if nothing is lost, delete the old question screens"):** Review's
+  practice-record question, its first screen (`BULK_MIN`, "Both devices' sessions for all N") and the
+  per-session `removalHint` warnings. Nothing a person could reach was lost: the engine combines
+  practice, a pre-Pass-126 hold that lists a practice record now lands on "Nothing is left to decide",
+  and the whole-piece question keeps its own red-box warning. Kept on purpose: the engine's
+  `combinePractice: false` and `recency: false` options and its "both" answer (engine API, used by
+  `test/pieceMerge.test.mjs`), and `unionProgressEntries`. Seen in a browser: a collection question,
+  a "ready" piece and the whole-piece warning all still walk to the end.
 - **The reconnect hold (found by her first phone check, fixed in this pass, 2026-10-31).** A phone coming
   back online held a piece that would have merged, because the upload run's own look was declined or
   skipped and the run uploaded blind (details under Merge before upload above, and "The reconnect hold" in
@@ -1218,14 +1229,15 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   first browser run of this pass missed it because it used the stand-in's down switch and timers, never the
   real `online` event or a hidden page: **run a sync scenario with the real triggers (dispatch `online`,
   force `visibilityState` to hidden, dispatch `focus`) before handing it over.**
-- **Checks.** 1,673 tests; 19 deliberate breakages, all caught; the piece simulation at seeds 1 to 3,000
+- **Checks.** 1,669 tests; 21 deliberate breakages, all caught; the piece simulation at seeds 1 to 3,000
   and 1 to 1,000 and the technique simulation likewise (`SIM_RUNS=3000 npm test`); seen in a real browser
   against a local stand-in service (two addresses as two devices): the same two settings renamed on both
   while offline, the later wins on both with nothing asked and the quiet line says so; the same chunk
   logged on both, both sessions on both; and the account revision stays still afterwards; the reconnect
-  and hidden-page paths held a piece before the fix and merge cleanly after it. **Her checks on the
-  preview:** the online Composer clash and the practice combine passed (2026-10-31); the reconnect
-  (airplane mode) check on the rebuilt preview is still hers.
+  and hidden-page paths held a piece before the fix and merge cleanly after it. **Her three checks on
+  the preview all passed (2026-10-31):** the online Composer clash, the practice combine (Full pass 2 to
+  4 on both devices) and the reconnect with the phone really offline ("Working offline" seen, then the
+  phone merged, kept its more recent Composer and the laptop took it, nothing red).
 - **Left open** (details in [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)):
   a device on the previous version writes no notes (its changes fall back to `updatedAt`); device
   clocks are trusted (no guard, the owner's call); a refused upload merged late by `reapplyOnto` leaves no
@@ -1437,10 +1449,10 @@ silently.
   off by default; the check runs every minute.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)
 - **Pass 121** — a piece held with recorded conflicts asks one plain question per conflicting
-  part in Review ("both devices' sessions", this device's, the other device's), with a first
-  screen for many practice records at once and a summary (including what would be removed)
-  before anything is applied; the account is read again at the last step; "Decide later"
-  changes nothing.
+  part in Review (this device's, the other device's; at the time also "both devices' sessions",
+  with a first screen for many practice records at once, both deleted 2026-10-31 after Pass 126
+  made the engine combine practice) and a summary (including what would be removed) before
+  anything is applied; the account is read again at the last step; "Decide later" changes nothing.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121)
 - **Pass 122** — a piece deleted on one device is deleted everywhere (the owner's 2026-10-23
   rule; the practice goes with it), with a 30-day "Recently deleted" and a "Keep it" button; with

@@ -35,8 +35,6 @@ import { ensureWorkId } from "./works";
 // code imports and never the other way round; they're re-exported from here so
 // everything that already imports them from this file is unchanged.
 import { isObject, toJsonValue, fingerprint, canonicalPiece, piecePartFingerprints, planPieceMerge, WHOLE_PIECE_PART, DATE_LINKED_FIELDS, compareOrderNotes, laterOrderNote } from "./pieceMerge";
-// Pass 121: naming a chunk by its measures, for the questions a held piece asks.
-import { generateAllChunks } from "./chunking";
 import { formatRange } from "./utils";
 // The same for the technique library (Pass 118): lib/techniqueMerge.js owns its
 // canonical form and its parts, and is imported here and never the other way.
@@ -2990,41 +2988,6 @@ function describeFieldValue(field, value, year) {
 
 const labelOfField = (field) => (field === "createdAt" ? "Date added" : (FIELD_INFO[field] && FIELD_INFO[field].label) || humanize(field));
 
-// What a progress entry's key stands for, in words a person recognizes. `piece` is
-// this device's copy (the chunk grid the question is about).
-function describeProgressTarget(piece, id) {
-  if (id === "__consolidation__") return "the full run-through";
-  if (id === "__cold_start__") return "the cold-start check";
-  if (typeof id === "string" && id.startsWith("sr_")) {
-    const section = ((piece && piece.sections) || []).find((s) => s && `sr_${s.id}` === id);
-    if (!section) return "a section run-through";
-    return `the run-through of ${typeof section.name === "string" && section.name.trim() ? section.name.trim() : formatRange(section.start, section.end)}`;
-  }
-  if (typeof id === "string" && id.startsWith("st_")) return "a run-through of two sections together";
-  try {
-    const chunk = generateAllChunks(piece).all.find((c) => c.id === id);
-    if (chunk) {
-      if (chunk.kind === "transition") return `the transition at ${formatRange(chunk.start, chunk.end)}`;
-      if (chunk.kind === "combo") return `the focus block at ${formatRange(chunk.start, chunk.end)}`;
-      return formatRange(chunk.start, chunk.end);
-    }
-  } catch (e) {
-    /* a piece that can't be chunked: fall through to the plain wording */
-  }
-  return "a chunk that is no longer in the plan";
-}
-
-// Where a progress entry sits in the piece (its first measure), to ask in order.
-function progressOrder(piece, id) {
-  try {
-    const chunk = generateAllChunks(piece).all.find((c) => c.id === id);
-    if (chunk) return chunk.start;
-  } catch (e) {
-    /* no order known */
-  }
-  return Number.MAX_SAFE_INTEGER;
-}
-
 const OPTION_LOCAL = "This device's";
 const OPTION_REMOTE = "The other device's";
 
@@ -3062,69 +3025,6 @@ function fieldQuestion(c, year, followers = []) {
   };
 }
 
-// The answers that throw away what one device logged. Said plainly (the person has
-// asked for this, and "left out" understated it), and flagged `removes` so the screen
-// before anything is applied can repeat it. Keeping THIS device's record also removes
-// the other device's sessions from the account (the next upload replaces its copy);
-// keeping the other device's removes only what this device logged, which the account
-// never had. Nothing is said, and nothing flagged, when no session would go.
-function removalHint(count, where, fromAccount) {
-  if (!(count > 0)) return {};
-  const who = count === 1 ? "The session" : `The ${count} sessions`;
-  return { hint: `${who} logged on ${where} will be removed${fromAccount ? ", from your account too" : ""}. This can't be undone.`, removes: true };
-}
-
-function progressQuestion(c, piece) {
-  const what = describeProgressTarget(piece, c.id);
-  const mine = isObject(c.local) ? c.local : null;
-  const theirs = isObject(c.remote) ? c.remote : null;
-  const kept = {
-    local: `this device's record of ${what}`,
-    remote: `the other device's record of ${what}`,
-    both: `both devices' sessions for ${what}`,
-  };
-  const keysOf = (entry) => new Set((Array.isArray(entry && entry.sessions) ? entry.sessions : []).map((s) => fingerprint(s)));
-  const here = keysOf(mine);
-  const there = keysOf(theirs);
-  const onlyHere = [...here].filter((k) => !there.has(k)).length;
-  const onlyThere = [...there].filter((k) => !here.has(k)).length;
-  const two = [
-    { value: "local", label: OPTION_LOCAL, ...removalHint(onlyThere, "your other device", true) },
-    { value: "remote", label: OPTION_REMOTE, ...removalHint(onlyHere, "this device", false) },
-  ];
-  const base = { part: c.part, kind: "progress", title: `Practice record: ${what}`, target: what, kept };
-  if (mine && theirs) {
-    if (onlyHere > 0 && onlyThere > 0) {
-      return {
-        ...base,
-        text: `You practiced ${what} on both devices since you last synced.`,
-        options: [
-          {
-            value: "both",
-            label: "Both devices' sessions",
-            recommended: true,
-            hint: "Every session from both devices is kept. The rest of the record (tempo, stage, next review) follows whichever device practiced last.",
-          },
-          ...two,
-        ],
-      };
-    }
-    return {
-      ...base,
-      text: `The practice record for ${what} was changed differently on the two devices.`,
-      detail: `Sessions: ${here.size} on this device, ${there.size} on your other device.`,
-      options: two,
-    };
-  }
-  return {
-    ...base,
-    text: mine
-      ? `The practice record for ${what} is on this device, but your other device no longer has it.`
-      : `The practice record for ${what} is on your other device, but this device no longer has it.`,
-    options: two,
-  };
-}
-
 function wholePieceQuestion() {
   return {
     part: WHOLE_PIECE_PART,
@@ -3149,29 +3049,30 @@ function wholePieceQuestion() {
   };
 }
 
-// EXACTLY one question per conflict the engine found, in a steady order: ordinary
-// fields first (by name), then practice records in the order of the piece. The one
-// exception is the numbers worked out from a conflicting target date (`plan.linkedToDate`):
-// they go with the date the person keeps, so they are not asked about, and the date's
-// question says so. `plan` is Pass 117's answer for the two copies (planPieceMerge);
-// `piece` is this device's copy.
+// EXACTLY one question per conflict the engine found, in a steady order (by the name the
+// person reads). The one exception is the numbers worked out from a conflicting target date
+// (`plan.linkedToDate`): they go with the date the person keeps, so they are not asked about,
+// and the date's question says so. `plan` is Pass 117's answer for the two copies
+// (planPieceMerge).
 // A question: { part, kind, title, text, detail?, options: [{ value, label, hint?,
-// recommended? }], kept: { local, remote, both? } } (`kept` finishes the sentence
+// recommended?, removes? }], kept: { local, remote } } (`kept` finishes the sentence
 // "Settled <piece>: kept ...", see describeKept).
-export function buildSettleQuestions({ plan, piece, year = new Date().getFullYear() }) {
+//
+// A chunk's practice record is never a question: since Pass 126 the engine combines a record
+// both devices changed. (The old question, its first screen for several records at once, and
+// the warnings about sessions an answer would remove were deleted on 2026-10-31, on the owner's
+// word, once nothing could reach them; git history before that commit has them.) A plan that
+// still holds one throws, so planSettle sends that piece to the whole-piece picker and the page
+// says it was not asked about, rather than asking fewer questions than there are conflicts.
+export function buildSettleQuestions({ plan, year = new Date().getFullYear() }) {
   if (!plan) return [];
   if (plan.status === "whole-piece-conflict") return [wholePieceQuestion()];
+  if (plan.conflicts.some((c) => c.kind === "progress")) throw new Error("a practice-record conflict cannot be asked about one question at a time");
   const followers = new Set(plan.linkedToDate || []);
-  const fields = plan.conflicts
-    .filter((c) => c.kind !== "progress" && !followers.has(c.field))
-    .sort((a, b) => labelOfField(a.field).localeCompare(labelOfField(b.field)));
-  const practice = plan.conflicts
-    .filter((c) => c.kind === "progress")
-    .sort((a, b) => progressOrder(piece, a.id) - progressOrder(piece, b.id) || String(a.id).localeCompare(String(b.id)));
-  return [
-    ...fields.map((c) => fieldQuestion(c, year, c.field === "targetDate" ? DATE_LINKED_FIELDS.filter((f) => followers.has(f)) : [])),
-    ...practice.map((c) => progressQuestion(c, piece)),
-  ];
+  return plan.conflicts
+    .filter((c) => !followers.has(c.field))
+    .sort((a, b) => labelOfField(a.field).localeCompare(labelOfField(b.field)))
+    .map((c) => fieldQuestion(c, year, c.field === "targetDate" ? DATE_LINKED_FIELDS.filter((f) => followers.has(f)) : []));
 }
 
 // Has every question an answer that is one of its own options?
@@ -3247,7 +3148,7 @@ export function planSettle({ candidates, localPieces, accountRecord, now = Date.
       if (d.kind === "same" || d.kind === "take") {
         out.items.push({ ...item, status: "ready" });
       } else if (d.kind === "settle" && (d.plan.status === "conflicts" || d.plan.status === "whole-piece-conflict")) {
-        out.items.push({ ...item, status: "questions", reason: d.plan.status, questions: build({ plan: d.plan, piece: localPieces[id], year }) });
+        out.items.push({ ...item, status: "questions", reason: d.plan.status, questions: build({ plan: d.plan, year }) });
       } else if (d.kind === "settle" && (d.plan.status === "merged" || d.plan.status === "identical" || d.plan.status === "local-only")) {
         out.items.push({ ...item, status: "ready", reason: d.plan.status });
       } else {

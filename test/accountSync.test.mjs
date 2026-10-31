@@ -97,6 +97,8 @@ import {
   withAutoUpdate,
   autoUpdateTargets,
   needsMergeBeforeUpload,
+  uploadAfterLook,
+  BEFORE_UPLOAD_RETRY_MS,
   mergeTechniqueFromAccount,
   fetchChangedAccountRows,
   describeAutoUpdate,
@@ -3059,6 +3061,45 @@ describe("merge before upload (Pass 120)", () => {
     const r = await runSync({ p1: clashHere }, tech, env.fake, env.storage);
     assert.equal(r.uploaded, 0, "a held piece is not uploaded");
     assert.equal(env.fake.writes().length, 0);
+  });
+});
+
+describe("an upload run sends only after a fresh look (Pass 126 follow-up, the reconnect hold)", () => {
+  // The look an upload run takes first, as App.jsx's requestCheck reports it.
+  const fresh = { fresh: true, applied: false, why: null };
+  const waitsShortly = { action: "wait", afterMs: BEFORE_UPLOAD_RETRY_MS };
+
+  test("a fresh look: send. A look that also brought something in: stop, the merged result goes up in the next run", () => {
+    assert.deepEqual(uploadAfterLook(fresh), { action: "send" });
+    assert.deepEqual(uploadAfterLook({ fresh: true, applied: true, why: null }), { action: "stop" });
+  });
+
+  test("[regression, Pass 126 follow-up] no look is never 'send': a missing, declined, unbelieved or busy look waits and looks again", () => {
+    // The bug: the browser's "online" event started a look and a run at the same moment, the
+    // run's own look was declined ("running"), and the run went on from an old picture of the
+    // account. The account refused the upload and the piece was held although the two copies
+    // would have merged. A phone check found it on 2026-10-30; a two-device rig reproduced it.
+    assert.deepEqual(uploadAfterLook(undefined), waitsShortly, "a caller that got nothing back");
+    assert.deepEqual(uploadAfterLook(null), waitsShortly);
+    assert.deepEqual(uploadAfterLook({}), waitsShortly);
+    ["running", "too-soon", "unusable", "busy", "hidden"].forEach((why) => {
+      assert.deepEqual(uploadAfterLook({ fresh: false, applied: false, why }), waitsShortly, why);
+    });
+  });
+
+  test("a look the service didn't answer waits for the usual retry gap, not two seconds", () => {
+    assert.deepEqual(uploadAfterLook({ fresh: false, applied: false, why: "failed" }), { action: "wait", afterFailure: true });
+  });
+
+  test("nothing to do here (another tab does the account work, not signed in, no checked backup yet): stop", () => {
+    ["not-ready", "no-lease", "no-backup", "cancelled"].forEach((why) => {
+      assert.deepEqual(uploadAfterLook({ fresh: false, applied: false, why }), { action: "stop" }, why);
+    });
+  });
+
+  test("the short wait is shorter than the first failure gap and than a person's patience", () => {
+    assert.ok(BEFORE_UPLOAD_RETRY_MS > 0 && BEFORE_UPLOAD_RETRY_MS < RETRY_GAPS_MS[0]);
+    assert.ok(BEFORE_UPLOAD_RETRY_MS <= 5000);
   });
 });
 

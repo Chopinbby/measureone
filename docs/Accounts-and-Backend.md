@@ -1614,7 +1614,11 @@ finds is brought in without a button, in about a minute. The deciding is in
   in a red banner. With the fresh look the second device sees the first's upload, merges,
   and uploads the merged result once (seen in the browser, below). **Cost:** one extra
   3 KB read per upload run while the switch is on (an upload run follows a quiet period
-  after a change, not a timer).
+  after a change, not a timer). **Since the Pass 126 follow-up (2026-10-31): no fresh look,
+  no upload.** The look used to be skipped silently (page hidden, or another look already
+  running) and the run carried on from an old picture of the account; now a look that did not
+  happen or was not believed makes the run wait and look again (`uploadAfterLook`, see "The
+  reconnect hold" under Pass 126).
 - **Safe moments.** A piece **in use** is not touched, using Pass 119's shared busy test
   (`isPieceBusy`): an unconfirmed Interleaved attempt, a running reassessment timer, an open
   Edit piece settings draft for that piece. Its change is **deferred**: not applied, and
@@ -1717,7 +1721,9 @@ same test).
 
 **Found in Pass 120's own review (2026-10-19), P2, not fixed:**
 
-10. **A page that is hidden skips the fresh look before an upload.** The look is a check, and
+10. **[Fixed in the Pass 126 follow-up, 2026-10-31: the look before an upload now ignores the
+    hidden gate, and an upload never goes out without a fresh look; see "The reconnect hold"
+    under Pass 126.]** **A page that is hidden skips the fresh look before an upload.** The look is a check, and
     checks never run hidden. Log a session and switch tabs within the 5 s quiet period and
     the upload goes out on the last check's knowledge (up to a minute old). If the other
     device uploaded in that minute the upload is refused and the piece is held (safe, nothing
@@ -2867,6 +2873,49 @@ the ACCOUNT's fingerprint for it made this device's copy read as changed, so it 
 the same, trading the piece. It existed for `updatedAt` before this pass (a probe showed one piece waiting after
 an update). `engineVerdict` now marks an identical result and `applyAccountMerge` records this device's own
 fingerprint for it; a test runs both directions.
+
+**The reconnect hold (found in the first phone check, 2026-10-30; fixed 2026-10-31, same pull request).**
+The owner's phone check of this pass ended with a red "1 piece changed on another device" on the phone, and
+Review saying "Nothing is left to decide". It was not the new rule: it was Pass 120's merge-before-upload, which
+this pass depends on to keep its promise that nothing is asked.
+
+- **Cause.** With the switch on, an upload run takes its own look at the account first (`requestCheck("startup")`
+  in `runSync`), but that returned nothing, silently, when the page was hidden, when another look was already
+  running, when the service did not answer, or when the look was not believed, and the run then went on from the
+  last picture of the account, which could be a minute old. The browser's `online` event starts a look
+  (`requestCheck("online")`) and an upload run (`scheduleSync(0)`) in the same moment, so the run's own look was
+  always declined as "running". The upload went out at the old revision, was refused, and the piece was held
+  (`judgeRefusal` "differs", no list of conflicts), which the automatic update never touches. The page being
+  hidden (the phone in another app) did the same without any event. Pre-existing from Pass 120 (its Left-open
+  item 10 named the hidden page); it undid this pass's "nothing is asked" in exactly the situation a phone is in.
+- **Seen before the fix,** in the two-address rig against a stand-in service: both devices change the Composer
+  while the service is down, it comes back, the laptop reconnects (uploads), the phone reconnects. The request
+  order on the phone: the look starts, **46 milliseconds later the upload goes out at the old revision**, before
+  the look has finished; the account refuses it, the phone re-reads the row and holds the piece. Taking the phone's page hidden gave the same hold with no look at all.
+- **The rule now: no fresh look, no upload** (switch on). `requestCheck` reports what came of the look
+  (`{ fresh, applied, why }`); `uploadAfterLook` (`lib/accountSync.js`, tested) decides: a fresh look sends, a look
+  that brought something in stops the run (the merged result goes up in the next one, as before), a look that was
+  declined, not believed or came while something was busy **waits `BEFORE_UPLOAD_RETRY_MS` (2 seconds) and looks
+  again**, a look the service did not answer waits the usual retry gap (that look already counted toward the
+  "isn't answering" count), and a run that has nothing to do here (another tab holds the lease, signed out, no
+  checked first backup) stops. The look before an upload **ignores the hidden-page gate** (`{ beforeUpload: true }`):
+  an upload goes out from a page in the background, so its look must too; the every-minute checks still wait for
+  the page.
+- **Seen after the fix,** same rig: reconnecting, the laptop's run waits two seconds, looks, then uploads at the right
+  revision; the phone's online look finds the laptop's change within a second, the engine keeps the more recent
+  Composer, and the merged piece goes up five seconds later at the right revision. No hold, nothing asked, the green
+  line says what was kept. With the phone's page hidden the same happens (look, merge, upload at the right revision).
+  With the old `App.jsx` swapped back in, the hidden case held again (no look before the upload).
+- **Unchanged:** with the switch OFF nothing is looked at first (uploads as after Pass 116, a refusal holds the piece).
+  A refusal is still judged and held when the account changes in the seconds between the look and the upload (the
+  last safety net). Two upload runs can still overlap during the look (Pass 120's item 11); nothing here changes
+  that, and the revision rule plus `sent` make the second one harmless.
+- **Checks.** 1,673 tests; the new regression test fails when the old behavior is put back (a missing or declined
+  look sends); `App.jsx`'s wiring has no automated test (seen in the rig, both paths, before and after).
+- **Left open.** (a) A look that keeps being declined or unbelieved for a long time retries every two seconds
+  forever (each retry costs a timer, not a request, until the look runs); (b) a service whose light read is broken but
+  whose writes work would now stop uploads with the switch on until the read works (the same read the every-minute
+  check makes, so the Account line would also say "isn't answering"); (c) not tried on the owner's real phone yet.
 
 **Left open** (owners in brackets)
 

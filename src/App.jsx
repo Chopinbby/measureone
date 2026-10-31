@@ -142,6 +142,7 @@ import {
   withPieceHeld,
   autoUpdateTargets,
   needsMergeBeforeUpload,
+  uploadAfterLook,
   fetchChangedAccountRows,
   mergeTechniqueFromAccount,
   reapplyOnto,
@@ -837,23 +838,30 @@ export default function App() {
     }, Math.max(0, delayMs));
   };
 
-  const requestCheck = async (trigger) => {
+  // Says what came of the look: { fresh, applied, why }. `fresh`: it was taken and
+  // believed, so checkRowsRef now holds the account as it is. `applied`: it also brought
+  // something in. `why`, when it wasn't fresh, is for runSync (uploadAfterLook, lib/accountSync.js).
+  // `beforeUpload` is runSync's own look: it is needed even while the page is in the
+  // background (the upload goes out anyway), and it is not put off with a timer of its own
+  // when something is busy (runSync waits and asks again).
+  const requestCheck = async (trigger, { beforeUpload = false } = {}) => {
+    const skipped = (why) => ({ fresh: false, applied: false, why });
     const { userId, loaded: isLoaded } = syncLatestRef.current;
-    if (!authEnabled || !userId || !isLoaded) return;
-    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-    if (!holdsLease()) return; // another tab does the looking (Pass 119)
-    if (!hasRecordedBackup(readDeviceRecord(), userId)) return;
+    if (!authEnabled || !userId || !isLoaded) return skipped("not-ready");
+    if (!beforeUpload && typeof document !== "undefined" && document.visibilityState !== "visible") return skipped("hidden");
+    if (!holdsLease()) return skipped("no-lease"); // another tab does the looking (Pass 119)
+    if (!hasRecordedBackup(readDeviceRecord(), userId)) return skipped("no-backup");
     const isBusy = () => backupRunningRef.current || accountFlowBusyRef.current || syncRunningRef.current;
     if (isBusy()) {
-      scheduleCheck(2000, trigger); // look again once it's finished
-      return;
+      if (!beforeUpload) scheduleCheck(2000, trigger); // look again once it's finished
+      return skipped("busy");
     }
     if (!checkerRef.current) checkerRef.current = createAccountChecker();
     const generation = syncGenRef.current;
     const recordBefore = accountRecordFor(readDeviceRecord(), userId);
     const out = await checkerRef.current.run({ trigger, userId, visible: true });
-    if (!out.ran) return;
-    if (syncGenRef.current !== generation) return; // signed out, or another account, meanwhile
+    if (!out.ran) return skipped(out.why); // "running": another look (say the "online" one) is in flight
+    if (syncGenRef.current !== generation) return skipped("cancelled"); // signed out, or another account, meanwhile
     syncFailuresRef.current = nextFailureCount(syncFailuresRef.current, checkOutcome(out));
     // Rows read while an upload, a backup or "Get changes" was changing the
     // record could already include this device's own upload without the
@@ -866,7 +874,8 @@ export default function App() {
     refreshSyncInfo();
     // Pass 120: with the switch on, what the check found is brought in now.
     const updated = usable ? await runAutoUpdate("check") : null;
-    return { applied: !!(updated && updated.applied) };
+    const why = usable ? null : out.result.status !== "ok" ? (out.result.reason === "signed-out" ? "cancelled" : "failed") : "unusable";
+    return { fresh: usable, applied: !!(updated && updated.applied), why };
   };
 
   // One upload run: send what's waiting (the library does it, one item at a
@@ -905,9 +914,23 @@ export default function App() {
     // first (never the data: ids, revisions, deleted dates, about 3 KB). If it
     // brought something in, this run stops and the merged result goes up in the
     // next one, after the usual quiet period.
+    // Pass 126 follow-up: NO FRESH LOOK, NO UPLOAD. The look used to be skipped without a
+    // word when the page was in the background, or when another look was already running
+    // (the browser's "online" event starts one at the same moment it starts this run), and
+    // the run then went on from an old picture of the account, was refused, and held a piece
+    // that would have merged. Now a look that didn't happen or wasn't believed makes the run
+    // wait and look again (uploadAfterLook decides, and is tested); the refusal below stays
+    // as the last safety net, for the seconds between the look and the upload.
     if (autoUpdateOn(readDeviceRecord(), userId)) {
-      const looked = await requestCheck("startup");
-      if (looked && looked.applied) return;
+      const looked = await requestCheck("startup", { beforeUpload: true });
+      const next = uploadAfterLook(looked);
+      if (next.action === "stop") return;
+      if (next.action === "wait") {
+        const gap = next.afterFailure ? retryGapMs(syncFailuresRef.current) : next.afterMs;
+        if (next.afterFailure) syncNextAttemptRef.current = Date.now() + gap;
+        scheduleSync(gap);
+        return;
+      }
     }
     const mergeRecord = readDeviceRecord();
     const lastRead = checkRowsRef.current;

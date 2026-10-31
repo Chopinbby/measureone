@@ -845,7 +845,13 @@ Phase 3, and a flip must also store an explicit OFF: today only an ON is stored,
   round), and leaves a piece that still can't be merged out of the run
   (`needsMergeBeforeUpload`, `skipPieceIds`) rather than sending it to be refused. A refusal
   is still judged and held as the last safety net. **Don't send a piece whose merge was
-  deferred: it will be refused.**
+  deferred: it will be refused.** **No fresh look, no upload (Pass 126 follow-up):** `runSync`
+  asks `requestCheck("startup", { beforeUpload: true })` and `uploadAfterLook`
+  (`lib/accountSync.js`) decides; a look that was declined (the `online`/`focus` look is
+  already running), not believed or busy waits 2 s and looks again, a failed look waits the
+  usual retry gap, and the look ignores the hidden-page gate. Letting an undefined look fall
+  through to the upload brings back the reconnect hold (seen in the rig, 46 ms from look to
+  blind upload; a test pins it).
 - **A piece in use waits** (`isPieceBusy`, Pass 119): the change is not applied and **not
   recorded**, so the next run finds it again; an effect applies it when idle. **Never record
   an account copy for a piece you didn't apply it to:** the record would say "synced" while
@@ -873,8 +879,8 @@ Phase 3, and a flip must also store an explicit OFF: today only an ON is stored,
 - **Left open** (details in
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)):
   the "applied when you're done" line is rarely visible; a piece held by a REFUSAL is not
-  settled automatically (Review asks about one since Pass 122b); a hidden page skips the fresh look before an upload; two upload
-  runs can overlap during it; a piece waiting because it is in use is downloaded again every
+  settled automatically (Review asks about one since Pass 122b); two upload
+  runs can overlap during the fresh look (a hidden page skipping it is fixed, Pass 126 follow-up); a piece waiting because it is in use is downloaded again every
   minute; a failed automatic update leaves only a console line; `App.jsx`'s wiring has no
   automated test.
 
@@ -1203,12 +1209,21 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
 - **Dormant, not removed:** Review's practice-record question, its first screen (`BULK_MIN`) and the
   `removalHint` warnings. Nothing reaches them (the engine combines practice); they are tested on the
   old plan (`LEGACY` in `test/accountSync.test.mjs`). Remove them on purpose, not by accident.
-- **Checks.** 1,668 tests; 18 deliberate breakages, all caught; the piece simulation at seeds 1 to 3,000
+- **The reconnect hold (found by her first phone check, fixed in this pass, 2026-10-31).** A phone coming
+  back online held a piece that would have merged, because the upload run's own look was declined or
+  skipped and the run uploaded blind (details under Merge before upload above, and "The reconnect hold" in
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)). My
+  first browser run of this pass missed it because it used the stand-in's down switch and timers, never the
+  real `online` event or a hidden page: **run a sync scenario with the real triggers (dispatch `online`,
+  force `visibilityState` to hidden, dispatch `focus`) before handing it over.**
+- **Checks.** 1,673 tests; 19 deliberate breakages, all caught; the piece simulation at seeds 1 to 3,000
   and 1 to 1,000 and the technique simulation likewise (`SIM_RUNS=3000 npm test`); seen in a real browser
   against a local stand-in service (two addresses as two devices): the same two settings renamed on both
   while offline, the later wins on both with nothing asked and the quiet line says so; the same chunk
-  logged on both, both sessions on both; and the account revision stays still afterwards. **Not seen on
-  the real preview with the real test project** (the card's "Yours" checks).
+  logged on both, both sessions on both; and the account revision stays still afterwards; the reconnect
+  and hidden-page paths held a piece before the fix and merge cleanly after it. **Her checks on the
+  preview:** the online Composer clash and the practice combine passed (2026-10-31); the reconnect
+  (airplane mode) check on the rebuilt preview is still hers.
 - **Left open** (details in [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)):
   a device on the previous version writes no notes (its changes fall back to `updatedAt`); device
   clocks are trusted (no guard, the owner's call); a refused upload merged late by `reapplyOnto` leaves no

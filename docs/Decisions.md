@@ -8454,6 +8454,16 @@ what it rules out.
      not itemised. The piece is named as it reads after the merge (found in the browser: the account's old
      name read as a piece that no longer exists). A technique notice now has kind `kept-more-recent` and a
      `side`; "kept-other-device" remains for the rules that still keep the account's value.
+     **Missed in the first commit, found 2026-10-29 while writing the preview check's steps:** the sentence
+     under the "Update automatically from other devices" checkbox in Settings (`SettingsTab.jsx`) still said
+     that the same chunk practiced on both devices, or the same setting changed on both, is held and Review
+     asks. That was true before this pass and false after it. Rewritten (also proposed wording): a setting
+     changed on both keeps the more recent change and a line says so, a chunk practiced on both keeps both
+     devices' sessions, and a piece is held only for what that cannot settle (a recording, document or
+     section list changed on both, the measure count or chunk layout changed on one device while the other
+     practiced, or two changes at the very same moment). Components are not tested, so no test could have
+     caught it: **when a pass changes what the app does on a conflict, grep `src/components` for the
+     sentences that describe the old behavior.**
   9. **The practice question and its first screen are now unreachable** and were kept (tested on the
      engine's old plan, `LEGACY`), not removed. Deleting tested code the owner has not asked to lose is a
      separate decision.
@@ -8468,6 +8478,23 @@ what it rules out.
      `main` and on this branch: the saved fields, every fingerprint and every part fingerprint are identical, so
      nothing re-uploads after the deploy. Smaller findings are logged under Left open in
      [Accounts-and-Backend.md](Accounts-and-Backend.md#the-most-recent-change-wins-pass-126), item 9.
+  11. **Found in the owner's first phone check (2026-10-30) and fixed in this pull request (2026-10-31):
+     a reconnecting phone held a piece that would have merged ("1 piece changed on another device", Review:
+     "Nothing is left to decide").** Not this pass's rule but Pass 120's merge-before-upload, which this pass
+     needs to keep "nothing is asked": the upload run's own look at the account was silently skipped (page
+     hidden, or another look already running, as the browser's `online` event always makes it), and the run
+     uploaded from an old picture and was refused. Reproduced in the two-address rig before touching the code
+     (the upload went out 46 ms after the look started, at the old revision), fixed, and seen again after (both
+     the `online` path and a hidden page; with the old `App.jsx` swapped back the hidden case held again). **The
+     rule: with the switch on, no fresh look, no upload** (`uploadAfterLook`, `lib/accountSync.js`, tested): wait
+     two seconds and look again, or the usual retry gap if the service did not answer. **Decision (the owner,
+     2026-10-31, "build it, push it"): inside this pull request rather than its own pass number**, because it
+     protects this pass's own promise and the pass is not merged; recorded here and in
+     [Accounts-and-Backend.md](Accounts-and-Backend.md#the-most-recent-change-wins-pass-126) ("The reconnect
+     hold"). Pass 120's Left-open item 10 (a hidden page skips the look) is closed by it; item 11 (two runs can
+     overlap) is not. Lesson (also in memory): my own first browser run of this pass used the stand-in's down
+     switch and timers, never the real `online` or hidden-page paths, so it missed the bug the owner's phone
+     found within minutes: **run a sync scenario with the real triggers before handing it over.**
   **Checks.** 1,668 tests; 18 deliberate breakages, all caught (the earlier change wins, a tie is guessed,
   a collection added to the list, a session dropped, an undo undone, a note stamped earlier, no note
   written, notes materialized on load, notes that depend on who merges, the work id or the date's numbers
@@ -8479,7 +8506,10 @@ what it rules out.
   two devices): the same two settings renamed on both while offline, the later wins on both, nothing asked,
   no banner, B's Account panel says what was kept; the same chunk logged on both, both sessions on both;
   the account revision still afterwards. **Not seen on the real preview with the real test project** (the
-  card's "Yours" checks: her phone as the second device).
+  card's "Yours" checks: her phone as the second device). **After item 11:** 1,673 tests and one more
+  deliberate breakage (a missing or declined look sends), caught. Her online Composer clash and her
+  practice-combine check (Full pass 2 to 4 on both devices) passed on the preview before the fix; the
+  reconnect and airplane-mode check is for the rebuilt preview.
 
 ## Open questions
 

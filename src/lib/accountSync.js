@@ -1829,6 +1829,35 @@ export function needsMergeBeforeUpload({ pieces, technique, accountRecord, chang
   return { pieceIds, technique: techniqueFirst };
 }
 
+// Pass 126 follow-up (the reconnect hold). With the switch on, an upload run takes
+// its own look at the account before it sends anything, and what it does next is
+// decided here. `look` is what App.jsx's requestCheck reports: { fresh, applied, why }.
+//   applied  the look also brought something in: stop here, the merged result goes up
+//            in the next run, after the usual quiet period
+//   fresh    the look was taken and believed, so the picture of the account is current:
+//            send
+//   neither  DO NOT SEND. A run that sends without knowing what the account holds is
+//            the one that is refused and held ("changed on another device") although
+//            the two copies would have merged. That is what happened when a phone came
+//            back online: the "online" look was already running, this run's own look
+//            was declined, and the run went on with an old picture. So wait and look
+//            again: shortly when the look was declined, not believed or the page was
+//            busy; after the usual retry gap when the service didn't answer (that look
+//            already counted toward the same "isn't answering" count an upload would);
+//            not at all when this tab no longer does the account work or the person
+//            signed out.
+// A missing `look` is "neither", never "send".
+export const BEFORE_UPLOAD_RETRY_MS = 2000;
+const NOTHING_TO_DO_HERE = new Set(["not-ready", "no-lease", "no-backup", "cancelled"]);
+export function uploadAfterLook(look) {
+  if (look && look.applied) return { action: "stop" };
+  if (look && look.fresh) return { action: "send" };
+  const why = look && look.why;
+  if (NOTHING_TO_DO_HERE.has(why)) return { action: "stop" };
+  if (why === "failed") return { action: "wait", afterFailure: true };
+  return { action: "wait", afterMs: BEFORE_UPLOAD_RETRY_MS };
+}
+
 export const PIECE_UPDATED_NOTE = "This piece was updated from another device.";
 
 export function andList(names, cap = 3) {

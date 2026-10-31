@@ -356,9 +356,7 @@ and [Decisions.md](Decisions.md#accounts-and-backend). Since 2026-10-12 a free
 daily backup of the account database runs into a private repository (see
 [Backups of the account copy](Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12)).
 
-**Accounts and backend, Phase 2 so far (Passes 115–123; 115 live since
-2026-10-14, 116 to 118 since 2026-10-15, 119 since 2026-10-18, 120 since 2026-10-19,
-121 since 2026-10-23, 122 since 2026-10-25, 122b since 2026-10-27, 123 since 2026-10-28)** — changes arriving from
+**Accounts and backend, Phase 2 (Passes 115–123 and 126; 115 live since 2026-10-14, 116 to 118 since 2026-10-15, 119 since 2026-10-18, 120 since 2026-10-19, 121 since 2026-10-23, 122 since 2026-10-25, 122b since 2026-10-27, 123 since 2026-10-28, 126 since 2026-10-31)** — changes arriving from
 other devices, and the app staying safe while they do. Built: "same" and "changed"
 made trustworthy (an upload notes what it is about to send, so a lost confirmation no
 longer reads as a conflict; sessions are compared by content; the technique library's
@@ -380,13 +378,16 @@ as a whole list**; and a piece held by a refused upload gets Review's plain ques
 hand-written service worker, and the Account line says "Working offline" when the browser
 reports no connection; swapping one file turns the worker off everywhere (DEPLOYMENT.md).
 Alongside, a scheduler fix: a chunk done earlier than the day a reschedule places it on is
-no longer owed there (a state only merged copies can reach). **Not built yet:**
-turning the switch on by default after a real-use trial (124; **on 2026-10-28 the owner chose to
-wait with the flip until Phase 3**); and most of the owner's 2026-10-15 decision, "the most
-recent change wins, item by item" (a conflicting part of a piece is still held and asked about;
-only a deletion and the piece's place in the list follow it; **scoped on 2026-10-28 as Pass 126,
-placed ahead of 124's flip**). "Always keep both" as a remembered answer, and size
-and schedule travelling together, have no owner. The first live sighting after the Pass
+no longer owed there (a state only merged copies can reach). **Pass 126 (live since 2026-10-31):** the
+owner's 2026-10-15 decision, "the most recent change wins, item by item", for single-value settings (the
+name, the target date, the notes and the others on her approved list): the later change keeps its value and a
+quiet line in the Account panel says so; practice logged on both devices is combined, never chosen between.
+Still held and asked about in Review: collections (recordings, documents, section lists and the like), the
+chunk layout against practice, and two changes at the very same moment. The same pass closed a hold that a
+reconnecting phone caused (an upload now waits for a fresh look at the account), stamped the dates "Reschedule
+all" moves, and deleted Review's old practice-record question. **Not built yet:** turning the switch on by
+default after a real-use trial (124; **on 2026-10-28 the owner chose to wait with the flip until Phase 3**).
+"Always keep both" as a remembered answer, and size and schedule travelling together, have no owner. The first live sighting after the Pass
 118 deploy, a technique library held as "changed on another device" that cleared with
 nothing to merge, is [Pass 118 open item 9](Decisions.md#open-questions). See
 [Accounts-and-Backend.md](Accounts-and-Backend.md#same-and-changed-you-can-trust-pass-115),
@@ -401,11 +402,7 @@ Analytics into Progress and remove the Analytics tab" — **shipped in Pass
 [Decisions.md](Decisions.md#ux) for the pinned-down panel placement).
 Pick the next thing from the priority-ordered backlog below rather than
 assuming this section is stale. **The one thread already in motion is the
-accounts work (Phase 2):** Passes 120 to 123 are built and live, and the passes the docs name
-next are 126 (the most recent change wins, item by item: the rest of the owner's 2026-10-15
-decision; step 1 was answered on 2026-10-28 and **the pass was built on 2026-10-29, merged only on her
-word**: see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 build") and 124 (turning the
-automatic switch on by default; on 2026-10-28 the owner chose to wait with the flip until
+accounts work (Phase 2):** Passes 120 to 123 and 126 are built and live (126, the most recent change wins item by item, was built on 2026-10-29 and **merged on 2026-10-31**: see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 build"), and the one pass the docs still name is 124 (turning the automatic switch on by default; on 2026-10-28 the owner chose to wait with the flip until
 Phase 3, so it is not scheduled, and it is only ever built on her word). The owner's 2026-10-15
 "the most recent change wins, item by item" decision is built for single-value settings (Pass 126);
 collections, whole shapes, the chunk grid and a tie are still asked; see backlog
@@ -501,13 +498,7 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    having enough session history to tune against.
 5. **Accounts and backend, Phases 2 and 3** — Phase 1 (an optional account
    that keeps a checked copy of every piece and the technique library, restore,
-   account settings, live since Pass 114) is Done above, and **Phase 2 is almost
-   built** (Passes 115 to 123, Done above). Still to build in **Phase 2**: turning other
-   devices' changes on by default after a real-use trial (124; the owner chose on 2026-10-28
-   to wait with the flip until Phase 3). Built, awaiting her merge: the most recent change
-   winning item by item (Pass 126, 2026-10-29, to run ahead of 124's flip; a deletion, the piece's place in
-   the list and every single-value setting follow it; collections, whole shapes, the chunk grid and a tie
-   are still held and asked about). No owner yet: "always keep both" as a remembered
+   account settings, live since Pass 114) is Done above, and **Phase 2 is built apart from one parked pass** (Passes 115 to 123 and 126, Done above). Still to build in **Phase 2**: turning other devices' changes on by default after a real-use trial (124; the owner chose on 2026-10-28 to wait with the flip until Phase 3). Pass 126 (merged 2026-10-31): the most recent change wins item by item (a deletion, the piece's place in the list and every single-value setting follow it; collections, whole shapes, the chunk grid and a tie are still held and asked about). No owner yet: "always keep both" as a remembered
    answer, and size and schedule travelling together. **Phase 3**, open sign-up, a
    privacy policy and terms, a real email provider (Supabase's built-in sender reaches
    only the project's own team and only a couple of messages an hour, which is why the

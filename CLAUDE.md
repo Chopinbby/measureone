@@ -1315,17 +1315,15 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
 
 See [`docs/Roadmap.md`](docs/Roadmap.md) — no single item is currently singled out as
 "next"; pick from the priority-ordered backlog there. **The accounts work is the one
-thread in motion:** it is mid-Phase 2 (Passes 115 to 118 are built and live; 119, tabs of
-one browser, and 120, automatic updates behind a switch that is off by default, are built),
-121 (a held piece asks one plain question per conflicting part in Review) is built, 122
-(a piece deleted on one device is deleted everywhere, with a 30-day way back) is built, and so is
-122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
-Review's questions; live since 2026-10-27); 123 (the app opens with no connection, a small service
-worker; live since 2026-10-28) is built, and the passes the docs name next are 126 (**built
-2026-10-29, not yet merged:** the most recent change wins, item by item, for single-value settings;
-see "The most recent change wins" below and Decisions.md "Pass 126 build") and 124 (turning the switch on by
-default; **on 2026-10-28 the owner chose to wait with the flip until Phase 3**, and it is only ever built
-on her word). The owner's 2026-10-15 "most recent wins" decision is built for single-value
+thread in motion:** Phase 2 is built and live apart from one parked pass. Passes 115 to 123 (noticing other
+devices, the merge engines, tabs of one browser, automatic updates behind a switch that is off by
+default, plain questions in Review, a deletion wins everywhere with a 30-day way back, what the
+person said no to is remembered, opening with no connection) were live by 2026-10-28, and **126 (the
+most recent change wins, item by item, for single-value settings; practice combined) was merged on
+2026-10-31 as PR #83**, with the reconnect-hold fix, the "Reschedule all" stamp and the deletion of
+Review's old practice screens in it (see "The most recent change wins" below and Decisions.md "Pass 126
+build"). The one pass left in Phase 2 is 124 (turning the switch on by default; **on 2026-10-28 the
+owner chose to wait with the flip until Phase 3**, and it is only ever built on her word). The owner's 2026-10-15 "most recent wins" decision is built for single-value
 settings, a deletion and the piece list's order; collections and whole shapes, the chunk grid and a
 tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
@@ -1481,5 +1479,7 @@ silently.
   dated note on each setting when it changes (`piece.settingTimes`, technique `partTimes`), the later
   change settles a setting both devices changed, a chunk's practice record both changed is combined,
   a tie and every collection or whole shape is still asked; one quiet line in the Account panel says what
-  was kept and from which device. Built 2026-10-29, merged only on her word.
+  was kept and from which device. Built 2026-10-29, **merged 2026-10-31 (PR #83, merge commit `0a9d1a7`)**
+  together with three follow-ups from her phone check: the reconnect-hold fix (no fresh look, no upload),
+  the "Reschedule all" stamp, and the deletion of Review's old practice screens.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)

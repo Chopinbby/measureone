@@ -8036,7 +8036,7 @@ what it rules out.
   tempo's exact time. Options: the piece's `updatedAt` as the stand-in for any part both
   sides changed, or a time kept per part. **Answered 2026-10-28 (Pass 126 step 1): a time
   kept per setting, with `updatedAt` as the fallback where there is none, for single-value
-  settings only;** see "Pass 126 step 1" under Accounts and backend. **Built 2026-10-29** ("Pass 126 build").
+  settings only;** see "Pass 126 step 1" under Accounts and backend. **Built 2026-10-29, merged 2026-10-31** ("Pass 126 build").
   (iii) ~~**Deletions (Pass 122):** if one device deletes a piece and the other practices
   it later, "the later action wins" means either the piece comes back or the practice is
   lost; it needs her answer.~~ **Answered 2026-10-23, built in Pass 122:** "If a piece is
@@ -8530,13 +8530,14 @@ what it rules out.
   technique simulation likewise. Seen in a real browser against a local stand-in service (two addresses as
   two devices): the same two settings renamed on both while offline, the later wins on both, nothing asked,
   no banner, B's Account panel says what was kept; the same chunk logged on both, both sessions on both;
-  the account revision still afterwards. **Not seen on the real preview with the real test project** (the
-  card's "Yours" checks: her phone as the second device). **After items 11 to 13:** 1,669 tests (the
+  the account revision still afterwards. The card's "Yours" checks (her laptop and phone on the real preview) came after the build; the first of them found the reconnect hold, item 11. **After items 11 to 13:** 1,669 tests (the
   deleted screens took their own tests with them) and three more deliberate breakages, all caught (a
   missing or declined look sends; "Reschedule all" stops stamping; the question builder stops refusing a
   leftover practice conflict). Her three "Yours" checks passed on
   the preview: the online Composer clash, the practice combine (Full pass 2 to 4 on both devices) and
-  the reconnect with the phone really offline ("Working offline" seen), after the fix.
+  the reconnect with the phone really offline ("Working offline" seen), after the fix. **Merged by the owner on
+  2026-10-31** (PR #83, merge commit `0a9d1a7`); the Production deployment of it completed the same minute, so her
+  real site runs it.
 
 ## Open questions
 

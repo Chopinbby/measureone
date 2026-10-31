@@ -1246,6 +1246,41 @@ branch at the same commit gets no preview of its own (its address answers DEPLOY
 the commit status API is keyed by commit, so it reads "success" for a deployment that does not exist
 for that branch; push a distinct commit and poll the address itself.
 
+## A sync scenario must be run with the real triggers, and shown to fail on the old code first
+
+In Pass 126 my own browser run of "two devices change the same thing while offline" passed, using only the stand-in
+service's down switch and timers, and the owner's phone held a piece within minutes of reconnecting. The cause was
+in Pass 120's merge-before-upload: the upload run's own look at the account was silently skipped when the page was
+hidden, or declined because the browser's `online` event had already started a look, and the run uploaded from an old
+picture and was refused (details: [Accounts-and-Backend.md](Accounts-and-Backend.md#the-most-recent-change-wins-pass-126),
+"The reconnect hold"). Even the second try with the real `online` event passed at first: a device's own retry loop
+outlived the outage and merged by itself. So: dispatch the real events (`online`, `focus`, a hidden
+`visibilityState`), control the timing (let each device finish its failure cycle, no look in flight when the event
+fires), read the per-device request order (`performance.getEntriesByType("resource")`; the service's own log cannot tell
+the devices apart), and do not trust a pass until the same scenario has been shown to hold a piece on the OLD code. A
+"held before, merged after" pair is the evidence; "it passed" is not. Swap the old file in from `git show HEAD:path`,
+keep two copies of the fixed one, and `cmp` after restoring.
+
+## Text on screen that describes behavior is invisible to the tests: search `src/components` after a behavior change
+
+Pass 126 changed what happens when the same setting or chunk changes on both devices, but the sentence under the
+"Update automatically from other devices" switch still said such pieces are held for Review. 1,668 tests and a
+browser run did not notice (components have no tests and the run never read that sentence); it was found only while
+writing the owner's check steps. After a pass that changes a rule, a merge, a default or a limit, grep `src/components`
+and the strings in `src/lib` for the old rule's words ("held", "Review asks", "both places", "merged when") and fix them
+in the same pass. Writing the owner's check steps from the real screen text (read the component, not the docs) is a cheap
+second net.
+
+## A hands-on check needs an independent proof of its precondition
+
+The first airplane-mode check of Pass 126 proved nothing: the phone was never offline (airplane mode can leave Wi-Fi on,
+and she kept scrolling another app), and my steps had called an unchanged "Backed up 7 minutes ago" line normal, wrongly:
+the page also looks at the account once a minute while it is on screen, so a really offline phone flips to "Working
+offline" by itself. Give the owner something that proves the precondition before the step that depends on it (Control
+Center with the Wi-Fi icon dark; a new Safari tab that must fail to load a site; the app's own line changing) and put
+the action that triggers a cue in the same step as the cue. Tell her to use a normal Safari tab, never a Private one, for
+anything that has to survive a sign-out. And read the WHOLE path that makes a cue appear before saying what she will see.
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

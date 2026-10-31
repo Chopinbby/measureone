@@ -251,6 +251,10 @@ MeasureOne.jsx/
     │   │                                  # compareSwitcherOrder) and the display parts
     │   │                                  # the engine settles itself (SOFT_PARTS).
     │   │                                  # Algorithms.md#merging-by-part-pass-117
+    │   ├── settingTimes.js                # Pass 126: the dated note on a single-value
+    │   │                                  # setting (RECENCY_FIELDS, stampChangedSettings,
+    │   │                                  # compareRecency) and the technique library's
+    │   │                                  # partTimes. Pure; the merge engines import it.
     │   ├── techniqueMerge.js              # Pass 118: the same for the technique
     │   │                                  # library (planTechniqueMerge), plus
     │   │                                  # canonicalTechnique and

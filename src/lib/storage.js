@@ -4,6 +4,7 @@ import { reconcileMinutesPerDaySchedule } from "./scheduling";
 import { isInRevival } from "./revival";
 import { generatePracticeChunks, reassociateTroubleSpots, validSplitPoints } from "./chunking";
 import { normalizePieceKey, normalizeOtherKeys, sameSpelledKey } from "./technique";
+import { cleanSettingTimes, cleanPartTimes } from "./settingTimes";
 
 /* ------------------------------------------------------------------ */
 /*  Schema versioning and migration                                   */
@@ -421,6 +422,14 @@ export function validateAndMigratePiece(piece) {
     startDate,
   };
 
+  // Pass 126 — the dated note on each single-value setting ("the most recent change
+  // wins", lib/settingTimes.js). Kept only when it holds a real time for a known setting;
+  // a piece without any carries no field at all, NOT an empty one, so loading never changes
+  // a piece that has none (no fingerprint moves, nothing re-uploads after the deploy).
+  const settingTimes = cleanSettingTimes(piece.settingTimes);
+  if (settingTimes) migrated.settingTimes = settingTimes;
+  else delete migrated.settingTimes;
+
   // Split points (Pass 97 follow-up) — self-heals any stored split point the
   // app could not have produced on this piece's own current chunk grid
   // (validSplitPoints, lib/chunking.js), same "never trust stored state"
@@ -756,6 +765,9 @@ export function validateAndMigrateTechnique(raw) {
     if (Number.isInteger(raw.settings.scalesPerDay) && raw.settings.scalesPerDay >= 1) settings.scalesPerDay = raw.settings.scalesPerDay;
     if (typeof raw.settings.minutesPerScale === "number" && raw.settings.minutesPerScale > 0) settings.minutesPerScale = raw.settings.minutesPerScale;
   }
+  // Pass 126 — the dated note on a scale's octaves and hands and on the two settings
+  // (lib/settingTimes.js). Absent unless a real note exists, like a piece's.
+  const partTimes = cleanPartTimes(raw.partTimes);
   return {
     schemaVersion: TECHNIQUE_SCHEMA_VERSION,
     items,
@@ -765,6 +777,7 @@ export function validateAndMigrateTechnique(raw) {
     walkPosition,
     dayList: normalizeDayList(raw.dayList),
     settings,
+    ...(partTimes ? { partTimes } : {}),
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : null,
   };
 }

@@ -510,10 +510,11 @@ device changed something ("Changes from another device: 3 pieces. Press Get chan
 it applies nothing). Live on the real site since Pass 114 (2026-10-10), with the
 owner's account the only one. **Phase 2:** the two merge-by-part engines (Passes 117 and
 118) are called between tabs of one browser (Pass 119) and, since Pass 120, by an
-automatic update from other devices that is **off by default**. **Decided 2026-10-15,
-only partly built:** the most recent change winning item by item, with practice sessions
-and scales always kept (Pass 120 holds a conflicting part and Pass 121 asks the person about it
-instead, so "most recent wins" is still not built; Pass 122 settled one case by the owner's
+automatic update from other devices that is **off by default**. **Decided 2026-10-15, built
+in Pass 126 for single-value settings:** the most recent change winning item by item, with
+practice sessions and scales always kept (Pass 126: a single-value setting both devices changed
+differently goes to the later change and a chunk's practice is combined, so Review is left with
+collections, whole shapes, the chunk grid and ties; Pass 122 settled one case by the owner's
 2026-10-23 rule: a deleted piece is deleted everywhere, practice and all, with a 30-day way back;
 Pass 122b stopped the app asking twice: what is left unticked is remembered, piece order follows
 the person with no question (the most recent reorder wins), and a refused-upload piece gets Review's
@@ -628,9 +629,10 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   eight tests fail if you do. **Superseded in direction on 2026-10-15:** the owner chose
   "most recent wins, item by item" and automatic updates. Pass 120 built the automatic
   updates and KEPT this rule (a clean newer copy still applies under it), adding Pass
-  117's engine beside it for a piece changed on both sides; Pass 121 asks about a conflicting
-  part instead of deciding it. **"Most recent wins" is still not built; don't weaken or remove
-  this rule until something replaces it on purpose.**
+  117's engine beside it for a piece changed on both sides; Pass 126 built "most recent wins"
+  in that engine (the automatic update, Review and tabs; Get changes and Review's file-import
+  path still use the import merge). **This rule still stands for the clean-newer-copy case; don't
+  weaken or remove it.**
 - **`applyAccountFlow` saves the device record BEFORE any state changes**
   (`withAccountCopyRecorded`); reverse it and the upload hook sees merged pieces with
   no record, takes them for new, and holds each one. Combining marks the account's
@@ -702,11 +704,11 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   it as read-only.
 - **Per part:** changed on one side only, take that side; same value on both,
   agreement; different values: a piece part is a conflict for that part only (this
-  device's value kept, both listed, never resolved in the engine; `status:
-  "local-only"` returns `local` itself, untouched), a technique part follows a rule per
-  kind. **Pass 120 did not change this** (an automatic update holds a conflicting piece
-  part instead of resolving it, and Pass 121 asks the person, see below); "the most recent
-  change wins" (decided 2026-10-15) is still not built. **One exception since Pass 122b:**
+  device's value kept, both listed; `status: "local-only"` returns `local` itself,
+  untouched), a technique part follows a rule per kind. **Two kinds of conflict are no longer
+  conflicts since Pass 126** (see "The most recent change wins" below): a single-value setting
+  goes to the later change, and a chunk's practice record is combined. Everything else is still
+  held and asked about (Pass 121). **One exception since Pass 122b:**
   `sortOrder`, `switcherOrder` and `createdAt` (`SOFT_PARTS`) are never a conflict: changed on both
   sides to different values the engine settles them itself and lists it in `softSettled`: the
   rank and the reorder note go to the side holding the MORE RECENT reorder, and where the notes
@@ -767,14 +769,13 @@ that saved last silently replaced the other's work and a deleted piece came back
   CONTENT, never a different object. A tab's own pending delete beats another tab's
   change. Storage that can't be read, or an unusable entry, is never a deletion. The
   technique library follows the same cases with `planTechniqueMerge`'s roles swapped.
-- **The same chunk logged in two tabs is a conflict in the engine** (one chunk's whole
-  progress entry is one part) and it would keep ONE entry whole, dropping a session.
-  `foldConflictedProgress` (`tabSync.js`, not exported) adds the other tab's sessions,
-  done days and focus-spot sessions back (by content; an undo is not undone). **Pass 120
-  meets the same thing with the account's copy: move the fold into `pieceMerge.js` or
-  export it**, or "most recent wins" drops sessions. A grid change in one tab against
-  progress in the other is still a whole-piece conflict (this tab's copy kept, the other
-  side's sessions dropped, console warning only; Decisions.md open item (i)).
+- **The same chunk logged in two tabs is combined by the engine** (Pass 126: `tabSync.js`'s
+  own fold is gone; `planPieceMerge` combines a chunk's record both tabs changed with
+  `unionProgressEntries`, given the copy this tab last saved as `baseProgress`, so a session
+  one tab undid stays undone). A setting both tabs changed goes to the later change, a tie
+  keeps this tab's value. A grid change in one tab against progress in the other is still a
+  whole-piece conflict (this tab's copy kept, the other side's sessions dropped, console warning
+  only; Decisions.md open item (i)).
 - **The write guard (`guardPieceWrites`, `guardTechniqueWrite`) holds a save when storage
   moved under it** and the tab reconciles instead (`runTabSync`, via `requestTabSync`). It
   checks byte-identical text first (0.22 ms on a 180 KB piece; the full comparison is
@@ -844,7 +845,13 @@ Phase 3, and a flip must also store an explicit OFF: today only an ON is stored,
   round), and leaves a piece that still can't be merged out of the run
   (`needsMergeBeforeUpload`, `skipPieceIds`) rather than sending it to be refused. A refusal
   is still judged and held as the last safety net. **Don't send a piece whose merge was
-  deferred: it will be refused.**
+  deferred: it will be refused.** **No fresh look, no upload (Pass 126 follow-up):** `runSync`
+  asks `requestCheck("startup", { beforeUpload: true })` and `uploadAfterLook`
+  (`lib/accountSync.js`) decides; a look that was declined (the `online`/`focus` look is
+  already running), not believed or busy waits 2 s and looks again, a failed look waits the
+  usual retry gap, and the look ignores the hidden-page gate. Letting an undefined look fall
+  through to the upload brings back the reconnect hold (seen in the rig, 46 ms from look to
+  blind upload; a test pins it).
 - **A piece in use waits** (`isPieceBusy`, Pass 119): the change is not applied and **not
   recorded**, so the next run finds it again; an effect applies it when idle. **Never record
   an account copy for a piece you didn't apply it to:** the record would say "synced" while
@@ -872,8 +879,8 @@ Phase 3, and a flip must also store an explicit OFF: today only an ON is stored,
 - **Left open** (details in
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)):
   the "applied when you're done" line is rarely visible; a piece held by a REFUSAL is not
-  settled automatically (Review asks about one since Pass 122b); a hidden page skips the fresh look before an upload; two upload
-  runs can overlap during it; a piece waiting because it is in use is downloaded again every
+  settled automatically (Review asks about one since Pass 122b); two upload
+  runs can overlap during the fresh look (a hidden page skipping it is fixed, Pass 126 follow-up); a piece waiting because it is in use is downloaded again every
   minute; a failed automatic update leaves only a console line; `App.jsx`'s wiring has no
   automated test.
 
@@ -914,12 +921,15 @@ question per conflicting part instead; everything else is unchanged. Rules:
 - **The walk through a piece's screens is plain data in `lib/settleFlow.js`** (tested in
   `test/settleFlow.test.mjs`): `startSettle`, `settleChoose`, `settleNext`, `settleBack`,
   `settleView`. `App.jsx` calls them and `SettleConflictModal` draws `settleView`'s result; put
-  any new "what comes next" rule there, not in the component. Screens: a **first screen** when
-  `BULK_MIN` (3) or more practice-record questions offer "both" ("Both devices' sessions for all
-  N" / "Decide each one"; it is a shortcut to the same answers), the questions, then the
-  **summary** (what is kept, one line for the first screen's group; in a red box what the chosen
-  answers **remove**, from the options flagged `removes`), then the apply. Nothing is chosen
-  for the person.
+  any new "what comes next" rule there, not in the component. Screens: the questions, one at a
+  time, then the **summary** (what is kept; in a red box what the chosen answers **remove**, from
+  the options flagged `removes`, which today is the whole-piece question only), then the apply.
+  Nothing is chosen for the person. (A first screen for three or more practice records answered
+  at once, and the practice-record question itself, were **deleted 2026-10-31** on her word: since
+  Pass 126 the engine combines practice, so nothing reached them. `buildSettleQuestions` THROWS on
+  a plan that still holds a practice-record conflict, so `planSettle` sends that piece to the
+  whole-piece picker and says it was not asked about, never silently asking fewer questions than
+  there are conflicts; a test pins it. Old behavior is in git before that commit.)
 - **The account is read again at the summary's button** (`rereadSettleItem`,
   `fetchChangedAccountRows` for that one id), because the questions were made when Review opened
   and a stale row made the settled piece's upload be refused and the piece held again with no
@@ -928,13 +938,15 @@ question per conflicting part instead; everything else is unchanged. Rules:
   record takes the new revision); different questions start the walk over with a note and apply
   nothing; a row that is gone is "gone". **If the account can't be read, nothing is applied** and
   the summary stays with a message (applying to a copy that may be old is what this exists to
-  stop). Don't make "same questions" looser: a changed number of sessions that would be removed
-  is a different question.
-- **What an answer removes is said plainly and counted** (`removalHint`): keeping this device's
-  record removes the other device's sessions from the account too; keeping the other's removes
-  this device's, which the account never had. Nothing is said when no session would go. The
-  whole-piece answers are always flagged `removes`.
-- **"Both devices' sessions"** is `unionProgressEntries` (`lib/pieceMerge.js`): the sessions,
+  stop). Don't make "same questions" looser: a changed value in a question's wording (or a
+  changed warning) is a different question.
+- **What an answer removes is said plainly** and repeated on the summary: the whole-piece answers
+  are flagged `removes` (keeping this device's piece removes the other device's practice and
+  changes from the account too; keeping the other's removes this device's, which the account never
+  had). The per-session counting (`removalHint`, "The 2 sessions logged on ... will be removed")
+  belonged to the deleted practice-record question and is gone with it.
+- **"Both devices' sessions"** (no longer an answer anyone is asked, since Pass 126 the engine
+  does it for every chunk both devices changed) is `unionProgressEntries` (`lib/pieceMerge.js`): the sessions,
   the days practiced and focus spots' own sessions are unioned by content (Pass 115's
   comparison); everything else in the chunk's record (the ladder state, tempo, but also a
   rating or flag) comes from the side whose latest JUDGED session is later (a skipped or
@@ -950,12 +962,12 @@ question per conflicting part instead; everything else is unchanged. Rules:
   the date, they are ordinary parts (`linkedToDate` in `planPieceMerge`'s result).
 - **The wording is partly proposed:** the two sentences are the pass card's; the hints under each
   option, the "Recommended" tag and the whole-piece sentence are additions. **Confirmed
-  2026-10-21:** "removed" for what an answer throws away, and the first screen.
+  2026-10-21:** "removed" for what an answer throws away (the first screen, also confirmed then, was
+  deleted 2026-10-31).
 - **`planSettle` never throws** (a piece it fails on is in `errored` and goes to the picker, and
   the page says so); it takes `build` so a test can make one fail.
 - **Left open:** a piece held by a REFUSAL with no recorded base still goes to the picker (one
-  that knows what it last synced gets questions since Pass 122b); `foldConflictedProgress` (`tabSync.js`) and
-  `unionProgressEntries` are two implementations of "keep both"; **size and schedule travel
+  that knows what it last synced gets questions since Pass 122b); **size and schedule travel
   together is not done** (a resize on one device against a difficulty edit on the other still
   gives a piece whose measure count and difficulty list disagree; practice days per week and
   minutes per day could too, not run), proposed as its own pass; no remembered answers
@@ -1148,6 +1160,93 @@ with a connection open it again without one (the owner chose it over a plugin or
   timeout; fonts come from Google over the network so offline text uses fallback fonts; no
   automated test of the worker's routing is committed.
 
+### The most recent change wins (Pass 126)
+
+The owner's 2026-10-15 decision, built for **single-value settings** (her approved list,
+2026-10-28: Decisions.md "Pass 126 step 1" and "the list of settings"). Rules:
+
+- **The list is `RECENCY_FIELDS` (`lib/settingTimes.js`) and it is hers.** `name`, `composer`,
+  `workName` (`workId` follows it), `notes`, `status`, `markedLearnedElsewhere`, `targetBPM`,
+  `homeKey`, `manualOverallConfidence`, `lastPlayedDate`, `startDate`, `scheduleMode`, `targetDate`,
+  `minutesPerDay`, `practiceDaysPerWeek`, `troubleSpotsEnabled`, `troubleSpotDefaultMinutes`. **A new
+  top-level piece field is an ordinary part (asked) until she says otherwise; never add a collection
+  or a whole shape** (a part is a whole top-level field: the later device's whole set would replace the
+  other's and an added note or recording would vanish silently). The chunk grid, `otherKeys`, the
+  recurring group, `ladderConfig`, `revival` and `rescheduleMarker` stay asked.
+- **The dated note.** `piece.settingTimes[field]` is written ONLY by `updatePiece` (App.jsx, through
+  `stampChangedSettings`) when a listed setting changes, and by the engine's own merge; never by a
+  load, a reload from another tab, an import or `setPieces`. A setting with no note falls back to
+  the piece's `updatedAt`. **It is not a part** (`NEVER_PARTS`), and **loading never adds it** (a piece
+  without any carries no field; materializing it would move every fingerprint and re-upload every
+  piece). A new place that changes a listed setting outside `updatePiece` must stamp it or the setting
+  falls back to `updatedAt`: a piece written straight to storage goes through `pieceWithChange`
+  (`lib/settingTimes.js`; "Reschedule all" does since 2026-10-31, it used to write the new target date
+  with no note). A note is never earlier than a note the piece already holds
+  (`nextSettingStamp`). The technique library has the same in `partTimes` (octaves, hands and the two
+  settings; `stampChangedTechnique`); **`updateTechnique(..., { stamp: false })` for a library that
+  arrives from somewhere else**. A task's method plan has no note (its keys would grow every day): it
+  falls back to the library's `updatedAt`.
+- **The engine.** `planPieceMerge` settles a listed setting both sides changed differently by
+  `compareRecency` (later note, else `updatedAt`) and lists it in `recencySettled`. **A tie is never
+  guessed** (it stays a conflict, this device's value kept); an answer the person already gave beats
+  the clock. `scheduleMode` and `targetDate` are settled first. **Followers go with their leader and
+  are not settled alone:** `workId` with `workName`; in a days-mode schedule `daysToLearn`,
+  `minutesPerDay` and `rescheduleMarker` with `targetDate` (even a change only one side made: a date
+  edit regenerates them). A date that ties leaves them ordinary parts. **`minutesPerDay` also goes with
+  the ONE device that changed the date** when both devices changed it (found in review before the
+  first commit: the clock used to pick it alone and could pair one device's date with the other's
+  minutes; the simulation could not see it until its days-mode schedule edit re-derived minutes too). The merged piece's notes are
+  worked out the same whichever copy is local (a test fails on it). Options `recency` and
+  `combinePractice` (both true) exist for the tests of the older mechanism; **nothing in the app
+  passes false.**
+- **Practice is combined, never chosen between.** A chunk's record both sides changed is
+  `unionProgressEntries` (sessions, days practiced, focus-spot sessions, by content; the ladder state
+  from the side whose latest judged session is later). A tie goes to the record with the smaller
+  fingerprint, so both directions agree. `baseProgress` (tabs pass the copy they last saved; the
+  account's device record keeps only fingerprints, so the account path cannot) stops an undo being
+  undone. `tabSync`'s own fold is gone: one implementation.
+- **Where it applies.** The automatic update, Review's questions (`planSettle` re-runs the engine, so a
+  held piece's old list shrinks) and tabs of one browser. **Get changes and the file import still use the
+  import merge** (they do not use the engines). The quiet line is `describeRecencySettled`, shown in the
+  Account panel with "Updated from another device" (`applyAccountMerge`'s `recency`, the technique's
+  `notices`); the piece is named as it reads AFTER the merge. No "put it back".
+- **"Identical by parts" must not record the account's fingerprint** (`engineVerdict`'s `identical`,
+  `applyAccountMerge` "same"): two copies with the same values and different `updatedAt` or notes would
+  each read as changed and trade the piece. Found with a probe while building (it existed for `updatedAt`
+  before this pass); fixed the way Pass 120 fixed the technique library.
+- **Removed 2026-10-31 (her word: "if nothing is lost, delete the old question screens"):** Review's
+  practice-record question, its first screen (`BULK_MIN`, "Both devices' sessions for all N") and the
+  per-session `removalHint` warnings. Nothing a person could reach was lost: the engine combines
+  practice, a pre-Pass-126 hold that lists a practice record now lands on "Nothing is left to decide",
+  and the whole-piece question keeps its own red-box warning. Kept on purpose: the engine's
+  `combinePractice: false` and `recency: false` options and its "both" answer (engine API, used by
+  `test/pieceMerge.test.mjs`), and `unionProgressEntries`. Seen in a browser: a collection question,
+  a "ready" piece and the whole-piece warning all still walk to the end.
+- **The reconnect hold (found by her first phone check, fixed in this pass, 2026-10-31).** A phone coming
+  back online held a piece that would have merged, because the upload run's own look was declined or
+  skipped and the run uploaded blind (details under Merge before upload above, and "The reconnect hold" in
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)). My
+  first browser run of this pass missed it because it used the stand-in's down switch and timers, never the
+  real `online` event or a hidden page: **run a sync scenario with the real triggers (dispatch `online`,
+  force `visibilityState` to hidden, dispatch `focus`) before handing it over.**
+- **Checks.** 1,669 tests; 21 deliberate breakages, all caught; the piece simulation at seeds 1 to 3,000
+  and 1 to 1,000 and the technique simulation likewise (`SIM_RUNS=3000 npm test`); seen in a real browser
+  against a local stand-in service (two addresses as two devices): the same two settings renamed on both
+  while offline, the later wins on both with nothing asked and the quiet line says so; the same chunk
+  logged on both, both sessions on both; and the account revision stays still afterwards; the reconnect
+  and hidden-page paths held a piece before the fix and merge cleanly after it. **Her three checks on
+  the preview all passed (2026-10-31):** the online Composer clash, the practice combine (Full pass 2 to
+  4 on both devices) and the reconnect with the phone really offline ("Working offline" seen, then the
+  phone merged, kept its more recent Composer and the laptop took it, nothing red).
+- **Left open** (details in [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)):
+  a device on the previous version writes no notes (its changes fall back to `updatedAt`); device
+  clocks are trusted (no guard, the owner's call); a refused upload merged late by `reapplyOnto` leaves no
+  quiet line; an undo of a session is brought back by the account path (no base copy); the quiet line
+  for a collection both changed does not exist (it is asked); every Settings save re-derives
+  `minutesPerDay` and can stamp it; the import merge (Get changes, a file) picks `settingTimes` as one lump; a piece
+  already held before the deploy stays held until Review (the automatic update never retries a held
+  piece); `App.jsx`'s wiring has no automated test. The rest is item 9 of the Accounts-and-Backend list.
+
 ### Deploying and operating (Pass 114 on)
 
 - **A merge to `main` now ships to real accounts.** Anything touching
@@ -1222,15 +1321,13 @@ one browser, and 120, automatic updates behind a switch that is off by default, 
 (a piece deleted on one device is deleted everywhere, with a 30-day way back) is built, and so is
 122b (what the person said no to is remembered, order follows them, a refused-upload piece gets
 Review's questions; live since 2026-10-27); 123 (the app opens with no connection, a small service
-worker; live since 2026-10-28) is built, and the passes the docs name next are 126 (**scoped
-2026-10-28, not built:** the most recent change wins, item by item; **step 1 was answered 2026-10-28:**
-each setting is stamped when it changes (the piece's `updatedAt` as the fallback), for single-value
-settings only, while collections and whole shapes are still held and asked about, with a quiet line
-and no wrong-clock guard, see Decisions.md "Pass 126 step 1"; placed ahead of 124's flip) and 124 (turning the switch on by
+worker; live since 2026-10-28) is built, and the passes the docs name next are 126 (**built
+2026-10-29, not yet merged:** the most recent change wins, item by item, for single-value settings;
+see "The most recent change wins" below and Decisions.md "Pass 126 build") and 124 (turning the switch on by
 default; **on 2026-10-28 the owner chose to wait with the flip until Phase 3**, and it is only ever built
-on her word). The owner's 2026-10-15 "most recent
-wins" decision is only partly built (a deletion and the piece list's order follow it; a
-conflicting part of a piece is held and asked about). Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
+on her word). The owner's 2026-10-15 "most recent wins" decision is built for single-value
+settings, a deletion and the piece list's order; collections and whole shapes, the chunk grid and a
+tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
 policy and terms, a real email provider, monitoring, in-app change of email and
 account deletion) is separate; see Roadmap.md and Accounts-and-Backend.md. Still not
@@ -1352,10 +1449,10 @@ silently.
   off by default; the check runs every minute.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#changes-from-your-other-devices-arrive-by-themselves-pass-120)
 - **Pass 121** — a piece held with recorded conflicts asks one plain question per conflicting
-  part in Review ("both devices' sessions", this device's, the other device's), with a first
-  screen for many practice records at once and a summary (including what would be removed)
-  before anything is applied; the account is read again at the last step; "Decide later"
-  changes nothing.
+  part in Review (this device's, the other device's; at the time also "both devices' sessions",
+  with a first screen for many practice records at once, both deleted 2026-10-31 after Pass 126
+  made the engine combine practice) and a summary (including what would be removed) before
+  anything is applied; the account is read again at the last step; "Decide later" changes nothing.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#settling-a-held-piece-one-question-at-a-time-pass-121)
 - **Pass 122** — a piece deleted on one device is deleted everywhere (the owner's 2026-10-23
   rule; the practice goes with it), with a 30-day "Recently deleted" and a "Keep it" button; with
@@ -1380,3 +1477,9 @@ silently.
   bottom edge, so a piece can be moved to any row in one drag (it shows about seven rows and could
   only be dragged to rows already in view). `lib/dragScroll.js`; what a drop does is unchanged.
   [`Decisions.md`](docs/Decisions.md#ux)
+- **Pass 126** — the most recent change wins for single-value settings (the owner's approved list): a
+  dated note on each setting when it changes (`piece.settingTimes`, technique `partTimes`), the later
+  change settles a setting both devices changed, a chunk's practice record both changed is combined,
+  a tie and every collection or whole shape is still asked; one quiet line in the Account panel says what
+  was kept and from which device. Built 2026-10-29, merged only on her word.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)

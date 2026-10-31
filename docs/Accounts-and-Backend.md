@@ -70,10 +70,11 @@ one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-ever
 reorder win as a whole list, and gives a piece held by a refused upload Review's plain
 questions** (see [What the person said no to is remembered, and order follows
 them](#what-the-person-said-no-to-is-remembered-and-order-follows-them-pass-122b)).
-**Decided 2026-10-15, only partly built:** "the most recent change wins item by item"
-(Decided 6 below) is built for a deletion and for a piece's place in the list; for a conflicting
-part of a piece it is not: Pass 120 holds it and Pass 121 asks the person about it instead. See
-[Pass plan](#pass-plan).
+**Decided 2026-10-15, built for single-value settings in Pass 126:** "the most recent change wins
+item by item" (Decided 6 below) is built for a deletion, for a piece's place in the list and (Pass 126) for
+the single-value settings the owner approved; a collection, a whole shape, the chunk grid and a tie are still
+held and asked about (Pass 120 holds, Pass 121 asks). See [The most recent change wins](#the-most-recent-change-wins-pass-126)
+and [Pass plan](#pass-plan).
 
 ## Decided
 
@@ -320,7 +321,8 @@ changes can arrive by themselves, behind a switch that is off by default):
 - **121** A piece held with a recorded list of conflicting parts asks one plain question per
   part in Review, instead of the whole-piece picker. Built; see [Settling a held piece, one
   question at a time](#settling-a-held-piece-one-question-at-a-time-pass-121). It asks; it does
-  not decide: **the 2026-10-15 "most recent wins" decision is still not built.**
+  not decide: **the 2026-10-15 "most recent wins" decision was not built by it; Pass 126 built it** (for
+  single-value settings), which leaves Review with far fewer questions.
 - **122** A piece deleted on one device is deleted everywhere, with a way back. Built; see [A piece
   deleted on one device is deleted everywhere](#a-piece-deleted-on-one-device-is-deleted-everywhere-with-a-way-back-pass-122).
   It was split in two when its card was edited (2026-10-24): this is the deletions half.
@@ -340,9 +342,9 @@ changes can arrive by themselves, behind a switch that is off by default):
   line; see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 124 re-scoped".
 - **126** The most recent change wins, item by item: the rest of the owner's 2026-10-15 decision (a part both
   devices changed differently is settled by recency instead of held and asked about; practice is combined,
-  never chosen between). Scoped 2026-10-28, not built; **step 1 was answered the same day** (each setting is
-  stamped when it changes, for single-value settings only; collections and whole shapes are still asked about;
-  see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1"). Placed ahead of 124's flip.
+  never chosen between). Scoped 2026-10-28, **step 1 answered the same day, built 2026-10-29** (not merged until
+  she says so); see [The most recent change wins](#the-most-recent-change-wins-pass-126) and
+  [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1" and "Pass 126 build". Placed ahead of 124's flip.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
 monitoring, and an in-app "delete my account", which must exist before
@@ -1524,7 +1526,8 @@ service: tabs stay in step, no lease key, no account request. **Not seen on the 
    edge. Pass 120's "most recent wins, item by item" applied to that part would drop one side's
    sessions, which the same decision says must always be kept. `foldConflictedProgress`
    (`lib/tabSync.js`, not exported) does the right thing for tabs; Pass 120 needs the same fold,
-   so it should be moved into `lib/pieceMerge.js` (not touched here) or exported.
+   so it should be moved into `lib/pieceMerge.js` (not touched here) or exported. **Done in Pass 126**:
+   the fold is gone and the engine combines the record (`unionProgressEntries`, with `baseProgress` for tabs).
 2. **A grid change in one tab against progress in the other can't be put together**
    (the engine's "travel together" case, Decisions.md open item (i)). For tabs this tab's copy is
    kept, so the other side's sessions (keyed by the old chunk ids) are dropped; it is reported in
@@ -1611,7 +1614,11 @@ finds is brought in without a button, in about a minute. The deciding is in
   in a red banner. With the fresh look the second device sees the first's upload, merges,
   and uploads the merged result once (seen in the browser, below). **Cost:** one extra
   3 KB read per upload run while the switch is on (an upload run follows a quiet period
-  after a change, not a timer).
+  after a change, not a timer). **Since the Pass 126 follow-up (2026-10-31): no fresh look,
+  no upload.** The look used to be skipped silently (page hidden, or another look already
+  running) and the run carried on from an old picture of the account; now a look that did not
+  happen or was not believed makes the run wait and look again (`uploadAfterLook`, see "The
+  reconnect hold" under Pass 126).
 - **Safe moments.** A piece **in use** is not touched, using Pass 119's shared busy test
   (`isPieceBusy`): an unconfirmed Interleaved attempt, a running reassessment timer, an open
   Edit piece settings draft for that piece. Its change is **deferred**: not applied, and
@@ -1691,7 +1698,7 @@ same test).
 4. **The fold Pass 119 wrote** (same chunk logged on two devices) is not used here: that case
    is a conflict and is held. If Pass 121 decides "most recent wins" for a chunk entry, it
    must move `foldConflictedProgress` (`lib/tabSync.js`) into `lib/pieceMerge.js`, or
-   sessions would be dropped. **Pass 121 did not move it** (`tabSync.js` was outside its
+   sessions would be dropped. (**Done in Pass 126**: one combine, in the engine.) **Pass 121 did not move it** (`tabSync.js` was outside its
    list): it wrote `unionProgressEntries` in `lib/pieceMerge.js` for the "both devices'
    sessions" answer, so there are now two implementations of "keep both".
 5. **A grid change in one place against practice in the other is held too** (the card
@@ -1714,7 +1721,9 @@ same test).
 
 **Found in Pass 120's own review (2026-10-19), P2, not fixed:**
 
-10. **A page that is hidden skips the fresh look before an upload.** The look is a check, and
+10. **[Fixed in the Pass 126 follow-up, 2026-10-31: the look before an upload now ignores the
+    hidden gate, and an upload never goes out without a fresh look; see "The reconnect hold"
+    under Pass 126.]** **A page that is hidden skips the fresh look before an upload.** The look is a check, and
     checks never run hidden. Log a session and switch tabs within the 5 s quiet period and
     the upload goes out on the last check's knowledge (up to a minute old). If the other
     device uploaded in that minute the upload is refused and the piece is held (safe, nothing
@@ -1825,11 +1834,11 @@ as before.
   or from the "ready" screen), with a test that walks every path and checks no earlier step
   applies.
 - **The walk is plain data** (`lib/settleFlow.js`, new in the follow-up, tested in
-  `test/settleFlow.test.mjs`). `state = { stage, index, answers, bulk, notice }` and pure
+  `test/settleFlow.test.mjs`). `state = { stage, index, answers, bulk, notice }` (`bulk` and the "bulk" stage were deleted 2026-10-31, see below) and pure
   functions: `startSettle`, `settleChoose`, `settleNext`, `settleBack`, `settleView`. `App.jsx`
   only calls them and `SettleConflictModal` only draws what `settleView` returns (it used to
   decide the order itself, where nothing could be tested).
-- **The first screen** (`BULK_MIN` = 3). When three or more practice-record questions offer
+- **[Deleted 2026-10-31, with the practice-record question itself: since Pass 126 the engine combines practice, so nothing reached it. The owner: "if nothing is lost, go ahead and delete the old question screens." Described here as it was.]** **The first screen** (`BULK_MIN` = 3). When three or more practice-record questions offer
   "both devices' sessions", the walk starts with one question for all of them: "You practiced N
   parts of this piece on both devices since you last synced." with **Both devices' sessions for
   all N** (recommended) and **Decide each one**. "All" answers each of them "both" and they are
@@ -2802,6 +2811,155 @@ hashed files immutable) and a local stand-in for the account service:
 6. **No automated test of the worker's routing is committed**: it is not on the card's file
    list, and a throwaway check of the same behavior was run instead (item 4 above). A small test
    that loads `public/sw.js` with a fake `self`, `caches` and `fetch` would pin it; offered.
+
+## The most recent change wins (Pass 126)
+
+The owner's 2026-10-15 decision, built for **single-value settings** (the list she approved on 2026-10-28:
+Decisions.md "Pass 126 step 1" and "the list of settings"). Before it, a piece changed on both devices whose
+parts conflicted was held by the automatic update and Review asked a question for each part, one of which was
+every chunk practiced on both devices. After it, Review is left with what a clock cannot decide.
+
+**What happens**
+
+- A **single-value setting** both devices changed to different values goes to the one changed **more recently**
+  (name, composer, work title, notes, status, "learned elsewhere", target tempo, home key, overall-confidence
+  rating, last played date, start date, schedule mode, target date, minutes per day, practice days per week,
+  the focus-spot switch and its minutes). Nothing is asked.
+- A **chunk's practice record** both devices changed is **combined**: every session either holds, the days
+  practiced, the focus spots' own sessions; the tempo and stage from the record whose latest judged session is
+  later. Nothing is asked and no session is dropped.
+- **Still asked in Review:** the collections and whole shapes (per-chunk notes, recordings, documents,
+  per-measure difficulty, sections, the recurring material, tempo zones, the maintenance-ladder settings,
+  revival, the reschedule marker, other keys), the chunk grid (total measures, chunk mode and size, split
+  points: the "size and schedule travel together" case), a **tie** (the same moment, different values: never
+  guessed), and a grid change against practice (open item (i)).
+- The **technique library**: a scale's octaves and hands, the two settings and a task's method plan follow the
+  same rule (the account's value wins a tie). Tempo checks keep their exact times; practiced dates and done tasks
+  stay combined; the walk stays as it is.
+- **What the person sees:** one quiet line in the Account panel next to "Updated from another device", for
+  example "Kept the more recent change on Ballade No. 1: target tempo (from your other device) and notes (from
+  this device)." Never the page-wide banner, no "put it back" (the owner's call). A tab of one browser says nothing.
+
+**How "more recent" is measured**
+
+- Each listed setting gets a **dated note** in `piece.settingTimes` when it changes (`updatePiece` calls
+  `stampChangedSettings`; `lib/settingTimes.js`). Where a setting has no note, the piece's `updatedAt` stands in.
+  The library has the same in `partTimes` for octaves, hands and the two settings (`updateTechnique` calls
+  `stampChangedTechnique`); a task's method plan falls back to the library's `updatedAt` always, because its keys
+  would grow with every day's list.
+- A note is never earlier than a note the piece already holds, so a device whose clock runs behind still stamps
+  after changes it has received. **Device clocks are otherwise trusted** (no guard: the owner's call).
+- Notes are **not parts** (a conflict is decided by them, so they can never be one) and **loading never adds
+  them**. The merged piece's notes are worked out the same whichever copy is "local": the later note either
+  holds where the values agree, the changing side's note where one side changed, the moment that decided it
+  for a contest.
+- **Followers** go with their leader and are never settled alone: `workId` with the work title; in a
+  finish-by-a-date schedule `daysToLearn`, `minutesPerDay` and the reschedule marker with the target date (even a
+  change only one side made: a date edit regenerates them). A date that ties leaves them as ordinary parts, as
+  they were. Minutes per day also goes with the **one** device that changed the date when both devices changed
+  it (each Save worked it out from its own date), so a device's date is never paired with the other's minutes.
+
+**Where it applies**
+
+- The automatic update (`engineVerdict`, `applyAccountMerge`) and Review (`planSettle` runs the engine again, so
+  a piece held before the pass shows only what is still asked) and tabs of one browser (`tabSync`: the later
+  change wins, a tie keeps this tab's; `foldConflictedProgress` is gone, the engine's combine does it, given the
+  copy the tab last saved so an undo is not undone).
+- **Get changes and the file import do not use the engines** and are unchanged.
+
+**One thing found while building, fixed** (the Pass 120 technique bug, for pieces). A piece whose parts are
+identical to the account's can still differ in what is not a part (`updatedAt`, now the dated notes). Recording
+the ACCOUNT's fingerprint for it made this device's copy read as changed, so it went up and the other device did
+the same, trading the piece. It existed for `updatedAt` before this pass (a probe showed one piece waiting after
+an update). `engineVerdict` now marks an identical result and `applyAccountMerge` records this device's own
+fingerprint for it; a test runs both directions.
+
+**The reconnect hold (found in the first phone check, 2026-10-30; fixed 2026-10-31, same pull request).**
+The owner's phone check of this pass ended with a red "1 piece changed on another device" on the phone, and
+Review saying "Nothing is left to decide". It was not the new rule: it was Pass 120's merge-before-upload, which
+this pass depends on to keep its promise that nothing is asked.
+
+- **Cause.** With the switch on, an upload run takes its own look at the account first (`requestCheck("startup")`
+  in `runSync`), but that returned nothing, silently, when the page was hidden, when another look was already
+  running, when the service did not answer, or when the look was not believed, and the run then went on from the
+  last picture of the account, which could be a minute old. The browser's `online` event starts a look
+  (`requestCheck("online")`) and an upload run (`scheduleSync(0)`) in the same moment, so the run's own look was
+  always declined as "running". The upload went out at the old revision, was refused, and the piece was held
+  (`judgeRefusal` "differs", no list of conflicts), which the automatic update never touches. The page being
+  hidden (the phone in another app) did the same without any event. Pre-existing from Pass 120 (its Left-open
+  item 10 named the hidden page); it undid this pass's "nothing is asked" in exactly the situation a phone is in.
+- **Seen before the fix,** in the two-address rig against a stand-in service: both devices change the Composer
+  while the service is down, it comes back, the laptop reconnects (uploads), the phone reconnects. The request
+  order on the phone: the look starts, **46 milliseconds later the upload goes out at the old revision**, before
+  the look has finished; the account refuses it, the phone re-reads the row and holds the piece. Taking the phone's page hidden gave the same hold with no look at all.
+- **The rule now: no fresh look, no upload** (switch on). `requestCheck` reports what came of the look
+  (`{ fresh, applied, why }`); `uploadAfterLook` (`lib/accountSync.js`, tested) decides: a fresh look sends, a look
+  that brought something in stops the run (the merged result goes up in the next one, as before), a look that was
+  declined, not believed or came while something was busy **waits `BEFORE_UPLOAD_RETRY_MS` (2 seconds) and looks
+  again**, a look the service did not answer waits the usual retry gap (that look already counted toward the
+  "isn't answering" count), and a run that has nothing to do here (another tab holds the lease, signed out, no
+  checked first backup) stops. The look before an upload **ignores the hidden-page gate** (`{ beforeUpload: true }`):
+  an upload goes out from a page in the background, so its look must too; the every-minute checks still wait for
+  the page.
+- **Seen after the fix,** same rig: reconnecting, the laptop's run waits two seconds, looks, then uploads at the right
+  revision; the phone's online look finds the laptop's change within a second, the engine keeps the more recent
+  Composer, and the merged piece goes up five seconds later at the right revision. No hold, nothing asked, the green
+  line says what was kept. With the phone's page hidden the same happens (look, merge, upload at the right revision).
+  With the old `App.jsx` swapped back in, the hidden case held again (no look before the upload).
+- **Unchanged:** with the switch OFF nothing is looked at first (uploads as after Pass 116, a refusal holds the piece).
+  A refusal is still judged and held when the account changes in the seconds between the look and the upload (the
+  last safety net). Two upload runs can still overlap during the look (Pass 120's item 11); nothing here changes
+  that, and the revision rule plus `sent` make the second one harmless.
+- **Checks.** 1,673 tests; the new regression test fails when the old behavior is put back (a missing or declined
+  look sends); `App.jsx`'s wiring has no automated test (seen in the rig, both paths, before and after).
+- **Left open.** (a) A look that keeps being declined or unbelieved for a long time retries every two seconds
+  forever (each retry costs a timer, not a request, until the look runs); (b) a service whose light read is broken but
+  whose writes work would now stop uploads with the switch on until the read works (the same read the every-minute
+  check makes, so the Account line would also say "isn't answering"). **Seen on the owner's real phone, 2026-10-31:**
+  the phone really offline ("Working offline" showed), the laptop changed the Composer first and the phone later,
+  the phone reconnected and stayed on screen: its Account section showed "Updated from another device: Sync test.
+  Kept the more recent change on Sync test: composer (from this device).", the laptop's Composer changed to the
+  phone's value within minutes, nothing red named the piece.
+
+**Left open** (owners in brackets)
+
+1. A device on the previous version writes no notes, so its changes fall back to `updatedAt`, which any later
+   practice moves. [Only until every device has the new version.]
+2. Device clocks are trusted, as the owner decided. [Revisit if a wrong clock is ever seen.]
+3. A refused upload merged late (`reapplyOnto`) leaves no quiet line; it returns `recencySettled` but the
+   caller does not show it. [A small addition.]
+4. The account path brings back a session that one device undid and the other still holds (the device record
+   keeps fingerprints, not copies, so there is no base entry); tabs do not. [Pass 121's deferred item.]
+5. Every Settings save re-derives `minutesPerDay` in a days-mode schedule and can stamp it, so a stale stored
+   value is "changed" once. Harmless (found in the browser on a hand-made piece), noted.
+6. **[Done 2026-10-31, on the owner's word: "if nothing is lost, delete the old question screens."]** The practice
+   question, its first screen and its per-session removal warnings were dormant (reached by nothing) and are deleted,
+   with their tests. Nothing a person could reach was lost: a practice record both devices changed is combined, a
+   piece an older version held for that reason lands on "Nothing is left to decide", and the whole-piece question
+   keeps its red-box warning. `buildSettleQuestions` throws on a plan that still holds a practice-record conflict,
+   so `planSettle` sends the piece to the whole-piece picker instead of asking fewer questions than there are
+   conflicts (tested). Kept: the engine's `combinePractice` / `recency` options and its "both" answer (engine API
+   for its own tests), `unionProgressEntries`. Seen in a browser: a recordings question, a "ready" piece and the
+   whole-piece warning each walk to the end. The old code is in git before that commit.
+7. `App.jsx`'s wiring (`updatePiece`, `updateTechnique`, the quiet line) has no automated test; it was checked
+   in a browser against a stand-in service (two addresses as two devices).
+8. An equal-count collection reads "1 recording on both devices, but the two plans differ in detail" in Review
+   (a wording that was there before). [Pre-existing.]
+9. **Found in the pre-commit review (2026-10-29), logged; (a) fixed 2026-10-31 on the owner's word:** (a) **[fixed:
+   `pieceWithChange` in `lib/settingTimes.js` writes the dated note, and "Reschedule all" uses it for the pieces
+   that are not open; a regression test fails without it]** "Reschedule all" wrote `targetDate`
+   (extending a piece past its date) for the pieces that are not open through `writePieceDirect`, without a dated
+   note, so a stale older note could understate that change; (b) the import merge (Get changes, a file) chooses
+   `settingTimes` as one lump by the generic rule, which can disagree with the values it chose field by field;
+   (c) during the days a phone or tab still runs the previous version, its edits write no note, so an older
+   inherited note can beat its newer edit (worse than the plain `updatedAt` fallback), and that version drops
+   the library's `partTimes` when it loads and saves; ask about phones and old tabs by name at hand-off;
+   (d) a piece already held before the deploy stays held until Review (the automatic update skips held
+   pieces) even when nothing is left to ask; (e) a technique notice says "(it was made later)" on a tie or when
+   no time is known, and names "your other device" for a scale whose octaves and hands were settled to different
+   sides; (f) Review's settle result lines do not mention settings the clock settled; (g) the work id is not
+   derived from the title text, it is a random id made when a title is first entered (the rule still behaves
+   correctly). Tidy: an unused import in `tabSync.js`, a no-op line in one test. [None blocks building on this.]
 
 ## Setup (test project)
 

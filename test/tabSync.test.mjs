@@ -465,13 +465,13 @@ describe("[Pass 119] reconcileFromStorage: pieces", () => {
     assert.deepEqual(out.pieces.keep, {});
   });
 
-  test("changed in both, the SAME chunk: this tab's entry is kept and the other tab's session is added to it, not dropped", () => {
+  test("changed in both, the SAME chunk: the two tabs' sessions are combined, nothing is dropped and nothing is a conflict (Pass 126)", () => {
     const mine = withSession(base, "c1", 10, "mine");
     const theirs = withSession(base, "c1", 20, "theirs");
     const out = reconcile({ p1: mine }, { p1: clone(theirs) }, { p1: base });
     const m = out.pieces.merge.p1;
-    assert.equal(m.status, "conflicts");
-    assert.deepEqual(m.conflicts.map((c) => c.part), ["progress:c1"]);
+    assert.equal(m.status, "merged");
+    assert.deepEqual(m.conflicts, []);
     assert.deepEqual(tagsOf(m.piece), ["mine", "theirs"]);
     // in the order they were logged
     assert.deepEqual(m.piece.progress.c1.sessions.map((s) => s.tag), ["mine", "theirs"]);
@@ -489,13 +489,33 @@ describe("[Pass 119] reconcileFromStorage: pieces", () => {
     assert.deepEqual(tagsOf(out.pieces.merge.p1.piece), ["mine", "theirs"], "'old' was undone here and is not re-added");
   });
 
-  test("changed in both, same field, different values: this tab's value is kept and the conflict is listed", () => {
+  test("changed in both, same field, different values: the more recent change wins, whichever tab it was made in (Pass 126)", () => {
     const mine = { ...base, notes: "mine", updatedAt: 10 };
     const theirs = { ...base, notes: "theirs", updatedAt: 20 };
+    const later = reconcile({ p1: mine }, { p1: clone(theirs) }, { p1: base }).pieces.merge.p1;
+    assert.equal(later.piece.notes, "theirs", "the other tab changed it later");
+    assert.deepEqual(later.conflicts, []);
+    const earlier = reconcile({ p1: { ...mine, updatedAt: 30 } }, { p1: clone(theirs) }, { p1: base }).pieces.merge.p1;
+    assert.equal(earlier.piece.notes, "mine", "this tab changed it later");
+    assert.deepEqual(earlier.conflicts, []);
+  });
+
+  test("changed in both, same field, at the same moment: this tab's value is kept and the conflict is listed (nothing is guessed)", () => {
+    const mine = { ...base, notes: "mine", updatedAt: 10 };
+    const theirs = { ...base, notes: "theirs", updatedAt: 10 };
     const out = reconcile({ p1: mine }, { p1: clone(theirs) }, { p1: base });
     const m = out.pieces.merge.p1;
     assert.equal(m.piece.notes, "mine");
     assert.deepEqual(m.conflicts.map((c) => [c.part, c.local, c.remote]), [["notes", "mine", "theirs"]]);
+  });
+
+  test("changed in both, a COLLECTION (recordings): this tab's value is kept and the conflict is listed, however late the other tab was", () => {
+    const rec = (n) => [{ id: `r${n}`, label: `Take ${n}`, url: `https://example.test/${n}` }];
+    const mine = { ...base, recordings: rec(1), updatedAt: 10 };
+    const theirs = { ...base, recordings: rec(2), updatedAt: 50 };
+    const m = reconcile({ p1: mine }, { p1: clone(theirs) }, { p1: base }).pieces.merge.p1;
+    assert.deepEqual(m.piece.recordings, rec(1));
+    assert.deepEqual(m.conflicts.map((c) => c.part), ["recordings"]);
   });
 
   test("[Pass 122b] both tabs reordered the list differently: this tab's order is kept, and it is no conflict (nobody is asked)", () => {
@@ -612,12 +632,21 @@ describe("[Pass 119] reconcileFromStorage: the technique library", () => {
     assert.deepEqual(out.technique.items.map((i) => i.id).sort(), ["a", "b"]);
     assert.equal(out.technique.items.find((i) => i.id === "a").starred, true);
   });
-  test("changed in both, the same thing: this tab's value is kept (not the other's)", () => {
+  test("changed in both, the same thing: the more recent change wins, whichever tab made it (Pass 126)", () => {
     const base = lib([item("a")]);
     const mine = { ...base, items: base.items.map((i) => ({ ...i, octaves: 3 })), updatedAt: 8 };
     const theirs = { ...clone(base), items: clone(base).items.map((i) => ({ ...i, octaves: 4 })), updatedAt: 9 };
+    const later = reconcile(mine, theirs, base).technique;
+    assert.equal(later.action, "merge");
+    assert.equal(later.technique.items[0].octaves, 4, "the other tab changed it later");
+    const mineLater = reconcile({ ...mine, updatedAt: 12 }, theirs, base).technique;
+    assert.equal(mineLater.technique.items[0].octaves, 3, "this tab changed it later");
+  });
+  test("changed in both, the same thing, at the same moment: this tab's value is kept (nothing says which is later)", () => {
+    const base = lib([item("a")]);
+    const mine = { ...base, items: base.items.map((i) => ({ ...i, octaves: 3 })), updatedAt: 9 };
+    const theirs = { ...clone(base), items: clone(base).items.map((i) => ({ ...i, octaves: 4 })), updatedAt: 9 };
     const out = reconcile(mine, theirs, base).technique;
-    assert.equal(out.action, "merge");
     assert.equal(out.technique.items[0].octaves, 3, "this tab's unsaved choice stands");
   });
   test("nothing in storage, or nothing saved here to compare with: no action", () => {

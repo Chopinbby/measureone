@@ -5,9 +5,9 @@ import { X, Check } from "lucide-react";
 // the question and its options, the summary, the buttons. The words are made in
 // lib/accountSync.js and lib/settleFlow.js, with tests; nothing here decides anything.
 //
-// view: { stage: "bulk" | "question" | "recap" | "ready", notice, intro, stepLabel,
+// view: { stage: "question" | "recap" | "ready", notice, intro, stepLabel,
 // primaryLabel, canNext, canBack, applies, question, answer, recap }
-//   bulk / question  a question to answer ({ part, kind, title, text, detail?, options:
+//   question         a question to answer ({ part, kind, title, text, detail?, options:
 //                    [{ value, label, hint?, recommended? }] }) and the value chosen so far.
 //                    Choosing an option changes nothing, and neither does Next.
 //   recap            what will be kept, and what will be removed. The button here is the
@@ -59,9 +59,9 @@ export function SettleConflictModal({ pieceName, pieceNumber = 1, pieceCount = 1
                   {question.detail}
                 </p>
               )}
-              <div role="radiogroup" aria-label={question.kind === "bulk" ? "How to settle them" : "What to keep"}>
+              <div role="radiogroup" aria-label="What to keep">
                 <p className="wizard-hint" style={{ margin: "0 0 8px" }}>
-                  {question.kind === "bulk" ? "Choose:" : "Keep:"}
+                  Keep:
                 </p>
                 {question.options.map((o, i) => {
                   const chosen = view.answer === o.value;

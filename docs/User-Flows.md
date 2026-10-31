@@ -908,6 +908,12 @@ decision is brought in by itself, with no button:
 - If the piece that is **open** changed, one quiet blue line at the top of the page, which
   you can dismiss and which goes when you open another piece: **"This piece was updated
   from another device."** No other piece makes a banner.
+- **(Pass 126, wording proposed)** When both devices changed the same single setting and the app
+  kept the more recent change, the same Account-panel line adds a sentence: **"Kept the more recent
+  change on Ballade No. 1: target tempo (from your other device) and notes (from this device)."** (for
+  the technique library: **"Kept the more recent change in the technique library: D major (from your
+  other device)."**). There is nothing to press and no "put it back"; a wrong value is one setting you
+  can retype. Practice logged on both devices is simply kept from both, with no line.
 
 **Two devices practicing at the same moment.** Before an upload goes up the app takes one
 light look at your account first. If the other device has just uploaded, yours merges its
@@ -924,8 +930,14 @@ changes.
 
 **Only on sites connected to an account service, signed in.** It is the second half of flow 14:
 when "Update automatically from other devices" finds a piece that **both** devices changed in
-the same place (the same chunk practiced on both, or the same setting changed on both), it
-can't merge the two for you, so it **holds** the piece: your device keeps its own copy,
+the same place and can't tell which to keep, it can't merge the two for you, so it **holds** the
+piece. **Since Pass 126 that is rarer:** a setting you changed on both devices (the name, the target
+tempo, the target date, the notes and the other single settings) goes to the **more recent** change by
+itself, and practice you logged on both devices is **kept from both** by itself; Review is left with
+collections (recordings, documents, chunk notes, difficulty, sections), the chunk layout, and two changes
+made at the very same moment. When the app settles a setting this way, the Account panel says so quietly
+("Kept the more recent change on Ballade No. 1: target tempo (from your other device).") and there is
+nothing to press. The held piece: your device keeps its own copy,
 nothing is lost on either side, and the red banner "1 piece changed on another device" with
 **Review** appears (also under the Account buttons in Settings). Pressing **Review** now asks
 **one plain question for each thing that was changed on both**, instead of the whole-piece
@@ -937,24 +949,15 @@ waiting). The first line says the piece was changed on both of your devices and 
 changes until the last step. Then one question and its answers. Devices have no names, so it is
 always "this device" and "your other device".
 
-**The first screen, only when it helps.** If you practiced **three or more** parts of the piece
-on both devices, the window starts with one question for all of them: "You practiced 6 parts of
-this piece on both devices since you last synced." You choose **Both devices' sessions for all
-6** (recommended) or **Decide each one**. The first keeps every session from both devices for
-all of them and skips those questions; whatever else was changed on both (a setting, say) is
-still asked one by one. Nothing is chosen for you: **Next** stays grey until you choose.
-With fewer than three, there is no first screen and you go straight to the questions.
+**Practice is never one of the questions.** Until 2026-10-31 there was a first screen for several
+practice records ("Both devices' sessions for all 6") and a question for each chunk you practiced
+on both devices. Both are gone: since Pass 126 the app keeps the sessions from both devices by
+itself, so Review never asks about practice. (A piece that an older version held for exactly that
+reason now simply shows "Bring it up to date?".) Nothing is chosen for you: **Next** stays grey
+until you choose an answer.
 
-**The questions** ("Question 2 of 5"):
+**The questions** ("Question 2 of 3"):
 
-- **A chunk you practiced on both devices:** "You practiced mm. 1–4 on both devices since you
-  last synced." You keep **Both devices' sessions** (recommended: every session from both is
-  kept, and the rest of the record, such as tempo and next review, follows whichever device
-  practiced last), **This device's** or **The other device's**. When an answer would throw
-  sessions away it says so, with the number: "The 2 sessions logged on your other device will
-  be removed, from your account too. This can't be undone." (keeping this device's) or "The
-  session logged on this device will be removed. This can't be undone." (keeping the other's).
-  An answer that would remove no session says nothing.
 - **Any other setting:** "Target date: Nov 1 on this device, Nov 15 on your other device." You
   keep **This device's** or **The other device's**. For the target date it also says that days
   to learn and the reschedule follow the date you keep, so you are not asked about them.
@@ -964,12 +967,11 @@ With fewer than three, there is no first screen and you go straight to the quest
   so ("...will be removed ... This can't be undone.").
 
 **The last step.** After the last question the window shows what you are about to do: "Nothing
-has changed yet." and "You are keeping:", one line per answer (everything you chose on the first
-screen is one line: "Both devices' sessions for all 6 practice records"). If any answer
-removes sessions, a red box says "Please check before you settle:" and repeats each one by the
-measures it is about (for example "For mm. 1–4: the session logged on your other device will be
-removed, from your account too. This can't be undone."). The buttons are **Decide later**,
-**Back** and **Settle this piece**.
+has changed yet." and "You are keeping:", one line per answer. If an answer would remove
+anything (only the chunk-layout question can), a red box says "Please check before you settle:"
+and repeats it ("Practice and changes made on your other device will be removed, from your
+account too. This can't be undone."). The buttons are **Decide later**, **Back** and **Settle
+this piece**.
 
 **Moving through it.** Choosing an answer changes nothing. **Next** goes on, **Back** goes to the
 one before (your answers are still there). **Decide later** leaves the piece exactly as it is,

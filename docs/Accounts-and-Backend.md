@@ -25,8 +25,7 @@
 > depends on.
 
 **Status: designed (Pass 105, 2026-09-27); Phase 1 built, and live since
-Pass 114 (2026-10-10); Phase 2 well under way (Passes 115 to 123 live between
-2026-10-14 and 2026-10-28).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
+Pass 114 (2026-10-10); Phase 2 built apart from one parked pass (Passes 115 to 123 live between 2026-10-14 and 2026-10-28, Pass 126 merged 2026-10-31).** Passes 106–113 built Phase 1 and Pass 114 put it live, see
 [Pass plan](#pass-plan). Since Pass 108 a **test** Supabase project exists with
 the tables and security rules, connected to preview sites and local
 development (see [Setup](#setup-test-project)), and since Pass 114 a separate
@@ -342,8 +341,7 @@ changes can arrive by themselves, behind a switch that is off by default):
   line; see [Decisions.md](Decisions.md#accounts-and-backend), "Pass 124 re-scoped".
 - **126** The most recent change wins, item by item: the rest of the owner's 2026-10-15 decision (a part both
   devices changed differently is settled by recency instead of held and asked about; practice is combined,
-  never chosen between). Scoped 2026-10-28, **step 1 answered the same day, built 2026-10-29** (not merged until
-  she says so); see [The most recent change wins](#the-most-recent-change-wins-pass-126) and
+  never chosen between). Scoped 2026-10-28, **step 1 answered the same day, built 2026-10-29, merged 2026-10-31** (PR #83); see [The most recent change wins](#the-most-recent-change-wins-pass-126) and
   [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1" and "Pass 126 build". Placed ahead of 124's flip.
 
 **Phase 3:** open sign-up, privacy policy and terms, a real email provider,
@@ -2817,7 +2815,9 @@ hashed files immutable) and a local stand-in for the account service:
 The owner's 2026-10-15 decision, built for **single-value settings** (the list she approved on 2026-10-28:
 Decisions.md "Pass 126 step 1" and "the list of settings"). Before it, a piece changed on both devices whose
 parts conflicted was held by the automatic update and Review asked a question for each part, one of which was
-every chunk practiced on both devices. After it, Review is left with what a clock cannot decide.
+every chunk practiced on both devices. After it, Review is left with what a clock cannot decide. **Merged by the owner on 2026-10-31** (PR #83,
+merge commit `0a9d1a7`), after her three checks on the preview (the Composer changed on both devices while online,
+the same chunk practiced on both, and a reconnect with the phone really offline).
 
 **What happens**
 

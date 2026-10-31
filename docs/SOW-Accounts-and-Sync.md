@@ -7,6 +7,8 @@ built and went live (Passes 105 to 114, 2026-10-10) and Phase 2 has begun
 written, so read it as the plain-language record of why, not as the current
 state (that is in [Accounts-and-Backend.md](Accounts-and-Backend.md) and
 [Roadmap.md](Roadmap.md)).
+**Phase 3 below is now designed** (Pass 127, 2026-10-31, not built): see
+[Accounts-and-Backend.md](Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).
 **Written for:** a non-technical reader making product decisions. Technical
 terms are explained the first time they're used.
 **Last updated:** 2026-09-27.

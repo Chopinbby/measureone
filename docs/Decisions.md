@@ -7343,6 +7343,9 @@ what it rules out.
   Site URL (where invitation and reset links open) moves from localhost to
   Pass 109's preview address, so links work from any device. See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#open-questions).
+  **Phase 3 (Pass 127, 2026-10-31) ends this in two steps:** Pass 134 starts
+  inviting other people, once a real email service is connected, and Pass 135 opens
+  sign-up, each only on the owner's word. See "Phase 3 Decided 1" below.
 - **Decided 5 — no live multi-device sync in Phase 1.** Decided earlier
   ([SOW §5.3](SOW-Accounts-and-Sync.md#53-is-live-multi-device-sync-required-on-day-one)).
   Alternative ruled out: sync from day one. Phase 1 fixes the data-loss
@@ -8538,6 +8541,111 @@ what it rules out.
   the reconnect with the phone really offline ("Working offline" seen), after the fix. **Merged by the owner on
   2026-10-31** (PR #83, merge commit `0a9d1a7`); the Production deployment of it completed the same minute, so her
   real site runs it.
+
+- **Phase 3 — the design was written down in Pass 127 (2026-10-31); nothing is built.** Phase 3 is
+  what has to be true before anyone but the owner has an account (Passes 128 to 135). The design,
+  the pass order and who owns each loose end are in
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).
+  The next thirteen entries are the owner's four decisions and the nine design choices recommended while
+  drafting; each says what it rules out. Where the brief did not name the alternative an item rules out,
+  the entry says "named by Pass 127" so the owner can see which are Claude's wording.
+- **Phase 3 Decided 1 — two stages: invitations first, open sign-up later (the owner, 2026-10-31).**
+  The owner invites people by email and the invitations actually arrive (Pass 134); open sign-up comes
+  later, as its own go-live, only after invitations have run for a while (Pass 135); each is tried with
+  real people before the next. Alternatives ruled out: open sign-up straight away; invitations only, for
+  good. This is what turns Decided 4 ("invitation only until Phase 3") into two dated steps.
+- **Phase 3 Decided 2 — the owner buys a web address (a domain), and it becomes the app's one address
+  and the address email is sent from (the owner, 2026-10-31).** Pass 128; the name and where to buy it are
+  hers. Alternative ruled out: staying on vercel.app, because real email services send only from a domain
+  you own, and the app keeps three addresses, each with its own browser copy of the pieces (found
+  2026-10-08; see "Pass 114 — the account Site URL and redirect list name the address where the owner's
+  pieces live", above).
+- **Phase 3 Decided 3 — the app is for people 13 and over (the owner, 2026-10-31).** The privacy policy
+  and terms say so (Pass 133) and open sign-up asks (Pass 135). Alternatives ruled out: 18 and over (rules
+  out teenage students); under 13 with a parent (US law needs verified parental consent first, a large
+  build).
+- **Phase 3 Decided 4 — payments, sign in with Google and teacher and student accounts stay separate
+  and later (the owner, 2026-10-31).** Alternative ruled out (named by Pass 127): folding any of them into
+  Phase 3. They were already outside it: payments and teacher and student accounts are non-goals of the
+  SOW (§8) and payments are parked in the backlog's "Eventually" list, and sign in with Google was ruled
+  out for Phase 1 by Decided 2.
+- **Phase 3 Design A — email goes through a real email service connected to Supabase as its mail server
+  (recommended, Pass 129).** Supabase still writes and sends its own sign-in emails; only the delivery
+  changes; no email code in the app. Alternatives ruled out (named by Pass 127): staying on the built-in
+  sender, which reaches only the project's own team and only about 2 messages an hour (Known limits); and
+  sending the emails from code of our own, which would be new server code and another secret to look
+  after, beyond the one function Design D allows.
+- **Phase 3 Design B — email is sent from the domain, with the service's records added to it so mail
+  isn't treated as spam, and a contact address at the domain forwards to the owner's inbox (recommended,
+  Pass 129).** That address is the reply-to on every email and the one the privacy policy names.
+  Alternatives ruled out (named by Pass 127): sending from a free-mailbox address (Decided 2's reason:
+  services send only from a domain you own), and printing the owner's own inbox address in the policy.
+- **Phase 3 Design C — Supabase's email templates are rewritten in MeasureOne's own plain wording, with no
+  em dashes, and kept in the repo as the record (recommended, Pass 129).** The dashboard isn't versioned,
+  so `supabase/templates/` is the record and the doc says the dashboard is where the text actually lives.
+  Alternatives ruled out (named by Pass 127): Supabase's default templates, which are developer-worded;
+  and editing only in the dashboard, where nothing records what is live.
+- **Phase 3 Design D — change email and delete my account move into the app (recommended, Pass 130).**
+  Change email uses Supabase's existing "secure email change" (both addresses confirm; it is on in both
+  projects). Delete uses a database function in a new migration (`0003_delete_my_account.sql`) that deletes
+  only the caller's own account; the rows go with it; the password is asked for again first; no other
+  server code. Alternatives ruled out: leaving both as dashboard jobs (the dashboard has no change-email
+  button, so an email change is a never-rehearsed replacement of the account, and the 2026-09-29 decision
+  says a delete in the app comes before open sign-up so that a person can leave without asking the owner);
+  and a Supabase Edge Function for the delete (the earlier entry's alternative: it holds the secret key
+  inside Supabase, with more moving parts and a separate deploy step). Costs accepted: a second small
+  exception to "no server code of our own", and a migration the owner runs by hand in production's SQL
+  Editor, since the app can't. See "No in-app 'delete my account' in Phase 1" above.
+- **Phase 3 Design E — the privacy policy and terms are two plain pages at the domain, written from what
+  the app actually does after every outside service is chosen (recommended, Pass 133).** Linked from the
+  sign-in windows, the Account panel, the welcome screen and every email. The owner reviews them; a
+  lawyer's look is recommended before the app is sold; Claude's draft isn't legal advice. Alternative ruled
+  out (named by Pass 127): writing the policy early and amending it as services change. It has to name
+  every outside service and every time limit that Passes 128 to 132 settle, so it is written last of the
+  preparation passes on purpose.
+- **Phase 3 Design F — other people's data: backups kept for a rolling window instead of forever, a
+  restore rehearsed inside a real Supabase project, and the Free-or-paid plan question answered at each
+  go-live (recommended, Pass 131; 30 days is the recommended window).** A deleted account then leaves the
+  backups within a stated time. Alternatives ruled out (named by Pass 127): keeping every day forever,
+  which is what the daily backup does today (so "how long does a deleted account stay in the backups?"
+  has no true answer short of "forever"); rewriting the backups repository's history now and then to prune
+  it (fragile, and GitHub's own guide says a rewrite is not a full erase); and deciding the plan once for
+  good (the question comes back at open sign-up, when strangers make a pause and the size limits matter
+  more).
+- **Phase 3 Design G — alarms: an outside check that the site and the account service answer, Supabase's
+  own usage emails, and a "Report a problem" link that opens an email (recommended, Pass 132).** No
+  error-reporting service during invitations; revisit before open sign-up. Alternatives ruled out for now
+  (named by Pass 127): an error-reporting service (it would see error messages, which can include piece
+  names); a public status page; and relying on the backup job's two failure emails alone, as today, which
+  would show a Free-plan pause only when someone could not sign in.
+- **Phase 3 Design H — one address: the domain becomes Supabase's Site URL, and the old vercel.app
+  addresses keep working with a quiet "moved" note (recommended, Pass 128).** Alternative ruled out: a
+  forced redirect, because each address holds its own browser copy and a signed-out person's pieces exist
+  only there, so a redirect would strand them. Nothing is removed from the old addresses.
+- **Phase 3 Design I — open sign-up: a sign-up form with "13 or older" and "I agree to the Terms and
+  Privacy Policy" boxes, the email confirmation Supabase already requires, a bot check, and Supabase's rate
+  limits (recommended, Pass 135).** Switching sign-ups off in the dashboard is the instant way back, and
+  the form hides itself when they are off. Alternatives ruled out (named by Pass 127): a form with no bot
+  check (nothing stops automated sign-ups today except sign-ups being off); and a form that always shows
+  (it would offer what the service refuses).
+- **Phase 3 — what Pass 127 added when it wrote the design down (2026-10-31).** It gave every loose end
+  earlier passes left for Phase 3 one owning pass, as "Owner: Pass N" lines in the Phase 3 section of
+  Accounts-and-Backend.md, so a later pass finds its own by search. Besides the ten notes on its card it
+  added twelve items (and one line inside the security-script item), each marked "added by Pass 127" so the
+  owner can strike any: the address change (Vercel Domains and the Site URL), the built-in sender's limit,
+  the one-hour email links, the Node.js 20 pins, the key prompt that doesn't trim, and six that come from
+  the later cards' own rationales (the backups kept forever, the first backup commit that still holds
+  sign-in tables, the restore never tried in a real project, the manual drill, the Free plan's pause, and
+  the sign-up check in the security script that open sign-up must change); and two corrections to the
+  cards, counted among the twelve:
+  **(1) link types:** the cards say `parseAuthLink` "knows invitations and resets"; it returns the type of
+  any link that carries one, and it is `App.jsx`'s handler that acts on `invite` and `recovery` only, so a
+  change-email or sign-up confirmation link would arrive as an ordinary sign-in with no message (owner:
+  Pass 130, then 135); **(2) fonts from Google:** the app's stylesheet imports its fonts from
+  `fonts.googleapis.com`, so every visitor's browser contacts Google, and the card for Pass 133 lists the
+  outside services without it (owner: Pass 133; the policy says so, or the fonts are served from the
+  app's own address first, the owner's choice). The backlog cards themselves were not edited. No code,
+  no dashboard setting and no purchase was touched.
 
 ## Open questions
 

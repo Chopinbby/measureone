@@ -10,6 +10,7 @@ import {
   compareRecency,
   nextSettingStamp,
   stampChangedSettings,
+  pieceWithChange,
   isRecencyField,
   cleanPartTimes,
   isTimedTechniquePart,
@@ -89,6 +90,42 @@ describe("writing the notes: stampChangedSettings", () => {
     stampChangedSettings(before, next, 7000);
     assert.equal(JSON.stringify(before), snapshot);
     assert.equal(JSON.stringify(next), nextSnapshot);
+  });
+});
+
+describe("a change written straight to storage carries the notes updatePiece would have written (Pass 126 follow-up, Reschedule all)", () => {
+  test("[regression] a target date moved for a piece that is not open gets a dated note, the moment of the change", () => {
+    // "Reschedule all" extends a piece past its date (daysToLearn and targetDate) and sets the marker.
+    // It wrote them with no note, so an older note could beat the newer date in a later clash.
+    const before = piece({ scheduleMode: "days", daysToLearn: 21, settingTimes: { targetDate: 100 } });
+    const marker = { asOfDay: 5, previous: null };
+    const after = pieceWithChange(before, { rescheduleMarker: marker, daysToLearn: 30, targetDate: "2026-11-10" }, 9000);
+    assert.equal(after.settingTimes.targetDate, 9000, "the new date is stamped now, past the old note");
+    assert.equal(after.targetDate, "2026-11-10");
+    assert.equal(after.updatedAt, 9000);
+  });
+
+  test("only the listed settings are stamped: days to learn and the reschedule marker follow the date and get no note of their own", () => {
+    const before = piece({ scheduleMode: "days", daysToLearn: 21 });
+    const after = pieceWithChange(before, { rescheduleMarker: { asOfDay: 5 }, daysToLearn: 30 }, 9000);
+    assert.equal(after.settingTimes, undefined, "nothing on the list changed, so no field is added");
+    assert.equal(after.daysToLearn, 30);
+    assert.deepEqual(after.rescheduleMarker, { asOfDay: 5 });
+    assert.equal(after.updatedAt, 9000);
+  });
+
+  test("a minutes-mode piece (no target date written) is not stamped for a date it never had", () => {
+    const before = piece({ scheduleMode: "minutes", targetDate: undefined, daysToLearn: 21 });
+    const after = pieceWithChange(before, { rescheduleMarker: { asOfDay: 5 }, daysToLearn: 28 }, 9000);
+    assert.equal(after.settingTimes, undefined);
+  });
+
+  test("never earlier than a note the piece already holds, and the inputs are not changed", () => {
+    const before = piece({ settingTimes: { targetDate: 20000 } });
+    const snapshot = JSON.stringify(before);
+    const after = pieceWithChange(before, { targetDate: "2026-12-01" }, 9000);
+    assert.equal(after.settingTimes.targetDate, 20001, "a slow clock still stamps after what it has received");
+    assert.equal(JSON.stringify(before), snapshot);
   });
 });
 

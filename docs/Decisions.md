@@ -8495,6 +8495,13 @@ what it rules out.
      overlap) is not. Lesson (also in memory): my own first browser run of this pass used the stand-in's down
      switch and timers, never the real `online` or hidden-page paths, so it missed the bug the owner's phone
      found within minutes: **run a sync scenario with the real triggers before handing it over.**
+  12. **"Reschedule all" gap closed (the owner, 2026-10-31: "include the reschedule all gap").** Item 9 of the
+     Accounts-and-Backend list, (a): the bulk reschedule wrote a moved target date for the pieces that are not
+     open straight to storage with no dated note, so in a later clash an older note on that piece could beat
+     the newer date. Now `pieceWithChange` (`lib/settingTimes.js`) does what `updatePiece` does for the open
+     piece (the dated note, `updatedAt`), from one place, and `handleConfirmReschedule` calls it. Days to learn
+     and the marker follow the date and get no note of their own; a minutes-mode piece (no date written) gets
+     none. A regression test fails without it. The wiring in `App.jsx` itself is not tested, as before.
   **Checks.** 1,668 tests; 18 deliberate breakages, all caught (the earlier change wins, a tie is guessed,
   a collection added to the list, a session dropped, an undo undone, a note stamped earlier, no note
   written, notes materialized on load, notes that depend on who merges, the work id or the date's numbers

@@ -138,6 +138,16 @@ export function stampChangedSettings(prev, next, now = Date.now()) {
   return { ...next, settingTimes: times };
 }
 
+// A change written straight to storage for a piece that is NOT open. The bulk "Reschedule all"
+// writes its other pieces this way, past updatePiece (which stamps for the open one), and used to
+// move a piece's target date with no dated note; an older note could then beat that newer change
+// in a later clash between devices. This carries the notes updatePiece would have written, and its
+// updatedAt, from one place. `patch` is what changed; a merge, an import and a reload never use it.
+export function pieceWithChange(current, patch, now = Date.now()) {
+  const next = { ...current, ...patch };
+  return { ...stampChangedSettings(current, next, now), updatedAt: now };
+}
+
 export const isRecencyField = (field) => RECENCY_SET.has(field);
 
 /* ------------------------------------------------------------------ */

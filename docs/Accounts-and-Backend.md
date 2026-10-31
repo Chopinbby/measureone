@@ -2934,9 +2934,11 @@ this pass depends on to keep its promise that nothing is asked.
    in a browser against a stand-in service (two addresses as two devices).
 8. An equal-count collection reads "1 recording on both devices, but the two plans differ in detail" in Review
    (a wording that was there before). [Pre-existing.]
-9. **Found in the pre-commit review (2026-10-29), logged, not fixed:** (a) "Reschedule all" writes `targetDate`
+9. **Found in the pre-commit review (2026-10-29), logged; (a) fixed 2026-10-31 on the owner's word:** (a) **[fixed:
+   `pieceWithChange` in `lib/settingTimes.js` writes the dated note, and "Reschedule all" uses it for the pieces
+   that are not open; a regression test fails without it]** "Reschedule all" wrote `targetDate`
    (extending a piece past its date) for the pieces that are not open through `writePieceDirect`, without a dated
-   note, so a stale older note can understate that change; (b) the import merge (Get changes, a file) chooses
+   note, so a stale older note could understate that change; (b) the import merge (Get changes, a file) chooses
    `settingTimes` as one lump by the generic rule, which can disagree with the values it chose field by field;
    (c) during the days a phone or tab still runs the previous version, its edits write no note, so an older
    inherited note can beat its newer edit (worse than the plain `updatedAt` fallback), and that version drops

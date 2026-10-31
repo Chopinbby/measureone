@@ -1173,7 +1173,9 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   the piece's `updatedAt`. **It is not a part** (`NEVER_PARTS`), and **loading never adds it** (a piece
   without any carries no field; materializing it would move every fingerprint and re-upload every
   piece). A new place that changes a listed setting outside `updatePiece` must stamp it or the setting
-  falls back to `updatedAt`. A note is never earlier than a note the piece already holds
+  falls back to `updatedAt`: a piece written straight to storage goes through `pieceWithChange`
+  (`lib/settingTimes.js`; "Reschedule all" does since 2026-10-31, it used to write the new target date
+  with no note). A note is never earlier than a note the piece already holds
   (`nextSettingStamp`). The technique library has the same in `partTimes` (octaves, hands and the two
   settings; `stampChangedTechnique`); **`updateTechnique(..., { stamp: false })` for a library that
   arrives from somewhere else**. A task's method plan has no note (its keys would grow every day): it
@@ -1229,8 +1231,7 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   clocks are trusted (no guard, the owner's call); a refused upload merged late by `reapplyOnto` leaves no
   quiet line; an undo of a session is brought back by the account path (no base copy); the quiet line
   for a collection both changed does not exist (it is asked); every Settings save re-derives
-  `minutesPerDay` and can stamp it; "Reschedule all" writes `targetDate` for the pieces that are not open
-  without a dated note; the import merge (Get changes, a file) picks `settingTimes` as one lump; a piece
+  `minutesPerDay` and can stamp it; the import merge (Get changes, a file) picks `settingTimes` as one lump; a piece
   already held before the deploy stays held until Review (the automatic update never retries a held
   piece); `App.jsx`'s wiring has no automated test. The rest is item 9 of the Accounts-and-Backend list.
 

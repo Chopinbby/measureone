@@ -172,7 +172,7 @@ import {
 } from "./lib/accountSync";
 import { startSettle, settleChoose, settleBack, settleNext, settleView, keptPhrases, rereadSettleItem } from "./lib/settleFlow";
 import { compareSwitcherOrder, sortPiecesForSwitcher, planSwitcherMove, makeOrderNote } from "./lib/pieceMerge";
-import { stampChangedSettings } from "./lib/settingTimes";
+import { stampChangedSettings, pieceWithChange } from "./lib/settingTimes";
 import { stampChangedTechnique } from "./lib/techniqueMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
@@ -3805,7 +3805,9 @@ export default function App() {
       .forEach(({ pieceId, marker, extend }) => {
         const current = pieces[pieceId];
         if (!current) return;
-        const next = { ...current, rescheduleMarker: marker, ...extendPatch(extend), updatedAt: Date.now() };
+        // Pass 126 follow-up: through the same stamping updatePiece does, so a target date moved
+        // here carries a dated note (lib/settingTimes.js, pieceWithChange). It used to carry none.
+        const next = pieceWithChange(current, { rescheduleMarker: marker, ...extendPatch(extend) });
         if (writePieceDirect(pieceId, next).ok) saved[pieceId] = next;
         else failedNames.push(current.name || "Untitled piece");
       });

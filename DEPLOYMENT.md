@@ -187,7 +187,8 @@ on that one click.
 The owner bought the name through Vercel (registered 2026-11-01, renews
 2027-11-01) and attached it to this project's **Production** environment;
 `https://www.measureone.app` forwards to it with a permanent redirect (308).
-HTTPS is Vercel's own certificate. It serves the same deployment as the three
+HTTPS is a free Let's Encrypt certificate that Vercel issues and renews (read
+2026-11-01: issued by Let's Encrypt, valid to 2027-01-30). It serves the same deployment as the three
 addresses below (compared 2026-11-01: the page, the app file and `sw.js`
 byte for byte). **It is the account Site URL** in the production project, with
 `https://measureone.app/**` on the redirect list beside the older entry (below).
@@ -262,12 +263,12 @@ kept, so nothing else is needed). **The "moved" note** is code: reverting the Pa
 merge removes it. Nothing about either touches a piece, the technique library or an
 account's rows. The domain itself can stay attached while any of this is done.
 
-**Rollback points since go-live (added 2026-10-15, extended 2026-10-27).** Every merge
+**Rollback points since go-live (added 2026-10-15, extended 2026-11-01).** Every merge
 to `main` makes an ordinary Production deployment, so earlier ones stay listed in
 Vercel (for as long as Vercel keeps them). The app code changed three times between
 go-live and 2026-10-15: the deployment of `92e6282` (PR 62) is the last one before
 Pass 115 (app file `index-BquOI88d.js`, accounts on); `b877140` (PR 63) is Pass 115
-alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed seven more times
+alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed nine more times
 since, one merge each:** `9864612` (PR 71) is Pass 119 (tabs of one browser),
 `847fada` (PR 72) Pass 120 (changes from other devices arriving by themselves,
 behind a switch that is off by default), `951a640` (PR 73) Pass 121 (Review asks one
@@ -275,8 +276,11 @@ question per conflicting part), `69dbebe` (PR 74) Pass 122 (a piece deleted on o
 device is deleted everywhere), `0b53445` (PR 75) Pass 122b (what the person said
 no to is remembered, the most recent reorder wins; app file `index-YBQquKJp.js`),
 `3fccc8c` (PR 76) Pass 125 (the piece list scrolls while a piece is dragged; app file
-`index-OJehj1yX.js`) and `038f256` (PR 79) Pass 123 (the app opens with no connection),
-**the current app code, live since 2026-10-28 (app file `index-78o7whRf.js`)**. The file
+`index-OJehj1yX.js`), `038f256` (PR 79) Pass 123 (the app opens with no connection; app file
+`index-78o7whRf.js`, live 2026-10-28), `0a9d1a7` (PR 83) Pass 126 (the most recent change wins;
+app file `index-CqYGi2T6.js`, live 2026-10-31; missing from this list until 2026-11-01) and
+`c4af6bf` (PR 86) Pass 128 (the "moved" note and its phone layout),
+**the current app code, live since 2026-11-01 (app file `index-IY8CdtWw.js`)**. The file
 names of the four before 122b were not recorded when they went live; read one off a
 deployment's page in Vercel before relying on it. The merges `8c8d637`, `209d77a` and `d3a0fa0` (and
 every later documentation-only one) change no app code. **A rollback across Pass 115
@@ -392,8 +396,10 @@ Done in Pass 128 (2026-11-01): `measureone.app`, bought through Vercel and attac
 Production, with `www` forwarding to it; see "The live addresses" above. To add a domain
 to a project in general: in Vercel project settings, go to "Domains", add the domain
 and, if it was bought elsewhere, follow the DNS instructions from the registrar. With
-"Include apex and www variants" ticked Vercel adds the `www` name and makes it forward to
-the bare name by itself (it did on 2026-11-01), so nothing more is needed; trying to add
+"Include apex and www variants" ticked Vercel should add the `www` name and make it forward to
+the bare name by itself. On 2026-11-01 `www` was already forwarding (307) before anything was
+added by hand, which points to exactly that, though the adding itself was not watched. So
+nothing more is needed; trying to add
 `www` by hand with the box ticked and the bare name as its target gets "A domain cannot
 redirect to itself", because the box adds the bare name to the same group. To change the
 redirect's type (307 to 308), use Edit on the existing `www` row. A new address opens

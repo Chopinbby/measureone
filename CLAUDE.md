@@ -1326,9 +1326,11 @@ build"). The one pass left in Phase 2 is 124 (turning the switch on by default; 
 owner chose to wait with the flip until Phase 3**, and it is only ever built on her word). The owner's 2026-10-15 "most recent wins" decision is built for single-value
 settings, a deletion and the piece list's order; collections and whole shapes, the chunk grid and a
 tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
-copies disagree" and Pass 118 open item 9) first. Phase 3 (open sign-up, a privacy
-policy and terms, a real email provider, monitoring, in-app change of email and
-account deletion) is separate; see Roadmap.md and Accounts-and-Backend.md. Still not
+copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
+is designed, not built (Pass 127, 2026-10-31): Passes 128 to 135, in
+[`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
+Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
+sign-up) and 124 (the switch's default) happen only on the owner's word. Still not
 built elsewhere: a persisted "learned" state, a second Tier 1 rung and repertoire
 rotation (Stage 5); see
 [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).

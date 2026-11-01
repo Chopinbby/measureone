@@ -4329,23 +4329,23 @@ export default function App() {
         // The old addresses keep working, each with its own browser copy of the pieces, so
         // this only says where to go: signed in, open it there and sign in; signed out with
         // pieces, export here and import there. One quiet line, dismissible, no redirect.
-        <div className="export-reminder-banner" role="status">
+        <div className="export-reminder-banner moved-note" role="status">
           <ExternalLink size={18} />
-          <div>
+          <div className="moved-note-text">
             <p className="export-reminder-title">{movedNoteInfo.title}</p>
             <p className="export-reminder-sub">{movedNoteInfo.sub}</p>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
+          <div className="moved-note-actions">
             {movedNoteInfo.exportButton && (
-              <button className="ghost-btn" style={{ marginLeft: 0 }} onClick={() => setExportModalOpen(true)}>
+              <button className="ghost-btn" onClick={() => setExportModalOpen(true)}>
                 Export backup
               </button>
             )}
-            <a className="ghost-btn" style={{ marginLeft: 0, textDecoration: "none" }} href={NEW_ADDRESS_URL} target="_blank" rel="noopener noreferrer">
+            <a className="ghost-btn" href={NEW_ADDRESS_URL} target="_blank" rel="noopener noreferrer">
               Open {NEW_ADDRESS}
             </a>
           </div>
-          <button className="export-reminder-dismiss" aria-label="Dismiss" onClick={dismissMovedNote}>
+          <button className="export-reminder-dismiss moved-note-dismiss" aria-label="Dismiss" onClick={dismissMovedNote}>
             <X size={16} />
           </button>
         </div>
@@ -5152,6 +5152,18 @@ const CSS = `
 .export-reminder-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
 .export-reminder-dismiss { background: transparent; border: none; color: var(--ink-soft); cursor: pointer; padding: 4px; flex-shrink: 0; display: inline-flex; border-radius: 6px; }
 .export-reminder-dismiss:hover { color: var(--ink); background: rgba(32,42,51,0.06); }
+/* Pass 128: the "moved" note. On a phone the text, one or two buttons and the dismiss X don't fit
+   in one row (the X went off the screen and the page scrolled sideways), so below 640px the
+   buttons drop to their own row and the X stays beside the text. */
+.moved-note-actions { margin-left: auto; display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+.moved-note .ghost-btn { margin-left: 0; }
+.moved-note a.ghost-btn { text-decoration: none; }
+@media (max-width: 640px) {
+  .moved-note { flex-wrap: wrap; padding: 12px 16px; gap: 10px 12px; }
+  .moved-note-text { flex: 1 1 0; min-width: 0; }
+  .moved-note-dismiss { order: 2; }
+  .moved-note-actions { order: 3; flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
+}
 .revival-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(47,93,154,0.1); border: 1px solid rgba(47,93,154,0.35); border-radius: 14px; padding: 16px 20px; }
 .revival-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--accent); }
 .revival-banner-reasons { font-size: 12.5px; color: var(--ink-soft); margin: 0; padding-left: 18px; max-width: 480px; }

@@ -3141,8 +3141,8 @@ and the way back, are in [DEPLOYMENT.md](../DEPLOYMENT.md#rolling-back).
 
 **Addresses (Pass 128, 2026-11-01).** The live site has its own address now,
 **`https://measureone.app`** (bought through Vercel, attached to the Production
-environment; `www.measureone.app` forwards to it with a permanent redirect; HTTPS is
-Vercel's own certificate; the page, the app file and `sw.js` are byte-identical to the
+environment; `www.measureone.app` forwards to it with a permanent redirect; HTTPS is a free
+Let's Encrypt certificate that Vercel issues and renews; the page, the app file and `sw.js` are byte-identical to the
 branch address's, compared the same day), and it is the Site URL. The three addresses
 below keep serving the same app, **unredirected on purpose** (Phase 3 Design H: each holds
 its own browser copy, and a signed-out person's pieces exist only there). On exactly those
@@ -3355,7 +3355,7 @@ repository.
 ## Phase 3: other people's accounts (designed, not built)
 
 **Designed in Pass 127 (2026-10-31). Only Pass 128 is built so far** (2026-11-01: the owner's own
-address, the Site URL, and the "moved" note on the old addresses, whose code waits for its merge);
+address, the Site URL, and the "moved" note on the old addresses, merged the same day as PR 86, `c4af6bf`);
 nothing else in this section is. Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on

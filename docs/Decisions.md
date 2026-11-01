@@ -7590,6 +7590,9 @@ what it rules out.
   naming; moving to a domain later is one setting plus a Restore (the app has
   no address built in). See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#setup-production-project).
+  **Superseded by Pass 128 (2026-11-01):** the owner bought `measureone.app` and the setting was changed
+  as predicted here: the Site URL is now `https://measureone.app` and this address stays on the redirect
+  list. Kept as the record of why it was the Site URL until then. See "Pass 128" below.
 - **Pass 114 — the security checks are a script, run against the test project
   and then production, with the key and passwords typed hidden (2026-10-10).**
   Pass 108's 27 checks were run by hand once and never saved, so go-live could
@@ -8646,6 +8649,39 @@ what it rules out.
   outside services without it (owner: Pass 133; the policy says so, or the fonts are served from the
   app's own address first, the owner's choice). The backlog cards themselves were not edited. No code,
   no dashboard setting and no purchase was touched.
+
+- **Pass 128 — the owner's own address, and a quiet "moved" note on the old ones (2026-11-01).** The
+  owner bought **`measureone.app`** through Vercel (the card's example name; Claude had wrongly called it
+  taken, because a lookup read a redirect as "registered"), attached it to Production with `www` forwarding
+  (308), and changed the production project's Site URL to it, keeping the old address on the redirect list.
+  Checked: the page, the app file and `sw.js` byte-identical to the old address's; a password-reset email
+  asked for at the new address opened on it, with the Choose a password window; Restore gave the same piece
+  count as her export; the new address opened with no connection. **Merged the same day** (PR 86, `c4af6bf`).
+  Code: `lib/address.js` lists the three old addresses EXACTLY and decides the note; `App.jsx` draws one
+  dismissible banner. **Choices beyond the card, named by Pass 128 so the owner can strike any:** (1) a
+  signed-out device with nothing on it is told "Open it there." instead of "Export a backup here" (nothing to
+  export); (2) an "Open measureone.app" link, in a new tab, so nothing is lost; (3) dismissed for the tab's
+  session in session storage, never the pieces' storage; (4) hidden until the pieces have loaded and the
+  sign-in check has come back, so a signed-in person never sees the signed-out wording. **Alternatives ruled
+  out:** a redirect from the old addresses (Phase 3 Design H: each address holds its own copy); a
+  ".vercel.app" suffix match instead of the exact three (a preview address would show the note); an Export
+  button for a signed-in device (its pieces come from the account). **Found in the review before the
+  merge and fixed in the same pull request:** at phone width (375px) the first version squeezed the text
+  into about 116px and pushed the dismiss X off the screen, and the page scrolled sideways; below 640px the
+  buttons now sit on their own row (`874a5fc`). The desktop checks could not have shown it; it was found by
+  measuring at phone width. **Still open, logged and not fixed:** (a) the signed-in wording assumes the
+  device's changes are backed up; a device with unsent changes would miss them at the new address until it
+  uploads from the old one (nothing is deleted); (b) a fifth live address, or one removed, silently gets no
+  note until `OLD_ADDRESSES` is changed by hand (said in CLAUDE.md and DEPLOYMENT.md); (c) the wiring in
+  `App.jsx` has no automated test (components can't be tested here), only `lib/address.js` has; (d) by
+  reading the code, not trying it: someone signed in but offline, whose sign-in can't be checked, would see
+  the signed-out wording (still safe advice); (e) how Vercel's Instant Rollback treats `measureone.app` is
+  untested, like the branch address; (f) `docs/Architecture.md` (file tree), `docs/User-Flows.md` (a new
+  banner) and `docs/README.md` were not updated, being outside the card's file list; (g) DEPLOYMENT.md's list
+  of rollback points had left out Pass 126, now added, but the caveat that an older app drops the dated
+  notes Pass 126 writes is not in its rollback caveats yet. See
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#setup-production-project) and
+  [DEPLOYMENT.md](../DEPLOYMENT.md#the-live-addresses-pass-114-and-pass-128).
 
 ## Open questions
 

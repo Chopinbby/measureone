@@ -1491,5 +1491,6 @@ silently.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)
 - **Pass 128** — the app has its own address, `measureone.app` (2026-11-01: bought through Vercel, the
   production Site URL, `www` forwarding); the three vercel.app addresses show one quiet, dismissible
-  "moved" note (`lib/address.js`, `App.jsx`). Phase 3's first pass with code; the rest of Phase 3 is
-  designed (Pass 127), not built. [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built)
+  "moved" note (`lib/address.js`, `App.jsx`). Phase 3's first pass with code; **merged 2026-11-01 (PR
+  #86, merge commit `c4af6bf`), live as `index-IY8CdtWw.js`**; the rest of Phase 3 is designed
+  (Pass 127), not built. [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built)

@@ -1272,15 +1272,18 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   library changed on another device" even though nothing is lost; Review clears it
   (Pass 118 open item 9, which also proposes avoiding the forced upload). Say so in
   the hand-off, and ask about phones and old tabs by name.
-- **One build, three addresses, separate pieces.** `measureone.vercel.app`,
-  `measureone-git-main-measure-one.vercel.app` and
-  `measureone-measure-one.vercel.app` serve the same deployment, but the
-  browser keeps pieces per address and per browser. **The owner's real pieces
-  are at `measureone-git-main-measure-one.vercel.app`**; the clean address
-  opens empty. That address is also the production project's Site URL and its only
-  redirect URL. A verification must not write to, or clear, storage at that address in
-  the owner's browser, and "the live site looks empty" usually means another address
-  or another browser.
+- **One build, four addresses, separate pieces.** **`measureone.app`** (the owner's own
+  address, bought 2026-11-01, Pass 128; the production project's Site URL) and the three older
+  ones, `measureone.vercel.app`, `measureone-git-main-measure-one.vercel.app` and
+  `measureone-measure-one.vercel.app`, serve the same deployment, but the browser keeps pieces
+  per address and per browser. **The owner's real pieces were at
+  `measureone-git-main-measure-one.vercel.app`** (still there, and still a redirect entry in the
+  production project) and are brought to `measureone.app` by signing in there and pressing
+  Restore; a new address opens empty. A verification must not write to, or clear, storage at
+  either of those addresses in the owner's browser, and "the live site looks empty" usually means
+  another address or another browser. **The old three are not redirected and carry a quiet "moved"
+  note** (`lib/address.js`): `OLD_ADDRESSES` lists them EXACTLY, never as a ".vercel.app" match (a
+  preview address would then show it); change that list if a live address is added or removed.
 - **`scripts/check-rls.mjs` is the security check** (37 checks, two throwaway
   accounts created and deleted in the dashboard; it refuses a secret key or an
   account that already holds data, and takes the key and passwords hidden).
@@ -1327,7 +1330,8 @@ owner chose to wait with the flip until Phase 3**, and it is only ever built on 
 settings, a deletion and the piece list's order; collections and whole shapes, the chunk grid and a
 tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
-is designed, not built (Pass 127, 2026-10-31): Passes 128 to 135, in
+is designed (Pass 127, 2026-10-31); only Pass 128 (the owner's own address, `measureone.app`, 2026-11-01) is built:
+Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
 sign-up) and 124 (the switch's default) happen only on the owner's word. Still not
@@ -1485,3 +1489,7 @@ silently.
   together with three follow-ups from her phone check: the reconnect-hold fix (no fresh look, no upload),
   the "Reschedule all" stamp, and the deletion of Review's old practice screens.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#the-most-recent-change-wins-pass-126)
+- **Pass 128** — the app has its own address, `measureone.app` (2026-11-01: bought through Vercel, the
+  production Site URL, `www` forwarding); the three vercel.app addresses show one quiet, dismissible
+  "moved" note (`lib/address.js`, `App.jsx`). Phase 3's first pass with code; the rest of Phase 3 is
+  designed (Pass 127), not built. [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built)

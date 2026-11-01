@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Piano,
   CloudDownload,
+  ExternalLink,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange, newId } from "./lib/utils";
@@ -175,6 +176,7 @@ import { compareSwitcherOrder, sortPiecesForSwitcher, planSwitcherMove, makeOrde
 import { stampChangedSettings, pieceWithChange } from "./lib/settingTimes";
 import { stampChangedTechnique } from "./lib/techniqueMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
+import { NEW_ADDRESS, NEW_ADDRESS_URL, movedNote } from "./lib/address";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { SettleConflictModal } from "./components/SettleConflictModal";
@@ -521,6 +523,26 @@ export default function App() {
   const [techniqueToday, setTechniqueToday] = useState(() => todayISODate());
   const [exportReminderDue, setExportReminderDue] = useState(false);
   const [exportReminderDismissed, setExportReminderDismissed] = useState(false);
+  // Pass 128: the quiet "MeasureOne has moved to measureone.app" note, shown only on the three
+  // old vercel.app addresses (lib/address.js decides). Dismissed for this tab's session: it
+  // survives a reload in the same tab and is back in a new one. Session storage only, never
+  // the pieces' storage, and a browser that blocks it just shows the note again.
+  const MOVED_NOTE_KEY = "measureone-moved-note-dismissed";
+  const [movedNoteDismissed, setMovedNoteDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem(MOVED_NOTE_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  });
+  const dismissMovedNote = () => {
+    setMovedNoteDismissed(true);
+    try {
+      sessionStorage.setItem(MOVED_NOTE_KEY, "1");
+    } catch (e) {
+      /* the note comes back next visit; nothing is lost */
+    }
+  };
   const importInputRef = useRef(null);
 
   // Keeping every tab of one browser in step (Pass 119, lib/tabSync.js). The
@@ -4156,6 +4178,18 @@ export default function App() {
   const pieceGroups = groupPiecesByWork(pieceList);
   const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
 
+  // Pass 128: null everywhere except the three old addresses. Waits until the pieces have
+  // loaded and the sign-in check has come back, so a signed-in person never sees the
+  // signed-out wording for a moment.
+  const movedNoteInfo =
+    loaded && !authChecking && !movedNoteDismissed
+      ? movedNote({
+          hostname: typeof window !== "undefined" ? window.location.hostname : "",
+          signedIn: Boolean(authSession),
+          pieceCount: pieceList.length,
+        })
+      : null;
+
   // Reorders whole switcher rows (a standalone piece, or an entire
   // multi-movement work as one block) by moving the dragged row to the
   // dropped-on row's position and re-ranking every piece to the new
@@ -4285,6 +4319,33 @@ export default function App() {
             <p className="export-reminder-title">{PIECE_UPDATED_NOTE}</p>
           </div>
           <button className="export-reminder-dismiss" aria-label="Dismiss" onClick={() => setPieceUpdatedNote(null)}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {movedNoteInfo && (
+        // Pass 128: the app has its own address now (docs/Accounts-and-Backend.md, Phase 3).
+        // The old addresses keep working, each with its own browser copy of the pieces, so
+        // this only says where to go: signed in, open it there and sign in; signed out with
+        // pieces, export here and import there. One quiet line, dismissible, no redirect.
+        <div className="export-reminder-banner moved-note" role="status">
+          <ExternalLink size={18} />
+          <div className="moved-note-text">
+            <p className="export-reminder-title">{movedNoteInfo.title}</p>
+            <p className="export-reminder-sub">{movedNoteInfo.sub}</p>
+          </div>
+          <div className="moved-note-actions">
+            {movedNoteInfo.exportButton && (
+              <button className="ghost-btn" onClick={() => setExportModalOpen(true)}>
+                Export backup
+              </button>
+            )}
+            <a className="ghost-btn" href={NEW_ADDRESS_URL} target="_blank" rel="noopener noreferrer">
+              Open {NEW_ADDRESS}
+            </a>
+          </div>
+          <button className="export-reminder-dismiss moved-note-dismiss" aria-label="Dismiss" onClick={dismissMovedNote}>
             <X size={16} />
           </button>
         </div>
@@ -5091,6 +5152,18 @@ const CSS = `
 .export-reminder-banner .ghost-btn { margin-left: auto; flex-shrink: 0; }
 .export-reminder-dismiss { background: transparent; border: none; color: var(--ink-soft); cursor: pointer; padding: 4px; flex-shrink: 0; display: inline-flex; border-radius: 6px; }
 .export-reminder-dismiss:hover { color: var(--ink); background: rgba(32,42,51,0.06); }
+/* Pass 128: the "moved" note. On a phone the text, one or two buttons and the dismiss X don't fit
+   in one row (the X went off the screen and the page scrolled sideways), so below 640px the
+   buttons drop to their own row and the X stays beside the text. */
+.moved-note-actions { margin-left: auto; display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+.moved-note .ghost-btn { margin-left: 0; }
+.moved-note a.ghost-btn { text-decoration: none; }
+@media (max-width: 640px) {
+  .moved-note { flex-wrap: wrap; padding: 12px 16px; gap: 10px 12px; }
+  .moved-note-text { flex: 1 1 0; min-width: 0; }
+  .moved-note-dismiss { order: 2; }
+  .moved-note-actions { order: 3; flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
+}
 .revival-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: rgba(47,93,154,0.1); border: 1px solid rgba(47,93,154,0.35); border-radius: 14px; padding: 16px 20px; }
 .revival-banner-title { font-family: 'Fraunces', 'Helvetica Neue', 'Segoe UI Symbol', serif; font-weight: 600; font-size: 15px; margin: 0 0 4px; color: var(--accent); }
 .revival-banner-reasons { font-size: 12.5px; color: var(--ink-soft); margin: 0; padding-left: 18px; max-width: 480px; }

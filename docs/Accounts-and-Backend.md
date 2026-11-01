@@ -3107,20 +3107,25 @@ owner's own is invited.
   fresh one is sent. The sign-up and anonymous settings were also tested
   directly: the script's checks 36 and 37 tried both against this project and
   were refused.
-- **Authentication → URL Configuration:** Site URL
-  `https://measureone-git-main-measure-one.vercel.app`, and one Redirect URL,
-  `https://measureone-git-main-measure-one.vercel.app/**`, nothing else. That
-  is the address where the owner's pieces live (see **Addresses** below). An
-  invitation always opens the Site URL, so it opens where the pieces are; a
-  reset link returns to the address that asked (the app sends
-  `window.location.origin`), which has to be on the list, and any other
-  address falls back to the Site URL. **Changing it later (for example a
-  domain of your own) is one setting, and nothing else in the app or in Vercel
-  changes:** set the new address as the Site URL and add `https://<new
-  address>/**` to the list, keeping the old one while both are used. The app
-  has no address built in, and the two Vercel settings name the project, not
-  the address. A new address opens as an empty copy of the app (the browser
-  keeps pieces per address), so sign in there and press Restore.
+- **Authentication → URL Configuration:** **since 2026-11-01 (Pass 128) the Site URL
+  is `https://measureone.app`, and there are two Redirect URLs:
+  `https://measureone.app/**` and `https://measureone-git-main-measure-one.vercel.app/**`
+  (kept while any device still uses the old address).** Before that, Site URL
+  `https://measureone-git-main-measure-one.vercel.app` and that one Redirect URL
+  alone, set at go-live (Pass 114) because it was where the owner's pieces lived.
+  An invitation always opens the Site URL, and a reset link returns to the address
+  that asked (the app sends `window.location.origin`), which has to be on the list; any
+  other address falls back to the Site URL. **Changing it was one setting, and nothing
+  else in the app or in Vercel needed to change** (apart from adding the domain in
+  Vercel's Domains page): set the new address as the Site URL and add `https://<new
+  address>/**` to the list, keeping the old one while both are used. The app has no
+  address built in (except the "moved" note's list of the three old addresses, below),
+  and the two Vercel settings name the project, not the address. A new address opens as
+  an empty copy of the app (the browser keeps pieces per address), so sign in there and
+  press Restore. **Read back by the owner after saving and again after a reload
+  (2026-11-01, her screenshots); a password-reset email asked for at
+  `https://measureone.app` opened on `measureone.app`, and the Choose a password window appeared.** The test project is unchanged
+  (it serves preview addresses).
 - **Where the two settings come from:** the same two pages as the test project
   (Project Settings → Data API and → API Keys, the **publishable** key). The
   secret key was never copied; the script asks for the key hidden for the same
@@ -3134,7 +3139,21 @@ Vercel applies a setting from the next build, so the merge of Pass 114 was the
 build that picked them up. How to see which project a deployed site talks to,
 and the way back, are in [DEPLOYMENT.md](../DEPLOYMENT.md#rolling-back).
 
-**Addresses.** The live site is served at three addresses, all assigned to the
+**Addresses (Pass 128, 2026-11-01).** The live site has its own address now,
+**`https://measureone.app`** (bought through Vercel, attached to the Production
+environment; `www.measureone.app` forwards to it with a permanent redirect; HTTPS is
+Vercel's own certificate; the page, the app file and `sw.js` are byte-identical to the
+branch address's, compared the same day), and it is the Site URL. The three addresses
+below keep serving the same app, **unredirected on purpose** (Phase 3 Design H: each holds
+its own browser copy, and a signed-out person's pieces exist only there). On exactly those
+three, the app shows one quiet, dismissible "MeasureOne has moved to measureone.app" note
+(`src/lib/address.js`: the three names listed exactly, so a preview address, the new address
+and localhost never show it; signed in: "Open it there and sign in to bring your pieces.";
+signed out with pieces: "Export a backup here, then import it there." with an Export button;
+signed out with nothing on the device: "Open it there."; dismissed for the tab's session).
+**The rest of this paragraph is the state before Pass 128**, kept as the record.
+
+The live site was served at three addresses, all assigned to the
 same deployment: `measureone.vercel.app`,
 `measureone-git-main-measure-one.vercel.app` and
 `measureone-measure-one.vercel.app` (the same page and app file, compared
@@ -3335,7 +3354,9 @@ repository.
 
 ## Phase 3: other people's accounts (designed, not built)
 
-**Designed in Pass 127 (2026-10-31). Nothing in this section is built.** Phase 3 is what has to
+**Designed in Pass 127 (2026-10-31). Only Pass 128 is built so far** (2026-11-01: the owner's own
+address, the Site URL, and the "moved" note on the old addresses, whose code waits for its merge);
+nothing else in this section is. Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -3417,7 +3438,8 @@ the docs for `Owner: Pass N` (below).
 - **127** This pass: the design above in the docs. Docs only.
 - **128** Your own web address. The name and where to buy it are the owner's. On the live site: a new
   address that works, and a quiet "moved" note on the three vercel.app addresses (the one code
-  change). Needs 127.
+  change). Needs 127. **Built 2026-11-01: `measureone.app`, bought through Vercel; see Setup
+  (production project), "Addresses".**
 - **129** A real email service, sending from that address. Dashboard setup and records on the domain;
   no app code expected. On the live site: sign-in emails come from the domain, in MeasureOne's words,
   and links last longer. Needs 128.
@@ -3468,7 +3490,11 @@ section, or taken from the later cards' own rationales; the owner can strike any
   list change (keep the old entry while any device uses it), and the domain itself is added in
   Vercel's Domains page (Setup (production project): "Changing it later" and item 4 of the review).
   A new address opens as an empty copy of the app, so sign in there and press Restore; the three
-  vercel.app addresses each keep their own browser copy. Owner: Pass 128.
+  vercel.app addresses each keep their own browser copy. **Done in Pass 128 (2026-11-01):** the domain
+  attached, the Site URL and redirect list changed and read back, a reset link checked, the "moved"
+  note built. **The owner's checks, 2026-11-01:** Restore at the new address gave the same piece count as
+  her export; the Choose a password window appeared from the reset link; and the new address opened with no
+  connection in a browser that had visited it before. Owner: Pass 128.
 - *(added by Pass 127)* **The built-in email sender** reaches only the Supabase project's own team
   and only about 2 messages an hour, which is why the owner's is the only account (Known limits;
   Open questions; Decided 4). Owner: Pass 129.

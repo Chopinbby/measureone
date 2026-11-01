@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Piano,
   CloudDownload,
+  ExternalLink,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange, newId } from "./lib/utils";
@@ -175,6 +176,7 @@ import { compareSwitcherOrder, sortPiecesForSwitcher, planSwitcherMove, makeOrde
 import { stampChangedSettings, pieceWithChange } from "./lib/settingTimes";
 import { stampChangedTechnique } from "./lib/techniqueMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
+import { NEW_ADDRESS, NEW_ADDRESS_URL, movedNote } from "./lib/address";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { SettleConflictModal } from "./components/SettleConflictModal";
@@ -521,6 +523,26 @@ export default function App() {
   const [techniqueToday, setTechniqueToday] = useState(() => todayISODate());
   const [exportReminderDue, setExportReminderDue] = useState(false);
   const [exportReminderDismissed, setExportReminderDismissed] = useState(false);
+  // Pass 128: the quiet "MeasureOne has moved to measureone.app" note, shown only on the three
+  // old vercel.app addresses (lib/address.js decides). Dismissed for this tab's session: it
+  // survives a reload in the same tab and is back in a new one. Session storage only, never
+  // the pieces' storage, and a browser that blocks it just shows the note again.
+  const MOVED_NOTE_KEY = "measureone-moved-note-dismissed";
+  const [movedNoteDismissed, setMovedNoteDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem(MOVED_NOTE_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  });
+  const dismissMovedNote = () => {
+    setMovedNoteDismissed(true);
+    try {
+      sessionStorage.setItem(MOVED_NOTE_KEY, "1");
+    } catch (e) {
+      /* the note comes back next visit; nothing is lost */
+    }
+  };
   const importInputRef = useRef(null);
 
   // Keeping every tab of one browser in step (Pass 119, lib/tabSync.js). The
@@ -4156,6 +4178,18 @@ export default function App() {
   const pieceGroups = groupPiecesByWork(pieceList);
   const workParts = piece ? partsOfWork(pieceList, piece.workId) : [];
 
+  // Pass 128: null everywhere except the three old addresses. Waits until the pieces have
+  // loaded and the sign-in check has come back, so a signed-in person never sees the
+  // signed-out wording for a moment.
+  const movedNoteInfo =
+    loaded && !authChecking && !movedNoteDismissed
+      ? movedNote({
+          hostname: typeof window !== "undefined" ? window.location.hostname : "",
+          signedIn: Boolean(authSession),
+          pieceCount: pieceList.length,
+        })
+      : null;
+
   // Reorders whole switcher rows (a standalone piece, or an entire
   // multi-movement work as one block) by moving the dragged row to the
   // dropped-on row's position and re-ranking every piece to the new
@@ -4285,6 +4319,33 @@ export default function App() {
             <p className="export-reminder-title">{PIECE_UPDATED_NOTE}</p>
           </div>
           <button className="export-reminder-dismiss" aria-label="Dismiss" onClick={() => setPieceUpdatedNote(null)}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {movedNoteInfo && (
+        // Pass 128: the app has its own address now (docs/Accounts-and-Backend.md, Phase 3).
+        // The old addresses keep working, each with its own browser copy of the pieces, so
+        // this only says where to go: signed in, open it there and sign in; signed out with
+        // pieces, export here and import there. One quiet line, dismissible, no redirect.
+        <div className="export-reminder-banner" role="status">
+          <ExternalLink size={18} />
+          <div>
+            <p className="export-reminder-title">{movedNoteInfo.title}</p>
+            <p className="export-reminder-sub">{movedNoteInfo.sub}</p>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
+            {movedNoteInfo.exportButton && (
+              <button className="ghost-btn" style={{ marginLeft: 0 }} onClick={() => setExportModalOpen(true)}>
+                Export backup
+              </button>
+            )}
+            <a className="ghost-btn" style={{ marginLeft: 0, textDecoration: "none" }} href={NEW_ADDRESS_URL} target="_blank" rel="noopener noreferrer">
+              Open {NEW_ADDRESS}
+            </a>
+          </div>
+          <button className="export-reminder-dismiss" aria-label="Dismiss" onClick={dismissMovedNote}>
             <X size={16} />
           </button>
         </div>

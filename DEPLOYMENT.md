@@ -181,23 +181,41 @@ With accounts on (since Pass 114, below) the live site also talks to real
 accounts, so read "The live addresses" and "Rolling back" below before relying
 on that one click.
 
-### The live addresses (Pass 114)
+### The live addresses (Pass 114, and Pass 128)
 
-**Three addresses serve the live site**, all assigned to the same deployment
-(compared 2026-10-08 and again 2026-10-10: the same page and the same app
-file):
+**Since 2026-11-01 (Pass 128) the app has its own address, `https://measureone.app`.**
+The owner bought the name through Vercel (registered 2026-11-01, renews
+2027-11-01) and attached it to this project's **Production** environment;
+`https://www.measureone.app` forwards to it with a permanent redirect (308).
+HTTPS is Vercel's own certificate. It serves the same deployment as the three
+addresses below (compared 2026-11-01: the page, the app file and `sw.js`
+byte for byte). **It is the account Site URL** in the production project, with
+`https://measureone.app/**` on the redirect list beside the older entry (below).
+
+**Three older addresses still serve the live site**, all assigned to the same
+deployment (compared 2026-10-08 and again 2026-10-10: the same page and the same
+app file):
 - `https://measureone.vercel.app`
 - `https://measureone-git-main-measure-one.vercel.app` (Vercel's branch
-  address for `main`). **This is where the owner's real pieces are**, and it
-  is the address set as the account Site URL in the production project.
+  address for `main`). **This is where the owner's real pieces were before Pass
+  128.** They are brought to `measureone.app` by signing in there and pressing
+  Restore on each device; the old copy at this address is left as it is.
 - `https://measureone-measure-one.vercel.app`
+
+They are **not redirected** (Phase 3 Design H): the browser keeps the pieces
+**per address and per browser**, so a signed-out person's pieces exist only at
+the address they were made on, and a redirect would strand them. Instead, on
+exactly these three addresses, the app shows one quiet, dismissible note
+("MeasureOne has moved to measureone.app", with an Export button when a signed-out
+device holds pieces; `src/lib/address.js`). It never shows on `measureone.app`,
+on a preview address or on localhost. **If a fourth address is ever added to the
+live site, or one of these three is removed, change `OLD_ADDRESSES` in that file.**
 
 The browser keeps the pieces **per address and per browser**, so the same app
 at another address, or in another browser, starts empty. Nothing is lost:
 open the address where the pieces are, or restore them from the account.
-Which address to use is a choice, not a rule, but the account's Site URL
-(where an invitation lands) should be the address where the pieces are; see
-[Setup (production project)](docs/Accounts-and-Backend.md#setup-production-project).
+The account's Site URL (where an invitation lands) is `https://measureone.app`;
+see [Setup (production project)](docs/Accounts-and-Backend.md#setup-production-project).
 
 ### Rolling back
 
@@ -230,6 +248,19 @@ account copy stays in Supabase.
    `measureone-git-main-measure-one.vercel.app` serves `index-B11FjqLP.js`
    (below): it is a branch address, and whether an instant rollback moves it
    was never tested.
+
+**The address change (Pass 128) and the way back.** None of the above changes: a
+rollback or a redeploy moves `measureone.app` together with the other Production
+addresses (it is attached to the Production environment; whether an Instant
+Rollback moves it was not tried, so check as for the branch address, by reading the
+app file name off the page). Deleting the two Production settings takes accounts off
+all four addresses. Two things stand apart from the code. **The account's Site URL**
+(Supabase, production project, Authentication, URL Configuration) is a dashboard
+setting, so no rollback changes it: to go back to the old address, set it to
+`https://measureone-git-main-measure-one.vercel.app` again (that redirect entry was
+kept, so nothing else is needed). **The "moved" note** is code: reverting the Pass 128
+merge removes it. Nothing about either touches a piece, the technique library or an
+account's rows. The domain itself can stay attached while any of this is done.
 
 **Rollback points since go-live (added 2026-10-15, extended 2026-10-27).** Every merge
 to `main` makes an ordinary Production deployment, so earlier ones stay listed in
@@ -355,12 +386,19 @@ account backend nothing at all.
 - View build logs if a deploy fails
 - Enable email notifications for deployment status
 
-### Custom Domain (Optional)
+### Custom Domain
 
-In Vercel project settings:
-1. Go to "Domains"
-2. Add your domain (e.g., `measureone.yoursite.com`)
-3. Follow DNS instructions from your domain provider
+Done in Pass 128 (2026-11-01): `measureone.app`, bought through Vercel and attached to
+Production, with `www` forwarding to it; see "The live addresses" above. To add a domain
+to a project in general: in Vercel project settings, go to "Domains", add the domain
+and, if it was bought elsewhere, follow the DNS instructions from the registrar. With
+"Include apex and www variants" ticked Vercel adds the `www` name and makes it forward to
+the bare name by itself (it did on 2026-11-01), so nothing more is needed; trying to add
+`www` by hand with the box ticked and the bare name as its target gets "A domain cannot
+redirect to itself", because the box adds the bare name to the same group. To change the
+redirect's type (307 to 308), use Edit on the existing `www` row. A new address opens
+as an empty copy of the app (the browser keeps pieces per address): sign in there and
+press Restore. Email records for the domain are a separate step (Pass 129).
 
 ---
 

@@ -7610,7 +7610,8 @@ what it rules out.
   password change" are off (see Pass 113 above), minimum length 6, sign-ups
   and anonymous sign-ins off. Invitation and reset links last one hour (the
   project's default, 3600 seconds), so an invitation is sent only when its
-  person can open it at once.
+  person can open it at once. **Superseded by Pass 129 (2026-11-06):** production's links now last
+  86400 seconds (24 hours). Kept as the record of why they were an hour until then.
 - **Pass 114 — the docs were written before the merge, with a small
   follow-up after (proposed by Claude, 2026-10-10; the owner asked for the
   docs update before merging).** Merging is the moment accounts turn on, so
@@ -8682,6 +8683,45 @@ what it rules out.
   notes Pass 126 writes is not in its rollback caveats yet. See
   [Accounts-and-Backend.md](Accounts-and-Backend.md#setup-production-project) and
   [DEPLOYMENT.md](../DEPLOYMENT.md#the-live-addresses-pass-114-and-pass-128).
+
+- **Pass 129 — a real email service (2026-11-05 to 2026-11-06).** Supabase's sign-in emails now go
+  out through **Resend** from `hello@measureone.app` on both projects, in MeasureOne's own wording (five
+  templates, recorded in `supabase/templates/`), `hello@measureone.app` forwards to the owner's inbox
+  (**ImprovMX**), and email links last 24 hours on production (86400 seconds). No app code. Checked: on
+  the test project a dashboard invitation to a second Gmail address arrived in the inbox with SPF, DKIM
+  and DMARC all passing, in the new wording, and its link opened the Choose a password window; on
+  production the owner's own reset email, asked for at `measureone.app`, arrived from
+  `hello@measureone.app` and its link opened `measureone.app` at the same window, and the message's own headers show
+  SPF, DKIM and DMARC all passing and name the production project, with an HTML body identical to
+  `recovery.html` once the account email and link are filled in (compared with a script that was checked
+  to fail on one changed word); the production SMTP page and the 86400 box were read from the owner's screenshots; `npm test` (1,681) and `npm run build` pass.
+  **Choices beyond the card, named by Pass 129 so the owner can strike any:** (1) Resend, chosen by the
+  owner from three (Brevo's pages could not be read here, so its data location and support were never
+  confirmed; Postmark's free tier is 100 a month), and ImprovMX for forwarding (Vercel has none, Cloudflare's
+  needs the DNS moved off Vercel, Forward Email's free targets are publicly searchable); (2) mail is sent
+  from the root domain, not a subdomain (Resend recommends a subdomain; the root keeps one friendly
+  address that replies reach, the volume is tiny and these are sign-in emails only); (3) DMARC is `p=none`
+  with no report address (nothing is rejected, and no daily report mail); (4) the templates do not say
+  how long a link lasts, so the setting can change without the files lying; (5) the security-notification
+  emails (password changed and so on) were left alone and are off on both projects, by the owner's word
+  (test project) and her screenshot (production, all seven toggles off); (6) Resend's records were added by hand, not with its "Auto
+  configure" button, which edits the owner's DNS. **Alternatives ruled out:** staying on the built-in
+  sender (Design A); a Reply-To address (Supabase has no field for one, so the sender is the address
+  replies reach); more than 24 hours (Supabase advises against it, and only its management API goes higher).
+  **Found on the way:** (a) the test project's Site URL pointed at the Pass 109 preview, which now answers
+  410 Gone, so an invitation would have opened a dead page; changed to a live preview address; (b)
+  Resend's records differed from the research (one TXT, two CNAMEs and an optional DMARC TXT, not two TXT
+  and an MX), so the dashboard's own list was copied. **Still open, logged and not fixed:** (i)
+  production's invitation, sign-up confirmation, change-email and confirmation-code templates have not
+  been sent from production (an invitation would create an account, which waits for Pass 134), and the
+  dashboard text of all five, pasted back by the owner on 2026-11-06, equals the files in
+  `supabase/templates/` byte for byte (what is not shown is which dashboard slot each text sits in, except
+  the reset one); (ii) a mail scanner can use up a
+  one-time link (owner: Pass 134); (iii) the test project's Email OTP expiration is still 3600 (left as it is: its links last an hour, production's 24); (iv) a Resend key never changes by itself and nothing reminds anyone to
+  rotate it; (v) Resend's free 100 a day and Supabase's 30 an hour are a ceiling for open sign-up
+  (owner: Pass 135); (vi) nothing checks that a dashboard template equals its file, and `test/` does not
+  read `supabase/templates/`. See [Accounts-and-Backend.md](Accounts-and-Backend.md#email-service-pass-129)
+  and [DEPLOYMENT.md](../DEPLOYMENT.md#sign-in-email-pass-129).
 
 ## Open questions
 

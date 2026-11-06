@@ -636,8 +636,8 @@ dashboard, or a reset link):
    without a new password.
 3. A link that has expired or was already used opens the sign-in window with
    a plain note saying so, where a fresh reset link can be asked for. On the
-   live site a link lasts one hour, so an invitation should be opened as soon
-   as it arrives; a late one needs a fresh invitation from the project owner.
+   live site a link lasts 24 hours (since Pass 129), so an invitation should be opened
+   soon after it arrives; a late one needs a fresh invitation from the project owner.
 
 **Signed in:** Settings → Account shows the email address, **Back up this
 device** ([flow 11](#11-backing-up-this-device-optional-pass-110)) and

@@ -404,7 +404,33 @@ nothing more is needed; trying to add
 redirect to itself", because the box adds the bare name to the same group. To change the
 redirect's type (307 to 308), use Edit on the existing `www` row. A new address opens
 as an empty copy of the app (the browser keeps pieces per address): sign in there and
-press Restore. Email records for the domain are a separate step (Pass 129).
+press Restore. The domain's email records (Resend, ImprovMX) were added in Pass 129: see
+"Sign-in email" below.
+
+### Sign-in email (Pass 129)
+
+Sign-in emails (invitation, password reset and so on) are written by Supabase and delivered
+by **Resend** from `hello@measureone.app`; `hello@measureone.app` forwards to the owner's inbox
+through **ImprovMX**. The domain's DNS is at Vercel (Domains, `measureone.app`, DNS Records):
+Resend's four records (`resend._domainkey` TXT, `rsend` and `send` CNAMEs, `_dmarc` TXT) and
+ImprovMX's (two MX and the ONE root SPF TXT). **Never add a second root SPF record:** it breaks
+both services. Full detail: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#email-service-pass-129).
+
+- **Pass 129 changed no app code,** so there is nothing to roll back in Vercel; no deployment
+  carries it.
+- **Where the live settings are:** each Supabase project's dashboard (Authentication, Email, SMTP
+  Settings; Authentication, Emails, Templates; Authentication, Sign In / Providers, Email, Email
+  OTP expiration). The repository's `supabase/templates/` is the record of the template text, not
+  the live copy: change the file, then paste into **both** projects.
+- **The key:** one Resend API key per project, pasted only into Supabase's SMTP password box.
+  Never put it in Vercel, `.env.local` or this repository. A leaked key lets someone send as
+  `hello@measureone.app`: delete it in Resend and paste a new one into Supabase.
+- **The way back:** switch "Enable custom SMTP" off in a project. Supabase's built-in sender
+  returns (the project's own team only, about 2 messages an hour), the templates stay, and the
+  app is untouched.
+- **Check after any change to email:** ask for a password reset for your own account at
+  `https://measureone.app`, and read the message's "Show original" for SPF, DKIM and DMARC all
+  passing. Click **Not now** at Choose a password.
 
 ---
 

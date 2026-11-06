@@ -2988,7 +2988,14 @@ checks were run against the project itself, not read off the settings pages.
     URL, so with the preview address invitation links work on any device, not
     only on the Mac running the development server. Reset links don't use it:
     they return to the site that asked. **If that branch's preview is ever
-    removed, change the Site URL before sending another invitation.**
+    removed, change the Site URL before sending another invitation.** **That
+    happened: on 2026-11-05 (Pass 129) the Pass 109 address answered 410 Gone,
+    and the Site URL became
+    `https://measureone-git-claude-docs-pass-128-followup-measure-one.vercel.app`
+    (a branch address again: it stops working if that branch is deleted, same
+    rule), with its `/**` added to the redirect list and the dead Pass 109
+    entry removed.** An invitation sent after that opened this address with the
+    Choose a password window.
   - Redirect URLs `http://localhost:5173/**` and
     `https://*-measure-one.vercel.app/**` (every preview address ends in
     `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
@@ -3100,11 +3107,13 @@ owner's own is invited.
   settings, read from the dashboard on 2026-10-10, match the test project:
   secure email change on, secure password change off, "require current
   password when updating" off, leaked-password check off (Pro plan only),
-  minimum length 6, no character requirements. **Email OTP expiration is 3600
-  seconds, so an invitation link or a reset link stops working after one
-  hour.** Send an invitation only when its person can open the email at once;
-  a late link opens the sign-in window with the plain "expired" note, and a
-  fresh one is sent. The sign-up and anonymous settings were also tested
+  minimum length 6, no character requirements. **Email OTP expiration was 3600
+  seconds when read on 2026-10-10, so a link stopped working after one hour;
+  since 2026-11-06 (Pass 129) it is 86400 seconds (24 hours), shown in the
+  dashboard with Save inactive.** Supabase's own advice is not to go higher,
+  and a GitHub issue reports the value going back to 3600 after a production
+  migration, so read it back after any migration. A late link opens the
+  sign-in window with the plain "expired" note, and a fresh one is sent. The sign-up and anonymous settings were also tested
   directly: the script's checks 36 and 37 tried both against this project and
   were refused.
 - **Authentication → URL Configuration:** **since 2026-11-01 (Pass 128) the Site URL
@@ -3239,6 +3248,98 @@ backups, so the manual export and the export reminder stay.
    Redeploy treat the branch address. An ordinary new deployment, the Pass 114
    merge, moved it together with the other addresses; DEPLOYMENT.md says how
    to check after a rollback.
+
+## Email service (Pass 129)
+
+Done 2026-11-05 (test project) and 2026-11-06 (production). The dashboard steps were done by the
+owner; what was checked from outside, and what was only read from her screenshots, is said below.
+
+**What it is.** Supabase still writes and sends its own sign-in emails (invitation, password reset and
+so on); only the delivery changed, to **Resend** over SMTP, from **`hello@measureone.app`** (sender name
+`MeasureOne`). No email code in the app. The domain's DNS is at Vercel.
+
+**Resend.** Free plan: 3,000 emails a month, 100 a day. The account holds the domain `measureone.app`
+(sending region North Virginia, `us-east-1`), verified 2026-11-05. Its records, added by hand in Vercel's
+DNS panel (not with Resend's "Auto configure" button, which edits DNS for you) and checked from outside
+against both Vercel's name server and 1.1.1.1: a DKIM TXT at `resend._domainkey`, two CNAMEs `rsend` and
+`send` (to `*.forge.rmta.net`), and a DMARC TXT at `_dmarc` = `v=DMARC1; p=none;` (no report address, so
+no daily report mail). Resend's open and click tracking is off by default and must stay off (it
+rewrites links). One sending-only API key per project, named for it (`Supabase production`), shown once
+by Resend and pasted only into that project's SMTP password box. The sending path is Amazon SES. Facts
+for the privacy policy are under "Owned by" (Owner: Pass 133).
+
+**Forwarding.** **ImprovMX** (free) forwards `hello@measureone.app` to the owner's inbox (alias `hello`).
+Its records: MX `mx1.improvmx.com` (10) and `mx2.improvmx.com` (20), and **one** root SPF TXT
+`v=spf1 include:spf.improvmx.com ~all`. **A root can have only one SPF record: a second one breaks
+both services** (if Resend ever asks for the root's SPF, add its `include:` to this one). Free plan: one
+domain, 25 aliases, 500 forwards a day. Supabase has no Reply-To field, so a reply to a sign-in email goes
+to `hello@measureone.app` itself and arrives in the owner's inbox; replying AS that address from Gmail is
+not clean on the free plan. Checked 2026-11-05: a message sent to the address from a second address
+arrived in the owner's inbox. If the owner's inbox address ever changes, the alias must be changed in
+ImprovMX.
+
+**Supabase, per project (test `devbzzbtinzxspmiatba`, production `tqamtwdraqsvejvhiptz`).**
+- **Authentication, Email, SMTP Settings:** "Enable custom SMTP" on, sender `hello@measureone.app`, name
+  `MeasureOne`, host `smtp.resend.com`, port 465, username `resend`, password = that project's key,
+  interval left at its default. Production's page was read from the owner's screenshot on 2026-11-06 (the
+  password is hidden, so whether it is the right key is proved by the reset email below, not by the page).
+  After custom SMTP is saved Supabase's limit is 30 emails an hour (Authentication, Rate Limits); the
+  production page was read from the owner's screenshot on 2026-11-06: emails 30 an hour, and "Minimum
+  interval per user" 60 seconds (it applies only with custom SMTP: a second email to the same person
+  within a minute is not sent). The other limits are Supabase's defaults (token refreshes 150, token
+  verifications 30, sign-ups and sign-ins 30, each per 5 minutes) and were left alone. The screenshot
+  does not show the project name; it came from the same session as the one that does.
+- **Authentication, Sign In / Providers, Email, Email OTP expiration:** production 86400 seconds (see
+  Setup (production project)). The test project's reads 3600 (the owner, 2026-11-06) and was left as it
+  is, so a link sent from the test project lasts one hour while production's lasts 24.
+- **Authentication, Emails, Templates:** five pasted with their subjects, as listed in
+  `supabase/templates/README.md` (the files are the record; the dashboard holds the live text). The
+  Magic link template is untouched: the app has no magic-link sign-in.
+- **Security-notification emails** (password changed, email address changed and so on; Supabase sends
+  them only if switched on): none are on. Test project: all off, by the owner's word. Production: all seven
+  toggles are off (her screenshot of Authentication, Emails, 2026-11-06; the page header reads
+  `measureone-prod`, PRODUCTION; Save changes inactive). If one is ever switched on it goes out in
+  Supabase's own wording until it has a file in `supabase/templates/`.
+
+**How it was checked.**
+- *Test project.* A dashboard invitation to a second, separate Gmail address (not a plus-address, not on
+  the Supabase team) arrived in the inbox within seconds, From `MeasureOne <hello@measureone.app>`, in the
+  new wording of `invite.html`. Gmail's "Show original": SPF PASS, DKIM PASS (domain `measureone.app`),
+  DMARC PASS. The link's address was the test project's verify address, `type=invite`, redirect to the
+  test Site URL, and opening it showed Choose a password. The throwaway user was deleted afterwards.
+- *Production.* A password reset asked for at `https://measureone.app` for the owner's own account
+  arrived from `hello@measureone.app`, and its link opened `measureone.app` at the Choose a password
+  window (her screenshot, 2026-11-06). **Read back from the message itself (Gmail's "Show original",
+  pasted 2026-11-06):** SPF pass (`rsend.measureone.app`, sent through Amazon SES), DKIM pass for
+  `measureone.app` (selector `resend`) and for `amazonses.com`, DMARC pass; the header
+  `X-Pm-Metadata-Project-Ref: tqamtwdraqsvejvhiptz` names the production project (so the SMTP page she
+  screenshotted was production's); the subject is "Reset your MeasureOne password"; the link goes
+  straight to the production project's verify address (`type=recovery`, redirect to
+  `https://measureone.app/`), not through a tracking address, so click tracking is off; and the HTML body
+  is **identical** to `recovery.html` with the account email and the link filled in (compared with a
+  script, which was checked to fail when one word differs). That proves the dashboard's Reset password
+  template equals its file, and that the production key in the password box is the right one.
+  **All five templates were then pasted back from the production dashboard by the owner (2026-11-06)
+  and each equals its file in `supabase/templates/` byte for byte** (compared with `cmp`; a control with
+  one changed word was caught), and each subject equals the README's table. Not shown: which dashboard
+  slot each text sits in, except the Reset password slot, which the email above proves.
+- `npm test` (1,681 tests) and `npm run build` pass; no app code or test changed.
+
+**Found on the way.**
+- The test project's Site URL still pointed at the Pass 109 preview, which now answers 410 Gone, so a
+  test invitation would have opened a dead page (see Setup (test project)).
+- Resend's dashboard listed one TXT, two CNAMEs and an optional DMARC TXT, not the two TXT and an MX the
+  research predicted. The dashboard's own list is the truth.
+
+**The way back.** Switch "Enable custom SMTP" off in a project: the built-in sender returns (that
+project's own team only, about 2 messages an hour), the templates stay, and the app does not change.
+
+**Left open** (the matching "Owned by" items are in the Phase 3 section below; the wider list is in
+the Pass 129 entry of [Decisions.md](Decisions.md)):
+production's other four templates (invitation, sign-up confirmation, change email, confirmation
+code) have not been sent from production (their dashboard text, pasted back by the owner on
+2026-11-06, equals the files byte for byte); mail scanners (Pass 134); a Resend key is never rotated and nothing reminds anyone; the free
+limits against open sign-up (Pass 135); nothing checks a dashboard template against its file.
 
 ## Backups of the account copy (2026-10-12)
 
@@ -3402,6 +3503,9 @@ C. **Supabase's email templates are rewritten** in MeasureOne's own plain wordin
    dashes, and kept in the repo (`supabase/templates/`) as the record, because the dashboard isn't
    versioned. (Pass 129)
 
+   *Designs A to C were built in Pass 129 (2026-11-06): see
+   [Email service (Pass 129)](#email-service-pass-129).*
+
 D. **Change email and delete my account move into the app.** Change email uses Supabase's existing
    "secure email change" (both addresses confirm). Delete uses a database function in a new
    migration (`0003_delete_my_account.sql`) that deletes only the caller's own account; the rows go
@@ -3497,10 +3601,28 @@ section, or taken from the later cards' own rationales; the owner can strike any
   connection in a browser that had visited it before. Owner: Pass 128.
 - *(added by Pass 127)* **The built-in email sender** reaches only the Supabase project's own team
   and only about 2 messages an hour, which is why the owner's is the only account (Known limits;
-  Open questions; Decided 4). Owner: Pass 129.
+  Open questions; Decided 4). **Done in Pass 129 (2026-11-06):** custom SMTP through Resend on both
+  projects (Email service (Pass 129)). Owner: Pass 129.
 - *(added by Pass 127)* **Email links last one hour** on production (Email OTP expiration 3600
   seconds, read 2026-10-10; Setup (production project)). The recommendation is 24 hours; it applies
-  to every email link, not only invitations. Owner: Pass 129.
+  to every email link, not only invitations. **Done in Pass 129 (2026-11-06):** production now reads
+  86400 seconds (the owner's screenshot, Save inactive); read it back after any migration. The test
+  project's reads 3600 and was left as it is. Owner: Pass 129.
+- *(added by Pass 129)* **A mail scanner can use up a one-time link.** Some email systems (Microsoft
+  Defender Safe Links is the known one) open every link in a message to check it, which spends a link
+  that can be used once; the person then sees "Token has expired or is invalid". Links lasting 24
+  hours do not make it less likely. It can hit an invitation or a reset. The fix needs app code (a
+  button page that spends the link only when the person presses it), so it belongs with inviting
+  people. Owner: Pass 134 (watch the first invitees' mail; nothing built).
+- *(added by Pass 129)* **Email facts for the privacy policy.** Resend keeps email content and
+  metadata for 30 days and stores account data in the United States; the mail travels through Amazon
+  SES (the Message-ID of a received email is at `email.amazonses.com`). ImprovMX, which forwards
+  `hello@measureone.app`, deletes mail after forwarding and holds inbound mail briefly in Paris (AWS).
+  Owner: Pass 133.
+- *(added by Pass 129)* **Open sign-up and the free email limits.** Supabase allows 30 emails an hour
+  once custom SMTP is saved and Resend's free plan 100 a day (3,000 a month); each sign-up sends a
+  confirmation. Plenty for invitations, a ceiling for open sign-up. Owner: Pass 135 (read both limits
+  again, and the plan, before opening it).
 - **"Delete my account" in the app.** The app's public key can't delete a sign-in account, so the
   planned way is a database function in a new migration that deletes only the caller's own account
   (the rows go with it by cascade, checked in Pass 108); the alternative, a Supabase Edge Function,

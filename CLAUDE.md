@@ -78,6 +78,8 @@ MeasureOne.jsx/
 │                      # not part of the app or of `npm test`
 ├── supabase/migrations/   # the account database's two SQL files; applied by
 │                          # hand in the Supabase SQL Editor, never by the app
+├── supabase/templates/    # Pass 129: the five sign-in email texts, the RECORD of
+│                          # what each Supabase project's dashboard holds live
 ├── test/              # `npm test`: node:test over lib/ only
 └── src/
     ├── main.jsx        # ReactDOM entry point, just mounts <App />
@@ -1291,9 +1293,22 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   sign-in setting change, and delete the accounts afterwards (production
   should read 0 accounts, 0 pieces, 0 technique rows until real accounts
   exist). It is not part of the app or of `npm test`.
-- **Invitation and reset links die after one hour** (production's Email OTP
-  expiration is 3600 seconds), so an invitation is sent only when its person
-  can open it at once.
+- **Invitation and reset links last 24 hours** (production's Email OTP expiration is 86400
+  seconds since Pass 129; Supabase advises against more). **Read it back after any migration
+  or project change:** a Supabase GitHub issue reports it going back to 3600 after a production
+  migration. An email scanner can also use up a one-time link before the person opens it (owner:
+  Pass 134), so an invitation is still best sent when its person can open it soon.
+- **Sign-in emails go out through Resend, from `hello@measureone.app` (Pass 129).** Custom SMTP
+  is switched on in BOTH Supabase projects (host `smtp.resend.com`, port 465, username
+  `resend`, password = a Resend API key: one key per project, pasted only into Supabase's
+  dashboard, never the repo, Vercel, `.env.local` or a chat). **`supabase/templates/` is the
+  RECORD of the five email texts; the live text is in each project's dashboard,** so a change is
+  made in the file and pasted into both projects. Keep Supabase's placeholders exact (a typo
+  silently breaks the link), keep Resend's open and click tracking off (it rewrites links), and
+  no em dashes. The built-in sender (team only, about 2 an hour) is the way back: switch
+  "Enable custom SMTP" off. With custom SMTP the limit is 30 emails an hour. `hello@measureone.app`
+  forwards to the owner's inbox through ImprovMX; the domain has ONE root SPF record, which must
+  stay one. Details: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#email-service-pass-129).
 - **The way back is in `DEPLOYMENT.md` ("Rolling back")**, with the go-live rollback
   point and the rollback points since. A change to a Vercel setting only takes effect
   with a new deployment.
@@ -1330,7 +1345,8 @@ owner chose to wait with the flip until Phase 3**, and it is only ever built on 
 settings, a deletion and the piece list's order; collections and whole shapes, the chunk grid and a
 tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
-is designed (Pass 127, 2026-10-31); only Pass 128 (the owner's own address, `measureone.app`, 2026-11-01) is built:
+is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01) and
+129 (a real email service, 2026-11-06) are built:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
@@ -1494,3 +1510,8 @@ silently.
   "moved" note (`lib/address.js`, `App.jsx`). Phase 3's first pass with code; **merged 2026-11-01 (PR
   #86, merge commit `c4af6bf`), live as `index-IY8CdtWw.js`**; the rest of Phase 3 is designed
   (Pass 127), not built. [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built)
+- **Pass 129** — sign-in emails go out through Resend from `hello@measureone.app` on both Supabase
+  projects, in MeasureOne's own wording (five templates, recorded in `supabase/templates/`; the
+  dashboards hold the live copy), `hello@measureone.app` forwards to the owner's inbox (ImprovMX), and
+  email links last 24 hours on production. No app code. Built 2026-11-05 to 2026-11-06.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#email-service-pass-129)

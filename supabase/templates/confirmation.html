@@ -1,0 +1,8 @@
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.5; max-width: 480px;">
+  <h2 style="font-size: 20px; margin: 0 0 16px;">Confirm your email for MeasureOne</h2>
+  <p>Someone used {{ .Email }} to create a MeasureOne account. If that was you, open the link below to confirm your email address.</p>
+  <p><a href="{{ .ConfirmationURL }}" style="display: inline-block; padding: 12px 20px; background: #2f5d9a; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600;">Confirm my email</a></p>
+  <p style="font-size: 14px; color: #555555;">If the button doesn't work, copy this link into your browser:<br>{{ .ConfirmationURL }}</p>
+  <p style="font-size: 14px; color: #555555;">The link can be used once and stops working after a while. If it wasn't you, you can ignore this email. The account will not be activated.</p>
+  <p style="font-size: 14px; color: #555555;">Questions? Just reply to this email.</p>
+</div>

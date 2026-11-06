@@ -3455,9 +3455,10 @@ repository.
 
 ## Phase 3: other people's accounts (designed, not built)
 
-**Designed in Pass 127 (2026-10-31). Only Pass 128 is built so far** (2026-11-01: the owner's own
-address, the Site URL, and the "moved" note on the old addresses, merged the same day as PR 86, `c4af6bf`);
-nothing else in this section is. Phase 3 is what has to
+**Designed in Pass 127 (2026-10-31). Only Passes 128 and 129 are built so far** (128, 2026-11-01: the owner's own
+address, the Site URL, and the "moved" note on the old addresses, merged the same day as PR 86, `c4af6bf`;
+129, 2026-11-06: a real email service, see [Email service (Pass 129)](#email-service-pass-129), merged
+as PR 88, `87065bc`); nothing else in this section is built. **The next is Pass 130.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same

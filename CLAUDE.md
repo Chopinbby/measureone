@@ -1350,7 +1350,12 @@ is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `m
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
-sign-up) and 124 (the switch's default) happen only on the owner's word. Still not
+sign-up) and 124 (the switch's default) happen only on the owner's word.
+**Where it stands (2026-11-06):** Pass 129 is **merged** (PR #88, merge commit `87065bc`); **the next
+pass is 130** (change email and delete my account: it adds a migration the owner runs by hand on the
+test project and then production). Start it in a new chat, **branched from `main`** (never from an
+older pass's branch: a pass built on another unmerged pass's branch lands in that branch, not `main`).
+Still not
 built elsewhere: a persisted "learned" state, a second Tier 1 rung and repertoire
 rotation (Stage 5); see
 [`docs/Repertoire-Lifecycle.md`](docs/Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
@@ -1513,5 +1518,6 @@ silently.
 - **Pass 129** — sign-in emails go out through Resend from `hello@measureone.app` on both Supabase
   projects, in MeasureOne's own wording (five templates, recorded in `supabase/templates/`; the
   dashboards hold the live copy), `hello@measureone.app` forwards to the owner's inbox (ImprovMX), and
-  email links last 24 hours on production. No app code. Built 2026-11-05 to 2026-11-06.
+  email links last 24 hours on production. No app code. Built 2026-11-05 to 2026-11-06; **merged
+  2026-11-06 (PR #88, merge commit `87065bc`)**; the app file stayed `index-IY8CdtWw.js` on all four addresses.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#email-service-pass-129)

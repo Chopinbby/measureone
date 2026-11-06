@@ -416,8 +416,9 @@ Resend's four records (`resend._domainkey` TXT, `rsend` and `send` CNAMEs, `_dma
 ImprovMX's (two MX and the ONE root SPF TXT). **Never add a second root SPF record:** it breaks
 both services. Full detail: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#email-service-pass-129).
 
-- **Pass 129 changed no app code,** so there is nothing to roll back in Vercel; no deployment
-  carries it.
+- **Pass 129 changed no app code,** so there is nothing to roll back in Vercel: merging it (PR #88,
+  `87065bc`) made Vercel redeploy `main`, but all four addresses kept serving the same app file,
+  `index-IY8CdtWw.js` (checked 2026-11-06). It is not a rollback point.
 - **Where the live settings are:** each Supabase project's dashboard (Authentication, Email, SMTP
   Settings; Authentication, Emails, Templates; Authentication, Sign In / Providers, Email, Email
   OTP expiration). The repository's `supabase/templates/` is the record of the template text, not

@@ -8687,7 +8687,8 @@ what it rules out.
 - **Pass 129 — a real email service (2026-11-05 to 2026-11-06).** Supabase's sign-in emails now go
   out through **Resend** from `hello@measureone.app` on both projects, in MeasureOne's own wording (five
   templates, recorded in `supabase/templates/`), `hello@measureone.app` forwards to the owner's inbox
-  (**ImprovMX**), and email links last 24 hours on production (86400 seconds). No app code. Checked: on
+  (**ImprovMX**), and email links last 24 hours on production (86400 seconds). No app code. **Merged 2026-11-06** (PR 88, `87065bc`; the four live addresses kept
+  serving the same app file, `index-IY8CdtWw.js`). Checked: on
   the test project a dashboard invitation to a second Gmail address arrived in the inbox with SPF, DKIM
   and DMARC all passing, in the new wording, and its link opened the Choose a password window; on
   production the owner's own reset email, asked for at `measureone.app`, arrived from

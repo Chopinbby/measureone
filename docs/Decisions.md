@@ -8724,6 +8724,44 @@ what it rules out.
   read `supabase/templates/`. See [Accounts-and-Backend.md](Accounts-and-Backend.md#email-service-pass-129)
   and [DEPLOYMENT.md](../DEPLOYMENT.md#sign-in-email-pass-129).
 
+- **Pass 130 — change email and delete my account, in the app (2026-11-06).** Built as Phase 3 Design D
+  describes: a **Change email** window (Supabase's "secure email change": a link to both addresses, the
+  address changes when both are opened), a **Delete my account** window (the password is asked for again and
+  checked by signing in with it, then a database function deletes the caller's own account and its rows, then
+  this device signs out), the two buttons in Settings, Account and on the welcome screen, and the app's
+  handling of the two links an email change sends. A new migration, `0003_delete_my_account.sql`, which the
+  owner runs by hand on the test project and then production. **Not merged and not yet tried on a real
+  project** (see [Accounts-and-Backend.md](Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)
+  for what was and was not seen, and her steps). **The owner's three answers, 2026-11-06, asked before
+  building:** (1) ask for the password again before deleting: yes; (2) after deleting, this device keeps its
+  pieces and technique library and signs out: yes; (3) a new address that already has an account gets a plain
+  "already has a MeasureOne account" answer, **against** the recommendation of the same answer as any
+  address (she weighed the clearer wording over not revealing who has an account; accepted while accounts
+  are by invitation, to be reconsidered before open sign-up: Owner, Pass 135). **Choices beyond the card,
+  named so the owner can strike any:** (a) **the password is checked by the app, not the database.** The
+  function can't see a password, so the re-sign-in guards an unlocked device and nothing more: a stolen
+  sign-in could call the function directly. A server-side "recently signed in" check on `auth.sessions` was
+  considered and left out (more server code than Design D allows, and untestable here); (b) no password for
+  **Change email**, because the link that must also be opened at the old address already stops a stranger;
+  (c) a failed delete is read back before anything is said (still there, gone, or "can't tell" with how to
+  find out), the honesty `describeSignOutAll` already shows; (d) the device record's entry for a deleted
+  account is left alone (inert: filed under an id that no longer exists); (e) the delete warning mentions the
+  owner's separate daily backup in one sentence, `DELETE_BACKUP_NOTE`, to be made exact by Pass 131 and 133;
+  (f) the security script gained a seventh group and **now deletes its own throwaway account A**, so it is the
+  last group; (g) only the two new buttons are on the welcome screen (Change password and Sign out of all
+  devices stay in Settings). **Alternatives ruled out:** an Edge Function for the delete (Design D); keeping
+  the dashboard as the only way to change an email (the by-hand replacement of the account has never been
+  rehearsed); clearing this device's pieces too when the account is deleted (the owner's answer 2). **Found on
+  the way:** the stale line in the Account panel ("isn't available in the app yet") and its mentions in the
+  docs; and that a hash-only change of the address does not re-read a link in the same page (a test-rig
+  detail, not an app bug). **Still open, logged and not fixed:** the real first-link address and wording; no
+  server-side password check; no email telling the person their account was deleted; other devices' failing
+  uploads until their sign-in ends; the hidden-prompt test of the script. **Added after a review the same
+  day (the owner agreed):** (h) the security script refuses, before signing in, any account whose address
+  doesn't start with `rls-check`, because "holds no data" cannot tell a newly invited person's empty account
+  from a throwaway and the last group deletes account A. 1,736 tests; 8 deliberate breakages of the new logic,
+  5 of that guard and 12 broken versions of the database in the script's tests, all caught.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

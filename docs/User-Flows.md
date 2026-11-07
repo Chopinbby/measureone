@@ -83,9 +83,10 @@ including Focus spots, Revival settings (only while in revival) and "Mark as
 learned elsewhere" (which asks "are you sure?" before it marks the draft) —
 followed by a separate, clearly labelled **"Applies immediately"** group
 below the Save/Discard row holding Practice status (Pause/Archive/Resume/
-Reactivate) and Delete this piece, which act on the live piece the moment
-they're clicked and are unaffected by Discard. The button was called "Edit
-piece" before this pass.
+Reactivate), which acts on the live piece the moment it's clicked and is
+unaffected by Discard. (Delete this piece was the second control there until
+the Pass 130 follow-up moved it to the **Danger zone** on the Settings landing
+page.) The button was called "Edit piece" before this pass.
 
 ### 1a. Adding a movement to an existing work
 
@@ -818,11 +819,15 @@ created date and clears the mark.
 **Only on sites connected to an account service, and only signed in** (signed out,
 Settings → Account still shows only the sign-in prompt, exactly as before). Two
 buttons sit in a group of their own at the bottom of the Account panel, under a
-thin line: **Change password** and **Sign out of all devices**, then one plain line:
-"Changing your email or deleting your account isn't available in the app yet."
-Neither button touches a piece, the technique library or anything else stored on
-this device. See [Accounts-and-Backend.md](Accounts-and-Backend.md#account-settings-pass-113)
-for the dashboard steps to change an email or delete an account by hand.
+thin line: **Change password**, **Change email**, **Sign out of all devices** and
+**Delete my account** (Pass 130 added the second and fourth, so the old line "Changing
+your email or deleting your account isn't available in the app yet." is gone).
+None of them touches a piece, the technique library or anything else stored on
+this device. **Change email** and **Delete my account** are also on the welcome screen
+(a signed-in device with no pieces has no Settings), as links after "Signed in as ...
+Sign out". See [Accounts-and-Backend.md](Accounts-and-Backend.md#account-settings-pass-113)
+for the dashboard steps to change an email or delete an account by hand, which are now
+only the fallback.
 
 **Change password**
 1. **Change password** opens the **Change password** window: "Choose a new password
@@ -863,6 +868,62 @@ for the dashboard steps to change an email or delete an account by hand.
    signed out by then: the library does that even when it couldn't tell the
    service.) If this device somehow stayed signed in, it says nothing was changed and
    to try again.
+
+**Change email (Pass 130)**
+1. **Change email** opens a window that names the account's current address and says: "For
+   your security we send a confirmation link to both addresses, and the address changes only
+   after you open both. Until then you keep signing in with" the current one. One field,
+   **New email address**, and **Send confirmation links**.
+2. A slip is caught before anything is sent: "That doesn't look like a valid email address."
+   or "That's already the email address on this account." An address that already has a
+   MeasureOne account gets "That address already has a MeasureOne account. Use a different
+   address." (the owner's choice, 2026-11-06). Too many emails: "Too many emails were sent
+   just now. Wait a few minutes and try again." No connection: the usual "Couldn't reach the
+   account service..." The window stays open with what was typed.
+3. Sent: the window says "We sent a confirmation link to (new) and another to (current).
+   Open both emails and press the button in each. Your address changes only after both are
+   confirmed. Until then you still sign in with (current). If an email doesn't arrive,
+   check the spam folder." **Done** closes it; **nothing has changed yet.**
+4. Opening the **first** link brings the person back to the app with one quiet banner at the
+   top: "That confirmation is done. The change finishes once you also open the email sent to
+   your other address and confirm there." (Dismiss closes it.) Opening the **second** signs
+   that browser in with the new address and the banner says "Your email address is now (new).
+   Use it the next time you sign in." Pieces and backups are not affected: they belong to the
+   account, not to the address. *(Proposed wording, and how the first link arrives is not yet
+   seen on the real service: the owner's trial reports it.)*
+
+**Danger zone (Pass 130 follow-up).** At the bottom of the Settings landing page is a red-bordered
+panel headed by a small skull and crossbones, **Danger zone**, with the line "Each of these asks you to
+confirm before anything is deleted." It holds the two things that delete, each as a row with a short
+explanation and a red button: **Delete this piece** (names the open piece; opens the type-its-name window,
+flow 16) and, only while signed in, **Delete my account** (names the account's address). Pressing either
+only opens its confirmation window; nothing is deleted from the panel itself. Signed out, only the piece
+row shows. **Delete my account** is no longer in the Account panel's button group, and **Delete this
+piece** is no longer on the Edit piece settings page.
+
+**Delete my account (Pass 130)**
+1. **Delete my account** (in the Danger zone) opens a window: "This permanently deletes your MeasureOne account
+   ((address)) and the copy of your pieces and technique library that it keeps online. It
+   can't be undone." Then: nothing is removed from this device (pieces and technique stay,
+   the device is signed out), other devices signed in to the account are signed out within
+   about an hour and keep their own copies, "If your account holds anything this device
+   doesn't, use Get changes from your account first." and "The service also keeps a separate
+   daily backup of its data, and an older copy of your pieces can still be in it."
+2. **Type your password to confirm.** The red **Delete my account** button is off until
+   something is typed. A wrong password: "That password isn't right. Check it and try again.
+   Nothing was deleted." Nothing else happens.
+3. The right password deletes the account and signs this device out. The window then says
+   "Your account is deleted, along with the copy of your pieces and technique library it kept
+   online. The pieces and technique on this device are still here, and you're signed out..."
+   and **Done** closes it. The Account panel shows the sign-in prompt again.
+4. If something goes wrong it says what happened and that **nothing was deleted** ("Couldn't
+   delete your account. Nothing was deleted. Try again in a moment."; with no connection,
+   "Couldn't reach the account service, so nothing was deleted..."). If the connection drops
+   at the worst moment: "The connection dropped before we could confirm whether your account
+   was deleted. Wait a minute, then try to sign in with your email and password. If they no
+   longer work, the account is deleted."
+5. A backup, an upload or a "Get changes" in progress: "Your pieces are being backed up or
+   read from your account right now. Nothing was deleted. Try again in a moment."
 
 ## 14. Updating automatically from other devices (optional, Pass 120)
 
@@ -1023,7 +1084,8 @@ before (this browser only, permanently) and nothing below appears. Design:
 The rule is the owner's (2026-10-23): a piece deleted on one device is deleted everywhere, and
 the practice goes with it. The way back is her addition.
 
-**Deleting.** Settings, **Delete this piece**. The window says the piece is removed "from this
+**Deleting.** Settings, **Danger zone**, **Delete this piece** (it was on the Edit piece settings
+page before the Pass 130 follow-up). The window says the piece is removed "from this
 device and from every other device on your account", that you can bring it back from **Recently
 deleted** in Settings for 30 days, "without any practice that was never backed up". You type the
 piece's name to confirm, and the button reads **Delete everywhere** (signed out it reads **Delete

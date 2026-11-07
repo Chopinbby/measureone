@@ -20,12 +20,22 @@
 /*      anyone else's rows, and nobody can delete a row at all         */
 /*    - the database keeps each row's revision count (migration 0002)  */
 /*    - new sign-ups and anonymous sign-ins are switched off           */
+/*    - "delete my account" (migration 0003): a signed-out visitor     */
+/*      cannot call it, and when account A calls it, A's account and   */
+/*      rows are gone, A cannot sign in or add rows any more, and B's  */
+/*      account and rows are untouched. THIS DELETES ACCOUNT A: it is  */
+/*      the last group on purpose, and a throwaway is all it is for.   */
 /*                                                                     */
 /*  Safety, on purpose:                                                */
 /*    - It refuses a secret key (sb_secret_..., or an old key whose    */
 /*      role is service_role). Never give it one.                      */
 /*    - It refuses any account that already holds pieces or technique  */
 /*      data, so it can't write test rows into a real account.         */
+/*    - It refuses any account whose address does not START WITH       */
+/*      "rls-check" (for example rls-check-a@example.com), before it   */
+/*      signs in to anything. The last group DELETES account A, and    */
+/*      "holds no data" is not proof of a throwaway (a newly invited   */
+/*      person's account is empty too).                                */
 /*    - Every row it writes is named "RLS check ..." with an id that   */
 /*      starts "rls-check-", and belongs to a throwaway account. It    */
 /*      cannot delete them (no one can): deleting the two accounts in  */
@@ -40,13 +50,25 @@
 /*                                                                     */
 /*  Setup: create the two throwaway accounts in the project's          */
 /*  dashboard (Authentication > Users > Add user), run this, then      */
-/*  delete the two accounts. See docs/Accounts-and-Backend.md.         */
+/*  delete the account(s) still there (A is deleted by the check of    */
+/*  migration 0003 itself; B stays). See docs/Accounts-and-Backend.md. */
 /* ------------------------------------------------------------------ */
 
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 
 export const ROW_PREFIX = "rls-check-";
+
+// The check deletes account A and writes test rows into both accounts, so both must be
+// accounts made for this: an address whose part before the @ starts with this (any letter
+// case), e.g. rls-check-a@example.com. Not proof an account is a throwaway, but a real
+// person's address will not start this way, and the emptiness check below can't tell a
+// newly invited person's empty account from a throwaway.
+export const THROWAWAY_PREFIX = "rls-check";
+export function isThrowawayEmail(email) {
+  const text = String(email || "").trim();
+  return text.includes("@") && text.split("@")[0].toLowerCase().startsWith(THROWAWAY_PREFIX);
+}
 
 // Something wrong with the setup (a wrong password, an account that isn't
 // empty), as opposed to a security check that failed.
@@ -106,6 +128,16 @@ export function keyProblem(key) {
 // accounts. log: called with each result as it comes in.
 // Returns { results: [{ n, group, title, ok, detail }] }.
 export async function runChecks({ createClient, url, key, accountA, accountB, log = () => {} }) {
+  // First of all, before anything signs in: only accounts made for this. The last group deletes A.
+  for (const [label, account] of [["A", accountA], ["B", accountB]]) {
+    if (!isThrowawayEmail(account.email)) {
+      throw new SetupProblem(
+        `Account ${label} (${maskEmail(account.email)}) doesn't look like a throwaway account: its address must start with "${THROWAWAY_PREFIX}" ` +
+          `(for example ${THROWAWAY_PREFIX}-${label.toLowerCase()}@example.com). The last group of checks DELETES account A and test rows are written into both, ` +
+          "so this script will not run against any other address."
+      );
+    }
+  }
   const opts = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
   const anon = createClient(url, key, opts);
   const ca = createClient(url, key, opts);
@@ -131,7 +163,7 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
   for (const [label, client] of [["A", ca], ["B", cb]]) {
     for (const table of ["pieces", "technique"]) {
       const r = await client.from(table).select("user_id").limit(1);
-      if (r.error) throw new SetupProblem(`Couldn't read the "${table}" table as account ${label}: ${why(r.error)}. Were both migration files run (0001 and 0002)?`);
+      if (r.error) throw new SetupProblem(`Couldn't read the "${table}" table as account ${label}: ${why(r.error)}. Were the migration files run?`);
       if (r.data && r.data.length > 0) {
         throw new SetupProblem(
           `Account ${label} already has rows in "${table}", so it isn't a throwaway account. Nothing was written. ` +
@@ -388,6 +420,63 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
     return verdict(off, `the anonymous sign-in probe failed, but not because it is switched off (${why(r.error)})`);
   });
 
+  /* -- delete my account (migration 0003) ---------------------------- */
+  // LAST, because it deletes account A. Everything above needed A signed in with its
+  // rows in place. B's rows are what prove the function deletes only the caller.
+  const DEL = "Delete my account (migration 0003)";
+  const noFunctionHint = (r) => (r && r.error && (r.error.code === "PGRST202" || r.status === 404) ? " Was migration 0003 run?" : "");
+  const afterDelete = { deleted: false };
+  await check(DEL, "a signed-out visitor cannot call it", async () => {
+    const r = await anon.rpc("delete_my_account");
+    const stillThere = await rowOf(ca, "technique", { user_id: idA });
+    return verdict(refused(r) && rowsIn(stillThere).length === 1, `it was not refused by the rules (${why(r.error)}).${noFunctionHint(r)}`);
+  });
+  await check(DEL, "A can delete its own account", async () => {
+    const r = await ca.rpc("delete_my_account");
+    afterDelete.deleted = !r.error;
+    return verdict(!r.error, `the call failed (${why(r.error)}).${noFunctionHint(r)}`);
+  });
+  await check(DEL, "A's pieces and technique row went with it", async () => {
+    if (!afterDelete.deleted) return { ok: false, detail: "needs the delete before it to have worked" };
+    // A's old sign-in still passes the rules (they go by the token), so an empty list here
+    // means the rows are gone, not that they are hidden.
+    const p = await rowOf(ca, "pieces", { user_id: idA });
+    const t = await rowOf(ca, "technique", { user_id: idA });
+    if (p.error || t.error) return { ok: false, detail: `couldn't read the rows back (${why(p.error || t.error)})` };
+    return verdict(rowsIn(p).length === 0 && rowsIn(t).length === 0, `A still has ${rowsIn(p).length} piece row(s) and ${rowsIn(t).length} technique row(s)`);
+  });
+  await check(DEL, "A can no longer sign in", async () => {
+    if (!afterDelete.deleted) return { ok: false, detail: "needs the delete before it to have worked" };
+    const again = createClient(url, key, opts);
+    const r = await again.auth.signInWithPassword({ email: accountA.email, password: accountA.password });
+    const signedIn = !r.error && r.data && r.data.user;
+    try {
+      await again.auth.signOut({ scope: "local" });
+    } catch (e) {
+      /* nothing to sign out of */
+    }
+    return verdict(!signedIn, "A could still sign in after deleting its account");
+  });
+  await check(DEL, "A's old sign-in cannot add rows any more", async () => {
+    if (!afterDelete.deleted) return { ok: false, detail: "needs the delete before it to have worked" };
+    const id = `${ROW_PREFIX}after-delete-${rand()}`;
+    const r = await ca.from("pieces").insert({ user_id: idA, id, data: mark("written after the account was deleted") }).select();
+    return verdict(!!r.error && rowsIn(r).length === 0, "a row was written for an account that no longer exists");
+  });
+  await check(DEL, "B's account and rows are untouched", async () => {
+    const again = createClient(url, key, opts);
+    const signIn = await again.auth.signInWithPassword({ email: accountB.email, password: accountB.password });
+    try {
+      await again.auth.signOut({ scope: "local" });
+    } catch (e) {
+      /* nothing to sign out of */
+    }
+    const p = await rowOf(cb, "pieces", { id: pb });
+    const t = await rowOf(cb, "technique", { user_id: idB });
+    const intact = rowsIn(p).length === 1 && rowsIn(p)[0].data.name === nameB && rowsIn(t).length === 1 && rowsIn(t)[0].data.name === techNameB;
+    return verdict(!signIn.error && intact, `B can sign in again: ${!signIn.error}; B's piece is there: ${rowsIn(p).length === 1}; B's technique row is there: ${rowsIn(t).length === 1}`);
+  });
+
   for (const client of [ca, cb]) {
     try {
       await client.auth.signOut({ scope: "local" });
@@ -408,6 +497,8 @@ Usage:  node scripts/check-rls.mjs [--yes]
 It asks for, in order: the project's URL, the project's PUBLIC key, then the
 email and password of two THROWAWAY accounts (A and B), created in the project's
 dashboard (Authentication > Users > Add user, with "Auto Confirm User" ticked).
+Both addresses must START WITH "rls-check" (for example rls-check-a@example.com):
+the script refuses anything else before it signs in, because it deletes account A.
 The key and the passwords are typed hidden. Nothing is saved.
 
 Instead of being asked, it reads these environment variables if they are set:
@@ -417,8 +508,10 @@ Instead of being asked, it reads these environment variables if they are set:
 --yes   don't ask "is this the right project?" before starting.
 
 Exit code: 0 every check passed, 1 a check failed, 2 the setup was wrong
-(nothing was checked). Afterwards delete the two throwaway accounts in the
-dashboard: their rows go with them.`);
+(nothing was checked). The last group (migration 0003) DELETES account A, so
+use throwaway accounts only. Afterwards delete whichever throwaway accounts
+are still in the dashboard (B, and A if that group did not get that far):
+their rows go with them.`);
 }
 
 function ask(question) {
@@ -468,18 +561,19 @@ async function main() {
     return hidden ? askHidden(question) : ask(question);
   };
 
-  const url = (await need(env.CHECK_URL || env.VITE_SUPABASE_URL, "Project URL (https://<project>.supabase.co): ")).replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
+  const url = (await need(env.CHECK_URL || env.VITE_SUPABASE_URL, "Project URL (https://<project>.supabase.co): ")).trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
   const ref = projectRefFromUrl(url);
   if (!ref) return fail("That isn't a hosted Supabase project address (https://<project>.supabase.co). Nothing was checked.");
   // Typed hidden like a password: the public key is not a secret, but the dashboard
   // shows the secret key right beside it, and one pasted by mistake must not end up
   // on the screen (the check below refuses it, but only after it was typed).
-  const key = await need(env.CHECK_KEY || env.VITE_SUPABASE_ANON_KEY, "Project PUBLIC key (sb_publishable_..., hidden as you paste it): ", { hidden: true });
+  // Trimmed: a hidden prompt can't show a stray space or line break pasted with the key.
+  const key = (await need(env.CHECK_KEY || env.VITE_SUPABASE_ANON_KEY, "Project PUBLIC key (sb_publishable_..., hidden as you paste it): ", { hidden: true })).trim();
   const problem = keyProblem(key);
   if (problem) return fail(`Not using that key: ${problem}. Nothing was checked.`);
 
-  const accountA = { email: await need(env.CHECK_EMAIL_A, "Throwaway account A, email: "), password: await need(env.CHECK_PASSWORD_A, "Throwaway account A, password (hidden): ", { hidden: true }) };
-  const accountB = { email: await need(env.CHECK_EMAIL_B, "Throwaway account B, email: "), password: await need(env.CHECK_PASSWORD_B, "Throwaway account B, password (hidden): ", { hidden: true }) };
+  const accountA = { email: await need(env.CHECK_EMAIL_A, "Throwaway account A, email (must start with rls-check): "), password: await need(env.CHECK_PASSWORD_A, "Throwaway account A, password (hidden): ", { hidden: true }) };
+  const accountB = { email: await need(env.CHECK_EMAIL_B, "Throwaway account B, email (must start with rls-check): "), password: await need(env.CHECK_PASSWORD_B, "Throwaway account B, password (hidden): ", { hidden: true }) };
   if (!accountA.email || !accountA.password || !accountB.email || !accountB.password) {
     return fail("Missing details for the two throwaway accounts, and this isn't an interactive terminal to ask in. Nothing was checked.");
   }
@@ -487,7 +581,7 @@ async function main() {
   console.log(`\nMeasureOne security check\nProject: ${ref}  (${url})\nAccount A: ${maskEmail(accountA.email)}\nAccount B: ${maskEmail(accountB.email)}`);
   if (!args.includes("--yes")) {
     if (!interactive) return fail("Not asking \"is this the right project?\" without a terminal: pass --yes to go ahead. Nothing was checked.");
-    const answer = await ask(`\nRun the checks against project "${ref}"? These two accounts must be throwaway ones. (yes/no) `);
+    const answer = await ask(`\nRun the checks against project "${ref}"? These two accounts must be throwaway ones, and account A will be DELETED by the last group of checks. (yes/no) `);
     if (!/^y(es)?$/i.test(answer)) return fail("Stopped. Nothing was checked.");
   }
 
@@ -514,8 +608,8 @@ async function main() {
     process.exitCode = 1;
   }
   console.log(
-    "\nNext: delete the two throwaway accounts (dashboard > Authentication > Users > click the row > Delete user)." +
-      "\nTheir test rows (named \"RLS check ...\") go with them; nothing else was written."
+    "\nNext: delete the throwaway account(s) still there (dashboard > Authentication > Users > click the row > Delete user)." +
+      "\nAccount A is deleted by the check of migration 0003 itself, so usually only B is left. Test rows (named \"RLS check ...\") go with their account; nothing else was written."
   );
 }
 

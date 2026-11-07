@@ -3524,6 +3524,10 @@ the link notices) has no automated test; it was tried in a browser.
 
 ## Backups of the account copy (2026-10-12)
 
+> **Superseded going forward by [Pass 131](#other-peoples-data-backups-that-expire-pass-131) (2026-11-06):** the daily
+> copy moves to a new private repository where each day's copy expires after 30 days. This section describes the first
+> repository, which keeps running until the owner deletes it, and is the history of why the job is built as it is.
+
 The Free plan keeps no backups of the production project (see
 [Free-plan consequences](#free-plan-consequences)), so a free scheduled job
 makes them. **Where:** a separate **private** GitHub repository,
@@ -3635,17 +3639,157 @@ repository's own `RESTORE.md` is not in this repository and was not checked for 
   and when other people get accounts (Phase 3) the privacy policy has to cover this
   copy. The Free plan's pause also stops the job's reads, not the app.
 
+## Other people's data: backups that expire (Pass 131)
+
+**Built 2026-11-06 (Phase 3, Design F), on the owner's answers of the same day: keep copies 30 days, stay on the
+Free plan through invitations, and a daily keep-awake request.** No app code and nothing on the live site changed
+(the app's delete-window sentence about the backup copy is a one-line follow-up, below). The work is in a **new
+private repository, `Chopinbby/measureone-backups-v2`** (the older `Chopinbby/measureone-backups` described in
+[Backups of the account copy](#backups-of-the-account-copy-2026-10-12) keeps running, untouched, until the owner
+deletes it). The repository's own README and RESTORE.md are the operating instructions; this section is the design and
+the facts.
+
+**How "about 30 days" works.** The daily copy is no longer a git commit. Each run keeps it as an **artifact**
+(`measureone-backup-<date>-<time>`, the whole `backup/` folder) with `retention-days: 30`, and the repository's
+setting "Artifact and log retention" is capped at 30 days as a second lock (set through the API and read back:
+`{"days":30,...}`; the default was 90). GitHub deletes an expired artifact on its own schedule and does not promise
+the hour, so the stated time is **about 30 days**: a deleted account leaves the account database at once (the
+cascade, Pass 130) and leaves the copies within that. **The repository itself holds only plain numbers:**
+`counts.csv` and `LAST_BACKUP.txt` (when, the counts, and a note when an account was deleted); `backup/` is in
+`.gitignore` as a safety net, and a test fails if the job ever adds anything but those two files, so no person's
+data lands in git history. Restoring "an earlier day" is now: Actions tab, that day's run, Artifacts, download, unzip
+(RESTORE.md). **Alternatives ruled out (Design F named the first):** pruning the old repository's history now and
+then (fragile; GitHub's own guide says a rewrite is not a full erase); GitHub Releases with a clean-up job (another
+moving part where the platform already expires files); keeping git commits and force-pushing a one-commit history
+daily (leaves exactly one day).
+
+**A finding: Pass 130 broke the backup job's alarm.** The job failed (and emailed) whenever the number of pieces,
+technique libraries or accounts went DOWN, on the assumption "the app never deletes rows", which stopped being true the
+moment a person could press Delete my account. With invitations that would have been a false emergency for every
+leaver. `check-counts.sh` now decides (a pure rule, `test-check-counts.sh`): nothing down is fine; rows down with no
+account down is an alarm; an account down is fine **with a note** unless every account is gone, more than 3 went in one
+day, or more technique libraries vanished than accounts (a person has at most one). The 3 is a judgement call, kept as
+`MAX_ACCOUNTS_DROP` in the file. **Known false alarm:** one account deleted and another invited on the same day, which
+leaves the account count level while pieces went down (the message says so). The note carries counts only, never an
+email (a deleted person's address must not land in git history).
+
+**Keeping the Free plan's project awake.** A new daily job, `keep-awake.yml`, makes one anonymous request the same way
+the app does (`GET /rest/v1/pieces?select=id&limit=1` with the public key) and treats 401 with PostgREST's `42501`
+("permission denied for table pieces": the database ran the query and the security rules refused it, read on
+production 2026-11-06) or 200 as healthy; anything else fails the run, so a paused project emails the owner. It has no
+permissions, no secrets and no checkout (the address and the publishable key are public: they are in the app's own code),
+retries twice before failing, and a test pins that the key is a publishable one. **Honest limit:** Supabase's pausing
+pages (read 2026-11-06) say a Free project is paused when it gets too little "user database activity" in a week, that
+"a few user requests to the database each day" is typically enough, and that dashboard visits and API calls count; they
+say nothing about automated pings (not endorsed, not forbidden) or about direct Postgres connections such as the backup
+job's, and some people report pings failing to prevent a pause. It is belt and braces with the owner's own use of the app
+(a signed-in open tab asks the account every minute), the daily backup, and Supabase's warning email about a week before
+a pause. Not provable without waiting for a week with no other activity. **A correction:** the docs said a paused project can
+be restored for 90 days; Supabase's current page says **up to a year** (the dashboard shows the real deadline).
+
+**The plan question (answered for invitations, asked again at Pass 135).** Stay on the **Free plan** through
+invitations. Consequences, all already accepted in Free-plan consequences above: a project idle for a week pauses
+(everyone's sync and sign-in from a new device stops until the owner presses Restore project; practice carries on
+because the app works from each person's own browser first), there are no Supabase backups (this job is why that is
+survivable), 500 MB of database and 50,000 monthly users are far above anything invitations reach, and the
+**leaked-password check is a Pro feature so it stays off**. Pro (from $25 a month when read 2026-10-10; re-read the price
+at 135) does not pause projects and keeps 7 days of backups. Revisit at open sign-up, when strangers make a pause or the
+email limits matter more.
+
+**The restore, rehearsed.** The fire drill (`tests/drill.mjs`, run by `tests/restore-drill.mjs <unzipped copy>`)
+restores a copy into a clean scratch Postgres (PGlite) built from the app's migration files (all three now), with a new
+account per person and the old ids swapped by the real tool, and compares every piece and the technique library with the
+importable file and checks what the new account and the old id can see through the security rules. **Run on the real
+latest backup on 2026-11-06: 26 places changed, matching counts.csv (25 pieces + 1 technique library), all 25 pieces
+identical, the technique library identical, the new account sees 25 and the old id none.** **Then tried in a real
+Supabase project, 2026-11-07 (the owner, in the TEST project, with a spare `+restore` account):** the SQL Editor took the
+whole swapped file (218 KB) and the `SET session_replication_role` line, and the account then held 25 pieces, a revision
+sum of 58 (maximum 33) and a technique revision of 34, **exactly the numbers a scratch load had predicted**, so each piece
+kept its original revision (a reset would have summed to 25). Her existing test account (49 pieces) and a third account were
+untouched. Running the file a second time fails with `duplicate key value violates unique constraint "pieces_pkey"` on the
+first piece and changes nothing (a failed run rolls back): that error means the first run had worked. **Not done:** signing in
+to the test preview as the spare account and pressing Restore (the app seeing the restored rows through a real sign-in).
+
+**`tools/swap-ids.mjs` (the id swap an exact rebuild needs).** Matches people old to new by email (`--rename` for a
+changed address), swaps only a whole quoted id in one pass over the text (so two people trading ids cannot undo each
+other, and an id inside a note is left alone), and refuses to write anything unless: every old person has a new
+account, every row's owner is in the old list, each person's replacements equal their number of rows, and the total equals
+`counts.csv` (pieces + technique libraries). It prints emails masked and writes nothing on a refusal. **The file it writes starts with a
+safety check** (a `DO` block) that raises an error, before anything loads, unless the project holds each new account with that id
+AND that email: it stops a paste into the wrong project (production would not hold the spare account) and an id mistyped on the way.
+Added 2026-11-07 while preparing the owner's trial. Its tests include 12
+deliberately broken copies, all caught.
+
+**The monthly reminder.** `monthly-restore-reminder.yml` opens a GitHub issue on the 1st of each month, assigned to the
+owner (a short checklist: the jobs are green, download the newest copy, import a file in a private window, look at the
+Supabase dashboard, a full rehearsal every third month). It fails (and emails) if it cannot open the issue.
+
+**The one-time reminder to delete the old repository (added at the owner's request, 2026-11-07).**
+`one-time-reminder-delete-old-repo.yml` opens an issue on **2026-11-10**, assigned to the owner, that counts this repository's
+*scheduled* backups since 2026-11-08 (successes and failures separately, through `gh run list`, flags checked against the real
+repository) and says "That is enough" only when at least 3 succeeded and none failed, otherwise WAIT with the reason; the checklist
+says how to delete `measureone-backups` (Settings, Danger zone, irreversible) and that the app's delete-window sentence is made exact
+only after that. A cron cannot name a year, so it runs every 10 November and **a year check makes it do nothing after 2026**; run by
+hand it always opens the issue. 35 checks, 9 broken copies caught. Not fired live (the issue would arrive with a "WAIT" before it
+means anything).
+**Upkeep done on the way.** Every pinned action is now on Node 24 (checkout v7.0.1, upload-artifact v7.0.2; Supabase's
+setup-cli v3.2.0), which closes the "Node.js 20 is being retired" item. Everything stays pinned to exact commits and to
+Ubuntu 24.04.
+
+**Checks.** The backups repository's `tests/run-all.sh` runs 8 groups, all passing: the job's steps and shape (99 checks,
+25 broken copies of the workflow and steps), the missing-rows rule (40 checks, 13 broken copies), the "is it recent" check
+(74, inherited, still passing against the new job), the keep-awake job against a stand-in service (46, 10 broken script
+copies and 6 broken workflow copies), the reminder (24, 5 broken), the id swap (37 checks, 17 broken copies), the importable-file
+SQL in a real Postgres engine, and the restore drill end to end on made-up data (7 checks, 8 broken restores each caught). The
+keep-awake job was run once on GitHub against production (green, 2026-11-06). **The backup job's first real run was 2026-11-07,
+after the owner added `SUPABASE_DB_URL`** (the first attempt failed on a wrong password and nothing was copied; re-adding the
+secret fixed it): green, its copy kept until 2026-12-07, the repository holding only counts, and the restore drill run on that
+real downloaded copy passed (25 pieces and the technique library identical).
+
+**Facts for the privacy policy (Pass 133's list from this pass).** The daily copy holds every account's email address,
+piece names, notes and practice history (the importable files and `data.sql`) and is stored as GitHub (GitHub Inc., United
+States) Actions artifacts in a private repository only the owner can open (two-factor on), for about 30 days; the
+repository's files hold counts only; run logs hold no personal data (counts and messages only) and are kept at most 30
+days; the secret in the repository is the database connection string. A deleted account leaves the database at once and
+the copies within about 30 days; **a piece deleted inside the app is only marked deleted and stays in the database and in
+the copies for as long as the row exists** (Design D, Pass 122): the policy must say that, or the owner must decide it
+should be erased (not built, no owner yet). The old repository (`measureone-backups`) holds every day since 2026-10-12 until
+the owner deletes it, and its first commit holds Supabase's sign-in tables (Backups of the account copy, item 1): it must be
+deleted before invitations. Outside services after this pass: Supabase, Vercel, GitHub, Resend, ImprovMX, Google Fonts.
+
+**Where it stands (2026-11-07).** Done with the owner in chat: the secret added (a wrong password first, then fixed), the first backup
+green with its copy kept until 2026-12-07, her private-window import of a file from it, the failure email (one arrived, for the earlier
+failed run) and the reminder issue reaching her, and the real-project restore in the test project (numbers exact, revisions kept). She
+accepted the `+restore` invitation and pressed Restore on the test preview; **what it showed was not reported when this was written**.
+Left: deleting `measureone-backups` (the dated reminder opens 2026-11-10), and deleting the spare user in the test project.
+
+**The owner's steps, in order** (all in RESTORE.md and the README): add the `SUPABASE_DB_URL` secret to the new
+repository; read back the 30-day retention cap; run the backup by hand and open its artifact; import a file from it in a
+private window; run "Check the backup is recent" with 0 (it must fail and email) and then with the box blank; run the monthly
+reminder once; the rehearsal in the test project; after about 3 green daily runs delete the old repository. **Until
+the secret is added the new repository's backup job fails each morning and "Check the backup is recent" fails each
+afternoon ("cannot find LAST_BACKUP.txt"): expected, and the emails say what is missing.**
+
+**Left open.** (i) The app's `DELETE_BACKUP_NOTE` ("an older copy of your pieces can still be in it") is true but vague; make
+it say "for about 30 days" at Pass 133, together with the policy and only after the old repository is deleted (an app
+change, so it reaches the live site). (ii) The restore trial did not include signing in to the test preview as the spare account (above). (iii) Whether the keep-awake request counts
+as activity is unknowable from outside. (iv) The 3-account threshold is a guess. (v) ~~The workflow's first real run~~ seen 2026-11-07 (with the current Supabase CLI's dump). (vi) Artifacts are readable by anyone with
+access to the repository, including through the owner's GitHub account; its two-factor sign-in is the protection. (vii) An
+email changed with Change email makes `--rename` necessary in a rebuild (the tool says which person has no match).
+
 ## Phase 3: other people's accounts (designed, not built)
 
-**Designed in Pass 127 (2026-10-31). Passes 128, 129 and 130 are built so far** (128, 2026-11-01: the owner's own
+**Designed in Pass 127 (2026-10-31). Passes 128, 129, 130 and 131 are built so far** (128, 2026-11-01: the owner's own
 address, the Site URL, and the "moved" note on the old addresses, merged the same day as PR 86, `c4af6bf`;
 129, 2026-11-06: a real email service, see [Email service (Pass 129)](#email-service-pass-129), merged
 as PR 88, `87065bc`; 130, 2026-11-06: change email and delete my account in the app, see
 [Change email and delete my account (Pass 130)](#change-email-and-delete-my-account-pass-130), **built and
 tried against a stand-in, plus migration `0003` and the security script on the test project (43 of 43,
 2026-11-06; Change email and Delete my account both passed on the test project's preview the same day);
-`0003` run on production with 43 of 43 there too; merged 2026-11-06 as PR 90, `ab7916f`, live as `index-BQl7BE2O.js`**);
-nothing else in this section is built. **The next to build is Pass 131.** Phase 3 is what has to
+`0003` run on production with 43 of 43 there too; merged 2026-11-06 as PR 90, `ab7916f`, live as `index-BQl7BE2O.js`**; 131, 2026-11-06:
+other people's data, see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), built in a new
+private backups repository, **no app code, nothing on the live site, and waiting on the owner's steps**);
+nothing else in this section is built. **The next to build is Pass 132.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -3743,7 +3887,8 @@ the docs for `Owner: Pass N` (below).
   that fails). On the live site: two new buttons in the Account panel and on the welcome screen.
   Needs 129.
 - **131** Other people's data: backups that expire, a real restore rehearsed, the plan question. On
-  the live site: nothing. Needs 127; best after 130.
+  the live site: nothing. Needs 127; best after 130. **Built 2026-11-06 in `Chopinbby/measureone-backups-v2`: see
+  [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131).**
 - **132** Alarms: an outside uptime check, Supabase's usage emails, a "Report a problem" link. On the
   live site: that link. Needs 128 and 129.
 - **133** Privacy policy and terms: two pages at the domain, linked everywhere, plus one sentence in
@@ -3862,29 +4007,41 @@ section, or taken from the later cards' own rationales; the owner can strike any
   day (the owner's trial 1):** the handler acts on `email_change` and on the half-way message, and both banners
   showed as written.
 - *(added by Pass 127)* **The backups repository keeps every day forever** in its history (Backups of the account copy).
-  Other people's data needs a stated time. Owner: Pass 131 (30 days recommended).
+  Other people's data needs a stated time. Owner: Pass 131 (30 days recommended). **Done in Pass 131 (2026-11-06):** about 30
+  days, as expiring artifacts in the new repository, plus a 30-day cap on the repository's own retention setting; see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131).
+  The old repository keeps every day until the owner deletes it (her step, after about 3 green runs of the new one).
 - *(added by Pass 127)* **The first backup commit still holds Supabase's sign-in tables** (Decisions.md, "Backups of the
   account copy: what is still open", item 1). A fresh private repository retires it with its
-  history. Owner: Pass 131.
+  history. Owner: Pass 131. **Done in Pass 131 (2026-11-06) in the new repository** (it never held sign-in tables and holds no
+  personal data in git at all); **retired for good only when the owner deletes the old repository**, which must happen before
+  anyone else is invited.
 - *(added by Pass 127)* **A restore inside a real Supabase project has never been tried** (Backups: "Not checked"; item
-  2). Owner: Pass 131.
+  2). Owner: Pass 131. **Rehearsed in a scratch Postgres on the real latest backup in Pass 131 (2026-11-06), and then in the TEST
+  Supabase project by the owner (2026-11-07: the SQL Editor took the 218 KB file, revisions kept; see Pass 131 above). Only the
+  sign-in-and-Restore check at the end is not done.**
 - **An exact rebuild with many accounts means inviting each person again,** and swapping their old
   account id for the new one in a copy of `data.sql`, since passwords aren't saved (item 4; `RESTORE.md`
-  in the backups repository). Owner: Pass 131 (an id-swap script and its test; `RESTORE.md` says so).
+  in the backups repository). Owner: Pass 131 (an id-swap script and its test; `RESTORE.md` says so). **Done in Pass 131
+  (2026-11-06):** `tools/swap-ids.mjs`, 37 checks and 17 broken copies, used by the restore drill, which ran on the real backup.
 - *(added by Pass 127)* **The restore drill is manual;** nothing reminds anyone (item 5). Owner: Pass 131 (a monthly
-  reminder).
+  reminder). **Done in Pass 131 (2026-11-06):** `monthly-restore-reminder.yml` opens an issue assigned to the owner on the 1st
+  of each month; not yet seen arriving (the owner runs it once by hand).
 - *(added by Pass 127)* **The two pinned actions in the backups workflows target Node.js 20** (item
   8; Backups: Upkeep). Pass 131 edits those workflows and a fresh repository carries them, so it is
-  the natural moment; the owner can leave it logged. Owner: Pass 131.
+  the natural moment; the owner can leave it logged. Owner: Pass 131. **Done in Pass 131 (2026-11-06):** checkout v7.0.1 and
+  upload-artifact v7.0.2 run on Node 24; Supabase's setup-cli is v3.2.0.
 - *(added by Pass 127)* **The Free plan.** An idle project pauses after a week, which would stop sign-in for every person,
   and the plan keeps no backups of its own (Free-plan consequences; Decisions.md, "The production
   project stays on Supabase's Free plan"). Owner: Pass 131 (stay Free through invitations, write down
-  what a pause looks like to an invited person and how it is restored; decided again at 135).
+  what a pause looks like to an invited person and how it is restored; decided again at 135). **Done in Pass 131
+  (2026-11-06):** Free through invitations (the owner's answer); what a pause looks like and how to restore it is in the new
+  README and in [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131); a daily keep-awake request was added at her request (unproven to count as activity).
 - **The leaked-password check is Pro-plan only** (Pass 113, item 8). Owner: Pass 131 (read with the
-  plan decision: if the plan changes, turn it on).
+  plan decision: if the plan changes, turn it on). **Done in Pass 131 (2026-11-06):** the plan did not change, so it stays off.
 - **The privacy policy has to cover the backups copy** in the private GitHub repository (Backups:
   "Things to remember"; Decisions.md, item 4 of the same open entry). Owner: Pass 133 (from 131's
-  list of facts).
+  list of facts). Pass 131's list of facts is at the end of [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131) (including that a piece deleted in the app is only marked deleted,
+  and that the old backups repository must be deleted before invitations).
 - *(added by Pass 127, a finding)* **The app's fonts come from Google.** The app's stylesheet imports
   them from `fonts.googleapis.com` (`App.jsx`, the `@import` at the top of the CSS string), so every
   visitor's browser contacts Google when the page opens, signed in or not. The card for Pass 133 lists

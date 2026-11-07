@@ -8765,6 +8765,47 @@ what it rules out.
   from a throwaway and the last group deletes account A. 1,736 tests; 8 deliberate breakages of the new logic,
   5 of that guard and 12 broken versions of the database in the script's tests, all caught.
 
+- **Pass 131 — other people's data: backups that expire, a real restore, the plan question (2026-11-06).** Built as Phase 3
+  Design F, in a new private repository, `Chopinbby/measureone-backups-v2`; no app code and nothing on the live site. Design
+  and facts: [Accounts-and-Backend.md](Accounts-and-Backend.md#other-peoples-data-backups-that-expire-pass-131).
+  **The owner's answers (2026-11-06):** keep copies **30 days** (she asked about 15; the reasons to keep 30 were modest: time to
+  notice a quiet problem, matching the app's 30-day Recently deleted list and the email service's 30 days; she kept 30), stay on
+  the **Free plan** through invitations, and add a **daily keep-awake request** (she said she would probably keep the project
+  awake herself too). **Decisions inside that:** (a) the daily copy is an **expiring artifact**, not a git commit, so no personal
+  data enters git history and the stated time needs no history rewriting; the repository's own artifact-and-log retention is
+  capped at 30 days as a second lock; (b) a **fresh repository** rather than cleaning the old one, which retires the first commit
+  (it holds Supabase's sign-in tables) and the secret is added again; the old one keeps running until the owner deletes it after
+  about 3 green runs of the new one; (c) the backup job's old alarm, "any drop in the counts fails the run", is replaced by a rule
+  (`check-counts.sh`) because **Delete my account (Pass 130) made a drop normal**: an account deleted is noted in
+  `LAST_BACKUP.txt` and passes, rows vanishing with no account deleted still fails, as does every account gone, more than 3
+  accounts in a day, or more libraries gone than accounts; the 3 is a guess and a known false alarm remains (a deletion and an
+  invitation on the same day); (d) the note carries **counts only, never an email**; (e) the keep-awake request is anonymous, reads
+  nothing private, and counts a 401 with `42501` as healthy, because production answers exactly that to an anonymous read
+  (checked 2026-11-06); it has no secret and no permission; (f) a monthly **issue** assigned to the owner is the reminder (GitHub
+  notifies on assignment), not a calendar entry or a scheduled app message; (g) the id swap is a tested tool that **refuses** rather
+  than guesses; (h) `DELETE_BACKUP_NOTE` is **not** changed in this pass (it would reach the live site and would be untrue until the
+  old repository is gone): Pass 133 makes it say "about 30 days". **Alternatives ruled out:** pruning the old repository's history
+  on a timer (Design F, fragile; a rewrite is not a full erase), GitHub Releases with a clean-up job, a one-commit repository
+  force-pushed daily (leaves one day), a 15 or 60 or 90 day window (30 chosen), Supabase Pro now ($25 a month: no pause and 7 days
+  of backups; revisit at 135), an outside uptime service for the pause (Pass 132's), a calendar reminder only (nothing would check
+  it was kept), leaving the counts alarm as it was (every leaver would have raised an emergency). **Honest limits:** Supabase does
+  not say whether such a request counts as activity or whether automated pings are acceptable (its pages say a few database
+  requests a day are usually enough and that API calls count); the SQL Editor's handling of a 200 KB paste was untried when built and
+  **was then tried by the owner in the test project (2026-11-07) and worked, revisions kept**; the backup job's first run (2026-11-07) failed
+  on a wrong password in the secret (nothing copied), then went green after she re-added it. **Found on the way:**
+  Supabase's current pausing page says a paused project can be restored for up to **a year**, not 90 days; and that Pass 130 had left
+  the backup alarm wrong. **Seen:** the id swap and the restore drill on the real latest backup in a scratch Postgres (all 25 pieces
+  and the technique library identical; the old id sees none); the keep-awake job green on GitHub against production. The backups
+  repository's 8 test groups pass, with 76 deliberately broken copies caught (25 + 13 + 16 + 5 + 17) plus 8 broken restores. **Added while
+  preparing her restore trial (2026-11-07), because an account id was to be copied from a screenshot:** the swapped file now begins with a
+  safety check that stops, loading nothing, unless the project holds each new account (id and email); it caught the right-project,
+  missing-account, mistyped-id, wrong-email and empty-project cases in a real Postgres engine, and it would have refused a paste into
+  production. **Found on the way:** the test project already held an account under her production email, so matching by email alone
+  would have restored into it; the trial used `--rename` to the spare `+restore` account. **Added at her request, 2026-11-07:** a one-time
+  reminder issue on 2026-11-10 to delete the old backups repository, with the new repository's scheduled-backup count in it (chosen over a calendar
+  event because she already receives GitHub's assignment emails, which the trial confirmed; the old repository stays until then so there is
+  a second copy while the new one proves itself).
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -8955,7 +8996,8 @@ oversight to silently fix; surface it instead.
   export reminder nags after a day). Until one is chosen, (3) is the safety
   net.
 - **Backups of the account copy (2026-10-12) — what is still open.** Logged, not
-  fixed. (1) **The first backup commit** in the private repository (the only
+  fixed. **Pass 131 (2026-11-06) answers items 1, 2 (rehearsed in a scratch database, then tried by the owner in the test project, 2026-11-07), 4, 5 and the
+  Node 20 part of 8 in a new repository; see "Pass 131" under Accounts and backend above.** (The list below is left as written.) (1) **The first backup commit** in the private repository (the only
   one; checked 2026-10-12: five sign-in tables, one INSERT each, none in any later
   copy), made before the fix, holds Supabase's sign-in tables: an email, a password
   scramble, the devices and network addresses of sign-ins, and the session keys. The

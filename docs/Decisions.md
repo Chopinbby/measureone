@@ -8796,7 +8796,7 @@ what it rules out.
   Supabase's current pausing page says a paused project can be restored for up to **a year**, not 90 days; and that Pass 130 had left
   the backup alarm wrong. **Seen:** the id swap and the restore drill on the real latest backup in a scratch Postgres (all 25 pieces
   and the technique library identical; the old id sees none); the keep-awake job green on GitHub against production. The backups
-  repository's 8 test groups pass, with 76 deliberately broken copies caught (25 + 13 + 16 + 5 + 17) plus 8 broken restores. **Added while
+  repository's 9 test groups pass, with 85 deliberately broken copies caught (25 + 13 + 16 + 5 + 17, and 9 for the one-time reminder) plus 8 broken restores. **Added while
   preparing her restore trial (2026-11-07), because an account id was to be copied from a screenshot:** the swapped file now begins with a
   safety check that stops, loading nothing, unless the project holds each new account (id and email); it caught the right-project,
   missing-account, mistyped-id, wrong-email and empty-project cases in a real Postgres engine, and it would have refused a paste into

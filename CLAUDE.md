@@ -1256,10 +1256,10 @@ Two windows (`ChangeEmailModal.jsx`, `DeleteAccountModal.jsx`), opened from the 
 and the Settings **Danger zone** panel (Delete my account, beside Delete this piece; it moved there from the
 Edit piece settings page at the owner's request, 2026-11-06, with a `SkullCrossbones.jsx` icon), and from
 the welcome screen; everything that decides what happens is in `lib/backend.js` (tested in
-`test/backend.test.mjs`). Built 2026-11-06, **not merged**. `0003_delete_my_account.sql` was run on the
-test project and `scripts/check-rls.mjs` passed 43 of 43 there (2026-11-06); still to do by hand: the two
-buttons tried on the test project, then `0003` on production BEFORE the merge (or the live site shows a
-Delete button that fails). Rules:
+`test/backend.test.mjs`). Built 2026-11-06 and **merged 2026-11-06 (PR #90, merge commit `ab7916f`), live as `index-BQl7BE2O.js` on all four addresses**.
+`0003_delete_my_account.sql` was run by hand on both projects BEFORE the merge (needed: without it the live site
+shows a Delete button that fails) and `scripts/check-rls.mjs` passed 43 of 43 on both; both buttons were tried on
+the test project's preview. Rules:
 
 - **A wrong password must never reach the database function.** `deleteMyAccount` signs in with the typed
   password first and stops on a refusal; the function itself (`delete_my_account()`, security definer, no
@@ -1385,21 +1385,19 @@ settings, a deletion and the piece list's order; collections and whole shapes, t
 tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
 is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01),
-129 (a real email service, 2026-11-06) and 130 (change email and delete my account, built 2026-11-06, not
-yet merged) are built:
+129 (a real email service, 2026-11-06) and 130 (change email and delete my account, 2026-11-06, merged as PR #90) are built:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
 sign-up) and 124 (the switch's default) happen only on the owner's word.
-**Where it stands (2026-11-06):** Pass 129 is **merged** (PR #88, merge commit `87065bc`). **Pass 130
-is built (branch `claude/pass-130-outline-dd20dd`) and waiting on the owner:** she has run migration
-`0003_delete_my_account.sql` on the test project and `scripts/check-rls.mjs` there (43 of 43), and tried Change
-email and Delete my account on the test project's preview (both passed, 2026-11-06); and run `0003` and the script on
-production (43 of 43 there too); **only the merge is left** (her steps, in order, are in
-[`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)).
-**The next pass to build is 131** (backups that expire, a real restore, the plan question), in a new chat
-**branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
-branch lands in that branch, not `main`; if 130 is still unmerged, say so and ask her).
+**Where it stands (2026-11-06):** Passes 129 (PR #88, `87065bc`) and **130 (PR #90, merge commit `ab7916f`)
+are merged.** Pass 130 is live: all four addresses serve `index-BQl7BE2O.js`, built for the production project
+(its address is in the file, the test project's and any secret key are not); migration `0003` is on both projects
+and the security script passed 43 of 43 on both; Change email and Delete my account were tried on the test
+project's preview. **The next pass to build is 131** (backups that expire, a real restore, the plan question),
+in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
+branch lands in that branch, not `main`). Her real account on measureone.app now shows Delete my account in the
+Danger zone: it is the owner's own account, so it must not be pressed in any check.
 Still not
 built elsewhere: a persisted "learned" state, a second Tier 1 rung and repertoire
 rotation (Stage 5); see
@@ -1571,6 +1569,8 @@ silently.
   `0003_delete_my_account.sql` (a database function that deletes only the caller's own account; the
   password is checked by the app, not the database). The security script gained a seventh group (43
   checks; it deletes its throwaway account A) and its first committed tests, and `lib/backend.js` its
-  first (`test/backend.test.mjs`). Built 2026-11-06 on the owner's three answers; **not merged: waiting on
-  her trial on the test project and migration 0003 on both projects.**
+  first (`test/backend.test.mjs`). Built 2026-11-06 on the owner's three answers; **merged 2026-11-06 (PR #90,
+  merge commit `ab7916f`), live as `index-BQl7BE2O.js`**, after her trials on the test project's preview and
+  migration 0003 plus the security script (43 of 43) on both projects. The Danger zone (a red Settings panel with
+  Delete this piece and Delete my account) was added the same day at her request.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)

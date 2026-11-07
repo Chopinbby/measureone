@@ -292,6 +292,10 @@ MeasureOne.jsx/
         │   PieceCheckRow.jsx                       # per-piece export/import picker
         ├── SignInModal.jsx, ChoosePasswordModal.jsx  # Pass 109/113: sign in; choose or
         │                                              # change a password (App.jsx owns the state)
+        ├── ChangeEmailModal.jsx, DeleteAccountModal.jsx  # Pass 130: change email (a link to both
+        │                                              # addresses); delete my account (password again);
+        │                                              # opened from Settings and the welcome screen
+        ├── SkullCrossbones.jsx                    # Pass 130: the Danger zone's icon (lucide has no crossbones)
         ├── SettleConflictModal.jsx, RecentlyDeletedModal.jsx  # Pass 121/122: Review's one
         │                                              # question at a time (draws settleFlow's
         │                                              # settleView); the 30-day Recently deleted list

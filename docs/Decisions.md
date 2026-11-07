@@ -7490,7 +7490,8 @@ what it rules out.
   inside Supabase (Supabase's usual pattern, but more moving parts and a
   separate deploy step), and building the function in Phase 1 now (more
   work before it's needed by anyone). Either way it's a small, deliberate
-  exception to "no server code of our own".
+  exception to "no server code of our own". **Superseded by Pass 130 (2026-11-06):** the in-app delete this entry
+  deferred is built, as a database function (the likely choice named here); see the Pass 130 entry.
 - **The database keeps the revision count, not the app (decided by the
   user, 2026-09-29, for Pass 110).** Design C's overwrite protection
   depends on every save raising the row's revision by exactly one. A
@@ -8730,8 +8731,9 @@ what it rules out.
   checked by signing in with it, then a database function deletes the caller's own account and its rows, then
   this device signs out), the two buttons in Settings, Account and on the welcome screen, and the app's
   handling of the two links an email change sends. A new migration, `0003_delete_my_account.sql`, which the
-  owner runs by hand on the test project and then production. **Not merged and not yet tried on a real
-  project** (see [Accounts-and-Backend.md](Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)
+  owner runs by hand on the test project and then production. **Merged 2026-11-06 (PR #90, `ab7916f`), live as
+  `index-BQl7BE2O.js`; both buttons were tried on the test project's preview and `0003` plus the security script
+  (43 of 43) were run on both projects first** (see [Accounts-and-Backend.md](Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)
   for what was and was not seen, and her steps). **The owner's three answers, 2026-11-06, asked before
   building:** (1) ask for the password again before deleting: yes; (2) after deleting, this device keeps its
   pieces and technique library and signs out: yes; (3) a new address that already has an account gets a plain

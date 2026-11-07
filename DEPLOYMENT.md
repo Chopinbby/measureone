@@ -481,8 +481,9 @@ group deletes account A, so only B is left to delete); run it after any change t
 database's rules or sign-in settings. Only the project's **public** key is ever
 in the app or in a setting, never the secret key. A daily copy of the account
 database is saved by a scheduled job into a separate **private** repository
-(`Chopinbby/measureone-backups`; this repository is public, so backups never go
-here): see [Accounts-and-Backend.md](docs/Accounts-and-Backend.md#backups-of-the-account-copy-2026-10-12).
+(`Chopinbby/measureone-backups-v2` since Pass 131, where each day's copy is an artifact
+that expires after 30 days; the older `Chopinbby/measureone-backups` runs until deleted; this repository is public,
+so backups never go here): see [Accounts-and-Backend.md](docs/Accounts-and-Backend.md#other-peoples-data-backups-that-expire-pass-131).
 
 ---
 

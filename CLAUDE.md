@@ -1354,17 +1354,27 @@ the test project's preview. Rules:
 - **The Free plan applies to both projects:** an idle project pauses after a week
   (practice is unaffected; restore it in the dashboard) and Supabase keeps no backups
   of it, **so since 2026-10-12 a free GitHub job copies the production database every
-  day into a separate PRIVATE repository, `Chopinbby/measureone-backups`** (this
-  repository is public: never put data here). Check it by opening that repository's
-  `LAST_BACKUP.txt` (today or yesterday counts as expected) and its Actions tab. A
-  failed run, a drop in the row counts, or a newest backup over 36 hours old (a second
-  check there) fails a run, and **GitHub emails the owner about failed runs only once
-  the owner has switched on Settings, Notifications, Actions** (done and confirmed
-  2026-10-12 by a deliberate failure; the email landed in Gmail's Updates tab; repeat
-  with limit 0, see that README). GitHub's timer is best effort: the job can start
-  hours late, and a skipped day sends no email by itself. It saves only the app's two
-  tables, never Supabase's sign-in tables. Re-run its restore fire drill now and then
-  (`tests/restore-drill.mjs` there). Manual export and the export reminder stay. See
+  day into a separate PRIVATE repository** (this repository is public: never put data
+  here). **Since Pass 131 (2026-11-06) that is `Chopinbby/measureone-backups-v2`: each
+  day's copy is an Actions artifact that GitHub deletes after 30 days ("about 30 days"
+  is the stated time), the repository holds only counts and `LAST_BACKUP.txt`, and the
+  older `Chopinbby/measureone-backups` (every day forever, first commit holds Supabase's
+  sign-in tables) keeps running until the owner deletes it, which must happen before
+  anyone else is invited.** Check it by opening `LAST_BACKUP.txt` there (today or
+  yesterday counts as expected; a third line "Note:" says an account was deleted) and the
+  Actions tab. Four jobs: the backup, "Check the backup is recent" (over 36 hours old
+  fails), "Keep the account service awake" (one anonymous harmless request a day, fails if
+  the project is paused; whether Supabase counts it as activity is not documented) and a
+  monthly reminder issue. **The backup's alarm is `check-counts.sh`: rows vanishing with no
+  account deleted fails the run, but an account deleted with Delete my account is only
+  noted** (the old rule "any drop fails" would have raised an emergency for every leaver).
+  **GitHub emails the owner about failed runs only once the owner has switched on Settings,
+  Notifications, Actions** (done 2026-10-12). GitHub's timer is best effort: a job can
+  start hours late, and a skipped day sends no email by itself. It saves only the app's two
+  tables, never Supabase's sign-in tables. Re-run its restore fire drill monthly
+  (`tests/restore-drill.mjs <unzipped copy>` there; `tools/swap-ids.mjs` is the id swap a
+  rebuild needs). Manual export and the export reminder stay. See
+  [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#other-peoples-data-backups-that-expire-pass-131),
   [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#setup-production-project)
   and [`DEPLOYMENT.md`](DEPLOYMENT.md#rolling-back).
 
@@ -1385,7 +1395,8 @@ settings, a deletion and the piece list's order; collections and whole shapes, t
 tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
 is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01),
-129 (a real email service, 2026-11-06) and 130 (change email and delete my account, 2026-11-06, merged as PR #90) are built:
+129 (a real email service, 2026-11-06), 130 (change email and delete my account, 2026-11-06, merged as PR #90) and
+131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code) are built:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
@@ -1394,8 +1405,10 @@ sign-up) and 124 (the switch's default) happen only on the owner's word.
 are merged.** Pass 130 is live: all four addresses serve `index-BQl7BE2O.js`, built for the production project
 (its address is in the file, the test project's and any secret key are not); migration `0003` is on both projects
 and the security script passed 43 of 43 on both; Change email and Delete my account were tried on the test
-project's preview. **The next pass to build is 131** (backups that expire, a real restore, the plan question),
-in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
+project's preview. **Pass 131 is built and verified with the owner (2026-11-07: the secret, the first backup, a file imported, the failure
+email, the real-project restore in the TEST project)**; what is left is deleting the old `Chopinbby/measureone-backups` (a reminder issue
+opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited) and the spare user in the test project. **The next pass to build is 132** (alarms: an outside uptime
+check, Supabase's usage emails, a "Report a problem" link), in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
 branch lands in that branch, not `main`). Her real account on measureone.app now shows Delete my account in the
 Danger zone: it is the owner's own account, so it must not be pressed in any check.
 Still not
@@ -1574,3 +1587,10 @@ silently.
   migration 0003 plus the security script (43 of 43) on both projects. The Danger zone (a red Settings panel with
   Delete this piece and Delete my account) was added the same day at her request.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)
+- **Pass 131** — other people's data: the daily database copy moves to a new private repository
+  (`measureone-backups-v2`) where each copy is an artifact GitHub deletes after 30 days (nothing personal in git
+  history); the backup's "rows went down" alarm now understands Delete my account (noted, not an emergency); a daily
+  keep-awake request for the Free plan; a monthly restore reminder issue; `tools/swap-ids.mjs` for an exact rebuild; the
+  restore drill rehearsed on the real latest backup in a scratch database (then tried by the owner in the test project, 2026-11-07, revisions kept); Free
+  plan kept through invitations. No app code. Built 2026-11-06; the owner's steps are listed in the doc.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#other-peoples-data-backups-that-expire-pass-131)

@@ -1362,10 +1362,10 @@ the test project's preview. Rules:
   sign-in tables) keeps running until the owner deletes it, which must happen before
   anyone else is invited.** Check it by opening `LAST_BACKUP.txt` there (today or
   yesterday counts as expected; a third line "Note:" says an account was deleted) and the
-  Actions tab. Four jobs: the backup, "Check the backup is recent" (over 36 hours old
+  Actions tab. Five jobs: the backup, "Check the backup is recent" (over 36 hours old
   fails), "Keep the account service awake" (one anonymous harmless request a day, fails if
-  the project is paused; whether Supabase counts it as activity is not documented) and a
-  monthly reminder issue. **The backup's alarm is `check-counts.sh`: rows vanishing with no
+  the project is paused; whether Supabase counts it as activity is not documented), a
+  monthly reminder issue, and a one-time reminder issue on 2026-11-10 to delete the old repository. **The backup's alarm is `check-counts.sh`: rows vanishing with no
   account deleted fails the run, but an account deleted with Delete my account is only
   noted** (the old rule "any drop fails" would have raised an emergency for every leaver).
   **GitHub emails the owner about failed runs only once the owner has switched on Settings,
@@ -1396,7 +1396,7 @@ tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
 is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01),
 129 (a real email service, 2026-11-06), 130 (change email and delete my account, 2026-11-06, merged as PR #90) and
-131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code) are built:
+131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code, merged 2026-11-07 as PR 92) are built:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
@@ -1407,7 +1407,7 @@ are merged.** Pass 130 is live: all four addresses serve `index-BQl7BE2O.js`, bu
 and the security script passed 43 of 43 on both; Change email and Delete my account were tried on the test
 project's preview. **Pass 131 is built and verified with the owner (2026-11-07: the secret, the first backup, a file imported, the failure
 email, the real-project restore in the TEST project)**; what is left is deleting the old `Chopinbby/measureone-backups` (a reminder issue
-opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited) and the spare user in the test project. **The next pass to build is 132** (alarms: an outside uptime
+opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited); the spare user in the test project was deleted by the owner on 2026-11-07. **The next pass to build is 132** (alarms: an outside uptime
 check, Supabase's usage emails, a "Report a problem" link), in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
 branch lands in that branch, not `main`). Her real account on measureone.app now shows Delete my account in the
 Danger zone: it is the owner's own account, so it must not be pressed in any check.
@@ -1592,5 +1592,6 @@ silently.
   history); the backup's "rows went down" alarm now understands Delete my account (noted, not an emergency); a daily
   keep-awake request for the Free plan; a monthly restore reminder issue; `tools/swap-ids.mjs` for an exact rebuild; the
   restore drill rehearsed on the real latest backup in a scratch database (then tried by the owner in the test project, 2026-11-07, revisions kept); Free
-  plan kept through invitations. No app code. Built 2026-11-06; the owner's steps are listed in the doc.
+  plan kept through invitations. No app code. Built 2026-11-06 and verified with the owner 2026-11-07; **merged 2026-11-07 (PR 92, merge commit `77ce143`)**; the old
+  backups repository is still to be deleted (a reminder issue opens 2026-11-10).
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#other-peoples-data-backups-that-expire-pass-131)

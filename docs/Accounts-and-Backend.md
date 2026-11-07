@@ -3737,10 +3737,10 @@ means anything).
 setup-cli v3.2.0), which closes the "Node.js 20 is being retired" item. Everything stays pinned to exact commits and to
 Ubuntu 24.04.
 
-**Checks.** The backups repository's `tests/run-all.sh` runs 8 groups, all passing: the job's steps and shape (99 checks,
+**Checks.** The backups repository's `tests/run-all.sh` runs 9 groups, all passing: the job's steps and shape (99 checks,
 25 broken copies of the workflow and steps), the missing-rows rule (40 checks, 13 broken copies), the "is it recent" check
 (74, inherited, still passing against the new job), the keep-awake job against a stand-in service (46, 10 broken script
-copies and 6 broken workflow copies), the reminder (24, 5 broken), the id swap (37 checks, 17 broken copies), the importable-file
+copies and 6 broken workflow copies), the monthly reminder (24, 5 broken), the one-time reminder to delete the old repository (35, 9 broken), the id swap (37 checks, 17 broken copies), the importable-file
 SQL in a real Postgres engine, and the restore drill end to end on made-up data (7 checks, 8 broken restores each caught). The
 keep-awake job was run once on GitHub against production (green, 2026-11-06). **The backup job's first real run was 2026-11-07,
 after the owner added `SUPABASE_DB_URL`** (the first attempt failed on a wrong password and nothing was copied; re-adding the
@@ -3762,14 +3762,16 @@ deleted before invitations. Outside services after this pass: Supabase, Vercel, 
 green with its copy kept until 2026-12-07, her private-window import of a file from it, the failure email (one arrived, for the earlier
 failed run) and the reminder issue reaching her, and the real-project restore in the test project (numbers exact, revisions kept). She
 accepted the `+restore` invitation, signed in on the test preview and pressed Restore: **all 25 pieces appeared**.
-Left: deleting `measureone-backups` (the dated reminder opens 2026-11-10), and deleting the spare user in the test project.
+Left: deleting `measureone-backups` (the dated reminder opens 2026-11-10). The spare user in the test project was deleted by the owner on
+2026-11-07 (her word, "i deleted the old account"; not checked from here, the test project is hers).
+**Merged 2026-11-07 (PR 92, `77ce143`); the live app is unchanged** (`index-BQl7BE2O.js` on all four addresses, read after the merge).
 
-**The owner's steps, in order** (all in RESTORE.md and the README): add the `SUPABASE_DB_URL` secret to the new
+**The owner's steps, in order** (all in RESTORE.md and the README; **done with her on 2026-11-07 except the last**): add the `SUPABASE_DB_URL` secret to the new
 repository; read back the 30-day retention cap; run the backup by hand and open its artifact; import a file from it in a
 private window; run "Check the backup is recent" with 0 (it must fail and email) and then with the box blank; run the monthly
-reminder once; the rehearsal in the test project; after about 3 green daily runs delete the old repository. **Until
-the secret is added the new repository's backup job fails each morning and "Check the backup is recent" fails each
-afternoon ("cannot find LAST_BACKUP.txt"): expected, and the emails say what is missing.**
+reminder once; the rehearsal in the test project; after about 3 green daily runs delete the old repository (the one-time
+reminder issue opens 2026-11-10). *Before the secret was added, the new repository's first scheduled backup failed at its secret
+check, as expected and as the message said.*
 
 **Left open.** (i) The app's `DELETE_BACKUP_NOTE` ("an older copy of your pieces can still be in it") is true but vague; make
 it say "for about 30 days" at Pass 133, together with the policy and only after the old repository is deleted (an app
@@ -3789,7 +3791,8 @@ tried against a stand-in, plus migration `0003` and the security script on the t
 2026-11-06; Change email and Delete my account both passed on the test project's preview the same day);
 `0003` run on production with 43 of 43 there too; merged 2026-11-06 as PR 90, `ab7916f`, live as `index-BQl7BE2O.js`**; 131, 2026-11-06:
 other people's data, see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), built in a new
-private backups repository, **no app code, nothing on the live site, and waiting on the owner's steps**);
+private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
+steps were done with her the same day apart from deleting the old backups repository**);
 nothing else in this section is built. **The next to build is Pass 132.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
@@ -3888,7 +3891,7 @@ the docs for `Owner: Pass N` (below).
   that fails). On the live site: two new buttons in the Account panel and on the welcome screen.
   Needs 129.
 - **131** Other people's data: backups that expire, a real restore rehearsed, the plan question. On
-  the live site: nothing. Needs 127; best after 130. **Built 2026-11-06 in `Chopinbby/measureone-backups-v2`: see
+  the live site: nothing. Needs 127; best after 130. **Built 2026-11-06 in `Chopinbby/measureone-backups-v2`, docs merged 2026-11-07 as PR 92: see
   [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131).**
 - **132** Alarms: an outside uptime check, Supabase's usage emails, a "Report a problem" link. On the
   live site: that link. Needs 128 and 129.
@@ -4026,7 +4029,8 @@ section, or taken from the later cards' own rationales; the owner can strike any
   (2026-11-06):** `tools/swap-ids.mjs`, 37 checks and 17 broken copies, used by the restore drill, which ran on the real backup.
 - *(added by Pass 127)* **The restore drill is manual;** nothing reminds anyone (item 5). Owner: Pass 131 (a monthly
   reminder). **Done in Pass 131 (2026-11-06):** `monthly-restore-reminder.yml` opens an issue assigned to the owner on the 1st
-  of each month; not yet seen arriving (the owner runs it once by hand).
+  of each month; **seen arriving 2026-11-07** (the owner ran it once by hand, the email came to her inbox with the checklist rendered
+  correctly, and she closed the issue).
 - *(added by Pass 127)* **The two pinned actions in the backups workflows target Node.js 20** (item
   8; Backups: Upkeep). Pass 131 edits those workflows and a fresh repository carries them, so it is
   the natural moment; the owner can leave it logged. Owner: Pass 131. **Done in Pass 131 (2026-11-06):** checkout v7.0.1 and

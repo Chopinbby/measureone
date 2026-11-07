@@ -889,8 +889,8 @@ only the fallback.
    your other address and confirm there." (Dismiss closes it.) Opening the **second** signs
    that browser in with the new address and the banner says "Your email address is now (new).
    Use it the next time you sign in." Pieces and backups are not affected: they belong to the
-   account, not to the address. *(Proposed wording, and how the first link arrives is not yet
-   seen on the real service: the owner's trial reports it.)*
+   account, not to the address. *(Seen working on the test project's preview, 2026-11-06, in
+   two browsers.)*
 
 **Danger zone (Pass 130 follow-up).** At the bottom of the Settings landing page is a red-bordered
 panel headed by a small skull and crossbones, **Danger zone**, with the line "Each of these asks you to

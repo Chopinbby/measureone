@@ -1277,8 +1277,10 @@ Delete button that fails). Rules:
 - **Links.** `parseAuthLink(hash, search)` also recognises the FIRST of the two confirmations (a message with
   no sign-in, `SINGLE_CONFIRMATION_LINK`, matched loosely); the library is not loaded for it
   (`needsBackendAtStartup`), the address is cleaned, and `emailLinkNotice` shows one dismissible banner. The
-  second link (`type=email_change`) is handled in the auth listener beside invite and recovery. **Where the
-  first message sits in the address and its exact words are not yet seen on the real service.**
+  second link (`type=email_change`) is handled in the auth listener beside invite and recovery. **Seen working on the test
+  project's preview (2026-11-06): the first link's banner, then the second link's, then sign-in with the new
+  address (the old one refused). Where Supabase puts the first message in the address is still unknown; the
+  parser accepts both places.**
 - **`scripts/check-rls.mjs` now deletes throwaway account A** (its last group), so `runChecks` refuses,
   before signing in, any account A or B whose address doesn't start with `rls-check`: "holds no data" can't
   tell a newly invited person's empty account from a throwaway. Keep that guard inside `runChecks` (no flag
@@ -1391,8 +1393,9 @@ Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 
 sign-up) and 124 (the switch's default) happen only on the owner's word.
 **Where it stands (2026-11-06):** Pass 129 is **merged** (PR #88, merge commit `87065bc`). **Pass 130
 is built (branch `claude/pass-130-outline-dd20dd`) and waiting on the owner:** she has run migration
-`0003_delete_my_account.sql` on the test project and `scripts/check-rls.mjs` there (43 of 43); still to do: try
-Change email and Delete my account on the test project, run `0003` on production, and only then merge (her steps, in order, are in
+`0003_delete_my_account.sql` on the test project and `scripts/check-rls.mjs` there (43 of 43), and tried Change
+email and Delete my account on the test project's preview (both passed, 2026-11-06); and run `0003` and the script on
+production (43 of 43 there too); **only the merge is left** (her steps, in order, are in
 [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)).
 **The next pass to build is 131** (backups that expire, a real restore, the plan question), in a new chat
 **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's

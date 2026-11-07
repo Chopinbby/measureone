@@ -3103,7 +3103,10 @@ owner's own is invited.
   and then `0002_revision_counter.sql`, each run once in the SQL Editor on
   2026-10-10. Both ended with "Success. No rows returned." (no deadlock; the
   notes under [Setup (test project)](#setup-test-project) apply if one ever
-  appears).
+  appears). **Pass 130's `0003_delete_my_account.sql` was run on this project on 2026-11-06 (the owner's word:
+  "Success. No rows returned."), and `scripts/check-rls.mjs` then passed 43 of 43 here** (the output was pasted by the
+  owner: project `tqamtwdraqsvejvhiptz`, accounts `rls-check-a` and `rls-check-b`; `rls-check-b` deleted afterwards by
+  her word).
 - **Authentication → Sign In / Providers:** "Allow new users to sign up"
   **off** (invitation only, Decided 4), "Allow anonymous sign-ins" off,
   "Allow manual linking" off, "Confirm email" on. The Email provider's own
@@ -3354,8 +3357,9 @@ Built 2026-11-06. **Update, the same day (the owner's report, and the script's o
 she ran `0003` on the TEST project ("Success. No rows returned.") and then `scripts/check-rls.mjs` against it
 (project `devbzzbtinzxspmiatba`, two new throwaway accounts): 43 of 43 passed, including all six checks of the
 delete group, so the function exists, is refused to a signed-out visitor, deletes the caller's account and its
-rows and nobody else's, and a deleted account can neither sign in nor add rows. `0003` has NOT been run on
-production, and the owner has not yet tried the two buttons on the test project.** Everything else is checked
+rows and nobody else's, and a deleted account can neither sign in nor add rows. The owner has since tried Change email
+and Delete my account on the test project's preview and both passed (below), run `0003` on PRODUCTION ("Success. No rows
+returned.") and run the script there: **43 of 43 again** (project `tqamtwdraqsvejvhiptz`, her pasted output).** Everything else is checked
 only as far as tests and a stand-in account service allow (what was seen and what was not is said below, and the
 owner's steps are at the end).
 
@@ -3398,8 +3402,14 @@ confirm link sent to the other email"): `parseAuthLink` now recognises it (`SING
 after the `#` and in the query string, matched loosely on either half of the sentence), the address is cleaned
 so a reload doesn't show it again, the library is not loaded for it, and the banner says "That confirmation is
 done. The change finishes once you also open the email sent to your other address and confirm there."
-**Where that message sits in the address and its exact words are from how Supabase is known to behave and have
-NOT been seen on the test project**; that is the first thing the owner's trial reports. Pieces and the device
+**Seen on the test project (the owner's Change email trial on the preview, 2026-11-06, two screenshots and her
+words):** both emails arrived; the **first** link (opened in Chrome, not signed in there) came back to the app with the
+banner "That confirmation is done. The change finishes once you also open the email sent to your other address and
+confirm there." and a clean address bar, still signed out; the **second** link (opened in Safari) signed that browser in
+and the banner read "Your email address is now (the new address). Use it the next time you sign in.", with the welcome
+screen showing the new address; signing in with the new address worked and the old address was refused. Not learned:
+where Supabase put the message in the address (the app removes it before anyone could see it; the parser accepts
+either place), and whether the emails went to spam (she said both landed). Pieces and the device
 record are filed under the account's user id, not its address, so a changed address moves nothing.
 
 **Delete my account.** `DeleteAccountModal.jsx` asks for the password and calls `App.jsx`'s
@@ -3445,9 +3455,21 @@ with the right password (password check, delete, local sign-out; the piece still
 shows the sign-in prompt and the app asks the service for nothing more); the half-way message (banner, address
 cleaned, library not loaded, no request to the service) and the `email_change` link (signed in, banner names the
 new address); the welcome screen's links; and a Change email window closing by itself when the person signs out
-underneath it. **Not seen:** the real links and their wording and `updateUser` with the real settings (the
-owner's trial on the test project), `0003` on production, two real devices. (The function under row-level security
+underneath it. **Not seen:** `0003` on production, the wrong-password refusal on the real project (not reported), two real
+devices. (Delete my account was seen working on the preview: see the paragraph "Delete my account, seen on the test
+project's preview".) (The real email links and `updateUser` were seen working on the preview, 2026-11-06: see "What the links do".) (The function under row-level security
 was seen on the test project: see the update at the top of this section.)
+
+**Delete my account, seen on the test project's preview (the owner's trial 2, 2026-11-06: her words and one screenshot).**
+The red Danger zone panel was there; after the right password the window read "Your account is deleted, along with the
+copy of your pieces and technique library it kept online. The pieces and technique on this device are still here, and
+you're signed out. Other devices that were signed in to this account are signed out within about an hour and keep their
+own copies. The service also keeps a separate daily backup of its data, and an older copy of your pieces can still be
+in it."; behind it the page already showed the signed-out Account panel ("Sign in") and the test piece still on the
+device. The user was gone from Supabase and could not sign in again. She then deleted the piece from the Danger zone
+(signed out, so the permanent wording) and landed on the welcome page. **Not reported, so not confirmed on the real
+project:** the wrong-password refusal (covered by tests and the stand-in), cancelling the piece-delete window, and what a
+second device does in the hour after a deletion.
 
 **The security script** has a seventh group, "Delete my account (migration 0003)" (6 checks, 43 in all): a
 signed-out visitor can't call it, account A can, A's rows are gone, A can't sign in or add a row any more, and B
@@ -3474,16 +3496,20 @@ account whose address starts that way.
 3. Try **Change email** on the test project with a throwaway account and a second address you can read. Both
    emails should arrive in the Pass 129 wording. Open the first link and **report exactly what the address bar
    showed and what the banner said**, then open the second: the banner should name the new address, and the new
-   address should sign in.
+   address should sign in. **Done 2026-11-06: it did all of that (see "What the links do").**
 4. Try **Delete my account** on another throwaway account there: a wrong password is refused; the right one
    deletes, signs out, leaves the pieces on the device, and the account is gone from Authentication, Users.
+   **Done 2026-11-06 (the right-password path; the wrong-password attempt was not reported).**
 5. **Production, before merging:** read Authentication, Sign In / Providers, Email on both projects ("Secure email
    change" on, "Require current password when updating" off); run `0003` on production; run the script there with
    two new throwaway accounts (production should read only the owner's own account afterwards); delete the one
-   left.
-6. Merge.
+   left. **Done 2026-11-06: the two settings read right on both projects; `0003` run on production; the script
+   passed 43 of 43 there with `rls-check-a` and `rls-check-b` (the project line read `tqamtwdraqsvejvhiptz`);
+   `rls-check-b` deleted (her word; production's Users list not shown to me).**
+6. Merge. **Not yet done.**
 
-**Left open.** (i) The first link's real address and wording (step 3). (ii) No server-side password check (above).
+**Left open.** (i) ~~The first link's real address and wording~~ seen working on 2026-11-06 (only where Supabase put the
+message in the address is unknown, and doesn't matter). (ii) No server-side password check (above).
 (iii) The plain "taken" answer shows that an address has an account (Pass 135). (iv) The device record's entry for
 a deleted account is not pruned. (v) Other devices' failing uploads between the deletion and their sign-out
 (nothing lost; not seen). (vi) No email tells the person their account was deleted (the security-notification
@@ -3613,7 +3639,8 @@ address, the Site URL, and the "moved" note on the old addresses, merged the sam
 as PR 88, `87065bc`; 130, 2026-11-06: change email and delete my account in the app, see
 [Change email and delete my account (Pass 130)](#change-email-and-delete-my-account-pass-130), **built and
 tried against a stand-in, plus migration `0003` and the security script on the test project (43 of 43,
-2026-11-06); not run on production and the buttons not yet tried by the owner, so it is not merged**); nothing else in this section is built. **The next to build
+2026-11-06; Change email and Delete my account both passed on the test project's preview the same day);
+`0003` run on production with 43 of 43 there too; waiting only on the merge**); nothing else in this section is built. **The next to build
 is Pass 131**, once 130 is merged. Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
@@ -3795,13 +3822,14 @@ section, or taken from the later cards' own rationales; the owner can strike any
   "Doing both by hand in the dashboard") have never been rehearsed (Pass 113, "For later passes",
   item 9); they become the fallback. Owner: Pass 130. **Built in Pass 130 (2026-11-06):** the Change
   email window and the two link messages; the by-hand steps stay as the fallback and are still
-  unrehearsed. The real links have not been seen yet (the owner's trial on the test project).
+  unrehearsed. The real links were seen working on the test project's preview (2026-11-06).
 - **"Require current password when updating" is off, and the app sends no current password** (Pass
   113, item 2; Setup (production project)). Pass 130 adds more calls that change an account's
   details, which fail with a generic message if that setting is on: it checks the setting is still
   off on both projects. Owner: Pass 130. **Not done by Claude: it is the owner's read-back** (Authentication,
   Sign In / Providers, Email, on both projects: "Require current password when updating" off and "Secure
-  email change" on). Change email calls `updateUser` the same way Change password does, so it fails the
+  email change" on). **Done 2026-11-06 (the owner's word, no screenshot): both projects show "Secure email
+  change" on and "Require current password when updating" off.** Change email calls `updateUser` the same way Change password does, so it fails the
   same way if that setting is on.
 - **`lib/backend.js` has no tests** (Pass 113, item 5). Owner: Pass 130 (the first
   `test/backend.test.mjs`, covering `signInErrorMessage`, `setPasswordErrorMessage`, `parseAuthLink`
@@ -3826,9 +3854,9 @@ section, or taken from the later cards' own rationales; the owner can strike any
   confirmation link arrives as an ordinary sign-in with no message. Pass 130 teaches the handler the
   email-change link; Pass 135 does the same for the sign-up confirmation. Check what Supabase really
   sends on the test project before writing the wording. Owner: Pass 130. **Built in Pass 130
-  (2026-11-06) from what Supabase is known to send, NOT yet checked against the test project:** the
-  handler acts on `email_change` and on the half-way message; the owner's trial reports what the address and
-  the message really were (step 3 of her list), and the wording is corrected if they differ.
+  (2026-11-06) from what Supabase is known to send, and then SEEN WORKING on the test project's preview the same
+  day (the owner's trial 1):** the handler acts on `email_change` and on the half-way message, and both banners
+  showed as written.
 - *(added by Pass 127)* **The backups repository keeps every day forever** in its history (Backups of the account copy).
   Other people's data needs a stated time. Owner: Pass 131 (30 days recommended).
 - *(added by Pass 127)* **The first backup commit still holds Supabase's sign-in tables** (Decisions.md, "Backups of the

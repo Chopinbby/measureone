@@ -8754,7 +8754,8 @@ what it rules out.
   rehearsed); clearing this device's pieces too when the account is deleted (the owner's answer 2). **Found on
   the way:** the stale line in the Account panel ("isn't available in the app yet") and its mentions in the
   docs; and that a hash-only change of the address does not re-read a link in the same page (a test-rig
-  detail, not an app bug). **Still open, logged and not fixed:** the real first-link address and wording; no
+  detail, not an app bug). **Seen working on the test project's preview, 2026-11-06 (the owner's Change email trial):** both banners, signing
+  in with the new address, the old one refused. **Still open, logged and not fixed:** no
   server-side password check; no email telling the person their account was deleted; other devices' failing
   uploads until their sign-in ends; the hidden-prompt test of the script. **Added after a review the same
   day (the owner agreed):** (h) the security script refuses, before signing in, any account whose address

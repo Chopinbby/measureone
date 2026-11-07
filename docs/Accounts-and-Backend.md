@@ -3707,8 +3707,9 @@ whole swapped file (218 KB) and the `SET session_replication_role` line, and the
 sum of 58 (maximum 33) and a technique revision of 34, **exactly the numbers a scratch load had predicted**, so each piece
 kept its original revision (a reset would have summed to 25). Her existing test account (49 pieces) and a third account were
 untouched. Running the file a second time fails with `duplicate key value violates unique constraint "pieces_pkey"` on the
-first piece and changes nothing (a failed run rolls back): that error means the first run had worked. **Not done:** signing in
-to the test preview as the spare account and pressing Restore (the app seeing the restored rows through a real sign-in).
+first piece and changes nothing (a failed run rolls back): that error means the first run had worked. **And the app saw
+them:** she accepted the spare account's invitation, signed in to the test preview as it, pressed Restore, and all 25 pieces
+appeared (2026-11-07), so the restore is proven through a real sign-in and the security rules.
 
 **`tools/swap-ids.mjs` (the id swap an exact rebuild needs).** Matches people old to new by email (`--rename` for a
 changed address), swaps only a whole quoted id in one pass over the text (so two people trading ids cannot undo each
@@ -3760,7 +3761,7 @@ deleted before invitations. Outside services after this pass: Supabase, Vercel, 
 **Where it stands (2026-11-07).** Done with the owner in chat: the secret added (a wrong password first, then fixed), the first backup
 green with its copy kept until 2026-12-07, her private-window import of a file from it, the failure email (one arrived, for the earlier
 failed run) and the reminder issue reaching her, and the real-project restore in the test project (numbers exact, revisions kept). She
-accepted the `+restore` invitation and pressed Restore on the test preview; **what it showed was not reported when this was written**.
+accepted the `+restore` invitation, signed in on the test preview and pressed Restore: **all 25 pieces appeared**.
 Left: deleting `measureone-backups` (the dated reminder opens 2026-11-10), and deleting the spare user in the test project.
 
 **The owner's steps, in order** (all in RESTORE.md and the README): add the `SUPABASE_DB_URL` secret to the new
@@ -3772,7 +3773,7 @@ afternoon ("cannot find LAST_BACKUP.txt"): expected, and the emails say what is 
 
 **Left open.** (i) The app's `DELETE_BACKUP_NOTE` ("an older copy of your pieces can still be in it") is true but vague; make
 it say "for about 30 days" at Pass 133, together with the policy and only after the old repository is deleted (an app
-change, so it reaches the live site). (ii) The restore trial did not include signing in to the test preview as the spare account (above). (iii) Whether the keep-awake request counts
+change, so it reaches the live site). (ii) ~~The sign-in-and-Restore check~~ done: all 25 pieces appeared (above). (iii) Whether the keep-awake request counts
 as activity is unknowable from outside. (iv) The 3-account threshold is a guess. (v) ~~The workflow's first real run~~ seen 2026-11-07 (with the current Supabase CLI's dump). (vi) Artifacts are readable by anyone with
 access to the repository, including through the owner's GitHub account; its two-factor sign-in is the protection. (vii) An
 email changed with Change email makes `--rename` necessary in a rebuild (the tool says which person has no match).
@@ -4017,8 +4018,8 @@ section, or taken from the later cards' own rationales; the owner can strike any
   anyone else is invited.
 - *(added by Pass 127)* **A restore inside a real Supabase project has never been tried** (Backups: "Not checked"; item
   2). Owner: Pass 131. **Rehearsed in a scratch Postgres on the real latest backup in Pass 131 (2026-11-06), and then in the TEST
-  Supabase project by the owner (2026-11-07: the SQL Editor took the 218 KB file, revisions kept; see Pass 131 above). Only the
-  sign-in-and-Restore check at the end is not done.**
+  Supabase project by the owner (2026-11-07: the SQL Editor took the 218 KB file, revisions kept; see Pass 131 above). The
+  sign-in-and-Restore check then showed all 25 pieces.**
 - **An exact rebuild with many accounts means inviting each person again,** and swapping their old
   account id for the new one in a copy of `data.sql`, since passwords aren't saved (item 4; `RESTORE.md`
   in the backups repository). Owner: Pass 131 (an id-swap script and its test; `RESTORE.md` says so). **Done in Pass 131

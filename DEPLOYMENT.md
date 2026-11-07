@@ -279,8 +279,11 @@ no to is remembered, the most recent reorder wins; app file `index-YBQquKJp.js`)
 `index-OJehj1yX.js`), `038f256` (PR 79) Pass 123 (the app opens with no connection; app file
 `index-78o7whRf.js`, live 2026-10-28), `0a9d1a7` (PR 83) Pass 126 (the most recent change wins;
 app file `index-CqYGi2T6.js`, live 2026-10-31; missing from this list until 2026-11-01) and
-`c4af6bf` (PR 86) Pass 128 (the "moved" note and its phone layout),
-**the current app code, live since 2026-11-01 (app file `index-IY8CdtWw.js`)**. The file
+`c4af6bf` (PR 86) Pass 128 (the "moved" note and its phone layout; app file `index-IY8CdtWw.js`, live
+2026-11-01) and `ab7916f` (PR 90) Pass 130 (change email, delete my account, the Danger zone),
+**the current app code, live since 2026-11-06 (app file `index-BQl7BE2O.js`)**. **Rolling back across Pass 130 only
+removes the new buttons;** migration `0003` and its database function stay on both Supabase projects, unused and
+harmless, and no stored data format changed, so devices don't upload anything extra either way. The file
 names of the four before 122b were not recorded when they went live; read one off a
 deployment's page in Vercel before relying on it. The merges `8c8d637`, `209d77a` and `d3a0fa0` (and
 every later documentation-only one) change no app code. **A rollback across Pass 115
@@ -473,8 +476,8 @@ Your pieces are stored in the browser first. Since go-live (Pass 114) an
 optional, invitation-only account holds a second copy in a Supabase project,
 protected by row-level security: nobody can read or change another account's
 rows, and nobody can delete a row. `scripts/check-rls.mjs` checks that against
-a project (43 checks since Pass 130, two throwaway accounts; the last group deletes account A, so only B
-is left to delete); run it after any change to the
+a project (43 checks since Pass 130, two throwaway accounts whose addresses must start `rls-check`; the last
+group deletes account A, so only B is left to delete); run it after any change to the
 database's rules or sign-in settings. Only the project's **public** key is ever
 in the app or in a setting, never the secret key. A daily copy of the account
 database is saved by a scheduled job into a separate **private** repository

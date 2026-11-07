@@ -1066,7 +1066,7 @@ account's rows are untouched. Delete the second throwaway account afterwards.
   password is changed (the app says nothing about other devices on a password change);
   the stand-in doesn't model it. (4) After "Sign out of all devices" other devices work
   for up to the token's remaining life (above); a shorter JWT expiry is a project
-  setting, not done. (5) **`lib/backend.js` has no tests**; a `test/backend.test.mjs`
+  setting, not done. (5) **`lib/backend.js` has no tests** (**done in Pass 130: `test/backend.test.mjs`**); a `test/backend.test.mjs`
   would cover these helpers and the older ones (`signInErrorMessage`,
   `setPasswordErrorMessage`, `parseAuthLink`). (6) `CLAUDE.md` had no "Since Pass 113"
   note when this pass was written (it wasn't on the card's file list); added
@@ -3200,8 +3200,9 @@ the revision count (6), sign-ups and anonymous sign-ins refused (2). It is not
 part of the app or of `npm test`. **Since Pass 130 it has 43 checks in seven
 groups** (the seventh, "Delete my account (migration 0003)", is 6 checks) and
 **it deletes throwaway account A** (that group is last on purpose), so only the
-other account is left to delete afterwards. Its own tests are `test/check-rls.test.mjs`
-and do run in `npm test`.
+other account is left to delete afterwards. **Both throwaway accounts' addresses must start `rls-check`**
+(for example `rls-check-a@example.com`): it refuses anything else before signing in. Its own tests are
+`test/check-rls.test.mjs` and do run in `npm test`.
 
 **Checked for real (Pass 114):**
 - 37 of 37 passed on the test project and 37 of 37 on this project, both on
@@ -3353,7 +3354,7 @@ limits against open sign-up (Pass 135); nothing checks a dashboard template agai
 
 ## Change email and delete my account (Pass 130)
 
-Built 2026-11-06. **Update, the same day (the owner's report, and the script's output read from her terminal):
+Built and merged 2026-11-06 (PR #90, `ab7916f`). **Update, the same day (the owner's report, and the script's output read from her terminal):
 she ran `0003` on the TEST project ("Success. No rows returned.") and then `scripts/check-rls.mjs` against it
 (project `devbzzbtinzxspmiatba`, two new throwaway accounts): 43 of 43 passed, including all six checks of the
 delete group, so the function exists, is refused to a signed-out visitor, deletes the caller's account and its
@@ -3506,7 +3507,9 @@ account whose address starts that way.
    left. **Done 2026-11-06: the two settings read right on both projects; `0003` run on production; the script
    passed 43 of 43 there with `rls-check-a` and `rls-check-b` (the project line read `tqamtwdraqsvejvhiptz`);
    `rls-check-b` deleted (her word; production's Users list not shown to me).**
-6. Merge. **Not yet done.**
+6. Merge. **Done 2026-11-06: PR #90, merge commit `ab7916f`; Vercel's production deployment succeeded and all four
+   addresses serve `index-BQl7BE2O.js` (checked from outside: it holds production's project address, not the
+   test project's, no secret key, and the new windows and Danger zone).**
 
 **Left open.** (i) ~~The first link's real address and wording~~ seen working on 2026-11-06 (only where Supabase put the
 message in the address is unknown, and doesn't matter). (ii) No server-side password check (above).
@@ -3596,7 +3599,8 @@ repository.
   needs no backup (sign in and press Restore); to look at an earlier day, download
   that day's importable file from the history and import it in a private window
   (import merges, it never wipes); a lost project is rebuilt from the importable
-  file or exactly from `data.sql` (new project, both migration files, invite the
+  file or exactly from `data.sql` (new project, all three migration files (Pass 130 added `0003`; the backups
+repository's own `RESTORE.md` is not in this repository and was not checked for this), invite the
   person again, **swap their old account id for the new one in a copy of
   `data.sql`**, run it in the SQL Editor). Skipping the swap gives no error: the
   rows load but nobody can see them.
@@ -3640,8 +3644,8 @@ as PR 88, `87065bc`; 130, 2026-11-06: change email and delete my account in the 
 [Change email and delete my account (Pass 130)](#change-email-and-delete-my-account-pass-130), **built and
 tried against a stand-in, plus migration `0003` and the security script on the test project (43 of 43,
 2026-11-06; Change email and Delete my account both passed on the test project's preview the same day);
-`0003` run on production with 43 of 43 there too; waiting only on the merge**); nothing else in this section is built. **The next to build
-is Pass 131**, once 130 is merged. Phase 3 is what has to
+`0003` run on production with 43 of 43 there too; merged 2026-11-06 as PR 90, `ab7916f`, live as `index-BQl7BE2O.js`**);
+nothing else in this section is built. **The next to build is Pass 131.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload, CloudDownload, KeyRound, MonitorSmartphone, Trash2 } from "lucide-react";
+import { Plus, Download, Upload, Pencil, RotateCcw, Check, Pause, Play, Archive, ArchiveRestore, BadgeCheck, Undo2, Target, LogIn, LogOut, CloudUpload, CloudDownload, KeyRound, MonitorSmartphone, Trash2, Mail } from "lucide-react";
 import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { KeyText } from "./technique/KeyText";
+import { SkullCrossbones } from "../SkullCrossbones";
 import { keyOptionFor } from "./technique/format";
 
 // "D major", or "F♯/G♭ major" for an enharmonic pair, as in the key list.
@@ -121,7 +122,13 @@ export function SettingsTab({
   // "Sign out of all devices" asks first, here in the panel (signOutAllAsking),
   // never as a browser pop-up. signOutNotice is the last result ({ text,
   // problem }), shown whether the person is still signed in or not.
+  // Pass 130: "Change email" and "Delete my account" each open a window too
+  // (App.jsx); the second asks for the password again inside it. "Delete my
+  // account" and "Delete this piece" (onDelete) sit together in the Danger zone
+  // panel at the bottom of this page.
   onChangePassword,
+  onChangeEmail,
+  onDeleteAccount,
   signOutAllAsking = false,
   onAskSignOutAll,
   onConfirmSignOutAll,
@@ -375,16 +382,22 @@ export function SettingsTab({
                     )}
                   </div>
                 )}
-                {/* Account settings (Pass 113). Change password opens its own window.
-                    Sign out of all devices asks first, right here, then ends every
-                    session the account has (this device's too) and leaves this
-                    device's data exactly as it is. The last line says plainly what
-                    the app doesn't do yet. */}
+                {/* Account settings (Pass 113, 130). Change password and Change email
+                    each open their own window. Sign out of all devices asks first,
+                    right here, then ends every session the account has (this
+                    device's too) and leaves this device's data exactly as it is.
+                    Deleting the account is in the Danger zone at the bottom of the
+                    page, and never removes this device's pieces either. */}
                 <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button className="ghost-btn" onClick={onChangePassword} disabled={signOutAllBusy}>
                       <KeyRound size={14} /> Change password
                     </button>
+                    {onChangeEmail && (
+                      <button className="ghost-btn" onClick={onChangeEmail} disabled={signOutAllBusy}>
+                        <Mail size={14} /> Change email
+                      </button>
+                    )}
                     <button
                       className="ghost-btn"
                       onClick={onAskSignOutAll}
@@ -413,9 +426,6 @@ export function SettingsTab({
                     </div>
                   )}
                   {signOutNoticeBlock(12)}
-                  <p className="wizard-hint" style={{ margin: "12px 0 0", fontSize: 13 }}>
-                    Changing your email or deleting your account isn't available in the app yet.
-                  </p>
                 </div>
               </>
             ) : (
@@ -471,13 +481,52 @@ export function SettingsTab({
             <Pencil size={15} /> Edit piece settings
           </button>
         </div>
+        {/* Danger zone (Pass 130 follow-up): the two things here that delete. Each one
+            only opens its own confirmation window (App.jsx), so nothing is deleted from
+            this panel directly. Deleting a piece was on the edit page before; it is here
+            now so both sit together, away from the editing controls. "Delete my account"
+            shows only while signed in. */}
+        <div className="panel danger-zone">
+          <h3>
+            <SkullCrossbones size={18} /> Danger zone
+          </h3>
+          <p className="wizard-hint" style={{ margin: 0 }}>
+            Each of these asks you to confirm before anything is deleted.
+          </p>
+          <div className="danger-row">
+            <div className="danger-row-text">
+              <p className="danger-row-title">Delete this piece</p>
+              <p className="wizard-hint danger-row-hint">
+                Delete "{piece.name || "this piece"}" and its practice history. You'll be asked to type its name to confirm.
+              </p>
+            </div>
+            <button className="danger-btn" onClick={onDelete}>
+              <Trash2 size={14} /> Delete this piece
+            </button>
+          </div>
+          {authEnabled && authEmail && onDeleteAccount && (
+            <div className="danger-row">
+              <div className="danger-row-text">
+                <p className="danger-row-title">Delete my account</p>
+                <p className="wizard-hint danger-row-hint">
+                  Permanently deletes your account ({authEmail}) and its online copy of your pieces. The pieces on this
+                  device stay here. You'll be asked for your password.
+                </p>
+              </div>
+              <button className="danger-btn" onClick={onDeleteAccount} disabled={backupRunning || accountBusy || signOutAllBusy}>
+                <Trash2 size={14} /> Delete my account
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
 
-  // Practice status and Delete are the only two controls on this page that
-  // still act on the live piece the moment they're clicked (they have gating
-  // and side effects, so they were deliberately not folded into editDraft).
+  // Practice status is the only control on this page that still acts on the
+  // live piece the moment it's clicked (it has gating and side effects, so it
+  // was deliberately not folded into editDraft). Delete used to be the second;
+  // it moved to the Danger zone on the landing page.
   // Everything else here, including Focus spots, Revival settings and Mark as
   // learned elsewhere, edits editDraft and is saved or discarded with the
   // form. handleSavePiece (App.jsx) keeps the live `status` over the draft's
@@ -690,16 +739,6 @@ export function SettingsTab({
               practicing left to do. Pause it instead if you want it off your daily agenda for now.
             </p>
           )}
-        </div>
-        <div className="panel danger">
-          <h3>Delete this piece</h3>
-          <p className="wizard-hint">
-            Removes "{piece.name || "this piece"}" and its practice history from this browser. Your
-            other pieces aren't affected.
-          </p>
-          <button className="danger-btn" onClick={onDelete}>
-            <RotateCcw size={15} /> Delete this piece
-          </button>
         </div>
       </div>
     </div>

@@ -473,7 +473,8 @@ Your pieces are stored in the browser first. Since go-live (Pass 114) an
 optional, invitation-only account holds a second copy in a Supabase project,
 protected by row-level security: nobody can read or change another account's
 rows, and nobody can delete a row. `scripts/check-rls.mjs` checks that against
-a project (37 checks, two throwaway accounts); run it after any change to the
+a project (43 checks since Pass 130, two throwaway accounts; the last group deletes account A, so only B
+is left to delete); run it after any change to the
 database's rules or sign-in settings. Only the project's **public** key is ever
 in the app or in a setting, never the secret key. A daily copy of the account
 database is saved by a scheduled job into a separate **private** repository

@@ -19,6 +19,7 @@ import {
   Piano,
   CloudDownload,
   ExternalLink,
+  Mail,
 } from "lucide-react";
 
 import { clamp, getCurrentDay, todayISODate, addDaysISO, formatMinutes, elapsedDay, formatRange, newId } from "./lib/utils";
@@ -83,6 +84,8 @@ import { RevivalEntryModal } from "./components/RevivalEntryModal";
 import { DeletePieceModal } from "./components/DeletePieceModal";
 import { SignInModal } from "./components/SignInModal";
 import { ChoosePasswordModal } from "./components/ChoosePasswordModal";
+import { ChangeEmailModal } from "./components/ChangeEmailModal";
+import { DeleteAccountModal } from "./components/DeleteAccountModal";
 import {
   isBackendConfigured,
   needsBackendAtStartup,
@@ -90,6 +93,10 @@ import {
   authLink,
   isConnectionProblem,
   describeSignOutAll,
+  describeEmailLinkNotice,
+  deleteMyAccount,
+  describeDeleteAccount,
+  SINGLE_CONFIRMATION_LINK,
   EXPIRED_LINK_MESSAGE,
   SIGN_IN_AGAIN_NOTICE,
 } from "./lib/backend";
@@ -457,6 +464,20 @@ export default function App() {
   const [signOutAllBusy, setSignOutAllBusy] = useState(false);
   const signOutAllBusyRef = useRef(false);
   const [signOutNotice, setSignOutNotice] = useState(null);
+  // Change email and delete my account (Pass 130). Each has its own window, opened from the
+  // Account panel and from the welcome screen. `emailLinkNotice` is what following an
+  // email-change link left to say ({ text, problem } or null; the first of the two
+  // confirmations arrives with no sign-in, so it is read from the address at startup).
+  // `deleteRunning` (while a delete is being tried) and `accountDeleted` (once the account is
+  // gone) keep the delete window up when the person becomes signed out underneath it, so it
+  // can say what happened: the sign-out is part of the delete itself.
+  const [changeEmailOpen, setChangeEmailOpen] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteRunning, setDeleteRunning] = useState(false);
+  const [accountDeleted, setAccountDeleted] = useState(false);
+  const [emailLinkNotice, setEmailLinkNotice] = useState(() =>
+    authLink && authLink.type === SINGLE_CONFIRMATION_LINK ? describeEmailLinkNotice({ type: SINGLE_CONFIRMATION_LINK }) : null
+  );
   const authListenerRef = useRef(false);
   const authLinkHandledRef = useRef(false);
   // Whether the browser itself says there is no connection (Pass 123). Only the Account
@@ -1325,6 +1346,11 @@ export default function App() {
           } else if (session && authLink && authLink.type === "recovery") {
             authLinkHandledRef.current = true;
             setChoosePasswordMode("reset");
+          } else if (session && authLink && authLink.type === "email_change") {
+            // The second confirmation of an email change (Pass 130): the link signed this
+            // browser in with the account's new address, so say so, once.
+            authLinkHandledRef.current = true;
+            setEmailLinkNotice(describeEmailLinkNotice({ type: "email_change", email: session.user.email || "" }));
           }
         }
       });
@@ -1426,6 +1452,62 @@ export default function App() {
     setSignOutAllAsking(false);
     if (authSession) setSignOutNotice(null);
   }, [authSession ? authSession.userId : null]);
+
+  // Change email and delete my account (Pass 130). Both windows are opened from the Account
+  // panel and from the welcome screen. A window that needs a signed-in account closes if the
+  // person becomes signed out (in another tab, say); the delete window is the exception once
+  // the account is actually gone, because its last screen is where that is said.
+  const openChangeEmail = () => {
+    if (!authEnabled || !authSession) return;
+    setChangeEmailOpen(true);
+  };
+  const openDeleteAccount = () => {
+    if (!authEnabled || !authSession) return;
+    setAccountDeleted(false);
+    setDeleteAccountOpen(true);
+  };
+  const closeDeleteAccount = () => {
+    setDeleteAccountOpen(false);
+    setAccountDeleted(false);
+  };
+  useEffect(() => {
+    if (authChecking || authSession) return;
+    setChangeEmailOpen(false);
+    if (!accountDeleted && !deleteRunning) setDeleteAccountOpen(false);
+  }, [authSession ? authSession.userId : null, authChecking, accountDeleted, deleteRunning]);
+
+  // "Delete my account": the password is checked by signing in with it again, then the
+  // database function (migration 0003) deletes this account and its rows, then this device
+  // is signed out. This device's pieces, technique library and device record are not
+  // touched. Everything that decides what happened is in lib/backend.js (deleteMyAccount,
+  // tested); this only keeps the automatic backup and the account flows from running while
+  // it does, and reports the result in the window, never a pop-up. Resolves to
+  // describeDeleteAccount's { text, problem, deleted }.
+  const handleDeleteAccount = async (password) => {
+    if (!authEnabled || !authSession) {
+      return describeDeleteAccount({ status: "signed-out" });
+    }
+    if (backupRunningRef.current || syncRunningRef.current || accountFlowBusyRef.current) {
+      return { deleted: false, problem: true, text: "Your pieces are being backed up or read from your account right now. Nothing was deleted. Try again in a moment." };
+    }
+    accountFlowBusyRef.current = true; // so a backup, an upload or a check waits
+    // Pinned open from here: a successful delete signs this device out BEFORE this function
+    // returns, and the window must not close in between (it would unmount before saying so).
+    setDeleteRunning(true);
+    let result;
+    try {
+      const client = await loadBackend();
+      result = await deleteMyAccount({ client, email: authSession.email, password });
+    } catch (e) {
+      result = { status: "could-not-check" };
+    } finally {
+      accountFlowBusyRef.current = false;
+    }
+    if (result.status === "deleted") setAccountDeleted(true);
+    else if (result.error) console.warn("MeasureOne: deleting the account didn't go through.", result.status, result.error.code || result.error.name || "");
+    setDeleteRunning(false);
+    return describeDeleteAccount(result);
+  };
 
   // Copies this device's pieces and technique library to the signed-in account
   // and checks the copy by reading it back (Pass 110, lib/accountSync.js). It
@@ -4324,6 +4406,20 @@ export default function App() {
         </div>
       )}
 
+      {emailLinkNotice && (
+        // Pass 130: what following an email-change link left to say. One quiet line,
+        // dismissible, shown wherever the person lands (the link opens the app's front door).
+        <div className="export-reminder-banner" role="status">
+          <Mail size={18} />
+          <div>
+            <p className="export-reminder-title">{emailLinkNotice.text}</p>
+          </div>
+          <button className="export-reminder-dismiss" aria-label="Dismiss" onClick={() => setEmailLinkNotice(null)}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {movedNoteInfo && (
         // Pass 128: the app has its own address now (docs/Accounts-and-Backend.md, Phase 3).
         // The old addresses keep working, each with its own browser copy of the pieces, so
@@ -4415,6 +4511,12 @@ export default function App() {
                   <p className="wizard-hint" style={{ margin: "18px 0 0" }}>
                     Signed in as {authSession.email}.{" "}
                     <button type="button" className="link-btn" onClick={handleSignOut}>Sign out</button>
+                    {/* Pass 130: a signed-in device with no pieces has no Settings, so the two
+                        account buttons are reachable here too, set apart by dots. */}
+                    {" \u00b7 "}
+                    <button type="button" className="link-btn" onClick={openChangeEmail}>Change email</button>
+                    {" \u00b7 "}
+                    <button type="button" className="link-btn" onClick={openDeleteAccount}>Delete my account</button>
                   </p>
                 ) : (
                   <button type="button" className="link-btn" style={{ display: "block", marginTop: 18 }} onClick={openSignIn}>
@@ -4730,6 +4832,8 @@ export default function App() {
                 declinedSummary={syncInfo.declined}
                 onAskMeAgain={handleAskMeAgain}
                 onChangePassword={openChangePassword}
+                onChangeEmail={openChangeEmail}
+                onDeleteAccount={openDeleteAccount}
                 signOutAllAsking={signOutAllAsking && !!authSession}
                 onAskSignOutAll={() => setSignOutAllAsking(true)}
                 onConfirmSignOutAll={handleSignOutAll}
@@ -4757,6 +4861,16 @@ export default function App() {
           mode={choosePasswordMode}
           onClose={() => setChoosePasswordMode(null)}
           onSignInAgain={handleSignInAgainToChangePassword}
+        />
+      )}
+      {authEnabled && changeEmailOpen && authSession && (
+        <ChangeEmailModal currentEmail={authSession.email} onClose={() => setChangeEmailOpen(false)} />
+      )}
+      {authEnabled && deleteAccountOpen && (authSession || accountDeleted || deleteRunning) && (
+        <DeleteAccountModal
+          email={authSession ? authSession.email : ""}
+          onDelete={handleDeleteAccount}
+          onClose={closeDeleteAccount}
         />
       )}
       {deleteModalOpen && piece && (
@@ -5051,7 +5165,12 @@ const CSS = `
 
 .panel { background: var(--paper-card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; }
 .panel h3 { font-size: 15px; margin-bottom: 14px; }
-.panel.danger { border-color: rgba(181,71,58,0.35); }
+.panel.danger-zone { border-color: rgba(181,71,58,0.55); background: rgba(181,71,58,0.04); }
+.panel.danger-zone > h3 { display: flex; align-items: center; gap: 8px; color: var(--brick); margin-bottom: 6px; }
+.danger-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(181,71,58,0.28); }
+.danger-row-text { flex: 1 1 260px; min-width: 0; }
+.danger-row-title { font-weight: 600; font-size: 14px; margin: 0 0 2px; }
+.danger-row-hint { margin: 0; font-size: 13px; }
 
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 @media (max-width: 640px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }

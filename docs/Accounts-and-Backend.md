@@ -159,8 +159,9 @@ the first pass that saves rows.
 it, so it can't reappear from another device and can be recovered by hand.
 Deleting the account erases everything. During Phase 1 that's done by the
 project owner from the Supabase dashboard, on request; in the app in Phase 3
-(Pass 130), before anyone else has an account (see
-[Phase 3](#phase-3-other-peoples-accounts-designed-not-built)).
+(Pass 130, built 2026-11-06: see
+[Change email and delete my account](#change-email-and-delete-my-account-pass-130)), before anyone
+else has an account (see [Phase 3](#phase-3-other-peoples-accounts-designed-not-built)).
 
 **E. Stays on the device, not in the account:** which piece is open
 (`activePieceId`), the export-reminder dates, the technique corrupt-copy key,
@@ -907,7 +908,7 @@ flow 13, has the screen-by-screen version):
 - **Where it lives.** Signed in, the Account panel (Settings) has a group of its
   own at the bottom, under a thin line: **Change password** and **Sign out of all
   devices**, then one plain line: "Changing your email or deleting your account
-  isn't available in the app yet." Nothing else in the panel changed (compared as
+  isn't available in the app yet." (Pass 130 replaced that line with two buttons.) Nothing else in the panel changed (compared as
   rendered structure against the previous version: the same except for that group;
   signed out, identical). The handlers are in `App.jsx` (`openChangePassword`,
   `handleSignOutAll`), the window is `ChoosePasswordModal.jsx` in a third mode,
@@ -3000,7 +3001,9 @@ checks were run against the project itself, not read off the settings pages.
     `https://*-measure-one.vercel.app/**` (every preview address ends in
     `-measure-one.vercel.app`; `*` matches one address label, `**` any path).
 - **Tables and security rules:** `supabase/migrations/0001_accounts_backend.sql`,
-  run once in the SQL Editor. Then `0002_revision_counter.sql` (Pass 110), the
+  run once in the SQL Editor. (Pass 130 adds a third file, `0003_delete_my_account.sql`, run the same way
+  after the other two: see [Change email and delete my account](#change-email-and-delete-my-account-pass-130).)
+  Then `0002_revision_counter.sql` (Pass 110), the
   rule that keeps each row's revision count: run once, after the first file.
   Applied to the test project on 2026-10-01. Two messages to expect when
   running it (also noted at the top of the file): the dashboard warns that it
@@ -3100,7 +3103,10 @@ owner's own is invited.
   and then `0002_revision_counter.sql`, each run once in the SQL Editor on
   2026-10-10. Both ended with "Success. No rows returned." (no deadlock; the
   notes under [Setup (test project)](#setup-test-project) apply if one ever
-  appears).
+  appears). **Pass 130's `0003_delete_my_account.sql` was run on this project on 2026-11-06 (the owner's word:
+  "Success. No rows returned."), and `scripts/check-rls.mjs` then passed 43 of 43 here** (the output was pasted by the
+  owner: project `tqamtwdraqsvejvhiptz`, accounts `rls-check-a` and `rls-check-b`; `rls-check-b` deleted afterwards by
+  her word).
 - **Authentication → Sign In / Providers:** "Allow new users to sign up"
   **off** (invitation only, Decided 4), "Allow anonymous sign-ins" off,
   "Allow manual linking" off, "Confirm email" on. The Email provider's own
@@ -3191,7 +3197,11 @@ any new migration and after any change to the project's sign-in settings. Its
 37 checks, in six groups: your own rows work (8), nobody else's rows (9),
 nobody can delete a row (4), signed out nothing at all (8), the database keeps
 the revision count (6), sign-ups and anonymous sign-ins refused (2). It is not
-part of the app or of `npm test`.
+part of the app or of `npm test`. **Since Pass 130 it has 43 checks in seven
+groups** (the seventh, "Delete my account (migration 0003)", is 6 checks) and
+**it deletes throwaway account A** (that group is last on purpose), so only the
+other account is left to delete afterwards. Its own tests are `test/check-rls.test.mjs`
+and do run in `npm test`.
 
 **Checked for real (Pass 114):**
 - 37 of 37 passed on the test project and 37 of 37 on this project, both on
@@ -3341,6 +3351,174 @@ code) have not been sent from production (their dashboard text, pasted back by t
 2026-11-06, equals the files byte for byte); mail scanners (Pass 134); a Resend key is never rotated and nothing reminds anyone; the free
 limits against open sign-up (Pass 135); nothing checks a dashboard template against its file.
 
+## Change email and delete my account (Pass 130)
+
+Built 2026-11-06. **Update, the same day (the owner's report, and the script's output read from her terminal):
+she ran `0003` on the TEST project ("Success. No rows returned.") and then `scripts/check-rls.mjs` against it
+(project `devbzzbtinzxspmiatba`, two new throwaway accounts): 43 of 43 passed, including all six checks of the
+delete group, so the function exists, is refused to a signed-out visitor, deletes the caller's account and its
+rows and nobody else's, and a deleted account can neither sign in nor add rows. The owner has since tried Change email
+and Delete my account on the test project's preview and both passed (below), run `0003` on PRODUCTION ("Success. No rows
+returned.") and run the script there: **43 of 43 again** (project `tqamtwdraqsvejvhiptz`, her pasted output).** Everything else is checked
+only as far as tests and a stand-in account service allow (what was seen and what was not is said below, and the
+owner's steps are at the end).
+
+**What a person sees.** Signed in, Settings, Account has one more button in the group under the thin line,
+**Change email**; **Delete my account** is in a red **Danger zone** panel at the bottom of the Settings page, beside
+**Delete this piece** (added the same day at the owner's request; the piece delete moved there from the Edit piece
+settings page). On the welcome screen (a signed-in device with no
+pieces has no Settings) the same two are links after "Signed in as ... Sign out", set apart by dots. The
+line "Changing your email or deleting your account isn't available in the app yet." is gone. Screen by
+screen: [User-Flows.md](User-Flows.md), flow 13.
+
+**The owner's three answers (2026-11-06, asked before building; the pass card named the first two as
+"still to confirm").**
+1. The password is asked for again before an account is deleted. **Yes.**
+2. After the account is deleted, this device keeps its pieces and technique library and is signed out.
+   **Yes.**
+3. A new email address that already has a MeasureOne account gets a plain answer ("That address already has a
+   MeasureOne account. Use a different address."), **not** the same "check your inbox" answer as any other
+   address (the recommendation was the same answer, as the sign-in and reset forms do). The cost she accepted:
+   a signed-in person can learn whether an address has an account. That is fine while accounts are by
+   invitation; **Owner: Pass 135 (reconsider before open sign-up).** Sign-in and reset keep the same-answer rule.
+
+**Change email.** `ChangeEmailModal.jsx` calls `client.auth.updateUser({ email }, { emailRedirectTo })` with
+the app's own address (the same redirect a reset link uses, already on the allowed list). Supabase's
+"secure email change" does the work: a link goes to the current address and another to the new one, and the
+address changes only after both are opened (`supabase/templates/email_change.html`, Pass 129, already says so;
+**the setting is on in production as read 2026-10-10 and was not re-read in this pass**). No password is asked:
+the link that must also be opened at the old address is what stops a stranger finishing a change from an
+unlocked device. What was typed is checked first (`checkNewEmail`: looks like an address, and is not the one
+already on the account, in any letter case), the service's answers become plain words (`emailChangeProblem`:
+taken, invalid, too many emails, not signed in, connection), and the window ends with
+`describeEmailChangeRequested`, which names both addresses and says the old one still signs in until both
+links are opened. Closing the window changes nothing.
+
+**What the links do.** The second link signs the browser in with the new address, as an invitation does
+(`type=email_change`); `App.jsx`'s auth listener shows one quiet, dismissible banner at the top ("Your email
+address is now ... Use it the next time you sign in.", `emailLinkNotice`, `describeEmailLinkNotice`). The
+first link opened comes back with no sign-in and only a message ("Confirmation link accepted. Please proceed to
+confirm link sent to the other email"): `parseAuthLink` now recognises it (`SINGLE_CONFIRMATION_LINK`, looked for
+after the `#` and in the query string, matched loosely on either half of the sentence), the address is cleaned
+so a reload doesn't show it again, the library is not loaded for it, and the banner says "That confirmation is
+done. The change finishes once you also open the email sent to your other address and confirm there."
+**Seen on the test project (the owner's Change email trial on the preview, 2026-11-06, two screenshots and her
+words):** both emails arrived; the **first** link (opened in Chrome, not signed in there) came back to the app with the
+banner "That confirmation is done. The change finishes once you also open the email sent to your other address and
+confirm there." and a clean address bar, still signed out; the **second** link (opened in Safari) signed that browser in
+and the banner read "Your email address is now (the new address). Use it the next time you sign in.", with the welcome
+screen showing the new address; signing in with the new address worked and the old address was refused. Not learned:
+where Supabase put the message in the address (the app removes it before anyone could see it; the parser accepts
+either place), and whether the emails went to spam (she said both landed). Pieces and the device
+record are filed under the account's user id, not its address, so a changed address moves nothing.
+
+**Delete my account.** `DeleteAccountModal.jsx` asks for the password and calls `App.jsx`'s
+`handleDeleteAccount`, which runs `deleteMyAccount` (`lib/backend.js`, tested) in three steps: (1) sign in again
+with the typed password (wrong: it stops here and **the database function is never called**, pinned by a test and
+by re-breaking it); (2) `rpc("delete_my_account")`; (3) sign this device out (`scope: "local"`). It never touches
+this device's pieces, technique library or device record. A failed delete is read back with `getUser`: the
+account still there reads "Nothing was deleted", gone reads as deleted, and when even that can't be asked
+(a dropped connection) the window says it can't tell and how to find out ("sign in; if your email and password no
+longer work, the account is deleted"), the same honesty as `describeSignOutAll`. While it runs
+`accountFlowBusyRef` makes a backup, an upload and a check wait, and it won't start while one is running. The
+window stays up after the account is gone (`accountDeleted`) because that is where it says so, and closes by
+itself if the person becomes signed out before that. The warning also says what a deletion does not do (this
+device keeps everything; other devices keep their own copies; a separate daily backup can still hold an older
+copy: `DELETE_BACKUP_NOTE`, one sentence to keep in step with Pass 131 and 133) and, because an account may hold
+pieces this device doesn't, suggests Get changes first.
+
+**The database function** (`supabase/migrations/0003_delete_my_account.sql`). No arguments, `security definer`,
+`set search_path = ''`, and its one statement deletes `auth.users` where `id = auth.uid()`; the pieces and
+technique rows and Supabase's own sessions go by cascade (0001's `on delete cascade`, Pass 108); execute is
+revoked from `public` and `anon` and given to `authenticated` only. **It does not check the password.** The
+password step is the app's guard against an unlocked device, not something the database enforces: anyone holding
+a valid sign-in of the account could call the function directly. A server-side "signed in within the last few
+minutes" check on `auth.sessions` was considered and **not built** (it is more server code than Design D allows,
+and could not be tried here). **A future table of a person's data must reference the account with `on delete
+cascade`**, or the function fails with a foreign-key error for everyone (nothing is half-deleted).
+
+**What a deletion leaves.** On this device: the pieces, the technique library and the device record's entry for
+the old user id (inert, never pruned). On other devices: signed out within about an hour (their access token's
+life), their copies kept; until then their uploads fail because the account no longer exists, which the usual
+failure handling treats as "not answering" (not seen with two real devices). In the owner's separate daily backup
+copy: an older copy of the pieces (Pass 131 decides how long that is kept, Pass 133's policy states it).
+
+**Checks.** `npm test` 1,736 tests (55 new: `test/backend.test.mjs`, 28, and `test/check-rls.test.mjs`, 27);
+8 breakages made on purpose, all caught, and 5 more of the script's address guard (below) (the 8: the password step skipped, the delete called before it, a failed delete
+signing this device out, "unsure" read as "not deleted", a global sign-out, the half-way message unrecognised, the
+same address accepted, and the script's "B untouched" check emptied). In a browser against a stand-in account
+service (a made-up user and password on this computer, two `*.localhost` addresses as two devices): Change email
+with the same address, a taken address and a good address (the window then names both addresses and the service
+received the request with the app's own address as the redirect); Delete my account with a wrong password (refused,
+no delete call, still signed in), with the function missing (read back, "Nothing was deleted", still signed in) and
+with the right password (password check, delete, local sign-out; the piece still on the device; the Account panel
+shows the sign-in prompt and the app asks the service for nothing more); the half-way message (banner, address
+cleaned, library not loaded, no request to the service) and the `email_change` link (signed in, banner names the
+new address); the welcome screen's links; and a Change email window closing by itself when the person signs out
+underneath it. **Not seen:** `0003` on production, the wrong-password refusal on the real project (not reported), two real
+devices. (Delete my account was seen working on the preview: see the paragraph "Delete my account, seen on the test
+project's preview".) (The real email links and `updateUser` were seen working on the preview, 2026-11-06: see "What the links do".) (The function under row-level security
+was seen on the test project: see the update at the top of this section.)
+
+**Delete my account, seen on the test project's preview (the owner's trial 2, 2026-11-06: her words and one screenshot).**
+The red Danger zone panel was there; after the right password the window read "Your account is deleted, along with the
+copy of your pieces and technique library it kept online. The pieces and technique on this device are still here, and
+you're signed out. Other devices that were signed in to this account are signed out within about an hour and keep their
+own copies. The service also keeps a separate daily backup of its data, and an older copy of your pieces can still be
+in it."; behind it the page already showed the signed-out Account panel ("Sign in") and the test piece still on the
+device. The user was gone from Supabase and could not sign in again. She then deleted the piece from the Danger zone
+(signed out, so the permanent wording) and landed on the welcome page. **Not reported, so not confirmed on the real
+project:** the wrong-password refusal (covered by tests and the stand-in), cancelling the piece-delete window, and what a
+second device does in the hour after a deletion.
+
+**The security script** has a seventh group, "Delete my account (migration 0003)" (6 checks, 43 in all): a
+signed-out visitor can't call it, account A can, A's rows are gone, A can't sign in or add a row any more, and B
+and B's rows are untouched. **It deletes throwaway account A**, which is why it is last and why its closing text
+now says to delete only what is left. The same pass committed its first tests and the one-line trim.
+**Address guard (added the same day after a review).** "The account holds no data" is not proof that an account
+is a throwaway: a newly invited person's account is empty too, and the last group would have deleted it (also with
+`--yes`, which skips the question). So `runChecks` itself now refuses, **before anything signs in**, any account A or
+B whose address does not start with `rls-check` (any letter case; `isThrowawayEmail`, e.g. `rls-check-a@example.com`).
+The prompts and `--help` say so. It sits in `runChecks`, so no command-line path can skip it. Pinned by 4 tests (an
+empty real-looking account is refused, never signed in to, never deleted; B too; which addresses count; the guard
+is inside `runChecks`) and re-broken 5 ways on purpose (removed, A only, case-sensitive, prefix matched anywhere,
+run after a sign-in), all caught. It is a guard against a mistake, not proof: someone could still make a real
+account whose address starts that way.
+
+**The owner's steps, in this order** (Claude can't do any of them; the app can't run a migration):
+1. **Test project:** SQL Editor, paste `supabase/migrations/0003_delete_my_account.sql`, Run. (A warning about
+   "destructive operations" is a false alarm, explained at the top of the file.) Optionally run the two
+   `has_function_privilege` read-backs at the end of the file: `anon` false, `authenticated` true.
+   **Done 2026-11-06: "Success. No rows returned."**
+2. `node scripts/check-rls.mjs` against the test project with **two new** throwaway accounts: expect 43 of 43. Delete
+   the account that is left (B). **Done 2026-11-06: 43 of 43 passed** (the account left, B, is for the owner to delete
+   in the dashboard; not confirmed).
+3. Try **Change email** on the test project with a throwaway account and a second address you can read. Both
+   emails should arrive in the Pass 129 wording. Open the first link and **report exactly what the address bar
+   showed and what the banner said**, then open the second: the banner should name the new address, and the new
+   address should sign in. **Done 2026-11-06: it did all of that (see "What the links do").**
+4. Try **Delete my account** on another throwaway account there: a wrong password is refused; the right one
+   deletes, signs out, leaves the pieces on the device, and the account is gone from Authentication, Users.
+   **Done 2026-11-06 (the right-password path; the wrong-password attempt was not reported).**
+5. **Production, before merging:** read Authentication, Sign In / Providers, Email on both projects ("Secure email
+   change" on, "Require current password when updating" off); run `0003` on production; run the script there with
+   two new throwaway accounts (production should read only the owner's own account afterwards); delete the one
+   left. **Done 2026-11-06: the two settings read right on both projects; `0003` run on production; the script
+   passed 43 of 43 there with `rls-check-a` and `rls-check-b` (the project line read `tqamtwdraqsvejvhiptz`);
+   `rls-check-b` deleted (her word; production's Users list not shown to me).**
+6. Merge. **Not yet done.**
+
+**Left open.** (i) ~~The first link's real address and wording~~ seen working on 2026-11-06 (only where Supabase put the
+message in the address is unknown, and doesn't matter). (ii) No server-side password check (above).
+(iii) The plain "taken" answer shows that an address has an account (Pass 135). (iv) The device record's entry for
+a deleted account is not pruned. (v) Other devices' failing uploads between the deletion and their sign-out
+(nothing lost; not seen). (vi) No email tells the person their account was deleted (the security-notification
+emails are off on both projects, Pass 129). (vii) A mail scanner can use up an email-change link as it can an
+invitation (Pass 134). (viii) The welcome screen offers only the two new links, not Change password or Sign out of
+all devices. (ix) The words about the backup copy and how long it is kept wait for Pass 131 and 133. (x) The
+terminal test of the script's hidden prompts is still not committed. (xi) `App.jsx`'s wiring (`handleDeleteAccount`,
+the link notices) has no automated test; it was tried in a browser.
+
 ## Backups of the account copy (2026-10-12)
 
 The Free plan keeps no backups of the production project (see
@@ -3455,10 +3633,15 @@ repository.
 
 ## Phase 3: other people's accounts (designed, not built)
 
-**Designed in Pass 127 (2026-10-31). Only Passes 128 and 129 are built so far** (128, 2026-11-01: the owner's own
+**Designed in Pass 127 (2026-10-31). Passes 128, 129 and 130 are built so far** (128, 2026-11-01: the owner's own
 address, the Site URL, and the "moved" note on the old addresses, merged the same day as PR 86, `c4af6bf`;
 129, 2026-11-06: a real email service, see [Email service (Pass 129)](#email-service-pass-129), merged
-as PR 88, `87065bc`); nothing else in this section is built. **The next is Pass 130.** Phase 3 is what has to
+as PR 88, `87065bc`; 130, 2026-11-06: change email and delete my account in the app, see
+[Change email and delete my account (Pass 130)](#change-email-and-delete-my-account-pass-130), **built and
+tried against a stand-in, plus migration `0003` and the security script on the test project (43 of 43,
+2026-11-06; Change email and Delete my account both passed on the test project's preview the same day);
+`0003` run on production with 43 of 43 there too; waiting only on the merge**); nothing else in this section is built. **The next to build
+is Pass 131**, once 130 is merged. Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -3511,6 +3694,9 @@ D. **Change email and delete my account move into the app.** Change email uses S
    "secure email change" (both addresses confirm). Delete uses a database function in a new
    migration (`0003_delete_my_account.sql`) that deletes only the caller's own account; the rows go
    with it. The password is asked for again first. No other server code. (Pass 130)
+
+   *Design D was built in Pass 130 (2026-11-06): see
+   [Change email and delete my account (Pass 130)](#change-email-and-delete-my-account-pass-130).*
 
 E. **Privacy policy and terms are two plain pages at the domain,** written from what the app
    actually does after every outside service is chosen, linked from the sign-in windows, the
@@ -3628,32 +3814,49 @@ section, or taken from the later cards' own rationales; the owner can strike any
   planned way is a database function in a new migration that deletes only the caller's own account
   (the rows go with it by cascade, checked in Pass 108); the alternative, a Supabase Edge Function,
   is ruled out by Design D. Decisions.md, "No in-app 'delete my account' in Phase 1"; User-Flows.md,
-  flow 16 ("Not covered"). Owner: Pass 130.
+  flow 16 ("Not covered"). Owner: Pass 130. **Built in Pass 130 (2026-11-06):** migration `0003`,
+  the function, the window and the buttons; not yet run on a real project (the owner's steps are in
+  [Change email and delete my account](#change-email-and-delete-my-account-pass-130)).
 - **Change email in the app.** Moved to Phase 3 when Pass 113's card was written, because it needs a
   real email provider (Pass plan, 113). The by-hand "replace the account" steps (Account settings,
   "Doing both by hand in the dashboard") have never been rehearsed (Pass 113, "For later passes",
-  item 9); they become the fallback. Owner: Pass 130.
+  item 9); they become the fallback. Owner: Pass 130. **Built in Pass 130 (2026-11-06):** the Change
+  email window and the two link messages; the by-hand steps stay as the fallback and are still
+  unrehearsed. The real links were seen working on the test project's preview (2026-11-06).
 - **"Require current password when updating" is off, and the app sends no current password** (Pass
   113, item 2; Setup (production project)). Pass 130 adds more calls that change an account's
   details, which fail with a generic message if that setting is on: it checks the setting is still
-  off on both projects. Owner: Pass 130.
+  off on both projects. Owner: Pass 130. **Not done by Claude: it is the owner's read-back** (Authentication,
+  Sign In / Providers, Email, on both projects: "Require current password when updating" off and "Secure
+  email change" on). **Done 2026-11-06 (the owner's word, no screenshot): both projects show "Secure email
+  change" on and "Require current password when updating" off.** Change email calls `updateUser` the same way Change password does, so it fails the
+  same way if that setting is on.
 - **`lib/backend.js` has no tests** (Pass 113, item 5). Owner: Pass 130 (the first
   `test/backend.test.mjs`, covering `signInErrorMessage`, `setPasswordErrorMessage`, `parseAuthLink`
-  and what it adds).
+  and what it adds). **Done in Pass 130 (2026-11-06):** `test/backend.test.mjs`, 28 tests, with the
+  regression checks for the delete sequence re-broken on purpose (8 breakages, all caught).
 - **The welcome screen has no account-settings buttons** (Pass 113, item 12): a signed-in device
-  with no pieces can't reach Settings. Owner: Pass 130 (the two new buttons appear there too).
+  with no pieces can't reach Settings. Owner: Pass 130 (the two new buttons appear there too). **Done in Pass 130 (2026-11-06):** "Change email" and
+  "Delete my account" are on the welcome screen as links after "Signed in as ... Sign out". Change password and
+  Sign out of all devices are still Settings only (not asked for).
 - **`scripts/check-rls.mjs` knows only the two tables, and its own tests were never committed**
   (Setup (production project), "Found in the review before the merge", items 2 and 3; Decisions.md,
   "Accounts at go-live", item 1). A migration that adds something needs its checks added, or "run it
   after any migration" passes without testing it. Owner: Pass 130 (checks for
   `delete_my_account()`, and the script's tests committed). *(added by Pass 127)* In the same file,
   the hidden key prompt doesn't trim a stray space (item 1 of that review, a one-line fix).
+  **Done in Pass 130 (2026-11-06):** a seventh group of 6 checks (43 in all), `test/check-rls.test.mjs`
+  (a stand-in database that follows the rules, 12 broken versions, each caught), and the trim. The terminal
+  test of the hidden prompts from the old scratch folder is still not committed.
 - *(added by Pass 127, a correction to the cards)* **Link types.** `parseAuthLink`
   (`lib/backend.js`) returns the `type` of any link that carries one; what is limited is
   `App.jsx`'s handler, which acts on `invite` and `recovery` only, so a change-email or sign-up
   confirmation link arrives as an ordinary sign-in with no message. Pass 130 teaches the handler the
   email-change link; Pass 135 does the same for the sign-up confirmation. Check what Supabase really
-  sends on the test project before writing the wording. Owner: Pass 130.
+  sends on the test project before writing the wording. Owner: Pass 130. **Built in Pass 130
+  (2026-11-06) from what Supabase is known to send, and then SEEN WORKING on the test project's preview the same
+  day (the owner's trial 1):** the handler acts on `email_change` and on the half-way message, and both banners
+  showed as written.
 - *(added by Pass 127)* **The backups repository keeps every day forever** in its history (Backups of the account copy).
   Other people's data needs a stated time. Owner: Pass 131 (30 days recommended).
 - *(added by Pass 127)* **The first backup commit still holds Supabase's sign-in tables** (Decisions.md, "Backups of the

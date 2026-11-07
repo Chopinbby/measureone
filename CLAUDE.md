@@ -76,8 +76,9 @@ MeasureOne.jsx/
 │                      # (so plain ES5); see "Opening the app with no connection" below
 ├── scripts/           # check-rls.mjs: the account security check (Pass 114);
 │                      # not part of the app or of `npm test`
-├── supabase/migrations/   # the account database's two SQL files; applied by
-│                          # hand in the Supabase SQL Editor, never by the app
+├── supabase/migrations/   # the account database's three SQL files (0003 = Pass 130's
+│                          # delete-my-account function); applied by hand in the
+│                          # Supabase SQL Editor, never by the app
 ├── supabase/templates/    # Pass 129: the five sign-in email texts, the RECORD of
 │                          # what each Supabase project's dashboard holds live
 ├── test/              # `npm test`: node:test over lib/ only
@@ -659,8 +660,8 @@ sees: [`docs/User-Flows.md`](docs/User-Flows.md#10-signing-in-optional-pass-109)
   sign-in older than 24 hours gets "For your security, sign in again". "Sign out of all
   devices" (`handleSignOutAll`) asks in the panel (never a pop-up) and reports honestly
   (`describeSignOutAll`); other devices keep working until their access token's hour is
-  up. No in-app email change or account deletion (Phase 3): the owner does them in the
-  dashboard.
+  up. Change email and delete my account are in the app since Pass 130 (below); the by-hand
+  dashboard steps are the fallback.
 - **Noticing other devices (Pass 116).** The check only notices; it applies nothing
   by itself unless the person turned on Pass 120's switch (below); otherwise "Get changes"
   is the way a change arrives. It reads only
@@ -1249,6 +1250,43 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   already held before the deploy stays held until Review (the automatic update never retries a held
   piece); `App.jsx`'s wiring has no automated test. The rest is item 9 of the Accounts-and-Backend list.
 
+### Change email and delete my account (Pass 130)
+
+Two windows (`ChangeEmailModal.jsx`, `DeleteAccountModal.jsx`), opened from the Account panel (Change email)
+and the Settings **Danger zone** panel (Delete my account, beside Delete this piece; it moved there from the
+Edit piece settings page at the owner's request, 2026-11-06, with a `SkullCrossbones.jsx` icon), and from
+the welcome screen; everything that decides what happens is in `lib/backend.js` (tested in
+`test/backend.test.mjs`). Built 2026-11-06, **not merged**. `0003_delete_my_account.sql` was run on the
+test project and `scripts/check-rls.mjs` passed 43 of 43 there (2026-11-06); still to do by hand: the two
+buttons tried on the test project, then `0003` on production BEFORE the merge (or the live site shows a
+Delete button that fails). Rules:
+
+- **A wrong password must never reach the database function.** `deleteMyAccount` signs in with the typed
+  password first and stops on a refusal; the function itself (`delete_my_account()`, security definer, no
+  arguments, deletes only `auth.uid()`'s account) **cannot see a password**, so the check is the app's guard
+  against an unlocked device, not a database rule, and the docs say so. Don't describe it as enforced.
+- **Deleting the account never touches this device** (the owner's answer, 2026-11-06): pieces, technique
+  library and the device record stay; the device only signs out (`scope: "local"`). A failed delete is read
+  back (`getUser`) before anything is said: still there, gone, or "can't tell" (`describeDeleteAccount`).
+- **A new table holding a person's data must reference `auth.users` with `on delete cascade`**, or the
+  function fails for everyone with a foreign-key error (nothing half-deleted).
+- **Change email calls `updateUser({ email })` and relies on Supabase's "secure email change"** (both
+  addresses confirm; on in both projects as last read). No password is asked. "Require current password when
+  updating" must stay OFF or it fails like Change password does. A taken address gets a plain answer (the
+  owner's choice, to be reconsidered before open sign-up: Pass 135).
+- **Links.** `parseAuthLink(hash, search)` also recognises the FIRST of the two confirmations (a message with
+  no sign-in, `SINGLE_CONFIRMATION_LINK`, matched loosely); the library is not loaded for it
+  (`needsBackendAtStartup`), the address is cleaned, and `emailLinkNotice` shows one dismissible banner. The
+  second link (`type=email_change`) is handled in the auth listener beside invite and recovery. **Seen working on the test
+  project's preview (2026-11-06): the first link's banner, then the second link's, then sign-in with the new
+  address (the old one refused). Where Supabase puts the first message in the address is still unknown; the
+  parser accepts both places.**
+- **`scripts/check-rls.mjs` now deletes throwaway account A** (its last group), so `runChecks` refuses,
+  before signing in, any account A or B whose address doesn't start with `rls-check`: "holds no data" can't
+  tell a newly invited person's empty account from a throwaway. Keep that guard inside `runChecks` (no flag
+  may skip it). Its tests (`test/check-rls.test.mjs`) use a stand-in database that follows the rules and 12
+  broken versions; add a check there for any new table or function.
+
 ### Deploying and operating (Pass 114 on)
 
 - **A merge to `main` now ships to real accounts.** Anything touching
@@ -1286,13 +1324,14 @@ The owner's 2026-10-15 decision, built for **single-value settings** (her approv
   another address or another browser. **The old three are not redirected and carry a quiet "moved"
   note** (`lib/address.js`): `OLD_ADDRESSES` lists them EXACTLY, never as a ".vercel.app" match (a
   preview address would then show it); change that list if a live address is added or removed.
-- **`scripts/check-rls.mjs` is the security check** (37 checks, two throwaway
-  accounts created and deleted in the dashboard; it refuses a secret key or an
-  account that already holds data, and takes the key and passwords hidden).
-  Run it against the test project and then production after any migration or
-  sign-in setting change, and delete the accounts afterwards (production
-  should read 0 accounts, 0 pieces, 0 technique rows until real accounts
-  exist). It is not part of the app or of `npm test`.
+- **`scripts/check-rls.mjs` is the security check** (43 checks since Pass 130, two throwaway
+  accounts created and deleted in the dashboard, with addresses that start `rls-check`; it refuses a secret key,
+  an address that doesn't start that way, or an
+  account that already holds data, and takes the key and passwords hidden; its last group
+  deletes account A, so only B is left to delete). Run it against the test project and then
+  production after any migration or sign-in setting change, and delete what is left afterwards
+  (production should read 0 accounts, 0 pieces, 0 technique rows until real accounts
+  exist). The script is not part of the app, but its tests (`test/check-rls.test.mjs`) run in `npm test`.
 - **Invitation and reset links last 24 hours** (production's Email OTP expiration is 86400
   seconds since Pass 129; Supabase advises against more). **Read it back after any migration
   or project change:** a Supabase GitHub issue reports it going back to 3600 after a production
@@ -1345,16 +1384,22 @@ owner chose to wait with the flip until Phase 3**, and it is only ever built on 
 settings, a deletion and the piece list's order; collections and whole shapes, the chunk grid and a
 tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md#open-questions) ("When two
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
-is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01) and
-129 (a real email service, 2026-11-06) are built:
+is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01),
+129 (a real email service, 2026-11-06) and 130 (change email and delete my account, built 2026-11-06, not
+yet merged) are built:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
 sign-up) and 124 (the switch's default) happen only on the owner's word.
-**Where it stands (2026-11-06):** Pass 129 is **merged** (PR #88, merge commit `87065bc`); **the next
-pass is 130** (change email and delete my account: it adds a migration the owner runs by hand on the
-test project and then production). Start it in a new chat, **branched from `main`** (never from an
-older pass's branch: a pass built on another unmerged pass's branch lands in that branch, not `main`).
+**Where it stands (2026-11-06):** Pass 129 is **merged** (PR #88, merge commit `87065bc`). **Pass 130
+is built (branch `claude/pass-130-outline-dd20dd`) and waiting on the owner:** she has run migration
+`0003_delete_my_account.sql` on the test project and `scripts/check-rls.mjs` there (43 of 43), and tried Change
+email and Delete my account on the test project's preview (both passed, 2026-11-06); and run `0003` and the script on
+production (43 of 43 there too); **only the merge is left** (her steps, in order, are in
+[`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)).
+**The next pass to build is 131** (backups that expire, a real restore, the plan question), in a new chat
+**branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
+branch lands in that branch, not `main`; if 130 is still unmerged, say so and ask her).
 Still not
 built elsewhere: a persisted "learned" state, a second Tier 1 rung and repertoire
 rotation (Stage 5); see
@@ -1521,3 +1566,11 @@ silently.
   email links last 24 hours on production. No app code. Built 2026-11-05 to 2026-11-06; **merged
   2026-11-06 (PR #88, merge commit `87065bc`)**; the app file stayed `index-IY8CdtWw.js` on all four addresses.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#email-service-pass-129)
+- **Pass 130** — change email and delete my account, in the app: two windows and buttons (Account panel
+  and welcome screen), the handling of the two links a two-address email change sends, and migration
+  `0003_delete_my_account.sql` (a database function that deletes only the caller's own account; the
+  password is checked by the app, not the database). The security script gained a seventh group (43
+  checks; it deletes its throwaway account A) and its first committed tests, and `lib/backend.js` its
+  first (`test/backend.test.mjs`). Built 2026-11-06 on the owner's three answers; **not merged: waiting on
+  her trial on the test project and migration 0003 on both projects.**
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#change-email-and-delete-my-account-pass-130)

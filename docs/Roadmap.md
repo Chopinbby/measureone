@@ -346,7 +346,7 @@ before. Built: sign-in and invite and reset links (109), a first backup checked
 by reading it back (110), every later change sent by itself (111), restore on a
 new device, "Get changes" and settling a piece changed elsewhere (112), change
 password and sign out of all devices (113), and go-live (114): a separate
-production project, a security script (`scripts/check-rls.mjs`, 37 checks, run
+production project, a security script (`scripts/check-rls.mjs`, 37 checks then, 43 since Pass 130, run
 on both projects) and the two Vercel Production settings. Live since
 2026-10-10, with the owner's own account (backed up, and restored on a phone)
 as the only one for now. See
@@ -505,7 +505,8 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    over. The plan, in order: 128 her own web address (done); 129 a real email service (done, 2026-11-06; Supabase's
    built-in sender reaches only the project's own team and only a couple of messages an
    hour, which is why the owner's is the only account for now); 130 change email and
-   "delete my account" in the app (a database function); 131 backups that expire, a real
+   "delete my account" in the app (a database function; built 2026-11-06, waiting on the owner's trial on the test
+   project and migration 0003 on both projects); 131 backups that expire, a real
    restore and the plan question; 132 alarms; 133 a privacy policy and terms; then Pass 124
    (the automatic-update switch's default), proposed just before 134; 134 inviting people
    and 135 open sign-up, each only on the owner's word. The design and who owns each loose

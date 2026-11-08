@@ -3790,7 +3790,7 @@ stands", at the end of this section, and is not claimed done until she has seen 
 
 **The link ("Report a problem").** `src/lib/reportProblem.js` (pure, `test/reportProblem.test.mjs`, 13 tests, 6 deliberate
 breakages all caught) builds a `mailto:hello@measureone.app` link with a fixed subject ("MeasureOne: a problem") and a short note
-(what happened, what were you trying to do, a line asking to leave out anything private such as piece names) ending in **exactly
+(what happened, what were you trying to do, a line asking not to include private information) ending in **exactly
 two lines the app adds: `Address:` (the host the app is open at) and `Browser:` (the browser's own name text, cut to 200
 characters)**. The function reads only those two inputs, so nothing from a piece, the technique library, the account or storage can
 reach it; a line break or `&` inside a value cannot start a new line of the note or a new field such as `cc=`/`bcc=` (a host that
@@ -3839,7 +3839,12 @@ decides whether an alert reaches her.
 
 **Supabase's own usage emails.** Supabase emails the organization's owner when a project nears a limit or is about to be paused.
 Pass 132 does not build or change them; the owner reads back, in the dashboard, which address they go to and that it is one she reads.
-They cannot be triggered on purpose, so this is a read-back of the setting and not a received message.
+They cannot be triggered on purpose, so this is a read-back of the setting and not a received message. **Read 2026-11-08 (Supabase's
+billing FAQ, "Manage your subscription", "Get set up for billing" and "Access control" pages): they do NOT say which address a usage,
+quota or paused-project email goes to, and name no setting to turn those emails on or off.** The only address they name is the
+organization's **billing email**, on the organization's billing page (`supabase.com/dashboard/org/_/billing`; viewable by every role,
+changeable by Owner and Administrator), and they do not say whether a Free-plan organization has one. So the read-back is of two
+addresses, the billing email and the login email on the account, and both should be ones the owner reads.
 
 **Facts for the privacy policy (Pass 133's list from this pass).** Outside services after this pass: Supabase, Vercel, GitHub, Resend,
 ImprovMX, Google Fonts, **UptimeRobot** (holds the owner's email address and the two monitored addresses; it sees no person's data, because

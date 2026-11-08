@@ -49,7 +49,7 @@ export function reportBody({ hostname, userAgent } = {}) {
     "What were you trying to do?",
     "",
     "",
-    "Please leave out anything private, such as piece names.",
+    "Please don't include private information.",
     "The two lines below were added by the app, so we can see which address and browser you are using. You can delete them.",
     `Address: ${cleanHost(hostname)}`,
     `Browser: ${oneLine(userAgent, MAX_BROWSER_LENGTH)}`,

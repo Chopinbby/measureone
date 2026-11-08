@@ -58,7 +58,7 @@ describe("[Pass 132] what the note carries", () => {
     const lines = body.split("\r\n");
     assert.equal(lines[0], "What happened?");
     assert.ok(lines.includes("What were you trying to do?"));
-    assert.ok(lines.includes("Please leave out anything private, such as piece names."));
+    assert.ok(lines.includes("Please don't include private information."));
     assert.equal(lines.filter((l) => l.startsWith("Address: ")).length, 1);
     assert.equal(lines.filter((l) => l.startsWith("Browser: ")).length, 1);
     assert.equal(lines.at(-2), "Address: measureone.app");

@@ -492,7 +492,7 @@ export function SettingsTab({
           <p className="wizard-hint" style={{ marginBottom: 12 }}>
             Something not working, or hard to follow? Tell us what happened and what you were doing.
             This opens a new message in your email app, ready to send. Nothing is sent until you press
-            send there. Please leave out anything private, such as piece names.
+            send there. Please don't include private information.
           </p>
           <ReportProblemLink className="ghost-btn">
             <Mail size={14} /> {REPORT_LABEL}

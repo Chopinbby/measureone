@@ -1247,7 +1247,7 @@ Import buttons) and on the Settings page, in its own panel just above the Danger
 whether or not accounts are available on the address you are using.
 
 **What you see.** Your own email app opens a new message to hello@measureone.app with the subject "MeasureOne: a problem" and a short
-note: "What happened?", "What were you trying to do?", a line asking you to leave out anything private such as piece names, and, added by
+note: "What happened?", "What were you trying to do?", a line asking you not to include private information, and, added by
 the app, two lines at the end: the address you opened the app at and your browser's name text. You can edit or delete any of it.
 Nothing is sent until you press send in your email app; the app itself sends nothing and keeps nothing. The note never contains a piece
 name, your email, your account or anything about your practice.

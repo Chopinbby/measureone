@@ -3794,8 +3794,9 @@ breakages all caught) builds a `mailto:hello@measureone.app` link with a fixed s
 two lines the app adds: `Address:` (the host the app is open at) and `Browser:` (the browser's own name text, cut to 200
 characters)**. The function reads only those two inputs, so nothing from a piece, the technique library, the account or storage can
 reach it; a line break or `&` inside a value cannot start a new line of the note or a new field such as `cc=`/`bcc=` (a host that
-is not a host reads `unknown`). `ReportProblemLink.jsx` is a real `<a href="mailto:...">`, not a script, so it works if the page's
-script is what broke. It is shown **on the welcome screen (no pieces yet) and as its own panel on the Settings page between "Current
+is not a host reads `unknown`). `ReportProblemLink.jsx` is a real `<a href="mailto:...">`, so the click itself needs no code of ours.
+**It is drawn by the app, so it exists only once the app has loaded: a page that never loads (a blank screen) shows no link at all** (see
+Left open). It is shown **on the welcome screen (no pieces yet) and as its own panel on the Settings page between "Current
 piece details" and the Danger zone**, signed in or out and whether or not an account service is configured, with the address in
 plain text beside it (under the button in Settings, after a dot on the welcome screen) so a device with no mail app is never a dead end.
 Nothing is sent by the app: the person's own email app opens with the note ready and nothing leaves until they press send. **There
@@ -3872,6 +3873,13 @@ email and in Settings). It also opened the mail app on her phone. **Not reported
 so that one provider failing does not hide an outage (the free plan's contacts are not stated). (iv) An error-reporting service is
 still not built; revisit before Pass 135 (Design G). (v) The note is English only. (vi) The monitors' addresses and key live in the
 owner's UptimeRobot account, not in this repository: a rebuilt project (a new Supabase address) needs the second monitor edited.
+(vii) **No link when the app itself does not load** (a blank page, as a browser that cannot parse the code would show): the link is
+drawn by the app. A plain link in `index.html`, outside the app, would cover it; not built, found in the pass's own review.
+(viii) **`a.ghost-btn { text-decoration: none; }` (App.jsx's CSS) also reaches the "Open measureone.app" link in the "moved" note
+(Pass 128), the one other `<a class="ghost-btn">`**, which used to keep the browser's underline. Expected to look better; not seen (the
+note shows only on the three old addresses). Scoping the rule to the new link would leave that note untouched. (ix) **Nothing watches
+the forwarding of `hello@measureone.app`**: if ImprovMX stopped forwarding, a report would reach nobody and the sender would see no
+error (it was received on 2026-11-08; the uptime monitors do not look at mail).
 
 ## Phase 3: other people's accounts (designed, not built)
 

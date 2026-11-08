@@ -3858,10 +3858,14 @@ fills in holds only the address and browser name.
 2026-11-08 that she set up the uptime monitors and ran the alert tests, and that the alert emails reach her own inbox. **What she did not
 report, so it is not recorded as seen:** that both monitors carry exactly the addresses and words above, whether an "it is back up" email
 arrived after the test, and what the free plan allows (alert contacts, where the data is stored); fill these in when she says.
-**The usage-email read-back is not reported yet.** Seen in the preview pane against `localhost:5173` (2026-11-07): the link on the
+**The usage-email read-back is done (reported 2026-11-08):** the organization's billing page has a field labelled "Email Recipient"
+("All billing correspondence will go to this email"), and it holds an address she reads, the same one she signs in to Supabase with, so
+both candidate addresses are one inbox. Supabase's pages still do not say that usage or pause emails use it, and no such email was
+received (they cannot be triggered). Seen in the preview pane against `localhost:5173` (2026-11-07): the link on the
 welcome screen and in Settings (signed out, with a test piece), its address holding the host and browser and not the test piece's
-name, and the phone-width layout. **Not seen:** a real mail app opening from the link (the owner's check on the preview address), or
-it on a phone.
+name, and the phone-width layout. **The owner's check of the link (reported 2026-11-08):** she used it on the preview, it opened the mail app on her
+computer, she sent the report and received it in her inbox, and asked that the note's closing sentence read "Please don't include private information." (done, in the
+email and in Settings). **Not reported:** the link on a phone, and which address and whether signed in or out she tried it from.
 
 **Left open.** (i) Whether to add the link to the sign-in windows (the likeliest place a person gives up) when Pass 133 edits them.
 (ii) A paused project's answer to the health address is unobserved. (iii) A second email address for alerts, or a text message,
@@ -3882,7 +3886,7 @@ tried against a stand-in, plus migration `0003` and the security script on the t
 other people's data, see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), built in a new
 private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
 steps were done with her the same day apart from deleting the old backups repository**);
-132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built and tested, not yet merged (PR 94); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, the usage-email read-back is still to be reported**;
+132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built and tested, not yet merged (PR 94); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link were reported the same day (the phone check is not)**;
 nothing else in this section is built. **The next to build, once 132 is merged, is Pass 133.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on

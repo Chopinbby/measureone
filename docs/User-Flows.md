@@ -1256,5 +1256,5 @@ name, your email, your account or anything about your practice.
 nothing opens, write to hello@measureone.app.") and beside the link on the welcome screen ("Report a problem · hello@measureone.app").
 
 **Not covered:** no form inside the app and no automatic error reports (the earlier decision: reports that could carry piece names are
-not collected); no app version number in the note (the app has none); the sign-in windows do not carry the link. Design and checks:
+not collected); no app version number in the note (the app has none); the sign-in windows do not carry the link, and a page that fails to load at all shows none (the app draws it). Design and checks:
 [Accounts-and-Backend.md](Accounts-and-Backend.md#alarms-pass-132).

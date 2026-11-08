@@ -263,12 +263,12 @@ kept, so nothing else is needed). **The "moved" note** is code: reverting the Pa
 merge removes it. Nothing about either touches a piece, the technique library or an
 account's rows. The domain itself can stay attached while any of this is done.
 
-**Rollback points since go-live (added 2026-10-15, extended 2026-11-01).** Every merge
+**Rollback points since go-live (added 2026-10-15, extended 2026-11-08).** Every merge
 to `main` makes an ordinary Production deployment, so earlier ones stay listed in
 Vercel (for as long as Vercel keeps them). The app code changed three times between
 go-live and 2026-10-15: the deployment of `92e6282` (PR 62) is the last one before
 Pass 115 (app file `index-BquOI88d.js`, accounts on); `b877140` (PR 63) is Pass 115
-alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed nine more times
+alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed eleven more times
 since, one merge each:** `9864612` (PR 71) is Pass 119 (tabs of one browser),
 `847fada` (PR 72) Pass 120 (changes from other devices arriving by themselves,
 behind a switch that is off by default), `951a640` (PR 73) Pass 121 (Review asks one
@@ -280,8 +280,10 @@ no to is remembered, the most recent reorder wins; app file `index-YBQquKJp.js`)
 `index-78o7whRf.js`, live 2026-10-28), `0a9d1a7` (PR 83) Pass 126 (the most recent change wins;
 app file `index-CqYGi2T6.js`, live 2026-10-31; missing from this list until 2026-11-01) and
 `c4af6bf` (PR 86) Pass 128 (the "moved" note and its phone layout; app file `index-IY8CdtWw.js`, live
-2026-11-01) and `ab7916f` (PR 90) Pass 130 (change email, delete my account, the Danger zone),
-**the current app code, live since 2026-11-06 (app file `index-BQl7BE2O.js`)**. **Rolling back across Pass 130 only
+2026-11-01) and `ab7916f` (PR 90) Pass 130 (change email, delete my account, the Danger zone; app file `index-BQl7BE2O.js`, live
+2026-11-06) and `a9835db` (PR 94) Pass 132 (the "Report a problem" link), **the current app code, live since 2026-11-08
+(app file `index-CYcwBRHX.js`)**. **Rolling back across Pass 132 only removes the link** (no stored data format and no
+database changed; Pass 131 changed no app code). **Rolling back across Pass 130 only
 removes the new buttons;** migration `0003` and its database function stay on both Supabase projects, unused and
 harmless, and no stored data format changed, so devices don't upload anything extra either way. The file
 names of the four before 122b were not recorded when they went live; read one off a
@@ -392,6 +394,11 @@ account backend nothing at all.
 - Check deployments at [vercel.com/dashboard](https://vercel.com/dashboard)
 - View build logs if a deploy fails
 - Enable email notifications for deployment status
+- **The uptime check (Pass 132):** two UptimeRobot keyword monitors, kept in the owner's UptimeRobot account (not in this
+  repository): `https://measureone.app/` expecting the word `MeasureOne`, and the account service's health address expecting
+  `GoTrue`. If the live address changes, or the production Supabase project is rebuilt (a new address), edit the matching
+  monitor, or it will report an outage that is not one. To turn it off, pause the monitors in UptimeRobot; nothing in the app
+  depends on it. Details: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#alarms-pass-132).
 
 ### Custom Domain
 

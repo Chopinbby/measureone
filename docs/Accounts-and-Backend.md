@@ -3782,11 +3782,11 @@ email changed with Change email makes `--rename` necessary in a rebuild (the too
 
 ## Alarms (Pass 132)
 
-**Built 2026-11-07 (Phase 3, Design G), on the owner's go-ahead for the plan in Design G: an outside "is it up?" check,
+**Built 2026-11-07, merged 2026-11-08 as PR #94 (Phase 3, Design G), on the owner's go-ahead for the plan in Design G: an outside "is it up?" check,
 Supabase's own usage emails, and a "Report a problem" link that opens an email. No error-reporting service and no public status
 page during invitations.** The one app change is the link. The outside check and the usage-email read-back are the owner's
 dashboard steps (Claude cannot create an account at another company or type a password); **their status is in "Where it
-stands", at the end of this section, and is not claimed done until she has seen the real alerts.**
+stands", at the end of this section (she has seen the real alerts and the link work).**
 
 **The link ("Report a problem").** `src/lib/reportProblem.js` (pure, `test/reportProblem.test.mjs`, 13 tests, 6 deliberate
 breakages all caught) builds a `mailto:hello@measureone.app` link with a fixed subject ("MeasureOne: a problem") and a short note
@@ -3854,8 +3854,9 @@ page says "3 months" on the free plan). **The "Report a problem" email is the pe
 contact address, which ImprovMX forwards to the owner's inbox (Pass 129); the app itself sends and stores nothing, and the note it
 fills in holds only the address and browser name.
 
-**Where it stands (2026-11-08).** Built and tested; pull request 94 is open and **not merged**, with its preview at
-`measureone-git-claude-pass-132-planning-97ba24-measure-one.vercel.app`. **The outside check is done by the owner:** she reported on
+**Where it stands (2026-11-08).** **Merged 2026-11-08 (PR #94, merge commit `a9835db`) and live: all four addresses serve
+`index-CYcwBRHX.js`, which holds the link** (read from outside after the deploy). Before the merge the owner tried the link on the pull
+request's preview. **The outside check is done by the owner:** she reported on
 2026-11-08 that she set up the uptime monitors and ran the alert tests, and that the alert emails reach her own inbox. **What she did not
 report, so it is not recorded as seen:** that both monitors carry exactly the addresses and words above, whether an "it is back up" email
 arrived after the test, and what the free plan allows (alert contacts, where the data is stored); fill these in when she says.
@@ -3894,8 +3895,8 @@ tried against a stand-in, plus migration `0003` and the security script on the t
 other people's data, see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), built in a new
 private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
 steps were done with her the same day apart from deleting the old backups repository**);
-132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built and tested, not yet merged (PR 94); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
-nothing else in this section is built. **The next to build, once 132 is merged, is Pass 133.** Phase 3 is what has to
+132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
+nothing else in this section is built. **The next to build is Pass 133.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -3996,7 +3997,7 @@ the docs for `Owner: Pass N` (below).
   the live site: nothing. Needs 127; best after 130. **Built 2026-11-06 in `Chopinbby/measureone-backups-v2`, docs merged 2026-11-07 as PR 92: see
   [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131).**
 - **132** Alarms: an outside uptime check, Supabase's usage emails, a "Report a problem" link. On the
-  live site: that link. Needs 128 and 129. **Built 2026-11-07 (not yet merged): see [Alarms (Pass 132)](#alarms-pass-132).**
+  live site: that link. Needs 128 and 129. **Built 2026-11-07, merged 2026-11-08 (PR 94): see [Alarms (Pass 132)](#alarms-pass-132).**
 - **133** Privacy policy and terms: two pages at the domain, linked everywhere, plus one sentence in
   the Choose a password window. Written last of the preparation passes on purpose, because it names
   every outside service and every time limit that 128 to 132 settle. Needs 129 to 132.

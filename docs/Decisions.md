@@ -8830,6 +8830,14 @@ what it rules out.
   Supabase's usage emails cannot be triggered, so that is a read-back of a setting. **Found on the way:** this worktree's `node_modules`
   predated the account library (`@supabase/supabase-js` absent), so the dev server showed an import error until `npm ci`; the tests
   never noticed because no lib file imports it at the top. Not an app bug.
+  **Status (2026-11-08):** merged as PR #94 (merge commit `a9835db`), live as `index-CYcwBRHX.js` on all four addresses. The owner's checks,
+  all reported by her: the two monitors exist and their alert emails reach her inbox; Supabase's billing page names her own sign-in address
+  as its "Email Recipient"; the link opened the mail app on her computer and her phone and the report she sent arrived; and she asked that
+  the note end "Please don't include private information." (the first wording, "leave out anything private, such as piece names", read
+  oddly; changed in the email and in Settings). **Not reported, so not recorded as seen:** that both monitors carry exactly the addresses and
+  words above, whether an "it is back up" email arrived, and what the free plan allows. **A review at the end** found one false claim I had
+  written (a code comment and the docs said the link works even if the page's script breaks; the app draws it, so a page that never loads
+  shows none) and corrected it, and logged loose ends: see "Alarms (Pass 132)" under Open questions.
 
 ## Open questions
 
@@ -10396,3 +10404,24 @@ oversight to silently fix; surface it instead.
   5. **No automated test of the worker's routing is committed** (not on the card's file list); a small
      test with a fake `self`, `caches` and `fetch` was offered.
   6. **The "new version shows" check was done locally only**, not on a preview address.
+
+- **Alarms (Pass 132): what is still open (logged 2026-11-08).** Merged as PR #94; see "Pass 132" under Accounts and backend above
+  and [Accounts-and-Backend.md](Accounts-and-Backend.md#alarms-pass-132) ("Left open" there spells each out). Still open:
+  1. **No link when the app itself does not load** (a blank page): the link is drawn by the app. A plain link in `index.html`, outside the
+     app, would cover it. Found in the pass's own review; the first version of a code comment and the docs claimed the opposite (corrected).
+     Not built.
+  2. **`a.ghost-btn { text-decoration: none; }` (App.jsx's CSS) also reaches the "Open measureone.app" link in the "moved" note** (Pass 128).
+     Expected to look better; not seen, because that note shows only on the three old addresses. Scoping the rule to the new link would
+     leave the note alone.
+  3. **Nothing watches the forwarding of `hello@measureone.app`** (ImprovMX). If it stopped, a report would reach nobody and the sender would
+     see no error. It worked on 2026-11-08; the uptime monitors do not look at mail.
+  4. Whether to add the link to the sign-in windows (the likeliest place a person gives up), decided with Pass 133, which edits them.
+  5. A paused project's answer to the health address is unobserved.
+  6. A second alert address, or a text message, so one provider failing does not hide an outage; the free plan's contacts are not stated
+     and she did not report them.
+  7. An error-reporting service is still not built; revisit before Pass 135 (Design G).
+  8. The note is English only.
+  9. The monitors' addresses and key live in her UptimeRobot account, not in this repository: a rebuilt production project (a new Supabase
+     address) needs the second monitor edited.
+  10. Supabase's pages do not say which address a usage or pause email goes to. The billing "Email Recipient" she saw is her sign-in address,
+      so both candidates are one inbox, but no such email has been received (they cannot be triggered).

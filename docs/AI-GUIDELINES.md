@@ -1281,6 +1281,15 @@ Center with the Wi-Fi icon dark; a new Safari tab that must fail to load a site;
 the action that triggers a cue in the same step as the cue. Tell her to use a normal Safari tab, never a Private one, for
 anything that has to survive a sign-out. And read the WHOLE path that makes a cue appear before saying what she will see.
 
+## A claim that a feature survives a failure has to name what draws it
+
+Pass 132's "Report a problem" link was described, in a code comment and in the docs, as a real `<a href="mailto:...">` that
+"still works if the page's script is the thing that broke". It does not: the app draws the link, so a page that never loads
+(the blank-page case CLAUDE.md warns about for Safari 14) shows no link at all. No test could have noticed (components have none),
+and the owner's computer and phone checks passed; it was found only when the changes were re-read as a skeptical second engineer.
+Before writing "X works even if Y breaks", list what has to run for X to exist at all; if Y is on that list, the claim is false.
+If the failure case matters, the fix is something outside Y (here a plain link in `index.html`, logged as open, not built).
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

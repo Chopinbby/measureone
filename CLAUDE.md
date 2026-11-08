@@ -1402,7 +1402,7 @@ copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's acco
 is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01),
 129 (a real email service, 2026-11-06), 130 (change email and delete my account, 2026-11-06, merged as PR #90) and
 131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code, merged 2026-11-07 as PR 92) are built,
-and 132 (alarms, 2026-11-07) is built but not yet merged:
+and 132 (alarms, 2026-11-07, PR 94) is built but not yet merged:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
@@ -1414,9 +1414,9 @@ and the security script passed 43 of 43 on both; Change email and Delete my acco
 project's preview. **Pass 131 is built and verified with the owner (2026-11-07: the secret, the first backup, a file imported, the failure
 email, the real-project restore in the TEST project)**; what is left is deleting the old `Chopinbby/measureone-backups` (a reminder issue
 opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited); the spare user in the test project was deleted by the owner on 2026-11-07. **Pass 132 (alarms) is built, 2026-11-07, and not yet
-merged:** the "Report a problem" link (welcome screen and Settings; `lib/reportProblem.js`, tested), and, as the owner's dashboard steps, an outside
-uptime check (UptimeRobot, two keyword monitors) and a read-back of Supabase's usage emails; see "What each pass added". **The next pass to build, once
-132's owner steps are seen, is 133** (the privacy policy and terms), in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
+merged (PR 94, preview `measureone-git-claude-pass-132-planning-97ba24-measure-one.vercel.app`):** the "Report a problem" link (welcome screen and Settings; `lib/reportProblem.js`, tested), and, as the owner's dashboard steps, an outside
+uptime check (UptimeRobot, two keyword monitors) and a read-back of Supabase's usage emails. **The owner reported on 2026-11-08 that she set up the monitors and ran the alert tests and that the alert emails reach her inbox; the usage-email read-back and her mail-app and phone checks of the link are not reported yet.** See "What each pass added". **The next pass to build, once
+132 is merged, is 133** (the privacy policy and terms), in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
 branch lands in that branch, not `main`). Her real account on measureone.app now shows Delete my account in the
 Danger zone: it is the owner's own account, so it must not be pressed in any check.
 Still not
@@ -1606,5 +1606,5 @@ silently.
 - **Pass 132** — alarms: a "Report a problem" email link (a plain `mailto:` to hello@measureone.app, on the welcome screen
   and as a Settings panel, with only the address and browser name added to the note; no piece data, no error-reporting
   service), and, as the owner's steps outside the app, an outside uptime check (UptimeRobot, two keyword monitors: the app's front page
-  and the account service's health address) and a read-back of Supabase's usage emails. Built 2026-11-07, not yet merged; the
-  monitors are not created until she does them. [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#alarms-pass-132)
+  and the account service's health address) and a read-back of Supabase's usage emails. Built 2026-11-07, not yet merged (PR 94); she set up
+  the monitors and saw their alert emails reach her inbox (reported 2026-11-08); the usage-email read-back is not reported yet. [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#alarms-pass-132)

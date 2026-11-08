@@ -3848,11 +3848,15 @@ page says "3 months" on the free plan). **The "Report a problem" email is the pe
 contact address, which ImprovMX forwards to the owner's inbox (Pass 129); the app itself sends and stores nothing, and the note it
 fills in holds only the address and browser name.
 
-**Where it stands (2026-11-07).** Built and tested here; **not merged**; the outside check is not created yet and the usage-email
-read-back is not done (both the owner's, walked through in chat). Seen in the preview pane against `localhost:5173`: the link on the
+**Where it stands (2026-11-08).** Built and tested; pull request 94 is open and **not merged**, with its preview at
+`measureone-git-claude-pass-132-planning-97ba24-measure-one.vercel.app`. **The outside check is done by the owner:** she reported on
+2026-11-08 that she set up the uptime monitors and ran the alert tests, and that the alert emails reach her own inbox. **What she did not
+report, so it is not recorded as seen:** that both monitors carry exactly the addresses and words above, whether an "it is back up" email
+arrived after the test, and what the free plan allows (alert contacts, where the data is stored); fill these in when she says.
+**The usage-email read-back is not reported yet.** Seen in the preview pane against `localhost:5173` (2026-11-07): the link on the
 welcome screen and in Settings (signed out, with a test piece), its address holding the host and browser and not the test piece's
-name, and the phone-width layout. **Not seen:** a real mail app opening from the link (the owner's check on the preview address),
-on a phone, or an alert arriving.
+name, and the phone-width layout. **Not seen:** a real mail app opening from the link (the owner's check on the preview address), or
+it on a phone.
 
 **Left open.** (i) Whether to add the link to the sign-in windows (the likeliest place a person gives up) when Pass 133 edits them.
 (ii) A paused project's answer to the health address is unobserved. (iii) A second email address for alerts, or a text message,
@@ -3873,8 +3877,8 @@ tried against a stand-in, plus migration `0003` and the security script on the t
 other people's data, see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), built in a new
 private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
 steps were done with her the same day apart from deleting the old backups repository**);
-132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built and tested, not yet merged; the outside check and the usage-email read-back are the owner's steps**;
-nothing else in this section is built. **The next to build, once 132's owner steps are seen, is Pass 133.** Phase 3 is what has to
+132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built and tested, not yet merged (PR 94); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, the usage-email read-back is still to be reported**;
+nothing else in this section is built. **The next to build, once 132 is merged, is Pass 133.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same

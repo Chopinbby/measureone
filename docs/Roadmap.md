@@ -506,7 +506,7 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    built-in sender reaches only the project's own team and only a couple of messages an
    hour, which is why the owner's is the only account for now); 130 change email and
    "delete my account" in the app (a database function; done 2026-11-06, merged as PR #90); 131 backups that expire, a real
-   restore and the plan question; 132 alarms; 133 a privacy policy and terms; then Pass 124
+   restore and the plan question; 132 alarms (built 2026-11-07, not yet merged); 133 a privacy policy and terms; then Pass 124
    (the automatic-update switch's default), proposed just before 134; 134 inviting people
    and 135 open sign-up, each only on the owner's word. The design and who owns each loose
    end: [Accounts-and-Backend.md](Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).

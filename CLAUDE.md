@@ -436,6 +436,11 @@ chunking, scheduling, and confidence are actually computed, see
 - **Show key names through `KeyText.jsx`** (♯/♭ in a tighter font inside one span, so
   a flex `gap` can't split "E♭" into "E ♭"), and wrap it together with its
   surrounding words when the parent is a flex row with a gap (buttons are) (Pass 101).
+- **The "Report a problem" note carries only the host and the browser's name text (Pass 132).**
+  `lib/reportProblem.js` reads exactly `hostname` and `userAgent`; do not widen it with "helpful" app state
+  (a piece name, the account's email, a piece count, a build of the data): Design G chose a plain email link
+  over an error-reporting service precisely so a report cannot carry piece names, and a component has no
+  test to catch a leak. `test/reportProblem.test.mjs` pins the function; keep any new field out of it.
 - **Technique stays out of every schedule path (Pass 102):** no behind-schedule
   count, `ScheduleBanner`, reschedule dialog or piece-progress code may read it. It
   isn't part of any piece.
@@ -1396,7 +1401,8 @@ tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
 is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01),
 129 (a real email service, 2026-11-06), 130 (change email and delete my account, 2026-11-06, merged as PR #90) and
-131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code, merged 2026-11-07 as PR 92) are built:
+131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code, merged 2026-11-07 as PR 92) are built,
+and 132 (alarms, 2026-11-07, PR 94) is built but not yet merged:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
@@ -1407,8 +1413,10 @@ are merged.** Pass 130 is live: all four addresses serve `index-BQl7BE2O.js`, bu
 and the security script passed 43 of 43 on both; Change email and Delete my account were tried on the test
 project's preview. **Pass 131 is built and verified with the owner (2026-11-07: the secret, the first backup, a file imported, the failure
 email, the real-project restore in the TEST project)**; what is left is deleting the old `Chopinbby/measureone-backups` (a reminder issue
-opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited); the spare user in the test project was deleted by the owner on 2026-11-07. **The next pass to build is 132** (alarms: an outside uptime
-check, Supabase's usage emails, a "Report a problem" link), in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
+opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited); the spare user in the test project was deleted by the owner on 2026-11-07. **Pass 132 (alarms) is built, 2026-11-07, and not yet
+merged (PR 94, preview `measureone-git-claude-pass-132-planning-97ba24-measure-one.vercel.app`):** the "Report a problem" link (welcome screen and Settings; `lib/reportProblem.js`, tested), and, as the owner's dashboard steps, an outside
+uptime check (UptimeRobot, two keyword monitors) and a read-back of Supabase's usage emails. **The owner reported on 2026-11-08 that she set up the monitors and ran the alert tests and that the alert emails reach her inbox, that Supabase's billing page names her own sign-in email as its "Email Recipient", and that the link opened the mail app on her computer and she sent a report through it and received it; it also opened the mail app on her phone.** See "What each pass added". **The next pass to build, once
+132 is merged, is 133** (the privacy policy and terms), in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's
 branch lands in that branch, not `main`). Her real account on measureone.app now shows Delete my account in the
 Danger zone: it is the owner's own account, so it must not be pressed in any check.
 Still not
@@ -1595,3 +1603,8 @@ silently.
   plan kept through invitations. No app code. Built 2026-11-06 and verified with the owner 2026-11-07; **merged 2026-11-07 (PR 92, merge commit `77ce143`)**; the old
   backups repository is still to be deleted (a reminder issue opens 2026-11-10).
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#other-peoples-data-backups-that-expire-pass-131)
+- **Pass 132** — alarms: a "Report a problem" email link (a plain `mailto:` to hello@measureone.app, on the welcome screen
+  and as a Settings panel, with only the address and browser name added to the note; no piece data, no error-reporting
+  service), and, as the owner's steps outside the app, an outside uptime check (UptimeRobot, two keyword monitors: the app's front page
+  and the account service's health address) and a read-back of Supabase's usage emails. Built 2026-11-07, not yet merged (PR 94); she set up
+  the monitors and saw their alert emails reach her inbox (reported 2026-11-08); Supabase's billing "Email Recipient" is her sign-in address; she sent a report through the link and received it; it also opened her phone's mail app. [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#alarms-pass-132)

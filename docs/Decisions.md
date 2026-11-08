@@ -8806,6 +8806,31 @@ what it rules out.
   event because she already receives GitHub's assignment emails, which the trial confirmed; the old repository stays until then so there is
   a second copy while the new one proves itself).
 
+- **Pass 132 — alarms: an outside check, Supabase's usage emails, and a "Report a problem" link (2026-11-07).** Built as Phase 3
+  Design G; one small app change (the link), the rest are the owner's dashboard steps. Design and facts:
+  [Accounts-and-Backend.md](Accounts-and-Backend.md#alarms-pass-132). **The owner's answer:** go ahead on the plan as outlined (the
+  three things, the link in Settings and on the welcome screen, a note with no piece data). **Decisions inside that:** (a) the link is a
+  plain `mailto:` to hello@measureone.app, so the person's own email app sends it and nothing passes through a server of ours or an
+  outside service; (b) the note carries **only the host and the browser's name text**, which is one thing more than the "address and
+  version" proposed in chat (the app has no version to give, and a browser name is what separates a phone-only bug from a general one),
+  both shown in the draft and deletable; the function reads only those two inputs, so a piece cannot leak in by a caller's mistake, and
+  tests pin that, plus no way for a value to start a new line or a `cc=`/`bcc=` field; (c) the link is on the welcome screen and in
+  Settings, shown signed in or out and with or without an account service, with the address as plain text beside it, because a mailto
+  link does nothing on a device with no mail app; (d) **UptimeRobot** is the recommended outside check because it is the only one of
+  three whose own terms plainly allow a for-profit project (Better Stack's free tier is "for personal projects"; StatusCake's terms say
+  "personal use" and "business" in different clauses), and the app may be sold; (e) the account-service monitor puts the **publishable** key
+  **in the address** (`/auth/v1/health?apikey=...`, tested to answer 200 with "GoTrue" in the body, and 401 without a key) because a free
+  plan may not allow custom headers; the key is public by design and the secret key goes nowhere; (f) two **keyword** monitors (the word
+  the page title holds, and `GoTrue`), so a 200 error page from either host does not pass. **Alternatives ruled out:** an in-app form
+  (needs somewhere to send to and fails with the page); filling in the person's email, name or a piece name (Design G's point is reports
+  without piece data); an error-reporting service (it would see error messages that can include piece names; revisit before Pass 135); a
+  public status page; the backup job's daily emails alone (would show a pause after up to a day, and nothing about the site). **Honest
+  limits:** the pricing pages read did not state that email alerts are on the free plan, that "back up" emails are sent, or the data
+  region (confirmed in the dashboard at sign-up); a 5-minute interval; a paused project's answer to the health address was not tried;
+  Supabase's usage emails cannot be triggered, so that is a read-back of a setting. **Found on the way:** this worktree's `node_modules`
+  predated the account library (`@supabase/supabase-js` absent), so the dev server showed an import error until `npm ci`; the tests
+  never noticed because no lib file imports it at the top. Not an app bug.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an

@@ -1239,3 +1239,22 @@ the network fails.
 text uses fallback fonts; a private window may not open offline, and Safari clears a site's saved data
 after about a week without a visit; installing to the home screen is not offered. Design and checks:
 [Accounts-and-Backend.md](Accounts-and-Backend.md#opening-the-app-with-no-connection-pass-123).
+
+## 19. Reporting a problem (Pass 132)
+
+**What you do:** press **Report a problem**. It is on the welcome screen (before you have any pieces, under the Start and
+Import buttons) and on the Settings page, in its own panel just above the Danger zone. It works signed in or signed out, and
+whether or not accounts are available on the address you are using.
+
+**What you see.** Your own email app opens a new message to hello@measureone.app with the subject "MeasureOne: a problem" and a short
+note: "What happened?", "What were you trying to do?", a line asking you to leave out anything private such as piece names, and, added by
+the app, two lines at the end: the address you opened the app at and your browser's name text. You can edit or delete any of it.
+Nothing is sent until you press send in your email app; the app itself sends nothing and keeps nothing. The note never contains a piece
+name, your email, your account or anything about your practice.
+
+**If nothing opens** (a device with no email app set up), the address is shown in plain text too: under the button in Settings ("If
+nothing opens, write to hello@measureone.app.") and beside the link on the welcome screen ("Report a problem · hello@measureone.app").
+
+**Not covered:** no form inside the app and no automatic error reports (the earlier decision: reports that could carry piece names are
+not collected); no app version number in the note (the app has none); the sign-in windows do not carry the link. Design and checks:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#alarms-pass-132).

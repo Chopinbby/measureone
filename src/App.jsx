@@ -184,6 +184,8 @@ import { stampChangedSettings, pieceWithChange } from "./lib/settingTimes";
 import { stampChangedTechnique } from "./lib/techniqueMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
 import { NEW_ADDRESS, NEW_ADDRESS_URL, movedNote } from "./lib/address";
+import { ReportProblemLink } from "./components/ReportProblemLink";
+import { CONTACT_ADDRESS } from "./lib/reportProblem";
 import { ExportPiecesModal } from "./components/ExportPiecesModal";
 import { ImportPiecesModal } from "./components/ImportPiecesModal";
 import { SettleConflictModal } from "./components/SettleConflictModal";
@@ -4524,6 +4526,15 @@ export default function App() {
                   </button>
                 )
               )}
+              {/* Pass 132: a plain email link, here whether or not an account service is
+                  configured, so a person who can't get started can still say so. */}
+              <p className="wizard-hint" style={{ margin: "18px 0 0" }}>
+                <ReportProblemLink />
+                {/* The address as plain text too: a mailto link does nothing on a device with no
+                    email app, and the person must never be left without a way to write. */}
+                {" · "}
+                {CONTACT_ADDRESS}
+              </p>
             </div>
           </div>
         </div>
@@ -5598,6 +5609,7 @@ const CSS = `
 .piece-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
 .link-btn { background: transparent; border: none; color: var(--accent-deep); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; transition: color 0.15s; padding: 0; font-family: inherit; }
 .link-btn:hover { color: var(--accent); text-decoration: underline; }
+a.ghost-btn { text-decoration: none; }
 
 /* ---------------------------------------------------------------- */
 /*  Technique practice (Pass 101) — the Technique page, the shared   */

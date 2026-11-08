@@ -3780,6 +3780,86 @@ as activity is unknowable from outside. (iv) The 3-account threshold is a guess.
 access to the repository, including through the owner's GitHub account; its two-factor sign-in is the protection. (vii) An
 email changed with Change email makes `--rename` necessary in a rebuild (the tool says which person has no match).
 
+## Alarms (Pass 132)
+
+**Built 2026-11-07 (Phase 3, Design G), on the owner's go-ahead for the plan in Design G: an outside "is it up?" check,
+Supabase's own usage emails, and a "Report a problem" link that opens an email. No error-reporting service and no public status
+page during invitations.** The one app change is the link. The outside check and the usage-email read-back are the owner's
+dashboard steps (Claude cannot create an account at another company or type a password); **their status is in "Where it
+stands", at the end of this section, and is not claimed done until she has seen the real alerts.**
+
+**The link ("Report a problem").** `src/lib/reportProblem.js` (pure, `test/reportProblem.test.mjs`, 13 tests, 6 deliberate
+breakages all caught) builds a `mailto:hello@measureone.app` link with a fixed subject ("MeasureOne: a problem") and a short note
+(what happened, what were you trying to do, a line asking to leave out anything private such as piece names) ending in **exactly
+two lines the app adds: `Address:` (the host the app is open at) and `Browser:` (the browser's own name text, cut to 200
+characters)**. The function reads only those two inputs, so nothing from a piece, the technique library, the account or storage can
+reach it; a line break or `&` inside a value cannot start a new line of the note or a new field such as `cc=`/`bcc=` (a host that
+is not a host reads `unknown`). `ReportProblemLink.jsx` is a real `<a href="mailto:...">`, not a script, so it works if the page's
+script is what broke. It is shown **on the welcome screen (no pieces yet) and as its own panel on the Settings page between "Current
+piece details" and the Danger zone**, signed in or out and whether or not an account service is configured, with the address in
+plain text beside it (under the button in Settings, after a dot on the welcome screen) so a device with no mail app is never a dead end.
+Nothing is sent by the app: the person's own email app opens with the note ready and nothing leaves until they press send. **There
+is no app version in the note** (the app has none to read; `package.json`'s 0.1.0 means nothing); the address and browser are what
+tell a bug apart. Not added to the sign-in windows (Pass 133 edits them for the privacy policy; see Owned by).
+**Alternatives ruled out:** a form inside the app (it would need somewhere to send to, which is a server or an outside service
+holding the person's words, and a form is lost if the page is what broke); a link with the person's email, name or a piece name filled
+in (the whole point of Design G is that reports carry no piece data); an error-reporting service (Design G).
+
+**The outside check: UptimeRobot, two monitors.** Compared from the services' own official pages (read 2026-11-07, each page's own
+date shown): UptimeRobot's free plan has 50 monitors at a 5-minute interval and lists HTTP and keyword monitors, and its terms (changelog
+to 2026-05-26) say it is available "for any use, including commercial and business use"; Better Stack's pricing page calls its free tier
+"for personal projects" (10 monitors, Slack and email alerts); StatusCake's terms (last updated 2022) say a free account "is for your own
+personal use" while its pricing says "for individuals and small businesses", which is ambiguous. **UptimeRobot was recommended because it
+is the only one whose own terms plainly allow a for-profit project, and the app may be sold** (the same reason the Vercel Hobby plan is
+flagged under "Not in Phase 3"). **Not stated on the pages read, to be confirmed in the dashboard when the owner signs up:** that email
+alerts are on the free plan and how many contacts, that it emails when a monitor comes back up as well as when it goes down, and where
+the data is stored (the operator is UptimeRobot s. r. o., Slovakia; its privacy page names Amazon Web Services, DigitalOcean, Hetzner,
+Cloudflare and others as storage providers without regions).
+
+- **Monitor 1, the app:** a keyword monitor on `https://measureone.app/`, expecting the word `MeasureOne` (the page's title). Answers 200
+  (read 2026-11-07).
+- **Monitor 2, the account service:** a keyword monitor on `https://tqamtwdraqsvejvhiptz.supabase.co/auth/v1/health?apikey=<the
+  app's publishable key>`, expecting the word `GoTrue`. **Tested from here 2026-11-07:** with no key the address answers 401
+  ("No API key found"); with the key in the address, and equally in a header, it answers 200 with `{"version":"v2.197.0","name":"GoTrue",...}`.
+  The key goes **in the address** because a free plan may not allow custom request headers (not stated on the pages read), and a
+  health check that needs one is no use there. **The key is the publishable one** (`sb_publishable_...`), public by design (it is in the
+  app's own built file, which is where it was read from, and the keep-awake job already sends it); **never the secret key, in this
+  monitor or anywhere.** A paused project's answer to this address was not tried (Pass 131's keep-awake job treats anything but
+  200 or the 401 `42501` as unhealthy, and the same is assumed here: not 200 means down).
+- **Interval and alerts:** every 5 minutes on the free plan, email to an address the owner reads. At most about 5 minutes pass before a
+  down site is noticed and, after UptimeRobot's own confirmation, a few more before the email.
+
+**How it sits beside the other alarms.** The backups repository's jobs (Pass 131) still decide whether the *copy* is recent and
+whether the project is paused (the daily keep-awake fails, and GitHub emails, within about a day); this is the minutes-scale check that
+the *site* and the *sign-in service* answer at all. None of them watches practice or sync correctness (the backup's counts rule does
+the nearest thing). **Honest limits:** a 5-minute interval, not instant; a monitor can pass while one feature fails (it proves the
+address and the sign-in service answer, not that a piece uploads); UptimeRobot is one more outside service that holds the owner's
+email address and the two monitored addresses (including the public key) and may itself be down or late; the owner's email provider
+decides whether an alert reaches her.
+
+**Supabase's own usage emails.** Supabase emails the organization's owner when a project nears a limit or is about to be paused.
+Pass 132 does not build or change them; the owner reads back, in the dashboard, which address they go to and that it is one she reads.
+They cannot be triggered on purpose, so this is a read-back of the setting and not a received message.
+
+**Facts for the privacy policy (Pass 133's list from this pass).** Outside services after this pass: Supabase, Vercel, GitHub, Resend,
+ImprovMX, Google Fonts, **UptimeRobot** (holds the owner's email address and the two monitored addresses; it sees no person's data, because
+the monitors request only the app's front page and the sign-in service's health address, both public; stores monitoring logs, its pricing
+page says "3 months" on the free plan). **The "Report a problem" email is the person's own message** from their own email app to the
+contact address, which ImprovMX forwards to the owner's inbox (Pass 129); the app itself sends and stores nothing, and the note it
+fills in holds only the address and browser name.
+
+**Where it stands (2026-11-07).** Built and tested here; **not merged**; the outside check is not created yet and the usage-email
+read-back is not done (both the owner's, walked through in chat). Seen in the preview pane against `localhost:5173`: the link on the
+welcome screen and in Settings (signed out, with a test piece), its address holding the host and browser and not the test piece's
+name, and the phone-width layout. **Not seen:** a real mail app opening from the link (the owner's check on the preview address),
+on a phone, or an alert arriving.
+
+**Left open.** (i) Whether to add the link to the sign-in windows (the likeliest place a person gives up) when Pass 133 edits them.
+(ii) A paused project's answer to the health address is unobserved. (iii) A second email address for alerts, or a text message,
+so that one provider failing does not hide an outage (the free plan's contacts are not stated). (iv) An error-reporting service is
+still not built; revisit before Pass 135 (Design G). (v) The note is English only. (vi) The monitors' addresses and key live in the
+owner's UptimeRobot account, not in this repository: a rebuilt project (a new Supabase address) needs the second monitor edited.
+
 ## Phase 3: other people's accounts (designed, not built)
 
 **Designed in Pass 127 (2026-10-31). Passes 128, 129, 130 and 131 are built so far** (128, 2026-11-01: the owner's own
@@ -3793,7 +3873,8 @@ tried against a stand-in, plus migration `0003` and the security script on the t
 other people's data, see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), built in a new
 private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
 steps were done with her the same day apart from deleting the old backups repository**);
-nothing else in this section is built. **The next to build is Pass 132.** Phase 3 is what has to
+132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built and tested, not yet merged; the outside check and the usage-email read-back are the owner's steps**;
+nothing else in this section is built. **The next to build, once 132's owner steps are seen, is Pass 133.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -3894,7 +3975,7 @@ the docs for `Owner: Pass N` (below).
   the live site: nothing. Needs 127; best after 130. **Built 2026-11-06 in `Chopinbby/measureone-backups-v2`, docs merged 2026-11-07 as PR 92: see
   [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131).**
 - **132** Alarms: an outside uptime check, Supabase's usage emails, a "Report a problem" link. On the
-  live site: that link. Needs 128 and 129.
+  live site: that link. Needs 128 and 129. **Built 2026-11-07 (not yet merged): see [Alarms (Pass 132)](#alarms-pass-132).**
 - **133** Privacy policy and terms: two pages at the domain, linked everywhere, plus one sentence in
   the Choose a password window. Written last of the preparation passes on purpose, because it names
   every outside service and every time limit that 128 to 132 settle. Needs 129 to 132.
@@ -4047,6 +4128,11 @@ section, or taken from the later cards' own rationales; the owner can strike any
   "Things to remember"; Decisions.md, item 4 of the same open entry). Owner: Pass 133 (from 131's
   list of facts). Pass 131's list of facts is at the end of [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131) (including that a piece deleted in the app is only marked deleted,
   and that the old backups repository must be deleted before invitations).
+- *(added by Pass 132)* **Alarms: facts for the policy, and one place for the link.** The outside services list gains UptimeRobot (it
+  holds the owner's email address and the two monitored public addresses and keeps monitoring logs, "3 months" on the free plan), and the
+  "Report a problem" email is the person's own message, not something the app sends; both are in [Alarms (Pass 132)](#alarms-pass-132),
+  "Facts for the privacy policy". The same pass left it open whether the sign-in windows should carry the link as well (Pass 133 edits
+  them to link the policy). Owner: Pass 133.
 - *(added by Pass 127, a finding)* **The app's fonts come from Google.** The app's stylesheet imports
   them from `fonts.googleapis.com` (`App.jsx`, the `@import` at the top of the CSS string), so every
   visitor's browser contacts Google when the page opens, signed in or not. The card for Pass 133 lists

@@ -4,6 +4,8 @@ import { NumberInput } from "../NumberInput";
 import { BasicsFields } from "../fields/BasicsFields";
 import { KeyText } from "./technique/KeyText";
 import { SkullCrossbones } from "../SkullCrossbones";
+import { ReportProblemLink } from "../ReportProblemLink";
+import { CONTACT_ADDRESS, REPORT_LABEL } from "../../lib/reportProblem";
 import { keyOptionFor } from "./technique/format";
 
 // "D major", or "F♯/G♭ major" for an enharmonic pair, as in the key list.
@@ -480,6 +482,24 @@ export function SettingsTab({
           <button className="primary-btn" onClick={onStartEdit}>
             <Pencil size={15} /> Edit piece settings
           </button>
+        </div>
+        {/* Report a problem (Pass 132). A plain email link, shown signed in or out and whether
+            or not an account service is configured, so a person who can't sign in can still
+            reach it. It opens the person's own email app; nothing is sent from here, and the
+            note holds no piece data (lib/reportProblem.js, tested). */}
+        <div className="panel">
+          <h3>{REPORT_LABEL}</h3>
+          <p className="wizard-hint" style={{ marginBottom: 12 }}>
+            Something not working, or hard to follow? Tell us what happened and what you were doing.
+            This opens a new message in your email app, ready to send. Nothing is sent until you press
+            send there. Please leave out anything private, such as piece names.
+          </p>
+          <ReportProblemLink className="ghost-btn">
+            <Mail size={14} /> {REPORT_LABEL}
+          </ReportProblemLink>
+          <p className="wizard-hint" style={{ margin: "10px 0 0", fontSize: 13 }}>
+            If nothing opens, write to {CONTACT_ADDRESS}.
+          </p>
         </div>
         {/* Danger zone (Pass 130 follow-up): the two things here that delete. Each one
             only opens its own confirmation window (App.jsx), so nothing is deleted from

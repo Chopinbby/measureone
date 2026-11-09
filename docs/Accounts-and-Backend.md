@@ -352,7 +352,7 @@ changes can arrive by themselves, behind a switch that is off by default):
   never chosen between). Scoped 2026-10-28, **step 1 answered the same day, built 2026-10-29, merged 2026-10-31** (PR #83); see [The most recent change wins](#the-most-recent-change-wins-pass-126) and
   [Decisions.md](Decisions.md#accounts-and-backend), "Pass 126 step 1" and "Pass 126 build". Placed ahead of 124's flip.
 
-**Phase 3 — other people's accounts** (designed in Pass 127, 2026-10-31; not built):
+**Phase 3 — other people's accounts** (designed in Pass 127, 2026-10-31; Passes 128 to 133 are built, 134 and 135 are not):
 Passes 128 to 135, in order, with Pass 124 (the automatic-update switch's default)
 proposed just before 134. Your own web address (128), a real email service (129),
 change email and "delete my account" in the app (130), backups that expire and a
@@ -3884,7 +3884,7 @@ error (it was received on 2026-11-08; the uptime monitors do not look at mail).
 
 ## Privacy policy and terms (Pass 133)
 
-**Built 2026-11-08 (Phase 3, Design E), on the owner's answers of the same day. Not merged: see "Before this merges".** The region blank was filled the same day (P16).
+**Built 2026-11-08 (Phase 3, Design E), on the owner's answers of the same day. Merged 2026-11-09 (PR #96, merge commit `94e93c4`), live as `index-CJNfVn4Z.js`: "Before it merged" and "After it merged" below say what is still the owner's.** The region blank was filled the same day (P16).
 Two plain static pages, `public/privacy.html` and `public/terms.html`, dated 2026-11-08 with a change history at the bottom;
 short addresses `/privacy` and `/terms` through a new `vercel.json`; links in the sign-in window, the Account panel, the
 welcome screen and the footer of all five email templates; one sentence in the Choose a password window; and the delete
@@ -3898,7 +3898,7 @@ look is the owner's, before the app is sold.**
   **The pages are written in the first person ("I" is the owner, named, an individual in Colorado)**, not as a company: see "Who is
   named". Nothing is left blank: the account service's region is `us-east-1` (P16).
 - **Short addresses.** `vercel.json` holds two rewrites, `/privacy` to `/privacy.html` and `/terms` to `/terms.html`. It is the
-  repository's first Vercel config and applies to all four addresses once merged. **The app links to `/privacy.html` and
+  repository's first Vercel config and applies to all four addresses (merged 2026-11-09; read from outside that day: `/privacy` and `/terms` answer 200 with the right titles on `measureone.app`, and `/privacy` on the three older addresses). **The app links to `/privacy.html` and
   `/terms.html`** (not the short ones) so they also work in the dev server and any static preview, where the rewrite does not
   exist; the emails use the short ones. The offline worker (`public/sw.js`) handles only `/` and `/assets/`, so the pages are not
   saved for offline reading; it needed no change.
@@ -3914,7 +3914,7 @@ look is the owner's, before the app is sold.**
   deleted and again after (`describeDeleteAccount`). **It is true only once the old backups repository is deleted.**
 - **Email footers.** Every file in `supabase/templates/` ends with `MeasureOne · Privacy Policy · Terms` (plain links to
   `https://measureone.app/privacy` and `/terms`, no tracking); the README says so. **The repository is only the record: the dashboard
-  text of BOTH projects is changed by hand (the owner), after this merges.**
+  text of BOTH projects is changed by hand (the owner), after this merged (2026-11-09; **not yet done**).**
 - **Test.** `test/copy-style.test.mjs` also reads both pages whole and fails on a real em dash, `&mdash;`, `&#8212;` or `&#x2014;`,
   and on a missing page. Four deliberate breakages (each form, and a renamed page) all failed it; the files were restored byte for byte.
 
@@ -3952,7 +3952,7 @@ history, and this row). "Vendor page" means read on 2026-11-08 unless a date say
 | P18 | The copy and the account stay until you delete the account | Design D (a deletion only marks a row); Pass 130 |
 | P19 | Daily backup to a private GitHub repository only I can open, two-factor on | Pass 131 "Facts for the privacy policy"; two-factor on, owner (2026-10-12) |
 | P20 | The copy holds emails, piece names, notes, practice history | Pass 131 "Facts for the privacy policy" |
-| P21 | GitHub deletes each copy after about 30 days; the repository's own files hold only counts | Pass 131 (`retention-days: 30`, the repository's 30-day cap read back, `counts.csv` and `LAST_BACKUP.txt` only, a test fails if anything else is added). **Holds only once the old repository `measureone-backups` is deleted** |
+| P21 | GitHub deletes each copy after about 30 days; the repository's own files hold only counts | Pass 131 (`retention-days: 30`, the repository's 30-day cap read back, `counts.csv` and `LAST_BACKUP.txt` only, a test fails if anything else is added). **Holds only once the old repository `measureone-backups` is deleted; it still existed on 2026-11-09, after the merge** |
 | P22 | Sign-in emails go through Resend (United States), kept 30 days; via Amazon SES | Pass 129 "Email facts for the privacy policy" (Resend's pages as read 2026-11-05; **not re-read in Pass 133**) |
 | P23 | ImprovMX forwards hello@ mail, deletes it after forwarding, holds it briefly in Paris | Pass 129, same note (**not re-read**) |
 | P24 | Vercel hosts the site and keeps request logs (page, time, browser text, in some logs the IP address), one hour to 30 days by plan | Vercel "Runtime Logs" (updated 2026-08-28: Hobby 1 hour, Pro 1 day, Observability Plus 30 days; fields listed) and "Log Drains reference" (updated 2026-09-11: `proxy.clientIp`). **Not stated: which plan the project is on**, so the policy gives the range |
@@ -3987,15 +3987,22 @@ history, and this row). "Vendor page" means read on 2026-11-08 unless a date say
 | T7 | You can leave any time; I can suspend or close an account | The pass card; Pass 130 |
 | T8 | Governed by the laws of the State of Colorado | The owner's state, chat 2026-11-08; the pass card (governing law) |
 
-**Before this merges (both are the owner's, or need her word)**
+**Before it merged (what was asked, and what happened).**
 1. ~~Fill the region (P16)~~ done 2026-11-08.
-2. **Delete the old backups repository** `Chopinbby/measureone-backups` (her reminder issue opens 2026-11-10). Until then P21 and
-   `DELETE_BACKUP_NOTE` are not true of that repository, which kept every day forever.
-3. **She reads both pages and approves them (in progress 2026-11-08: she asked for edits first)** (or says what to change), including P35, P43 and the last sentence of P44, which are promises.
+2. **Delete the old backups repository** `Chopinbby/measureone-backups` (her reminder issue opens 2026-11-10). **Not done before the merge:**
+   she merged on 2026-11-09 with it still there (read that day: it exists, private, last push 2026-11-08). Until it is deleted P21 and
+   `DELETE_BACKUP_NOTE` are not true of that repository, which keeps every day forever, so the pages' "about 30 days" runs ahead of the
+   fact. Only her own account exists, so no one else's data is held that way; **it must be deleted before anyone is invited (Pass 134)**.
+3. **She reads both pages and approves them.** She asked for edits on 2026-11-08 (all applied) and merged the pull request on 2026-11-09,
+   which carried P35, P43 and the last sentence of P44, the promises. On 2026-11-09 (in the Quincy Jones check chat) she decided the
+   email-for-changes promise (P43) stays as written and that how it is kept is settled in Pass 134: **no way to email every account
+   holder exists yet** (Supabase has no broadcast, and replying or sending AS `hello@` is not clean on the Free plan, Pass 129).
 
-**After it merges.** Check the live pages (`/privacy`, `/terms`, and the `.html` names), then she pastes the new footer into the five
-templates in BOTH Supabase projects (before the merge the links would point at nothing), and a real email from each project is
-compared with the file. A first email after the paste is the only proof the footer is live.
+**After it merged (2026-11-09).** Read from outside that day, after the deploy: `/privacy`, `/terms`, `/privacy.html` and `/terms.html`
+answer 200 with the right titles on `measureone.app`, and `/privacy` on the three older addresses; the pages hold no script; the live app
+file (`index-CJNfVn4Z.js`) holds the Choose a password sentence and the new delete wording. **Not done yet, all the owner's:** pasting the
+new footer into the five templates in BOTH Supabase projects, and comparing a real email from each project with the file (a first email
+after the paste is the only proof the footer is live; no sign-in email carries it today).
 
 **Left open (Pass 133).** (i) ~~The region~~ filled (P16). (ii) Whether "MeasureOne" needs a Colorado trade name filing, and when to form an LLC:
 the owner's adviser. (iii) The policy was not read by a lawyer. (iv) Resend, ImprovMX and UptimeRobot facts (P22, P23, P26) are from
@@ -4004,8 +4011,8 @@ depends on the project's plan, which is not recorded anywhere; the policy gives 
 are not stated on the pages read. (vii) The pages cannot be opened offline (the worker handles `/` and `/assets/` only). (viii) The
 pages' colours are a hand copy of the app's, so a palette change in `App.jsx` does not reach them. (ix) `test/copy-style.test.mjs`
 checks the two pages only; **`supabase/templates/` has no automated em dash check** (checked by hand for this pass). (x) No placeholder
-check was added (the pass fenced the test to em dashes); with the region filled the pages hold no blank, searched for `[[`. (xi) `docs/Decisions.md` is not edited (outside this pass's file list): the choices above are
-recorded here instead. (xii) The old three vercel.app addresses serve the pages too, since they serve the same build. (xiii) ~~The age wording~~ settled 2026-11-08: she chose option A (accounts stay 13 and older, so no parental consent is built; younger students use the app without an account, with an adult). Her first wording (accounts for younger students with adult supervision) contradicted Decided 3 and, as far as is understood, US children's privacy law (COPPA: verifiable parental consent, which supervision is not); it was not used. (xiv) Common-practice gaps raised and **added the same day**: a "How I use your information" section (P44), a Do Not Track sentence (P45) and a security paragraph (P46). **Not added, a lawyer's call:** rights worded for particular laws (EU or UK, California's rights to know and delete).
+check was added (the pass fenced the test to em dashes); with the region filled the pages hold no blank, searched for `[[`. (xi) The pass left `docs/Decisions.md` alone (outside its file list); the docs follow-up of 2026-11-09 recorded
+the decisions there ("Pass 133" under Accounts and backend, and "Privacy policy and terms (Pass 133): what is still open" under Open questions). (xii) The old three vercel.app addresses serve the pages too, since they serve the same build. (xiii) ~~The age wording~~ settled 2026-11-08: she chose option A (accounts stay 13 and older, so no parental consent is built; younger students use the app without an account, with an adult). Her first wording (accounts for younger students with adult supervision) contradicted Decided 3 and, as far as is understood, US children's privacy law (COPPA: verifiable parental consent, which supervision is not); it was not used. (xiv) Common-practice gaps raised and **added the same day**: a "How I use your information" section (P44), a Do Not Track sentence (P45) and a security paragraph (P46). **Not added, a lawyer's call:** rights worded for particular laws (EU or UK, California's rights to know and delete). (xv) **The promise to email account holders about changes that matter (P43) has no mechanism yet** ("Before it merged", item 3). (xvi) (iv) says the vendor figures came from earlier passes' readings of the vendors' own pages; the 2026-11-09 check reported that Resend's 30 days, ImprovMX's short hold of failed mail and UptimeRobot's free-plan terms rest on third-party sources instead. The docs cannot tell which; read them from the vendors' own pages before the policy is relied on.
 
 ## Phase 3: other people's accounts (designed, not built)
 
@@ -4021,7 +4028,7 @@ other people's data, see [Other people's data (Pass 131)](#other-peoples-data-ba
 private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
 steps were done with her the same day apart from deleting the old backups repository**);
 132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
-133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **built, not merged (two things wait on the owner: deleting the old backups repository and her reading of the pages)**;
+133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **merged 2026-11-09 as PR 96 (`94e93c4`), live as `index-CJNfVn4Z.js`; still the owner's: deleting the old backups repository (she merged before doing it) and pasting the footer into the five email templates in both projects**;
 nothing else in this section is built. **The next passes are 134 and 124, each only on the owner's word.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
@@ -4126,8 +4133,8 @@ the docs for `Owner: Pass N` (below).
   live site: that link. Needs 128 and 129. **Built 2026-11-07, merged 2026-11-08 (PR 94): see [Alarms (Pass 132)](#alarms-pass-132).**
 - **133** Privacy policy and terms: two pages at the domain, linked everywhere, plus one sentence in
   the Choose a password window. Written last of the preparation passes on purpose, because it names
-  every outside service and every time limit that 128 to 132 settle. Needs 129 to 132. **Built 2026-11-08, not
-  merged: see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133).**
+  every outside service and every time limit that 128 to 132 settle. Needs 129 to 132. **Built 2026-11-08, merged 2026-11-09
+  (PR 96): see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133).**
 - **124** (Tier 9) The automatic-update switch on by default. Proposed to run just before 134, so a new
   person's device starts with it; built only on the owner's word. See its entry under Owned by.
 - **134** First go-live: inviting people. Only on the owner's word. A checklist read from the real
@@ -4276,7 +4283,7 @@ section, or taken from the later cards' own rationales; the owner can strike any
 - **The privacy policy has to cover the backups copy** in the private GitHub repository (Backups:
   "Things to remember"; Decisions.md, item 4 of the same open entry). Owner: Pass 133 (from 131's
   list of facts). Pass 131's list of facts is at the end of [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131) (including that a piece deleted in the app is only marked deleted,
-  and that the old backups repository must be deleted before invitations). **Done in Pass 133 (2026-11-08), built not merged:** P18 to P21, P39 and P41 of the table; the "about 30 days" wording is true only once the old repository is deleted, which is why the merge waits on that.
+  and that the old backups repository must be deleted before invitations). **Done in Pass 133 (2026-11-08, merged 2026-11-09):** P18 to P21, P39 and P41 of the table; the "about 30 days" wording is true only once the old repository is deleted, and the merge did not wait on that ("Before it merged"), so it runs ahead of the fact until then.
 - *(added by Pass 132)* **Alarms: facts for the policy, and one place for the link.** The outside services list gains UptimeRobot (it
   holds the owner's email address and the two monitored public addresses and keeps monitoring logs, "3 months" on the free plan), and the
   "Report a problem" email is the person's own message, not something the app sends; both are in [Alarms (Pass 132)](#alarms-pass-132),

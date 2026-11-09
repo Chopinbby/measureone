@@ -39,3 +39,18 @@ function emDashesInCopy(file) {
 test("no em dashes in user-facing copy anywhere in src/", () => {
   assert.deepEqual(sourceFiles("src").flatMap(emDashesInCopy), []);
 });
+
+// Pass 133: the privacy policy and terms are plain static pages in public/, outside src/, so the
+// check above never saw them. Unlike JS, an HTML file has no comments worth exempting here, so the
+// whole file is read (a dash in a comment is easy to copy into the text later), and the written
+// forms of an em dash count too: &mdash; and the numeric references draw the same character.
+const LEGAL_PAGES = ["public/privacy.html", "public/terms.html"];
+const EM_DASH_FORMS = /—|&mdash;|&#0*8212;|&#x0*2014;/gi;
+
+test("no em dashes in the privacy policy and terms pages (public/)", () => {
+  const found = LEGAL_PAGES.flatMap((file) => {
+    const text = readFileSync(file, "utf8"); // throws if a page is missing or renamed, on purpose
+    return [...text.matchAll(EM_DASH_FORMS)].map((m) => `${file}: …${text.slice(Math.max(0, m.index - 60), m.index + 40)}…`);
+  });
+  assert.deepEqual(found, []);
+});

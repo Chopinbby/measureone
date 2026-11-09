@@ -7,6 +7,7 @@ import {
   NO_CONNECTION_MESSAGE,
   RESET_REQUESTED_MESSAGE,
 } from "../lib/backend";
+import { ReportProblemLink } from "./ReportProblemLink";
 
 // Sign in with an email and password, or ask for a password reset link.
 // Accounts are by invitation for now (docs/Accounts-and-Backend.md, Decided 4),
@@ -124,6 +125,16 @@ export function SignInModal({ notice, onClose }) {
                 Forgot password?
               </button>
               {error && <p className="tq-error" style={{ marginTop: 14 }} role="alert">{error}</p>}
+              {/* Pass 133: the two pages open in a new tab so this window (and anything typed
+                  into it) stays put. "Report a problem" is here too (Pass 132 left that open):
+                  a person who can't sign in is the likeliest to give up. */}
+              <p className="wizard-hint" style={{ margin: "16px 0 0" }}>
+                <a className="link-btn" href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+                {" · "}
+                <a className="link-btn" href="/terms.html" target="_blank" rel="noopener noreferrer">Terms</a>
+                {" · "}
+                <ReportProblemLink />
+              </p>
             </div>
             <div className="modal-foot">
               <button type="button" className="ghost-btn" onClick={onClose}>

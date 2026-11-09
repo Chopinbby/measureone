@@ -624,6 +624,11 @@ Accounts are **by invitation for now**: there's no sign-up form. See
    always answers "If that address has an account, a reset link is on its
    way.", whether or not the address has one. Only a failed connection
    says something different.
+3. At the bottom of the sign-in form (not the reset form) a quiet line,
+   **Privacy Policy · Terms · Report a problem** (Pass 133). The first two open
+   the pages in a new tab, so nothing typed is lost; the third opens the
+   person's own email app ([flow 19](#19-reporting-a-problem-pass-132)). See
+   [flow 20](#20-reading-the-privacy-policy-and-terms-pass-133).
 
 **Arriving from a link in an email** (an invitation from the Supabase
 dashboard, or a reset link):
@@ -633,8 +638,11 @@ dashboard, or a reset link):
    whichever site asked for it.
 2. The **Choose a password** window opens: the new password twice (at least
    6 characters; the service's own minimum is the real rule), then **Save
-   password**. **Not now** closes it and leaves the person signed in,
-   without a new password.
+   password**. Under the fields (Pass 133): "By choosing a password you agree
+   to the Terms and the Privacy Policy, and confirm you're 13 or older.", the
+   two names being links that open in a new tab. It shows for an invitation
+   and for a reset link, never in Change password. **Not now** closes it and
+   leaves the person signed in, without a new password.
 3. A link that has expired or was already used opens the sign-in window with
    a plain note saying so, where a fresh reset link can be asked for. On the
    live site a link lasts 24 hours (since Pass 129), so an invitation should be opened
@@ -1256,5 +1264,24 @@ name, your email, your account or anything about your practice.
 nothing opens, write to hello@measureone.app.") and beside the link on the welcome screen ("Report a problem · hello@measureone.app").
 
 **Not covered:** no form inside the app and no automatic error reports (the earlier decision: reports that could carry piece names are
-not collected); no app version number in the note (the app has none); the sign-in windows do not carry the link, and a page that fails to load at all shows none (the app draws it). Design and checks:
+not collected); no app version number in the note (the app has none); the sign-in window carries the link since Pass 133 (sign-in mode only), and a page that fails to load at all shows none (the app draws it). Design and checks:
 [Accounts-and-Backend.md](Accounts-and-Backend.md#alarms-pass-132).
+
+## 20. Reading the privacy policy and terms (Pass 133)
+
+**What you do:** press **Privacy Policy** or **Terms**. They are on the welcome screen (under "Report a problem"), at the bottom of the
+sign-in window, and in Settings, at the bottom of the Account panel (that panel exists only where accounts are available). Every sign-in
+email ends with the same two words as links. Each opens a plain page in a **new tab**, so the window you were in stays as it was.
+
+**What you see.** A readable page in the app's colours, with a dark version if your device is set to dark: the policy (what is collected,
+where it is kept and for how long, who can see it, no selling or ads or tracking, what you can do, deleting, age, how changes are
+announced) and the terms (short rules, ending an account, governing law). Each page shows when it was last updated and, at the bottom, a
+short change history. The two pages link to each other and back to the app. There are no scripts and no outside requests on them.
+
+**Addresses.** `/privacy.html` and `/terms.html` always work; `/privacy` and `/terms` work on the live site (a Vercel rewrite) and are
+the ones emails use. A static preview or the local dev server does not have the short ones.
+
+**Not covered:** the pages cannot be opened without a connection (the offline worker keeps only the app); there is no banner or
+checkbox for agreeing (an invited person agrees by the sentence in Choose a password; open sign-up's checkboxes are Pass 135); no
+cookie banner, because nothing tracks. Design and the source of each sentence:
+[Accounts-and-Backend.md](Accounts-and-Backend.md#privacy-policy-and-terms-pass-133).

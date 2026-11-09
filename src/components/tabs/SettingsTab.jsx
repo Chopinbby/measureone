@@ -441,6 +441,12 @@ export function SettingsTab({
                 </button>
               </>
             )}
+            {/* Pass 133: the two pages, signed in or out. A new tab, so Settings stays put. */}
+            <p className="wizard-hint" style={{ margin: "14px 0 0" }}>
+              <a className="link-btn" href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+              {" · "}
+              <a className="link-btn" href="/terms.html" target="_blank" rel="noopener noreferrer">Terms</a>
+            </p>
           </div>
         )}
         {/* Read-only summary of whichever piece "Edit piece settings" will

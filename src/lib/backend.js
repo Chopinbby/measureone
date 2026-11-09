@@ -368,11 +368,13 @@ export function describeEmailLinkNotice({ type, email }) {
 }
 
 // Said before an account is deleted, and again once it is. One place for the
-// sentence about the owner's separate daily backup: Pass 131 sets how long that
-// keeps data and Pass 133's privacy policy states it, and this should then say
-// the same thing.
+// sentence about the owner's separate daily backup: Pass 131 set how long that
+// keeps data (about 30 days: each day's copy is a GitHub Actions artifact that
+// GitHub deletes) and Pass 133's privacy policy (public/privacy.html, "Deleting")
+// states it, so this says the same thing. Change both together. True only once the
+// OLD backups repository (which kept every day forever) has been deleted.
 export const DELETE_BACKUP_NOTE =
-  "The service also keeps a separate daily backup of its data, and an older copy of your pieces can still be in it.";
+  "The service also keeps a separate daily backup of its data. Backup copies that include your email address and pieces are deleted within about 30 days.";
 
 const DELETE_NOTHING = "Nothing was deleted.";
 

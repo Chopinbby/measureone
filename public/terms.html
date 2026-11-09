@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Terms of Use | MeasureOne</title>
+<meta name="description" content="The rules for using MeasureOne.">
+<!--
+  Pass 133. A plain static page: no scripts, no outside requests (not even fonts). Files in public/
+  reach the browser exactly as written. The colours match the app's (App.jsx's CSS), with a dark set
+  the app does not have. When the terms change, change the date and the history together, and keep
+  privacy.html in step (the two pages share this look). No em dashes (test/copy-style.test.mjs
+  checks this file).
+-->
+<style>
+:root {
+  color-scheme: light dark;
+  --paper: #EEF0EC;
+  --card: #F8F9F6;
+  --ink: #202A33;
+  --ink-soft: #57646F;
+  --line: rgba(32, 42, 51, 0.14);
+  --accent: #2F5D9A;
+  --accent-deep: #214775;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12171C;
+    --card: #1A2128;
+    --ink: #E7EBEF;
+    --ink-soft: #A9B4BE;
+    --line: rgba(231, 235, 239, 0.16);
+    --accent: #8DB4E8;
+    --accent-deep: #A9C7F0;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 16.5px;
+  line-height: 1.65;
+}
+.wrap { max-width: 42rem; margin: 0 auto; padding: 20px 16px 48px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; font-size: 14.5px; }
+.brand { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 18px; color: var(--ink); text-decoration: none; }
+article { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px 18px 26px; }
+h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 30px; line-height: 1.2; margin: 0 0 4px; }
+h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 21px; line-height: 1.3; margin: 34px 0 8px; }
+p { margin: 0 0 14px; }
+ul { margin: 0 0 14px; padding-left: 1.3em; }
+li { margin: 0 0 7px; }
+a { color: var(--accent-deep); text-underline-offset: 2px; }
+a:hover { color: var(--accent); }
+.date { color: var(--ink-soft); font-size: 14.5px; margin: 0 0 22px; }
+.history { color: var(--ink-soft); font-size: 15px; }
+.history li { margin-bottom: 4px; }
+.foot { margin-top: 22px; font-size: 14.5px; color: var(--ink-soft); }
+@media (min-width: 640px) {
+  .wrap { padding-top: 36px; }
+  article { padding: 30px 34px 36px; }
+  h1 { font-size: 34px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="brand" href="/">MeasureOne</a>
+    <a href="/">Back to the app</a>
+  </div>
+  <article>
+    <h1>Terms of Use</h1>
+    <p class="date">Last updated: November 8, 2026</p>
+
+    <p>These terms are between you and Naomi Fleishour, an individual in Colorado, United States, who runs MeasureOne. In these terms, &ldquo;I&rdquo; means her. By using MeasureOne you agree to them. If you do not agree, please do not use it.</p>
+    <p>The <a href="/privacy.html">Privacy Policy</a> says what is collected and what you can do about it. It is part of these terms.</p>
+
+    <h2>What MeasureOne is</h2>
+    <p>MeasureOne is a practice planner for musicians learning new pieces. It turns what you enter into a day-by-day plan and changes the plan as you log practice. The plans and confidence figures are suggestions based on what you tell it. They are not a promise of results and not a teacher's advice.</p>
+
+    <h2>Accounts</h2>
+    <ul>
+      <li>An account is optional. Without one, everything stays in your browser.</li>
+      <li>For now, accounts are by invitation.</li>
+      <li>You must be 13 or older to have an account. Younger students can use MeasureOne without an account, with an adult.</li>
+      <li>One account is for one person. Do not share your sign-in, and keep your password private.</li>
+      <li>You are responsible for what happens under your account. If you think someone else has got into it, change your password, use &ldquo;Sign out of all devices&rdquo;, and write to me.</li>
+    </ul>
+
+    <h2>Your pieces and your data</h2>
+    <p>The pieces, notes and links you put into MeasureOne are yours. When you sign in to an account, you let me store and process them only to run MeasureOne for you: to keep your online copy, to bring it to your other devices, and to keep backups. Please do not add anything you have no right to share.</p>
+
+    <h2>Keep your own copies</h2>
+    <p>Use &ldquo;Export pieces&rdquo; in Settings now and then to save a backup file. A browser or device can clear what it stores, and an online copy can fail or be lost. I cannot promise to get your data back.</p>
+
+    <h2>MeasureOne as it is</h2>
+    <p>MeasureOne is provided as it is and as it is available. It may have mistakes, it may be down at times, and I may change it, pause it or stop it. I do not promise that it will never fail or never lose data. To the extent the law allows, I am not responsible for lost data, lost practice time or other indirect losses. Nothing in these terms limits a right that the law does not let me limit.</p>
+
+    <h2>What is not allowed</h2>
+    <ul>
+      <li>Using MeasureOne for anything against the law.</li>
+      <li>Trying to get into someone else's account, or into the parts of the service that are not yours.</li>
+      <li>Overloading the service, or attacking it.</li>
+      <li>Making accounts or collecting data with automated tools.</li>
+      <li>Putting unlawful or harmful content into your pieces, notes or links.</li>
+    </ul>
+
+    <h2>Ending an account</h2>
+    <p>You can leave at any time: in Settings, in the Danger zone, choose &ldquo;Delete my account&rdquo;. The Privacy Policy says what happens to your data then. I can suspend or close an account that breaks these terms or puts the service or other people at risk, or if I have to stop running accounts at all. I will email the address on the account first when I can.</p>
+
+    <h2>Changes to these terms</h2>
+    <p>When these terms change, the date at the top changes and the history below says what changed. If a change matters to you, I will email the address on your account. If you do not agree to a change, you can delete your account and stop using MeasureOne.</p>
+
+    <h2>Governing law</h2>
+    <p>These terms are governed by the laws of the State of Colorado, United States.</p>
+
+    <h2>Contact</h2>
+    <p>Naomi Fleishour, <a href="mailto:hello@measureone.app">hello@measureone.app</a>.</p>
+
+    <h2>Change history</h2>
+    <ul class="history">
+      <li>November 8, 2026: first version.</li>
+    </ul>
+
+    <p class="foot"><a href="/privacy.html">Privacy Policy</a> &middot; <a href="/">Back to the app</a></p>
+  </article>
+</div>
+</body>
+</html>

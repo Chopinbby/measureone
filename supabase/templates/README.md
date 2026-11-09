@@ -30,7 +30,11 @@ The file names are the ones Supabase's command-line tool uses, so these files ca
   The text does not give how long a link lasts, so the setting can change without these files lying.
   How long it is lives in the project settings (Authentication, Sign In / Providers, Email, Email OTP
   expiration; Supabase's most is 24 hours).
-- A footer line with the link to the privacy policy is added in Pass 133.
+- **Every template ends with the same footer line (Pass 133):** `MeasureOne · Privacy Policy · Terms`, the
+  two words linking to `https://measureone.app/privacy` and `https://measureone.app/terms` (the short
+  addresses made by `vercel.json`; the test project's emails link to the live address too). The links are
+  plain, with no tracking. A new template gets the same line. Those two addresses answer only once Pass
+  133 has merged, so paste the footer into the dashboards after that merge, not before.
 
 ## Not changed here
 

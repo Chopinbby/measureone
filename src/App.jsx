@@ -4535,6 +4535,14 @@ export default function App() {
                 {" · "}
                 {CONTACT_ADDRESS}
               </p>
+              {/* Pass 133: the two pages, in a new tab so the welcome screen stays put. Here
+                  whether or not an account service is configured (the privacy page also covers
+                  using the app with no account). */}
+              <p className="wizard-hint" style={{ margin: "8px 0 0" }}>
+                <a className="link-btn" href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+                {" · "}
+                <a className="link-btn" href="/terms.html" target="_blank" rel="noopener noreferrer">Terms</a>
+              </p>
             </div>
           </div>
         </div>

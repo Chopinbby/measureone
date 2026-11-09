@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Privacy Policy | MeasureOne</title>
+<meta name="description" content="What MeasureOne collects, where it is kept, who can see it, and what you can do about it.">
+<!--
+  Pass 133. A plain static page: no scripts, no outside requests (not even fonts), so this page
+  itself contacts nobody but the site it is served from. Files in public/ reach the browser exactly
+  as written. The colours match the app's (App.jsx's CSS), with a dark set the app does not have.
+  Every sentence here is traced to its source in docs/Accounts-and-Backend.md, "Privacy policy and
+  terms (Pass 133)". Keep it true: when a service, a time limit or a setting changes, change this
+  page, its date and its history together. No em dashes (test/copy-style.test.mjs checks this file).
+-->
+<style>
+:root {
+  color-scheme: light dark;
+  --paper: #EEF0EC;
+  --card: #F8F9F6;
+  --ink: #202A33;
+  --ink-soft: #57646F;
+  --line: rgba(32, 42, 51, 0.14);
+  --accent: #2F5D9A;
+  --accent-deep: #214775;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12171C;
+    --card: #1A2128;
+    --ink: #E7EBEF;
+    --ink-soft: #A9B4BE;
+    --line: rgba(231, 235, 239, 0.16);
+    --accent: #8DB4E8;
+    --accent-deep: #A9C7F0;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 16.5px;
+  line-height: 1.65;
+}
+.wrap { max-width: 42rem; margin: 0 auto; padding: 20px 16px 48px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; font-size: 14.5px; }
+.brand { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 18px; color: var(--ink); text-decoration: none; }
+article { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px 18px 26px; }
+h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 30px; line-height: 1.2; margin: 0 0 4px; }
+h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 21px; line-height: 1.3; margin: 34px 0 8px; }
+h3 { font-size: 16.5px; margin: 20px 0 4px; }
+p { margin: 0 0 14px; }
+ul { margin: 0 0 14px; padding-left: 1.3em; }
+li { margin: 0 0 7px; }
+a { color: var(--accent-deep); text-underline-offset: 2px; }
+a:hover { color: var(--accent); }
+.date { color: var(--ink-soft); font-size: 14.5px; margin: 0 0 22px; }
+.short { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px 6px; margin: 0 0 8px; }
+.short ul { margin-bottom: 8px; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+.history { color: var(--ink-soft); font-size: 15px; }
+.history li { margin-bottom: 4px; }
+.foot { margin-top: 22px; font-size: 14.5px; color: var(--ink-soft); }
+@media (min-width: 640px) {
+  .wrap { padding-top: 36px; }
+  article { padding: 30px 34px 36px; }
+  h1 { font-size: 34px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="brand" href="/">MeasureOne</a>
+    <a href="/">Back to the app</a>
+  </div>
+  <article>
+    <h1>Privacy Policy</h1>
+    <p class="date">Last updated: November 8, 2026</p>
+
+    <p>MeasureOne is a practice planner for musicians learning new pieces. It is run by Naomi Fleishour, an individual in Colorado, United States. In this policy, &ldquo;I&rdquo; means her. You can reach me at <a href="mailto:hello@measureone.app">hello@measureone.app</a>.</p>
+    <p>This page says what MeasureOne collects, where it is kept, who can see it, and what you can do about it.</p>
+
+    <div class="short">
+      <h3 style="margin-top:0">The short version</h3>
+      <ul>
+        <li>You can use MeasureOne with no account. Then your pieces and practice stay in your browser, and I receive none of it.</li>
+        <li>If you sign in to an account, a copy of your pieces, practice history and technique library is kept online so it can follow you between devices. I can see that copy.</li>
+        <li>I do not sell your data. There are no ads and no tracking.</li>
+        <li>You can export your data, and you can delete your account yourself.</li>
+        <li>MeasureOne accounts are for people 13 and older. Younger students can use MeasureOne without an account, with an adult.</li>
+      </ul>
+    </div>
+
+    <h2>What is collected</h2>
+    <h3>Without an account</h3>
+    <p>Your pieces, practice history, technique library and settings are saved in your browser's own storage, on your device. They are not sent to me. The app also keeps a saved copy of itself in your browser so it can open when you have no connection.</p>
+
+    <h3>With an account</h3>
+    <ul>
+      <li><strong>Your email address.</strong> It is the only personal detail an account needs.</li>
+      <li><strong>Your password.</strong> The sign-in service handles it. The app does not store it or write it to any log.</li>
+      <li><strong>A copy of what you keep in the app.</strong> That means piece names, composers, notes, measure counts, schedules, practice sessions (such as dates, minutes, ratings and tempos), focus spots, and the technique library. A link you add for a recording or a document is saved as the text you typed. The file it points to is not stored.</li>
+    </ul>
+
+    <h3>If you write to me</h3>
+    <p>If you email <a href="mailto:hello@measureone.app">hello@measureone.app</a>, I receive your message and your email address. The &ldquo;Report a problem&rdquo; link opens a new message in your own email app. It adds only the address of the site you are on and your browser's name text, and nothing is sent until you press send there.</p>
+
+    <h3>Technical records kept by the services that run MeasureOne</h3>
+    <p>The services that run MeasureOne keep short-lived records of requests, as most web services do. The next section names each service and what it keeps.</p>
+
+    <h2>How I use your information</h2>
+    <p>I use what is collected to:</p>
+    <ul>
+      <li>let you sign in, and keep your online copy so it can follow you between your devices;</li>
+      <li>send the emails an account needs: an invitation, a password reset, an email change;</li>
+      <li>keep backups, so a lost or damaged copy can be restored;</li>
+      <li>keep the service running and fix problems, including checking that the site and the sign-in service answer;</li>
+      <li>answer a message you send me.</li>
+    </ul>
+    <p>I do not use it for anything else.</p>
+
+    <h2>Where it is kept, and for how long</h2>
+    <ul>
+      <li><strong>Your browser.</strong> Your pieces, practice, technique library and settings, and a few small app settings such as which piece is open. They stay until you delete a piece, clear your browser's site data, or remove them another way.</li>
+      <li><strong>The account service: Supabase.</strong> Supabase (Supabase Inc.) holds the account's database and does the signing in. It holds your email address and the online copy described above. The project is in the East US (North Virginia) region, on Amazon's servers (<code>us-east-1</code>). Supabase also keeps short-lived technical logs of requests to the service, which identify requests by account ID. How long it keeps them depends on its plan. The copy and the account stay until you delete your account (see &ldquo;Deleting&rdquo; below).</li>
+      <li><strong>A daily backup copy: GitHub.</strong> Each day a copy of the account database is saved to a private repository at GitHub (GitHub Inc., United States) that only I can open, protected by two-factor sign-in. The copy holds every account's email address, piece names, notes and practice history. GitHub deletes each day's copy after about 30 days. The repository's own files hold only counts, with no personal data.</li>
+      <li><strong>Sign-in emails: Resend.</strong> Supabase sends the invitation, password reset and email change messages through Resend (United States), which keeps the content and details of each email for 30 days. The messages travel through Amazon's email system (Amazon SES).</li>
+      <li><strong>Mail to hello@measureone.app: ImprovMX.</strong> ImprovMX forwards mail sent to that address to my inbox. It deletes the mail after forwarding, and holds incoming mail briefly in Paris, on Amazon's servers.</li>
+      <li><strong>The website: Vercel.</strong> Vercel hosts the app and these pages. It keeps technical logs of requests to the site, such as the page asked for, the time, your browser's name text and, in some of its logs, your IP address. Vercel's documentation gives log retention of one hour to 30 days, depending on the plan.</li>
+      <li><strong>Fonts: Google.</strong> The app (not these two pages) loads its fonts from Google, so when the app opens, your browser asks Google for them, whether or not you have an account. Google then receives your IP address, the address requested, your browser's name text and the address of the page. Google says it does not set cookies for this and does not use the data to build profiles or to show ads.</li>
+      <li><strong>An uptime check: UptimeRobot.</strong> UptimeRobot (UptimeRobot s. r. o., Slovakia) checks every five minutes that the app's front page and the sign-in service answer. It requests only those two public addresses and receives no one's personal data. It holds my email address, to alert me, and keeps its monitoring logs for about 3 months.</li>
+    </ul>
+    <p>Some of these services are in the United States, one holds mail in France and one is based in Slovakia, so information may be handled outside the country where you live.</p>
+
+    <h2>Who can see it</h2>
+    <ul>
+      <li><strong>Me.</strong> As the person who runs MeasureOne, I can see account email addresses and the online copies of pieces, practice and technique data, in the account service and in the backups.</li>
+      <li><strong>Not other people with accounts.</strong> The account database is set so that each account can read only its own data.</li>
+      <li><strong>The services listed above</strong> hold data for the purposes I gave there.</li>
+    </ul>
+
+    <h2>Security</h2>
+    <p>The site and the account service are reached over HTTPS, so what travels between your device and them is encrypted. Each account can read only its own data, the backups are in a private repository protected by two-factor sign-in, and the app never stores your password. No system is perfectly secure, so I cannot promise that your information will never be exposed.</p>
+
+    <h2>No selling, no ads, no tracking</h2>
+    <p>I do not sell your data and I do not share it for advertising. The only others who handle it are the services listed above, to run MeasureOne. There are no ads, no analytics and no tracking tools in the app.</p>
+    <p>MeasureOne does not set cookies. It uses your browser's storage to keep your pieces and your sign-in on your device. Because nothing here tracks you, there is no cookie banner.</p>
+    <p>Some browsers send a &ldquo;Do Not Track&rdquo; signal. MeasureOne does not track you across websites or build profiles of you, so that signal changes nothing here. The outside services that receive a request when you use the app are named above: Google for fonts, Vercel for hosting and, when you are signed in, Supabase.</p>
+
+    <h2>What you can do</h2>
+    <ul>
+      <li><strong>Export your data.</strong> In Settings, under &ldquo;Backup &amp; restore&rdquo;, &ldquo;Export pieces&rdquo; saves the pieces you choose, and your technique library, to a file on your device.</li>
+      <li><strong>Change your email.</strong> In Settings, in the Account panel, choose &ldquo;Change email&rdquo;. A link goes to both addresses and the change happens once both are confirmed.</li>
+      <li><strong>Sign out of all devices.</strong> The Account panel has a button for it. Other devices can keep working for up to an hour.</li>
+      <li><strong>Delete your account.</strong> See below.</li>
+      <li><strong>Ask me.</strong> You can write to <a href="mailto:hello@measureone.app">hello@measureone.app</a> to ask what is held about you, to ask for a correction, or to ask for your account to be deleted.</li>
+    </ul>
+
+    <h2>Deleting</h2>
+    <h3>Deleting your account</h3>
+    <p>In Settings, in the Danger zone, choose &ldquo;Delete my account&rdquo; (it is also on the first screen if you have no pieces yet). You are asked for your password first. Your account and its online copy leave the account service at once. Other devices signed in to the account are signed out within about an hour. The daily backup copies that held your data are deleted within about 30 days. Nothing is removed from the device you used: your pieces and technique library stay there.</p>
+    <h3>Deleting a piece</h3>
+    <p>When you are signed in and delete a piece, it is marked as deleted in your account copy rather than erased. It appears in &ldquo;Recently deleted&rdquo; for 30 days, where you can bring it back. After that it stays in your account copy, and in the daily backup copies, until you delete your account. If you want a piece's history kept without it being active, archive or pause it instead.</p>
+
+    <h2>Age</h2>
+    <p>MeasureOne is for people 13 and older. Students younger than 13 can use MeasureOne without an account, with an adult: without an account, nothing you enter is sent to me. Please do not make an account if you are younger than 13.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>When this policy changes, the date at the top changes and the history below says what changed. If a change matters to you, such as a new service holding your data, I will email the address on your account.</p>
+
+    <h2>Contact</h2>
+    <p>Naomi Fleishour, <a href="mailto:hello@measureone.app">hello@measureone.app</a>.</p>
+
+    <h2>Change history</h2>
+    <ul class="history">
+      <li>November 8, 2026: first version.</li>
+    </ul>
+
+    <p class="foot"><a href="/terms.html">Terms of Use</a> &middot; <a href="/">Back to the app</a></p>
+  </article>
+</div>
+</body>
+</html>

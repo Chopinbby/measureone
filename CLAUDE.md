@@ -1292,6 +1292,27 @@ the test project's preview. Rules:
   may skip it). Its tests (`test/check-rls.test.mjs`) use a stand-in database that follows the rules and 12
   broken versions; add a check there for any new table or function.
 
+### The privacy policy and terms (Pass 133)
+
+Two static pages, `public/privacy.html` and `public/terms.html` (short addresses `/privacy` and `/terms` through `vercel.json`'s two
+rewrites; the app links to the `.html` names). **Built 2026-11-08, not merged**: it waits on the owner (the old backups repository must be deleted first, and she reads and approves
+the pages; the account service's region, `us-east-1`, is filled in). Rules:
+
+- **Every sentence traces to a fact:** the table in [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#privacy-policy-and-terms-pass-133)
+  ("Where each sentence comes from") is the record. When a service, a time limit, a setting or a screen label changes, change the
+  page, its date at the top and its change history at the bottom, and that row, together. A page that promises an email for changes
+  that matter means the owner must send one.
+- **The pages are plain on purpose:** no scripts, no outside requests (not even fonts), so they contact only their own host. Their
+  colours are a hand copy of the app's, with a dark set the app does not have. They are written in the first person for one named
+  individual, and say "an individual", **not "LLC"** (none exists). `test/copy-style.test.mjs` reads both whole and fails on an em
+  dash in any written form.
+- **`DELETE_BACKUP_NOTE` (`lib/backend.js`) and the policy's "Deleting" section say the same thing** (about 30 days). It is only true
+  while the OLD backups repository (every day, forever) is gone.
+- **The email templates' footer is a record only:** the live text is pasted by hand into both Supabase projects, after the pages are
+  live (before that the links point at nothing).
+- **The Choose a password sentence shows in invitation and reset windows, never in Change password.** Pass 135's sign-up
+  checkboxes must replace it, not add a second ask.
+
 ### Deploying and operating (Pass 114 on)
 
 - **A merge to `main` now ships to real accounts.** Anything touching
@@ -1401,13 +1422,13 @@ tie are still held and asked about. Read [`docs/Decisions.md`](docs/Decisions.md
 copies disagree" and Pass 118 open item 9) first. **Phase 3 (other people's accounts)
 is designed (Pass 127, 2026-10-31); only Passes 128 (the owner's own address, `measureone.app`, 2026-11-01),
 129 (a real email service, 2026-11-06), 130 (change email and delete my account, 2026-11-06, merged as PR #90),
-131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code, merged 2026-11-07 as PR 92) and
-132 (alarms, built 2026-11-07, merged 2026-11-08 as PR #94) are built:
+131 (other people's data: backups that expire, a real restore, the plan question, 2026-11-06, new backups repository, no app code, merged 2026-11-07 as PR 92) 132 (alarms, built 2026-11-07, merged 2026-11-08 as PR #94) and
+133 (the privacy policy and terms, built 2026-11-08, **not merged**) are built:
 Passes 128 to 135, in
 [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).**
 Search the docs for `Owner: Pass N` before building one; 134 (inviting people), 135 (open
 sign-up) and 124 (the switch's default) happen only on the owner's word.
-**Where it stands (2026-11-08):** Passes 129 (PR #88, `87065bc`), 130 (PR #90, `ab7916f`), 131 (PR #92, `77ce143`) and **132 (PR #94, merge commit `a9835db`)** are merged. **Pass 132 is live: all four addresses serve `index-CYcwBRHX.js`** (read from outside after the deploy; it holds the "Report a problem" link). The link (welcome screen and Settings; `lib/reportProblem.js`, tested) opened the mail app on the owner's computer and phone and her report arrived; her two UptimeRobot keyword monitors send their alert emails to her inbox; and Supabase's billing "Email Recipient" is her own sign-in address (all reported by her, 2026-11-08). Pass 131 was verified with the owner on 2026-11-07; what is left of it is deleting the old `Chopinbby/measureone-backups` (a reminder issue opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited). **Open from Pass 132's own review, not fixed** ([`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#alarms-pass-132), Left open vii to ix; [`docs/Decisions.md`](docs/Decisions.md#open-questions)): no link when the app itself fails to load, the new `a.ghost-btn` CSS rule also reaching the "moved" note's link, and nothing watching `hello@measureone.app`'s forwarding. **The next pass to build is 133** (the privacy policy and terms; it must name UptimeRobot among the outside services), in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's branch lands in that branch, not `main`). Her real account on measureone.app shows Delete my account in the Danger zone: it is the owner's own account, so it must not be pressed in any check.
+**Where it stands (2026-11-08):** Passes 129 (PR #88, `87065bc`), 130 (PR #90, `ab7916f`), 131 (PR #92, `77ce143`) and **132 (PR #94, merge commit `a9835db`)** are merged. **Pass 132 is live: all four addresses serve `index-CYcwBRHX.js`** (read from outside after the deploy; it holds the "Report a problem" link). The link (welcome screen and Settings; `lib/reportProblem.js`, tested) opened the mail app on the owner's computer and phone and her report arrived; her two UptimeRobot keyword monitors send their alert emails to her inbox; and Supabase's billing "Email Recipient" is her own sign-in address (all reported by her, 2026-11-08). Pass 131 was verified with the owner on 2026-11-07; what is left of it is deleting the old `Chopinbby/measureone-backups` (a reminder issue opens on 2026-11-10 with the new repository's backup count; it must be gone before anyone is invited). **Open from Pass 132's own review, not fixed** ([`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#alarms-pass-132), Left open vii to ix; [`docs/Decisions.md`](docs/Decisions.md#open-questions)): no link when the app itself fails to load, the new `a.ghost-btn` CSS rule also reaching the "moved" note's link, and nothing watching `hello@measureone.app`'s forwarding. **Pass 133 (the privacy policy and terms) is built and not merged** (see "The privacy policy and terms" above): it waits on the owner for deleting the old backups repository and her reading of the pages, and after it merges she pastes the new footer into the five email templates in both Supabase projects. The passes after it are 134 and 124, each only on her word; start any new pass in a new chat **branched from `main`** (never from an older pass's branch: a pass built on another unmerged pass's branch lands in that branch, not `main`). Her real account on measureone.app shows Delete my account in the Danger zone: it is the owner's own account, so it must not be pressed in any check.
 Still not
 built elsewhere: a persisted "learned" state, a second Tier 1 rung and repertoire
 rotation (Stage 5); see
@@ -1597,3 +1618,10 @@ silently.
   service), and, as the owner's steps outside the app, an outside uptime check (UptimeRobot, two keyword monitors: the app's front page
   and the account service's health address) and a read-back of Supabase's usage emails. Built 2026-11-07, **merged 2026-11-08 (PR #94, merge commit `a9835db`), live as `index-CYcwBRHX.js` on all four addresses**; she set up
   the monitors and saw their alert emails reach her inbox, Supabase's billing "Email Recipient" is her sign-in address, and the link opened the mail app on her computer and her phone and her report arrived (all reported 2026-11-08). [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#alarms-pass-132)
+- **Pass 133** — a privacy policy and terms: two plain static pages (`public/privacy.html`, `public/terms.html`, short addresses through
+  a new `vercel.json`), written in the first person for one named individual (no "LLC": none exists), every sentence traced in a table in the
+  docs; links in the sign-in window (with "Report a problem"), the Account panel and the welcome screen, a footer line in all five email
+  templates (the live text is pasted by the owner), one sentence in the Choose a password window (invitation and reset), the delete window's
+  backup sentence made exact ("about 30 days"), and the copy-style test extended to the two pages. Built 2026-11-08, **not merged**: it waits on
+  deleting the old backups repository and the owner's reading.
+  [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#privacy-policy-and-terms-pass-133)

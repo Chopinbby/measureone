@@ -3801,7 +3801,7 @@ piece details" and the Danger zone**, signed in or out and whether or not an acc
 plain text beside it (under the button in Settings, after a dot on the welcome screen) so a device with no mail app is never a dead end.
 Nothing is sent by the app: the person's own email app opens with the note ready and nothing leaves until they press send. **There
 is no app version in the note** (the app has none to read; `package.json`'s 0.1.0 means nothing); the address and browser are what
-tell a bug apart. Not added to the sign-in windows (Pass 133 edits them for the privacy policy; see Owned by).
+tell a bug apart. Not added to the sign-in windows by Pass 132; **Pass 133 added it to the sign-in window** (sign-in mode only) beside the two new links.
 **Alternatives ruled out:** a form inside the app (it would need somewhere to send to, which is a server or an outside service
 holding the person's words, and a form is lost if the page is what broke); a link with the person's email, name or a piece name filled
 in (the whole point of Design G is that reports carry no piece data); an error-reporting service (Design G).
@@ -3869,7 +3869,7 @@ name, and the phone-width layout. **The owner's check of the link (reported 2026
 computer, she sent the report and received it in her inbox, and asked that the note's closing sentence read "Please don't include private information." (done, in the
 email and in Settings). It also opened the mail app on her phone. **Not reported:** which address and whether signed in or out she tried it from.
 
-**Left open.** (i) Whether to add the link to the sign-in windows (the likeliest place a person gives up) when Pass 133 edits them.
+**Left open.** (i) ~~Whether to add the link to the sign-in windows~~ added in Pass 133 (2026-11-08).
 (ii) A paused project's answer to the health address is unobserved. (iii) A second email address for alerts, or a text message,
 so that one provider failing does not hide an outage (the free plan's contacts are not stated). (iv) An error-reporting service is
 still not built; revisit before Pass 135 (Design G). (v) The note is English only. (vi) The monitors' addresses and key live in the
@@ -3882,9 +3882,134 @@ note shows only on the three old addresses). Scoping the rule to the new link wo
 the forwarding of `hello@measureone.app`**: if ImprovMX stopped forwarding, a report would reach nobody and the sender would see no
 error (it was received on 2026-11-08; the uptime monitors do not look at mail).
 
+## Privacy policy and terms (Pass 133)
+
+**Built 2026-11-08 (Phase 3, Design E), on the owner's answers of the same day. Not merged: see "Before this merges".** The region blank was filled the same day (P16).
+Two plain static pages, `public/privacy.html` and `public/terms.html`, dated 2026-11-08 with a change history at the bottom;
+short addresses `/privacy` and `/terms` through a new `vercel.json`; links in the sign-in window, the Account panel, the
+welcome screen and the footer of all five email templates; one sentence in the Choose a password window; and the delete
+window's backup sentence made exact. A Draft written by Claude from the facts below. **It is not legal advice, and a lawyer's
+look is the owner's, before the app is sold.**
+
+**What was built**
+- **The pages.** No scripts and no outside requests (not even fonts: the app's fonts come from Google, the pages' headings use a
+  Georgia-style serif so the pages contact nobody but their own host). The colours are a hand copy of the app's tokens
+  (`App.jsx`'s CSS), with a dark set the app does not have. Phone-width checked at 375px, light and dark.
+  **The pages are written in the first person ("I" is the owner, named, an individual in Colorado)**, not as a company: see "Who is
+  named". Nothing is left blank: the account service's region is `us-east-1` (P16).
+- **Short addresses.** `vercel.json` holds two rewrites, `/privacy` to `/privacy.html` and `/terms` to `/terms.html`. It is the
+  repository's first Vercel config and applies to all four addresses once merged. **The app links to `/privacy.html` and
+  `/terms.html`** (not the short ones) so they also work in the dev server and any static preview, where the rewrite does not
+  exist; the emails use the short ones. The offline worker (`public/sw.js`) handles only `/` and `/assets/`, so the pages are not
+  saved for offline reading; it needed no change.
+- **Links** (all `target="_blank" rel="noopener noreferrer"`, so nothing typed in a window is lost): the sign-in window
+  ("Privacy Policy · Terms · Report a problem", sign-in mode only), the Account panel on Settings (signed in or out), the welcome
+  screen (under "Report a problem"). **"Report a problem" was added to the sign-in window** (Pass 132 Left open (i): taken as the
+  default; she did not object).
+- **Choose a password** shows "By choosing a password you agree to the Terms and the Privacy Policy, and confirm you're 13 or
+  older." in the invitation and the reset-link windows, **never in Change password** (`ChoosePasswordModal`, `!changing`). Pass 135's
+  sign-up checkboxes must not ask a second time.
+- **Delete wording.** `DELETE_BACKUP_NOTE` (`lib/backend.js`) now reads "The service also keeps a separate daily backup of its data.
+  Backup copies that include your email address and pieces are deleted within about 30 days." It is shown before an account is
+  deleted and again after (`describeDeleteAccount`). **It is true only once the old backups repository is deleted.**
+- **Email footers.** Every file in `supabase/templates/` ends with `MeasureOne · Privacy Policy · Terms` (plain links to
+  `https://measureone.app/privacy` and `/terms`, no tracking); the README says so. **The repository is only the record: the dashboard
+  text of BOTH projects is changed by hand (the owner), after this merges.**
+- **Test.** `test/copy-style.test.mjs` also reads both pages whole and fails on a real em dash, `&mdash;`, `&#8212;` or `&#x2014;`,
+  and on a missing page. Four deliberate breakages (each form, and a renamed page) all failed it; the files were restored byte for byte.
+
+**Who is named, and why not "MeasureOne, LLC".** The owner is the only person behind MeasureOne and has no company. "LLC" names a
+registered kind of company, so it is not printed while there is none. Read from the Colorado Secretary of State's own FAQ pages
+(2026-11-08): a sole proprietor who does business under a name other than their own legal first and last name is listed among those
+who must file a Statement of Trade Name, which for an individual is good for one year and is then renewed; the pages did not
+state a fee, and said nothing about "LLC" in a trade name (entity names, not trade names, carry the LLC rule). **Whether the product name
+"MeasureOne" needs that filing is a question for the owner's legal and paperwork adviser (Beethoven's lane), not settled here.** When an
+LLC is formed: change "I" to the company's name in both pages, add a line to each change history, and email account holders (the pages
+promise that for changes that matter).
+
+**Where each sentence comes from** (the table the pass asked for; keep it true: when a fact changes, change the page, its date and its
+history, and this row). "Vendor page" means read on 2026-11-08 unless a date says otherwise.
+
+| # | The page says | Source |
+|---|---|---|
+| P1 | Run by Naomi Fleishour, an individual in Colorado | The owner's words in chat, 2026-11-08 ("it's just me", Colorado) |
+| P2 | Contact is hello@measureone.app | Pass 129 (Design B); `CONTACT_ADDRESS` in `lib/reportProblem.js`; forwarding checked 2026-11-05 |
+| P3 | No account: everything stays in your browser, nothing reaches me | CLAUDE.md "No backend of our own"; Decided 3; the library loads only when signed in (Design K, `lib/backend.js`) |
+| P4 | Signed in: a copy of pieces, practice and technique is kept online | Passes 110 and 111; this document, "What exists" |
+| P5 | No selling, ads or tracking | The pass card (commitment); code: no analytics or tracking package or script in `package.json`, `src/` or `index.html` (searched 2026-11-08) |
+| P6 | You can export, and delete your account yourself | Passes 104 and 130 |
+| P7 | Accounts are for people 13 and older; younger students can use the app without an account, with an adult | Phase 3 Decided 3 (owner, 2026-10-31); the "without an account" half is the owner's answer 2026-11-08 (option A) and follows P3 (signed out, nothing is sent to me) |
+| P8 | Browser holds pieces, practice, technique, settings; a few small settings | `lib/storage.js`, `lib/constants.js`; the keys are `measureone-app`, `-technique`, `-active_piece_id`, `-first_use_at`, `-last_exported_at`, `-account-sync`, `-tab-lease`, `-moved-note-dismissed` |
+| P9 | The app keeps a saved copy of itself so it opens offline | `public/sw.js`, Pass 123 |
+| P10 | The email address is the only personal detail an account needs | `SignInModal.jsx`, the invitation flow (email, then a chosen password) |
+| P11 | The password is handled by the sign-in service; the app does not store or log it | CLAUDE.md "Never store or log the password"; `ChoosePasswordModal.jsx` and `SignInModal.jsx` (state only while open) |
+| P12 | What the copy holds (piece details, sessions, focus spots, technique library) | `docs/Data-Model.md`; `lib/accountSync.js` (pieces and technique rows) |
+| P13 | A recording or document link is saved as typed; the file is not stored | `RecordingsEditor.jsx`, `DocumentsEditor.jsx` (`{ id, label, url }`) |
+| P14 | "Report a problem" adds only the site address and the browser's name text | `lib/reportProblem.js` (reads two inputs), `test/reportProblem.test.mjs`; Pass 132 |
+| P15 | Supabase (Supabase Inc.) holds the database and does the signing in | Setup (production project); `lib/backend.js` |
+| P16 | The account service's project is in the East US (North Virginia) region, `us-east-1` | **The owner's dashboard reading, reported in chat 2026-11-08 ("us-east-1"; no screenshot; I asked about the production project and took it as that one).** Supabase's regions page (2026-11-08): a project is deployed to one primary region and that region decides where primary project data is stored; it does not say where logs or backups are kept, so the policy says nothing about them. The test project's region was not read |
+| P17 | Supabase keeps short-lived logs that identify requests by account ID; the time depends on its plan | Supabase "Logs in Studio" (user filter matches Auth actor IDs and gateway JWT subjects) and "Manage Logs usage" (retention depends on plan). **Not stated on the pages read: whether IP addresses are in those logs, and any number of days;** the policy claims neither |
+| P18 | The copy and the account stay until you delete the account | Design D (a deletion only marks a row); Pass 130 |
+| P19 | Daily backup to a private GitHub repository only I can open, two-factor on | Pass 131 "Facts for the privacy policy"; two-factor on, owner (2026-10-12) |
+| P20 | The copy holds emails, piece names, notes, practice history | Pass 131 "Facts for the privacy policy" |
+| P21 | GitHub deletes each copy after about 30 days; the repository's own files hold only counts | Pass 131 (`retention-days: 30`, the repository's 30-day cap read back, `counts.csv` and `LAST_BACKUP.txt` only, a test fails if anything else is added). **Holds only once the old repository `measureone-backups` is deleted** |
+| P22 | Sign-in emails go through Resend (United States), kept 30 days; via Amazon SES | Pass 129 "Email facts for the privacy policy" (Resend's pages as read 2026-11-05; **not re-read in Pass 133**) |
+| P23 | ImprovMX forwards hello@ mail, deletes it after forwarding, holds it briefly in Paris | Pass 129, same note (**not re-read**) |
+| P24 | Vercel hosts the site and keeps request logs (page, time, browser text, in some logs the IP address), one hour to 30 days by plan | Vercel "Runtime Logs" (updated 2026-08-28: Hobby 1 hour, Pro 1 day, Observability Plus 30 days; fields listed) and "Log Drains reference" (updated 2026-09-11: `proxy.clientIp`). **Not stated: which plan the project is on**, so the policy gives the range |
+| P25 | The app (not the pages) loads fonts from Google: Google gets IP, address requested, browser text, page address; sets no cookies; no profiles or ads | `App.jsx` CSS `@import` from `fonts.googleapis.com`; Google Fonts FAQ, privacy section (read in the browser, since the first fetch returned an empty page) |
+| P26 | UptimeRobot checks two public addresses every 5 minutes, gets no personal data, holds my email, keeps logs about 3 months | Pass 132 "Alarms" and its "Facts for the privacy policy" (UptimeRobot's pages as read 2026-11-07; **not re-read**) |
+| P27 | Some services are in the US, one holds mail in France, one is in Slovakia | P22 and P23, P19, P26 |
+| P28 | I can see emails and copies, in the service and in the backups | P15, P19, P20 |
+| P29 | Other accounts cannot read yours | Migrations `0001` and `0002` (row rules); `scripts/check-rls.mjs` (43 checks, run on both projects 2026-11-06) |
+| P30 | MeasureOne sets no cookies; the sign-in is kept in browser storage | No `document.cookie` anywhere in `src/` (searched 2026-11-08); `https://measureone.app/` answers with no `Set-Cookie` header (read 2026-11-08); the session is the `sb-...-auth-token` entry in `localStorage` (`authStorageKeyFor`, `lib/backend.js`) |
+| P31 | So there is no cookie banner | Follows P5 and P30; "Not in Phase 3" in this document |
+| P32 | "Export pieces" in Settings, under "Backup & restore", saves the chosen pieces and the technique library | `SettingsTab.jsx` (the button's label), `ExportPiecesModal.jsx`; seen on screen 2026-11-08 (**the label is "Export pieces"; "Export backup" appears only in reminder banners**) |
+| P33 | Change email: Account panel; a link goes to both addresses | Pass 130; `supabase/templates/email_change.html`; seen on screen 2026-11-08 |
+| P34 | Sign out of all devices; other devices can work up to an hour | Pass 113; `DeleteAccountModal.jsx` and "Account settings (Pass 113)" |
+| P35 | "Ask me" about what is held, a correction or deletion | **A commitment of the owner**, not a fact: she confirms it when she reads the page |
+| P36 | Delete my account: Settings, Danger zone (and the welcome screen), password first | Pass 130; `SettingsTab.jsx`, `App.jsx`; the window opened and cancelled on screen 2026-11-08 against a throwaway stand-in |
+| P37 | The account and its online copy leave the service at once | Migration `0003` (cascade); Pass 131 ("leaves the account database at once") |
+| P38 | Other devices are signed out within about an hour | `DeleteAccountModal.jsx` |
+| P39 | Backup copies with your data are deleted within about 30 days | P21; `DELETE_BACKUP_NOTE` |
+| P40 | Nothing is removed from the device you deleted from | Pass 130, the owner's answer 2026-11-06 |
+| P41 | A deleted piece is marked deleted, shown in Recently deleted for 30 days, then stays in the copy and the backups until the account is deleted; archive or pause keeps history | Design D and Pass 122 (`RECENTLY_DELETED_DAYS`); Pass 131 "Facts" (the policy must say it); `KEEP_HISTORY_HINT` in `lib/recentlyDeleted.js` |
+| P42 | Students younger than 13 can use the app without an account, with an adult; please do not make an account if younger than 13 | Phase 3 Decided 3 and the owner's answer 2026-11-08 (option A: keep 13, build no parental consent); P3 (without an account nothing you enter is sent to me). The first draft's promise to delete a child's account was taken out at her word |
+| P43 | Changes: the date and history change; an email for changes that matter | The owner's answer 2026-11-08 (decision 4); **a promise she must keep** |
+| P44 | How I use your information: sign-in and the online copy, the account's emails, backups for restoring, running and fixing the service (including the uptime check), answering a message. "I do not use it for anything else." | The purposes follow P4, P22, P19 (Pass 131: the Free plan keeps no backups of its own, so this copy is what a restore uses), P24 to P26 and P14. **"I do not use it for anything else" is a commitment of the owner**, as P35: she confirms it when she reads the page |
+| P45 | Do Not Track: MeasureOne does not track across websites or build profiles, so the signal changes nothing; the outside services that receive a request are Google (fonts), Vercel (hosting) and, when signed in, Supabase | P5; P24 (Vercel), P25 (Google), P15 and P17 (Supabase). California's online privacy law expects a policy to say how it responds to Do Not Track and whether other parties collect information on the site (California AG guidance; pages from about 2013 to 2016, not re-checked against the current statute) |
+| P46 | Security: the site and the account service are reached over HTTPS; each account reads only its own data; backups are in a private repository with two-factor sign-in; the app never stores your password; no promise of perfect security | `https://measureone.app/` answers `strict-transport-security: max-age=63072000` and `http://` redirects (308) to `https://` (curl, read 2026-11-08); the account service's address is `https://...supabase.co` and answered over HTTPS (HTTP 401 without its key, read 2026-11-08); P29, P19, P11. The last sentence is a plain disclaimer |
+| T1 | A planning tool; plans are suggestions, not promises or a teacher's advice | `docs/Vision.md`; the product's own principles |
+| T2 | Accounts optional, by invitation for now; 13 or older to have an account (younger students can use the app without one, with an adult); one per person | Decided 3 and 4; `SignInModal.jsx` ("Accounts are by invitation for now."). **Edit when invitations end (Pass 135)** |
+| T3 | Keep your password private; you are responsible for your account | Standard term, **owner to approve** |
+| T4 | Pieces and notes are yours; I store them only to run MeasureOne | Standard term, **owner to approve**; matches P3 and P4 |
+| T5 | Provided as it is; no promise it never fails or loses data; limits on what I am responsible for | Standard term, **owner to approve, and the lawyer's first read** |
+| T6 | What is not allowed (the five bullets) | Standard terms, **owner to approve** |
+| T7 | You can leave any time; I can suspend or close an account | The pass card; Pass 130 |
+| T8 | Governed by the laws of the State of Colorado | The owner's state, chat 2026-11-08; the pass card (governing law) |
+
+**Before this merges (both are the owner's, or need her word)**
+1. ~~Fill the region (P16)~~ done 2026-11-08.
+2. **Delete the old backups repository** `Chopinbby/measureone-backups` (her reminder issue opens 2026-11-10). Until then P21 and
+   `DELETE_BACKUP_NOTE` are not true of that repository, which kept every day forever.
+3. **She reads both pages and approves them (in progress 2026-11-08: she asked for edits first)** (or says what to change), including P35, P43 and the last sentence of P44, which are promises.
+
+**After it merges.** Check the live pages (`/privacy`, `/terms`, and the `.html` names), then she pastes the new footer into the five
+templates in BOTH Supabase projects (before the merge the links would point at nothing), and a real email from each project is
+compared with the file. A first email after the paste is the only proof the footer is live.
+
+**Left open (Pass 133).** (i) ~~The region~~ filled (P16). (ii) Whether "MeasureOne" needs a Colorado trade name filing, and when to form an LLC:
+the owner's adviser. (iii) The policy was not read by a lawyer. (iv) Resend, ImprovMX and UptimeRobot facts (P22, P23, P26) are from
+earlier passes' readings of those vendors' pages, not re-read here, and dates are in those passes' notes. (v) Vercel's retention
+depends on the project's plan, which is not recorded anywhere; the policy gives the range. (vi) Supabase's log contents (IP address)
+are not stated on the pages read. (vii) The pages cannot be opened offline (the worker handles `/` and `/assets/` only). (viii) The
+pages' colours are a hand copy of the app's, so a palette change in `App.jsx` does not reach them. (ix) `test/copy-style.test.mjs`
+checks the two pages only; **`supabase/templates/` has no automated em dash check** (checked by hand for this pass). (x) No placeholder
+check was added (the pass fenced the test to em dashes); with the region filled the pages hold no blank, searched for `[[`. (xi) `docs/Decisions.md` is not edited (outside this pass's file list): the choices above are
+recorded here instead. (xii) The old three vercel.app addresses serve the pages too, since they serve the same build. (xiii) ~~The age wording~~ settled 2026-11-08: she chose option A (accounts stay 13 and older, so no parental consent is built; younger students use the app without an account, with an adult). Her first wording (accounts for younger students with adult supervision) contradicted Decided 3 and, as far as is understood, US children's privacy law (COPPA: verifiable parental consent, which supervision is not); it was not used. (xiv) Common-practice gaps raised and **added the same day**: a "How I use your information" section (P44), a Do Not Track sentence (P45) and a security paragraph (P46). **Not added, a lawyer's call:** rights worded for particular laws (EU or UK, California's rights to know and delete).
+
 ## Phase 3: other people's accounts (designed, not built)
 
-**Designed in Pass 127 (2026-10-31). Passes 128, 129, 130 and 131 are built so far** (128, 2026-11-01: the owner's own
+**Designed in Pass 127 (2026-10-31). Passes 128 to 133 are built so far** (128, 2026-11-01: the owner's own
 address, the Site URL, and the "moved" note on the old addresses, merged the same day as PR 86, `c4af6bf`;
 129, 2026-11-06: a real email service, see [Email service (Pass 129)](#email-service-pass-129), merged
 as PR 88, `87065bc`; 130, 2026-11-06: change email and delete my account in the app, see
@@ -3896,7 +4021,8 @@ other people's data, see [Other people's data (Pass 131)](#other-peoples-data-ba
 private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
 steps were done with her the same day apart from deleting the old backups repository**);
 132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
-nothing else in this section is built. **The next to build is Pass 133.** Phase 3 is what has to
+133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **built, not merged (two things wait on the owner: deleting the old backups repository and her reading of the pages)**;
+nothing else in this section is built. **The next passes are 134 and 124, each only on the owner's word.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -4000,7 +4126,8 @@ the docs for `Owner: Pass N` (below).
   live site: that link. Needs 128 and 129. **Built 2026-11-07, merged 2026-11-08 (PR 94): see [Alarms (Pass 132)](#alarms-pass-132).**
 - **133** Privacy policy and terms: two pages at the domain, linked everywhere, plus one sentence in
   the Choose a password window. Written last of the preparation passes on purpose, because it names
-  every outside service and every time limit that 128 to 132 settle. Needs 129 to 132.
+  every outside service and every time limit that 128 to 132 settle. Needs 129 to 132. **Built 2026-11-08, not
+  merged: see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133).**
 - **124** (Tier 9) The automatic-update switch on by default. Proposed to run just before 134, so a new
   person's device starts with it; built only on the owner's word. See its entry under Owned by.
 - **134** First go-live: inviting people. Only on the owner's word. A checklist read from the real
@@ -4061,7 +4188,7 @@ section, or taken from the later cards' own rationales; the owner can strike any
   metadata for 30 days and stores account data in the United States; the mail travels through Amazon
   SES (the Message-ID of a received email is at `email.amazonses.com`). ImprovMX, which forwards
   `hello@measureone.app`, deletes mail after forwarding and holds inbound mail briefly in Paris (AWS).
-  Owner: Pass 133.
+  Owner: Pass 133. **Done in Pass 133 (2026-11-08):** the policy states Resend's 30 days and United States storage and ImprovMX's deletion after forwarding (P22, P23; from Pass 129's readings, not re-read).
 - *(added by Pass 129)* **Open sign-up and the free email limits.** Supabase allows 30 emails an hour
   once custom SMTP is saved and Resend's free plan 100 a day (3,000 a month); each sign-up sends a
   confirmation. Plenty for invitations, a ceiling for open sign-up. Owner: Pass 135 (read both limits
@@ -4149,17 +4276,17 @@ section, or taken from the later cards' own rationales; the owner can strike any
 - **The privacy policy has to cover the backups copy** in the private GitHub repository (Backups:
   "Things to remember"; Decisions.md, item 4 of the same open entry). Owner: Pass 133 (from 131's
   list of facts). Pass 131's list of facts is at the end of [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131) (including that a piece deleted in the app is only marked deleted,
-  and that the old backups repository must be deleted before invitations).
+  and that the old backups repository must be deleted before invitations). **Done in Pass 133 (2026-11-08), built not merged:** P18 to P21, P39 and P41 of the table; the "about 30 days" wording is true only once the old repository is deleted, which is why the merge waits on that.
 - *(added by Pass 132)* **Alarms: facts for the policy, and one place for the link.** The outside services list gains UptimeRobot (it
   holds the owner's email address and the two monitored public addresses and keeps monitoring logs, "3 months" on the free plan), and the
   "Report a problem" email is the person's own message, not something the app sends; both are in [Alarms (Pass 132)](#alarms-pass-132),
   "Facts for the privacy policy". The same pass left it open whether the sign-in windows should carry the link as well (Pass 133 edits
-  them to link the policy). Owner: Pass 133.
+  them to link the policy). Owner: Pass 133. **Done in Pass 133 (2026-11-08):** UptimeRobot is in the policy (P26), the "Report a problem" email is described as the person's own message (P14), and the link is in the sign-in window.
 - *(added by Pass 127, a finding)* **The app's fonts come from Google.** The app's stylesheet imports
   them from `fonts.googleapis.com` (`App.jsx`, the `@import` at the top of the CSS string), so every
   visitor's browser contacts Google when the page opens, signed in or not. The card for Pass 133 lists
   the outside services but not this one. The policy must say so, or the fonts are served from the app's
-  own address first (a code change, the owner's choice). Owner: Pass 133.
+  own address first (a code change, the owner's choice). Owner: Pass 133. **Done in Pass 133 (2026-11-08): the policy says so** (P25); self-hosting the fonts was not built (it is a code change outside this pass's file list) and stays the owner's choice.
 - *(added by Pass 127)* **Invitation only ends.** The sign-in window says "Accounts are by invitation for now."
   (`SignInModal.jsx`), the app has no sign-up form, production refuses sign-ups, and the script's check
   "new sign-ups are switched off" asserts that refusal, so it must change with open sign-up (Setup

@@ -126,6 +126,18 @@ export function ChoosePasswordModal({ mode, onClose, onSignInAgain }) {
               {tooShort && <p className="tq-error">That's too short. Use at least {MIN_PASSWORD_LENGTH} characters.</p>}
               {mismatch && <p className="tq-error">The two passwords don't match.</p>}
               {error && <p className="tq-error" style={{ marginTop: 8 }} role="alert">{error}</p>}
+              {/* Pass 133: shown when a password is first chosen (invitation) and when one is
+                  chosen from a reset link; never in "Change password" (the person is already in
+                  and agreed then). The links open in a new tab so nothing typed here is lost. */}
+              {!changing && (
+                <p className="wizard-hint" style={{ margin: "14px 0 0" }}>
+                  By choosing a password you agree to the{" "}
+                  <a className="link-btn" href="/terms.html" target="_blank" rel="noopener noreferrer">Terms</a>
+                  {" "}and the{" "}
+                  <a className="link-btn" href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+                  , and confirm you're 13 or older.
+                </p>
+              )}
               {canSignInAgain && onSignInAgain && (
                 <div style={{ marginTop: 10 }}>
                   <button type="button" className="ghost-btn" onClick={onSignInAgain}>

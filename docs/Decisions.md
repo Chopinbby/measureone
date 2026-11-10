@@ -8804,7 +8804,8 @@ what it rules out.
   would have restored into it; the trial used `--rename` to the spare `+restore` account. **Added at her request, 2026-11-07:** a one-time
   reminder issue on 2026-11-10 to delete the old backups repository, with the new repository's scheduled-backup count in it (chosen over a calendar
   event because she already receives GitHub's assignment emails, which the trial confirmed; the old repository stays until then so there is
-  a second copy while the new one proves itself).
+  a second copy while the new one proves itself). **Done 2026-11-10:** the issue opened that day reading 3 succeeded, 0 failed, and the
+  owner deleted the old repository the same day.
 
 - **Pass 132 — alarms: an outside check, Supabase's usage emails, and a "Report a problem" link (2026-11-07).** Built as Phase 3
   Design G; one small app change (the link), the rest are the owner's dashboard steps. Design and facts:
@@ -8864,7 +8865,7 @@ what it rules out.
   Change password (Pass 135's checkboxes must replace it, not add a second ask). **Status (2026-11-09):** merged as PR #96 (merge commit
   `94e93c4`), live as `index-CJNfVn4Z.js`; the short addresses and the new sentences were read from outside and are there. **She merged
   before deleting the old backups repository**, so "about 30 days" is live ahead of the fact; only her own account exists, so no one else's
-  data is held that way, but it must go before anyone is invited. Not done: the footer in the five templates in both projects. A check by
+  data is held that way, but it must go before anyone is invited (**she deleted it on 2026-11-10; read from outside: 404**). Not done: the footer in the five templates in both projects. A check by
   Quincy Jones on 2026-11-09, before the merge, found nothing blocking (1,750 tests and the build pass, the em dash test fails when it
   should, the pages fit a 375 px phone in light and dark) and logged the loose ends under Open questions.
 
@@ -10458,8 +10459,9 @@ oversight to silently fix; surface it instead.
 - **Privacy policy and terms (Pass 133): what is still open (logged 2026-11-09).** Merged as PR #96; see "Pass 133" under Accounts and
   backend above and [Accounts-and-Backend.md](Accounts-and-Backend.md#privacy-policy-and-terms-pass-133) ("Left open" there spells each
   out). Still open:
-  1. **The old backups repository `Chopinbby/measureone-backups` still exists** (read 2026-11-09), so the policy's and the delete window's
-     "about 30 days" is not true yet. Only the owner's account exists; it must be deleted before Pass 134 invites anyone.
+  1. ~~The old backups repository `Chopinbby/measureone-backups` still exists~~ (read 2026-11-09). **Resolved 2026-11-10:** the owner deleted
+     it after the new repository's third green scheduled backup (her reminder issue read 3 succeeded, 0 failed; read from outside: GitHub
+     answers 404). The policy's and the delete window's "about 30 days" is true as written.
   2. **The promise to email account holders about changes that matter has no mechanism.** Supabase has no broadcast, and sending AS
      `hello@measureone.app` is not clean on the Free plan (Pass 129). The owner decided on 2026-11-09 that the promise stays as written and
      that she settles how in Pass 134.

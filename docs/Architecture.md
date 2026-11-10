@@ -70,6 +70,13 @@ MeasureOne.jsx/
 │                               # opening with no connection; leaves everything else to the
 │                               # browser. How to change it and how to turn it off:
 │                               # DEPLOYMENT.md, "The offline worker, and turning it off".
+├── public/privacy.html,        # Pass 133: the privacy policy and the terms of use, plain static
+│   public/terms.html           # pages (no scripts, no outside requests), copied into the build
+│                               # untouched like sw.js. Every sentence is traced in a table in
+│                               # Accounts-and-Backend.md; test/copy-style.test.mjs reads both
+│                               # whole and fails on an em dash.
+├── vercel.json                 # Pass 133: two rewrites, /privacy to /privacy.html and /terms to
+│                               # /terms.html; the repository's only Vercel config (DEPLOYMENT.md)
 ├── test/                       # `npm test` — node:test, run against the
 │                               # real lib/ modules via a small loader hook
 │                               # (extensionless-loader.mjs) that lets Node

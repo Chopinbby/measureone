@@ -263,12 +263,12 @@ kept, so nothing else is needed). **The "moved" note** is code: reverting the Pa
 merge removes it. Nothing about either touches a piece, the technique library or an
 account's rows. The domain itself can stay attached while any of this is done.
 
-**Rollback points since go-live (added 2026-10-15, extended 2026-11-08).** Every merge
+**Rollback points since go-live (added 2026-10-15, extended 2026-11-09).** Every merge
 to `main` makes an ordinary Production deployment, so earlier ones stay listed in
 Vercel (for as long as Vercel keeps them). The app code changed three times between
 go-live and 2026-10-15: the deployment of `92e6282` (PR 62) is the last one before
 Pass 115 (app file `index-BquOI88d.js`, accounts on); `b877140` (PR 63) is Pass 115
-alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed eleven more times
+alone; `8eae8fd` (PR 67) is Passes 116 to 118. **It has changed twelve more times
 since, one merge each:** `9864612` (PR 71) is Pass 119 (tabs of one browser),
 `847fada` (PR 72) Pass 120 (changes from other devices arriving by themselves,
 behind a switch that is off by default), `951a640` (PR 73) Pass 121 (Review asks one
@@ -281,8 +281,12 @@ no to is remembered, the most recent reorder wins; app file `index-YBQquKJp.js`)
 app file `index-CqYGi2T6.js`, live 2026-10-31; missing from this list until 2026-11-01) and
 `c4af6bf` (PR 86) Pass 128 (the "moved" note and its phone layout; app file `index-IY8CdtWw.js`, live
 2026-11-01) and `ab7916f` (PR 90) Pass 130 (change email, delete my account, the Danger zone; app file `index-BQl7BE2O.js`, live
-2026-11-06) and `a9835db` (PR 94) Pass 132 (the "Report a problem" link), **the current app code, live since 2026-11-08
-(app file `index-CYcwBRHX.js`)**. **Rolling back across Pass 132 only removes the link** (no stored data format and no
+2026-11-06) and `a9835db` (PR 94) Pass 132 (the "Report a problem" link; app file `index-CYcwBRHX.js`, live 2026-11-08) and
+`94e93c4` (PR 96) Pass 133 (the privacy policy and terms pages, the short addresses, the links to them, one sentence in Choose a password
+and the delete window's backup sentence), **the current app code, live since 2026-11-09 (app file `index-CJNfVn4Z.js`)**. **Rolling back
+across Pass 133 takes all of that out** (the pages and `vercel.json` go with the code; no stored data format and no database changed; once
+the email footer is pasted into the dashboards, the emails' `/privacy` and `/terms` links would point at nothing).
+**Rolling back across Pass 132 only removes the link** (no stored data format and no
 database changed; Pass 131 changed no app code). **Rolling back across Pass 130 only
 removes the new buttons;** migration `0003` and its database function stay on both Supabase projects, unused and
 harmless, and no stored data format changed, so devices don't upload anything extra either way. The file
@@ -442,6 +446,22 @@ both services. Full detail: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-B
 - **Check after any change to email:** ask for a password reset for your own account at
   `https://measureone.app`, and read the message's "Show original" for SPF, DKIM and DMARC all
   passing. Click **Not now** at Choose a password.
+
+### The privacy policy and terms (Pass 133)
+
+The two pages are plain files in `public/` (`privacy.html`, `terms.html`), served as they are. `vercel.json`, the repository's only Vercel
+config, adds two rewrites so `/privacy` and `/terms` work too: the app links to the `.html` names and the sign-in emails use the short
+ones. Full detail: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#privacy-policy-and-terms-pass-133).
+
+- **Merged 2026-11-09 (PR #96, `94e93c4`), live as `index-CJNfVn4Z.js`.** Read from outside that day: `/privacy`, `/terms`,
+  `/privacy.html` and `/terms.html` answer 200 with the right page on `measureone.app`, and `/privacy` answers on the three older addresses.
+- **The way back:** reverting PR #96 takes out the whole pass (pages, rewrites, links, the Choose a password sentence). Deleting only
+  `vercel.json` drops the short addresses and leaves the `.html` pages, but the sign-in emails (once the footer is pasted) use the short
+  ones and would point at nothing.
+- **Not done yet (the owner's):** the footer in `supabase/templates/` is not yet pasted into either Supabase project, and the old backups
+  repository is not yet deleted (the pages' "about 30 days" needs that).
+- **After any change to the pages:** change the "Last updated" date and the change history at the bottom of the page, and the matching row
+  of the table in `docs/Accounts-and-Backend.md`, together.
 
 ---
 

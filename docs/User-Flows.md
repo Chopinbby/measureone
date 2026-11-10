@@ -1270,16 +1270,17 @@ not collected); no app version number in the note (the app has none); the sign-i
 ## 20. Reading the privacy policy and terms (Pass 133)
 
 **What you do:** press **Privacy Policy** or **Terms**. They are on the welcome screen (under "Report a problem"), at the bottom of the
-sign-in window, and in Settings, at the bottom of the Account panel (that panel exists only where accounts are available). Every sign-in
-email ends with the same two words as links. Each opens a plain page in a **new tab**, so the window you were in stays as it was.
+sign-in window, and in Settings, at the bottom of the Account panel (that panel exists only where accounts are available). The sign-in
+emails are meant to end with the same two words as links: the text is in the repository but, as of 2026-11-09, not yet pasted into the
+account service's dashboards, so emails sent today do not carry it. Each link opens a plain page in a **new tab**, so the window you were in stays as it was.
 
 **What you see.** A readable page in the app's colours, with a dark version if your device is set to dark: the policy (what is collected,
 where it is kept and for how long, who can see it, no selling or ads or tracking, what you can do, deleting, age, how changes are
 announced) and the terms (short rules, ending an account, governing law). Each page shows when it was last updated and, at the bottom, a
 short change history. The two pages link to each other and back to the app. There are no scripts and no outside requests on them.
 
-**Addresses.** `/privacy.html` and `/terms.html` always work; `/privacy` and `/terms` work on the live site (a Vercel rewrite) and are
-the ones emails use. A static preview or the local dev server does not have the short ones.
+**Addresses.** `/privacy.html` and `/terms.html` always work; `/privacy` and `/terms` work on the live site (a Vercel rewrite, read from outside
+2026-11-09) and are the ones emails use. A static preview or the local dev server does not have the short ones.
 
 **Not covered:** the pages cannot be opened without a connection (the offline worker keeps only the app); there is no banner or
 checkbox for agreeing (an invited person agrees by the sentence in Choose a password; open sign-up's checkboxes are Pass 135); no

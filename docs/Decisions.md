@@ -8839,6 +8839,35 @@ what it rules out.
   written (a code comment and the docs said the link works even if the page's script breaks; the app draws it, so a page that never loads
   shows none) and corrected it, and logged loose ends: see "Alarms (Pass 132)" under Open questions.
 
+- **Pass 133 — a privacy policy and terms of use (2026-11-08, merged 2026-11-09).** Built as Phase 3 Design E: two plain static pages,
+  short addresses through a new `vercel.json`, links everywhere a person signs in, one sentence in Choose a password. Design, the source of
+  every sentence and the checks: [Accounts-and-Backend.md](Accounts-and-Backend.md#privacy-policy-and-terms-pass-133). **The owner's
+  answers (2026-11-08):** (a) she is the only person behind MeasureOne and lives in Colorado, so the pages name "Naomi Fleishour, an
+  individual in Colorado", are written in the first person, and choose Colorado law; **"MeasureOne, LLC" is not printed because no LLC
+  exists** (she asked whether she must file a business to use that name; a company's name has to be a company's, and whether the product
+  name itself needs a Colorado trade name filing is her adviser's question: the Secretary of State's FAQ lists a sole proprietor who uses a
+  name other than their own legal name among those who file a Statement of Trade Name, and nothing more was settled); (b) yes to editing
+  `DELETE_BACKUP_NOTE` (`lib/backend.js`, outside the card's file list), yes to holding the merge until the old backups repository was
+  deleted, and yes to announcing changes that matter by email to account holders; (c) **age: option A.** Accounts stay 13 and older and no
+  parental consent is built; younger students can use the app without an account, with an adult (without an account nothing entered is sent
+  to the owner). Her first wording (younger students may make an account with adult supervision, with a promise to delete a child's
+  account) was **not used**: it contradicted Phase 3 Decided 3 (13 and over; under 13 with a parent was ruled out because US children's
+  privacy law, COPPA, needs verifiable parental consent first, which supervision is not, as far as is understood) and would have promised
+  something nobody built; she then chose A; (d) at her request, three common-practice additions: "How I use your information" (ending "I do
+  not use it for anything else"), a Do Not Track sentence and a security paragraph. **Alternatives ruled out:** "MeasureOne, LLC"; a cookie
+  banner (nothing sets a cookie: read from the code and from the live headers); self-hosting the app's Google fonts (a code change outside
+  the card; the policy says the app contacts Google instead); rights worded for the EU, UK or California (a lawyer's call, before the app
+  is sold). **Decisions inside that:** the pages carry no script and make no outside request, so a visit tells nobody but their own host;
+  the app links to `/privacy.html` and `/terms.html` (they also work on the dev server) and opens them in a new tab so a half-typed
+  password survives, while the emails use the short addresses; "Report a problem" was added to the sign-in window (Pass 132's open
+  question 4: taken as the default, she did not object); the Choose a password sentence shows in invitations and resets and never in
+  Change password (Pass 135's checkboxes must replace it, not add a second ask). **Status (2026-11-09):** merged as PR #96 (merge commit
+  `94e93c4`), live as `index-CJNfVn4Z.js`; the short addresses and the new sentences were read from outside and are there. **She merged
+  before deleting the old backups repository**, so "about 30 days" is live ahead of the fact; only her own account exists, so no one else's
+  data is held that way, but it must go before anyone is invited. Not done: the footer in the five templates in both projects. A check by
+  Quincy Jones on 2026-11-09, before the merge, found nothing blocking (1,750 tests and the build pass, the em dash test fails when it
+  should, the pages fit a 375 px phone in light and dark) and logged the loose ends under Open questions.
+
 ## Open questions
 
 These are unresolved — don't treat the absence of a decision as an
@@ -10415,7 +10444,7 @@ oversight to silently fix; surface it instead.
      leave the note alone.
   3. **Nothing watches the forwarding of `hello@measureone.app`** (ImprovMX). If it stopped, a report would reach nobody and the sender would
      see no error. It worked on 2026-11-08; the uptime monitors do not look at mail.
-  4. Whether to add the link to the sign-in windows (the likeliest place a person gives up), decided with Pass 133, which edits them.
+  4. Whether to add the link to the sign-in windows (the likeliest place a person gives up), decided with Pass 133, which edits them. **Resolved in Pass 133 (2026-11-08):** the sign-in window carries it (sign-in mode only), taken as the default; the owner did not object.
   5. A paused project's answer to the health address is unobserved.
   6. A second alert address, or a text message, so one provider failing does not hide an outage; the free plan's contacts are not stated
      and she did not report them.
@@ -10425,3 +10454,22 @@ oversight to silently fix; surface it instead.
      address) needs the second monitor edited.
   10. Supabase's pages do not say which address a usage or pause email goes to. The billing "Email Recipient" she saw is her sign-in address,
       so both candidates are one inbox, but no such email has been received (they cannot be triggered).
+
+- **Privacy policy and terms (Pass 133): what is still open (logged 2026-11-09).** Merged as PR #96; see "Pass 133" under Accounts and
+  backend above and [Accounts-and-Backend.md](Accounts-and-Backend.md#privacy-policy-and-terms-pass-133) ("Left open" there spells each
+  out). Still open:
+  1. **The old backups repository `Chopinbby/measureone-backups` still exists** (read 2026-11-09), so the policy's and the delete window's
+     "about 30 days" is not true yet. Only the owner's account exists; it must be deleted before Pass 134 invites anyone.
+  2. **The promise to email account holders about changes that matter has no mechanism.** Supabase has no broadcast, and sending AS
+     `hello@measureone.app` is not clean on the Free plan (Pass 129). The owner decided on 2026-11-09 that the promise stays as written and
+     that she settles how in Pass 134.
+  3. **The email footer is not in either Supabase project's dashboard yet**, so no email carries the links; a real email from each project
+     is the only proof it is live.
+  4. **Whether "MeasureOne" needs a Colorado trade name filing, and when to form an LLC** (the owner's adviser). The pages say "an individual".
+  5. **No lawyer has read the pages**, and rights worded for particular laws (EU or UK, California) were not added.
+  6. **Some vendor figures may rest on third-party sources.** Resend's 30 days, ImprovMX's short hold of failed mail and UptimeRobot's
+     free-plan terms: the pass's notes say earlier passes read the vendors' pages, and the 2026-11-09 check reported third-party sources
+     instead. Not re-checked.
+  7. Vercel's plan (so its log retention) and whether Supabase's logs hold IP addresses are not recorded, so the policy gives a range and
+     claims neither. The pages cannot be opened offline, their colours are a hand copy of the app's, and `supabase/templates/` has no
+     automated em dash check.

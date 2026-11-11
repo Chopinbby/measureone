@@ -3526,7 +3526,7 @@ the link notices) has no automated test; it was tried in a browser.
 
 > **Superseded going forward by [Pass 131](#other-peoples-data-backups-that-expire-pass-131) (2026-11-06):** the daily
 > copy moves to a new private repository where each day's copy expires after 30 days. This section describes the first
-> repository, which keeps running until the owner deletes it, and is the history of why the job is built as it is.
+> repository, which the owner deleted on 2026-11-10, and is the history of why the job is built as it is.
 
 The Free plan keeps no backups of the production project (see
 [Free-plan consequences](#free-plan-consequences)), so a free scheduled job
@@ -3765,6 +3765,9 @@ accepted the `+restore` invitation, signed in on the test preview and pressed Re
 Left: deleting `measureone-backups` (the dated reminder opens 2026-11-10). The spare user in the test project was deleted by the owner on
 2026-11-07 (her word, "i deleted the old account"; not checked from here, the test project is hers).
 **Merged 2026-11-07 (PR 92, `77ce143`); the live app is unchanged** (`index-BQl7BE2O.js` on all four addresses, read after the merge).
+**Update 2026-11-10:** the owner deleted the old repository after the new one's third green scheduled backup (its reminder issue read
+3 succeeded, 0 failed); read from outside afterwards, GitHub answers 404 for `measureone-backups` and `measureone-backups-v2` is healthy
+(that morning's backup holds 25 pieces, 1 technique library, 1 account).
 
 **The owner's steps, in order** (all in RESTORE.md and the README; **done with her on 2026-11-07 except the last**): add the `SUPABASE_DB_URL` secret to the new
 repository; read back the 30-day retention cap; run the backup by hand and open its artifact; import a file from it in a
@@ -3911,7 +3914,7 @@ look is the owner's, before the app is sold.**
   sign-up checkboxes must not ask a second time.
 - **Delete wording.** `DELETE_BACKUP_NOTE` (`lib/backend.js`) now reads "The service also keeps a separate daily backup of its data.
   Backup copies that include your email address and pieces are deleted within about 30 days." It is shown before an account is
-  deleted and again after (`describeDeleteAccount`). **It is true only once the old backups repository is deleted.**
+  deleted and again after (`describeDeleteAccount`). **It is true: the old backups repository was deleted on 2026-11-10** (from the 2026-11-09 merge until then it ran ahead of the fact).
 - **Email footers.** Every file in `supabase/templates/` ends with `MeasureOne · Privacy Policy · Terms` (plain links to
   `https://measureone.app/privacy` and `/terms`, no tracking); the README says so. **The repository is only the record: the dashboard
   text of BOTH projects is changed by hand (the owner), after this merged (2026-11-09; **not yet done**).**
@@ -3952,7 +3955,7 @@ history, and this row). "Vendor page" means read on 2026-11-08 unless a date say
 | P18 | The copy and the account stay until you delete the account | Design D (a deletion only marks a row); Pass 130 |
 | P19 | Daily backup to a private GitHub repository only I can open, two-factor on | Pass 131 "Facts for the privacy policy"; two-factor on, owner (2026-10-12) |
 | P20 | The copy holds emails, piece names, notes, practice history | Pass 131 "Facts for the privacy policy" |
-| P21 | GitHub deletes each copy after about 30 days; the repository's own files hold only counts | Pass 131 (`retention-days: 30`, the repository's 30-day cap read back, `counts.csv` and `LAST_BACKUP.txt` only, a test fails if anything else is added). **Holds only once the old repository `measureone-backups` is deleted; it still existed on 2026-11-09, after the merge** |
+| P21 | GitHub deletes each copy after about 30 days; the repository's own files hold only counts | Pass 131 (`retention-days: 30`, the repository's 30-day cap read back, `counts.csv` and `LAST_BACKUP.txt` only, a test fails if anything else is added). **Holds since the old repository `measureone-backups` was deleted on 2026-11-10 (it still existed on 2026-11-09, after the merge)** |
 | P22 | Sign-in emails go through Resend (United States), kept 30 days; via Amazon SES | Pass 129 "Email facts for the privacy policy" (Resend's pages as read 2026-11-05; **not re-read in Pass 133**) |
 | P23 | ImprovMX forwards hello@ mail, deletes it after forwarding, holds it briefly in Paris | Pass 129, same note (**not re-read**) |
 | P24 | Vercel hosts the site and keeps request logs (page, time, browser text, in some logs the IP address), one hour to 30 days by plan | Vercel "Runtime Logs" (updated 2026-08-28: Hobby 1 hour, Pro 1 day, Observability Plus 30 days; fields listed) and "Log Drains reference" (updated 2026-09-11: `proxy.clientIp`). **Not stated: which plan the project is on**, so the policy gives the range |
@@ -3989,10 +3992,11 @@ history, and this row). "Vendor page" means read on 2026-11-08 unless a date say
 
 **Before it merged (what was asked, and what happened).**
 1. ~~Fill the region (P16)~~ done 2026-11-08.
-2. **Delete the old backups repository** `Chopinbby/measureone-backups` (her reminder issue opens 2026-11-10). **Not done before the merge:**
-   she merged on 2026-11-09 with it still there (read that day: it exists, private, last push 2026-11-08). Until it is deleted P21 and
-   `DELETE_BACKUP_NOTE` are not true of that repository, which keeps every day forever, so the pages' "about 30 days" runs ahead of the
-   fact. Only her own account exists, so no one else's data is held that way; **it must be deleted before anyone is invited (Pass 134)**.
+2. ~~Delete the old backups repository~~ `Chopinbby/measureone-backups`: **done 2026-11-10.** Not done before the merge: she merged on
+   2026-11-09 with it still there (read that day: it exists, private, last push 2026-11-08), so for a day P21 and `DELETE_BACKUP_NOTE` were
+   not true of that repository, which kept every day forever, and the pages' "about 30 days" ran ahead of the fact (only her own account
+   existed, so no one else's data was held that way). Her reminder issue opened on 2026-11-10 reading 3 scheduled backups succeeded, 0
+   failed; she deleted the repository that day, and a read from outside afterwards got 404 for it and a healthy new repository.
 3. **She reads both pages and approves them.** She asked for edits on 2026-11-08 (all applied) and merged the pull request on 2026-11-09,
    which carried P35, P43 and the last sentence of P44, the promises. On 2026-11-09 (in the Quincy Jones check chat) she decided the
    email-for-changes promise (P43) stays as written and that how it is kept is settled in Pass 134: **no way to email every account
@@ -4026,9 +4030,9 @@ tried against a stand-in, plus migration `0003` and the security script on the t
 `0003` run on production with 43 of 43 there too; merged 2026-11-06 as PR 90, `ab7916f`, live as `index-BQl7BE2O.js`**; 131, 2026-11-06:
 other people's data, see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), built in a new
 private backups repository, **no app code and nothing on the live site; merged 2026-11-07 as PR 92, merge commit `77ce143`; the owner's
-steps were done with her the same day apart from deleting the old backups repository**);
+steps were done with her the same day, and the old backups repository was deleted on 2026-11-10**);
 132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
-133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **merged 2026-11-09 as PR 96 (`94e93c4`), live as `index-CJNfVn4Z.js`; still the owner's: deleting the old backups repository (she merged before doing it) and pasting the footer into the five email templates in both projects**;
+133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **merged 2026-11-09 as PR 96 (`94e93c4`), live as `index-CJNfVn4Z.js`; the old backups repository was deleted 2026-11-10 (she merged before doing it); still the owner's: pasting the footer into the five email templates in both projects**;
 nothing else in this section is built. **The next passes are 134 and 124, each only on the owner's word.** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
@@ -4250,12 +4254,12 @@ section, or taken from the later cards' own rationales; the owner can strike any
 - *(added by Pass 127)* **The backups repository keeps every day forever** in its history (Backups of the account copy).
   Other people's data needs a stated time. Owner: Pass 131 (30 days recommended). **Done in Pass 131 (2026-11-06):** about 30
   days, as expiring artifacts in the new repository, plus a 30-day cap on the repository's own retention setting; see [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131).
-  The old repository keeps every day until the owner deletes it (her step, after about 3 green runs of the new one).
+  The old repository was deleted by the owner on 2026-11-10, after 3 green scheduled runs of the new one.
 - *(added by Pass 127)* **The first backup commit still holds Supabase's sign-in tables** (Decisions.md, "Backups of the
   account copy: what is still open", item 1). A fresh private repository retires it with its
   history. Owner: Pass 131. **Done in Pass 131 (2026-11-06) in the new repository** (it never held sign-in tables and holds no
-  personal data in git at all); **retired for good only when the owner deletes the old repository**, which must happen before
-  anyone else is invited.
+  personal data in git at all); **retired for good when the owner deleted the old repository (2026-11-10)**, before anyone else
+  was invited.
 - *(added by Pass 127)* **A restore inside a real Supabase project has never been tried** (Backups: "Not checked"; item
   2). Owner: Pass 131. **Rehearsed in a scratch Postgres on the real latest backup in Pass 131 (2026-11-06), and then in the TEST
   Supabase project by the owner (2026-11-07: the SQL Editor took the 218 KB file, revisions kept; see Pass 131 above). The
@@ -4283,7 +4287,7 @@ section, or taken from the later cards' own rationales; the owner can strike any
 - **The privacy policy has to cover the backups copy** in the private GitHub repository (Backups:
   "Things to remember"; Decisions.md, item 4 of the same open entry). Owner: Pass 133 (from 131's
   list of facts). Pass 131's list of facts is at the end of [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131) (including that a piece deleted in the app is only marked deleted,
-  and that the old backups repository must be deleted before invitations). **Done in Pass 133 (2026-11-08, merged 2026-11-09):** P18 to P21, P39 and P41 of the table; the "about 30 days" wording is true only once the old repository is deleted, and the merge did not wait on that ("Before it merged"), so it runs ahead of the fact until then.
+  and that the old backups repository must be deleted before invitations). **Done in Pass 133 (2026-11-08, merged 2026-11-09):** P18 to P21, P39 and P41 of the table; the merge did not wait for the old repository's deletion ("Before it merged"), so the "about 30 days" wording ran ahead of the fact until the owner deleted it on 2026-11-10.
 - *(added by Pass 132)* **Alarms: facts for the policy, and one place for the link.** The outside services list gains UptimeRobot (it
   holds the owner's email address and the two monitored public addresses and keeps monitoring logs, "3 months" on the free plan), and the
   "Report a problem" email is the person's own message, not something the app sends; both are in [Alarms (Pass 132)](#alarms-pass-132),

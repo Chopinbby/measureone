@@ -458,8 +458,8 @@ ones. Full detail: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md
 - **The way back:** reverting PR #96 takes out the whole pass (pages, rewrites, links, the Choose a password sentence). Deleting only
   `vercel.json` drops the short addresses and leaves the `.html` pages, but the sign-in emails (once the footer is pasted) use the short
   ones and would point at nothing.
-- **Not done yet (the owner's):** the footer in `supabase/templates/` is not yet pasted into either Supabase project, and the old backups
-  repository is not yet deleted (the pages' "about 30 days" needs that).
+- **Not done yet (the owner's):** the footer in `supabase/templates/` is not yet pasted into either Supabase project. (The old backups
+  repository was deleted on 2026-11-10, so the pages' "about 30 days" is true.)
 - **After any change to the pages:** change the "Last updated" date and the change history at the bottom of the page, and the matching row
   of the table in `docs/Accounts-and-Backend.md`, together.
 
@@ -509,7 +509,7 @@ database's rules or sign-in settings. Only the project's **public** key is ever
 in the app or in a setting, never the secret key. A daily copy of the account
 database is saved by a scheduled job into a separate **private** repository
 (`Chopinbby/measureone-backups-v2` since Pass 131, where each day's copy is an artifact
-that expires after 30 days; the older `Chopinbby/measureone-backups` runs until deleted; this repository is public,
+that expires after 30 days; the older `Chopinbby/measureone-backups` was deleted on 2026-11-10; this repository is public,
 so backups never go here): see [Accounts-and-Backend.md](docs/Accounts-and-Backend.md#other-peoples-data-backups-that-expire-pass-131).
 
 ---

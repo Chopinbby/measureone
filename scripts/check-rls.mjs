@@ -19,7 +19,9 @@
 /*    - an account cannot read, add, change, move to, or delete        */
 /*      anyone else's rows, and nobody can delete a row at all         */
 /*    - the database keeps each row's revision count (migration 0002)  */
-/*    - new sign-ups and anonymous sign-ins are switched off           */
+/*    - a sign-up without a valid bot-check token is refused (by the   */
+/*      bot check, or because sign-ups are off), and anonymous         */
+/*      sign-ins are switched off (Pass 135)                           */
 /*    - "delete my account" (migration 0003): a signed-out visitor     */
 /*      cannot call it, and when account A calls it, A's account and   */
 /*      rows are gone, A cannot sign in or add rows any more, and B's  */
@@ -48,6 +50,19 @@
 /*  succeed instead of failing for some other reason (for example the  */
 /*  technique table's one-row-per-account rule).                       */
 /*                                                                     */
+/*  The bot check (Pass 135). Once a project's bot check ("Enable       */
+/*  CAPTCHA protection") is on, the service asks for a token on every  */
+/*  password sign-in, this script's included, and a real token can     */
+/*  only be made in a browser. So:                                     */
+/*    - TEST project (its bot check uses Cloudflare's published TEST   */
+/*      secret key, which accepts Cloudflare's published dummy token): */
+/*      run with --dummy-token.                                        */
+/*    - PRODUCTION (a real secret key): the full run only works while  */
+/*      the bot check is switched OFF. Run it before switching the bot */
+/*      check on; afterwards, `--bot-check` asks the service, with no  */
+/*      account at all, whether a sign-in and a sign-up without a      */
+/*      token are refused. See DEPLOYMENT.md, "Open sign-up".          */
+/*                                                                     */
 /*  Setup: create the two throwaway accounts in the project's          */
 /*  dashboard (Authentication > Users > Add user), run this, then      */
 /*  delete the account(s) still there (A is deleted by the check of    */
@@ -73,6 +88,19 @@ export function isThrowawayEmail(email) {
 // Something wrong with the setup (a wrong password, an account that isn't
 // empty), as opposed to a security check that failed.
 export class SetupProblem extends Error {}
+
+// Cloudflare's published dummy token: what its TEST site keys produce, accepted only by
+// its TEST secret keys (a real secret key rejects it). Public, and no use against a real
+// project. Read from developers.cloudflare.com/turnstile/troubleshooting/testing, 2026-11-12.
+export const DUMMY_BOT_TOKEN = "XXXX.DUMMY.TOKEN.XXXX";
+
+// The service refused a call because the bot-check token was missing or not accepted
+// ("captcha protection: request disallowed (...)", a 400). Not the same thing as a wrong
+// password or sign-ups being off, and the checks below must tell them apart.
+export const isBotCheckRefusal = (error) => !!(error && (error.code === "captcha_failed" || /captcha/i.test(String(error.message || error.msg || ""))));
+
+// Sign-ups are switched off for the project.
+const isSignupsOff = (error) => !!(error && (error.code === "signup_disabled" || /signups? not allowed|signups? (are )?disabled|not allowed for this instance/i.test(String(error.message || error.msg || ""))));
 
 /* ---- small helpers ------------------------------------------------ */
 
@@ -125,9 +153,13 @@ export function keyProblem(key) {
 
 // createClient: supabase-js's (or a stand-in with the same shape, for testing
 // this script). accountA / accountB: { email, password }, two throwaway
-// accounts. log: called with each result as it comes in.
-// Returns { results: [{ n, group, title, ok, detail }] }.
-export async function runChecks({ createClient, url, key, accountA, accountB, log = () => {} }) {
+// accounts. log: called with each result as it comes in. botToken: sent with every
+// password sign-in when given (see "The bot check" at the top); never with the probes that
+// check a call WITHOUT a token is refused.
+// Returns { results: [{ n, group, title, ok, detail }], botCheck }, where botCheck says
+// what refused the sign-up probe: "on" (the bot check), "off" (only sign-ups being
+// switched off: the bot check is not guarding sign-up) or "unknown".
+export async function runChecks({ createClient, url, key, accountA, accountB, botToken = "", log = () => {} }) {
   // First of all, before anything signs in: only accounts made for this. The last group deletes A.
   for (const [label, account] of [["A", accountA], ["B", accountB]]) {
     if (!isThrowawayEmail(account.email)) {
@@ -144,8 +176,16 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
   const cb = createClient(url, key, opts);
   const probe = createClient(url, key, opts);
 
+  const withToken = botToken ? { options: { captchaToken: botToken } } : {};
   const signIn = async (client, account, label) => {
-    const r = await client.auth.signInWithPassword({ email: account.email, password: account.password });
+    const r = await client.auth.signInWithPassword({ email: account.email, password: account.password, ...withToken });
+    if (r.error && isBotCheckRefusal(r.error)) {
+      throw new SetupProblem(
+        `Couldn't sign in as account ${label} (${maskEmail(account.email)}): this project's bot check is on and ${botToken ? "did not accept the token given" : "no token was given"}. ` +
+          "On the TEST project (Cloudflare's test secret key) run again with --dummy-token. " +
+          "On PRODUCTION the full check only runs while the bot check is switched off; with it on, use --bot-check (see DEPLOYMENT.md, \"Open sign-up\")."
+      );
+    }
     if (r.error || !r.data || !r.data.user) {
       throw new SetupProblem(
         `Couldn't sign in as account ${label} (${maskEmail(account.email)}): ${messageOf(r.error)}. ` +
@@ -401,20 +441,44 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
 
   /* -- sign-in settings ---------------------------------------------- */
   const SIGNIN = "Sign-in settings";
-  await check(SIGNIN, "new sign-ups are switched off", async () => {
+  // Pass 135: open sign-up is allowed, so what must hold is that a sign-up with NO bot-check
+  // token is refused: by the bot check when it is on, or because sign-ups are switched off.
+  // Which of the two it was is kept (`botCheck`) and said at the end of the run, because
+  // "refused only because sign-ups are off" means nothing would stop automated sign-ups the
+  // moment they are switched on.
+  let botCheck = "unknown";
+  await check(SIGNIN, "a sign-up without a valid bot-check token is refused", async () => {
     const email = `rls-check-signup-probe-${rand()}@example.invalid`;
-    const r = await probe.auth.signUp({ email, password: `${rand()}${rand()}Aa1!` });
+    const r = await probe.auth.signUp({ email, password: `${rand()}${rand()}Aa1!` }); // no token, on purpose
     if (!r.error && r.data && r.data.user) {
-      return { ok: false, detail: `sign-up WENT THROUGH: an account was created for ${email}. Switch sign-ups off (Authentication > Sign In / Providers) and delete that account.` };
+      return {
+        ok: false,
+        detail:
+          `a sign-up with no bot-check token WENT THROUGH: an account was created for ${email}. Switch the bot check on ` +
+          "(the project's Authentication settings, \"Enable CAPTCHA protection\") or switch sign-ups off (Authentication > Sign In / Providers), and delete that account.",
+      };
     }
-    const off = r.error && (r.error.code === "signup_disabled" || /signups? not allowed|signups? (are )?disabled|not allowed for this instance/i.test(messageOf(r.error)));
-    return verdict(off, `the sign-up probe failed, but not because sign-ups are off (${why(r.error)})`);
+    if (isBotCheckRefusal(r.error)) {
+      botCheck = "on";
+      return verdict(true, "");
+    }
+    if (isSignupsOff(r.error)) {
+      botCheck = "off";
+      return verdict(true, "");
+    }
+    return verdict(false, `the sign-up probe failed, but not because of the bot check and not because sign-ups are off (${why(r.error)})`);
   });
   await check(SIGNIN, "anonymous sign-ins are switched off", async () => {
     if (typeof probe.auth.signInAnonymously !== "function") return { ok: false, detail: "this version of the library can't try an anonymous sign-in" };
-    const r = await probe.auth.signInAnonymously();
+    // With the bot check on, a probe with no token is stopped by the bot check before the
+    // service says whether anonymous sign-ins are allowed, so the token (when there is one)
+    // goes with it: the answer wanted here is "disabled", not "no token".
+    const r = await probe.auth.signInAnonymously(withToken);
     if (!r.error && r.data && r.data.user) {
       return { ok: false, detail: "an anonymous sign-in WENT THROUGH. Switch anonymous sign-ins off (Authentication > Sign In / Providers) and delete that anonymous user." };
+    }
+    if (isBotCheckRefusal(r.error)) {
+      return { ok: false, detail: "couldn't tell: the probe was stopped by the bot check before the service said whether anonymous sign-ins are allowed" };
     }
     const off = r.error && (r.error.code === "anonymous_provider_disabled" || /anonymous sign-ins? (are )?disabled/i.test(messageOf(r.error)));
     return verdict(off, `the anonymous sign-in probe failed, but not because it is switched off (${why(r.error)})`);
@@ -448,13 +512,15 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
   await check(DEL, "A can no longer sign in", async () => {
     if (!afterDelete.deleted) return { ok: false, detail: "needs the delete before it to have worked" };
     const again = createClient(url, key, opts);
-    const r = await again.auth.signInWithPassword({ email: accountA.email, password: accountA.password });
+    const r = await again.auth.signInWithPassword({ email: accountA.email, password: accountA.password, ...withToken });
     const signedIn = !r.error && r.data && r.data.user;
     try {
       await again.auth.signOut({ scope: "local" });
     } catch (e) {
       /* nothing to sign out of */
     }
+    // Refused by the bot check is not "the account is gone": it would be refused either way.
+    if (isBotCheckRefusal(r.error)) return { ok: false, detail: "couldn't tell: the sign-in was stopped by the bot check, not because the account is gone" };
     return verdict(!signedIn, "A could still sign in after deleting its account");
   });
   await check(DEL, "A's old sign-in cannot add rows any more", async () => {
@@ -465,7 +531,7 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
   });
   await check(DEL, "B's account and rows are untouched", async () => {
     const again = createClient(url, key, opts);
-    const signIn = await again.auth.signInWithPassword({ email: accountB.email, password: accountB.password });
+    const signIn = await again.auth.signInWithPassword({ email: accountB.email, password: accountB.password, ...withToken });
     try {
       await again.auth.signOut({ scope: "local" });
     } catch (e) {
@@ -484,6 +550,62 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
       /* the accounts are about to be deleted anyway */
     }
   }
+  return { results, botCheck };
+}
+
+// `--bot-check`: is the bot check really guarding this project? Asked from the outside
+// with the public key and NO account: a password sign-in for a made-up address and a
+// sign-up, each with no token, must both be refused BY THE BOT CHECK (not for some other
+// reason). It writes nothing and signs in to nothing. The sign-in probe goes first and the
+// sign-up probe is only tried once it shows the bot check is on, so that a project with the
+// bot check off and sign-ups on doesn't get a stray account made by this probe.
+// Returns { results } in the same shape as runChecks.
+export async function runBotCheckProbe({ createClient, url, key, log = () => {} }) {
+  const opts = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
+  const probe = createClient(url, key, opts);
+  const GROUP = "The bot check";
+  const results = [];
+  const add = (title, ok, detail) => {
+    const result = { n: results.length + 1, group: GROUP, title, ok: !!ok, detail: ok ? "" : detail };
+    results.push(result);
+    log(result);
+  };
+  const email = `rls-check-probe-${rand()}@example.invalid`;
+  const password = `${rand()}${rand()}Aa1!`;
+
+  let signInGuarded = false;
+  try {
+    const r = await probe.auth.signInWithPassword({ email, password });
+    signInGuarded = isBotCheckRefusal(r.error);
+    add(
+      "a sign-in without a bot-check token is refused by the bot check",
+      signInGuarded,
+      r.error
+        ? `it was refused, but not by the bot check (${why(r.error)}): the bot check is not on for this project`
+        : "a sign-in for a made-up address WENT THROUGH, which should be impossible"
+    );
+  } catch (e) {
+    add("a sign-in without a bot-check token is refused by the bot check", false, `the probe itself failed to run: ${messageOf(e)}`);
+  }
+
+  if (!signInGuarded) {
+    add("a sign-up without a bot-check token is refused by the bot check", false, "not tried: the sign-in probe shows the bot check is off, and a sign-up probe could then create an account");
+    return { results };
+  }
+  try {
+    const r = await probe.auth.signUp({ email, password });
+    if (!r.error && r.data && r.data.user) {
+      add("a sign-up without a bot-check token is refused by the bot check", false, `a sign-up with no token WENT THROUGH: an account was created for ${email}. Delete it, and check the bot check's settings.`);
+    } else {
+      add(
+        "a sign-up without a bot-check token is refused by the bot check",
+        isBotCheckRefusal(r.error),
+        `it was refused, but not by the bot check (${why(r.error)})`
+      );
+    }
+  } catch (e) {
+    add("a sign-up without a bot-check token is refused by the bot check", false, `the probe itself failed to run: ${messageOf(e)}`);
+  }
   return { results };
 }
 
@@ -492,7 +614,8 @@ export async function runChecks({ createClient, url, key, accountA, accountB, lo
 function printHelp() {
   console.log(`MeasureOne security check (Pass 114)
 
-Usage:  node scripts/check-rls.mjs [--yes]
+Usage:  node scripts/check-rls.mjs [--yes] [--dummy-token]
+        node scripts/check-rls.mjs --bot-check
 
 It asks for, in order: the project's URL, the project's PUBLIC key, then the
 email and password of two THROWAWAY accounts (A and B), created in the project's
@@ -506,6 +629,17 @@ Instead of being asked, it reads these environment variables if they are set:
   CHECK_EMAIL_A, CHECK_PASSWORD_A, CHECK_EMAIL_B, CHECK_PASSWORD_B.
 
 --yes   don't ask "is this the right project?" before starting.
+
+The bot check (Pass 135). When a project's bot check is on, every password
+sign-in needs a token, this script's too:
+--dummy-token  send Cloudflare's published dummy token with each sign-in. Only a
+               project whose bot check uses Cloudflare's TEST secret key accepts
+               it (the TEST project). (Or set CHECK_BOT_TOKEN to a token.)
+--bot-check    a short check that needs NO accounts: asks only for the URL and
+               the public key, then checks that a sign-in and a sign-up without
+               a token are refused by the bot check. Use it on PRODUCTION after
+               switching the bot check on. The full run works on production only
+               while the bot check is off (see DEPLOYMENT.md, "Open sign-up").
 
 Exit code: 0 every check passed, 1 a check failed, 2 the setup was wrong
 (nothing was checked). The last group (migration 0003) DELETES account A, so
@@ -572,6 +706,28 @@ async function main() {
   const problem = keyProblem(key);
   if (problem) return fail(`Not using that key: ${problem}. Nothing was checked.`);
 
+  let lastGroup = "";
+  const log = (r) => {
+    if (r.group !== lastGroup) { console.log(`\n${r.group}`); lastGroup = r.group; }
+    console.log(`  ${r.ok ? "PASS" : "FAIL"}  ${String(r.n).padStart(2)}. ${r.title}${r.ok ? "" : `\n          ${r.detail}`}`);
+  };
+
+  // The short check of the bot check alone: no accounts, nothing written.
+  if (args.includes("--bot-check")) {
+    console.log(`\nMeasureOne bot-check probe\nProject: ${ref}  (${url})\nNo account is used and nothing is written.`);
+    const { createClient } = await import("@supabase/supabase-js");
+    let probeRun;
+    try {
+      probeRun = await runBotCheckProbe({ createClient, url, key, log });
+    } catch (e) {
+      return fail(`Something unexpected stopped the probe: ${messageOf(e)}`);
+    }
+    const ok = probeRun.results.every((r) => r.ok);
+    console.log(`\n${ok ? "RESULT: the bot check is ON for this project." : "RESULT: PROBLEMS FOUND. Do NOT switch sign-ups on for this project until both lines pass."}`);
+    if (!ok) process.exitCode = 1;
+    return;
+  }
+
   const accountA = { email: await need(env.CHECK_EMAIL_A, "Throwaway account A, email (must start with rls-check): "), password: await need(env.CHECK_PASSWORD_A, "Throwaway account A, password (hidden): ", { hidden: true }) };
   const accountB = { email: await need(env.CHECK_EMAIL_B, "Throwaway account B, email (must start with rls-check): "), password: await need(env.CHECK_PASSWORD_B, "Throwaway account B, password (hidden): ", { hidden: true }) };
   if (!accountA.email || !accountA.password || !accountB.email || !accountB.password) {
@@ -586,15 +742,12 @@ async function main() {
   }
 
   const { createClient } = await import("@supabase/supabase-js");
-  let lastGroup = "";
-  const log = (r) => {
-    if (r.group !== lastGroup) { console.log(`\n${r.group}`); lastGroup = r.group; }
-    console.log(`  ${r.ok ? "PASS" : "FAIL"}  ${String(r.n).padStart(2)}. ${r.title}${r.ok ? "" : `\n          ${r.detail}`}`);
-  };
+  // Never printed. The dummy token is public (see DUMMY_BOT_TOKEN); a real one is not.
+  const botToken = args.includes("--dummy-token") ? DUMMY_BOT_TOKEN : String(env.CHECK_BOT_TOKEN || "").trim();
 
   let run;
   try {
-    run = await runChecks({ createClient, url, key, accountA, accountB, log });
+    run = await runChecks({ createClient, url, key, accountA, accountB, botToken, log });
   } catch (e) {
     if (e instanceof SetupProblem) return fail(`${e.message}\nNothing was checked.`);
     return fail(`Something unexpected stopped the checks: ${messageOf(e)}`);
@@ -607,10 +760,23 @@ async function main() {
     console.log("The failed checks are listed above. Do NOT go live on this project until they pass.");
     process.exitCode = 1;
   }
+  console.log(botCheckNote(run.botCheck));
   console.log(
     "\nNext: delete the throwaway account(s) still there (dashboard > Authentication > Users > click the row > Delete user)." +
       "\nAccount A is deleted by the check of migration 0003 itself, so usually only B is left. Test rows (named \"RLS check ...\") go with their account; nothing else was written."
   );
+}
+
+// The line printed after a full run: was it the bot check that refused the sign-up probe?
+export function botCheckNote(botCheck) {
+  if (botCheck === "on") return "\nBot check: ON (the sign-up with no token was refused by the bot check).";
+  if (botCheck === "off") {
+    return (
+      "\nBot check: NOT ON for this project. The sign-up with no token was refused only because new sign-ups are switched off." +
+      "\nBefore switching sign-ups on: switch the bot check on, then run  node scripts/check-rls.mjs --bot-check  and see both lines pass."
+    );
+  }
+  return "\nBot check: couldn't tell (see the sign-up check above).";
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

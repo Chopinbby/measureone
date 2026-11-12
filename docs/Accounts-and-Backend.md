@@ -3350,7 +3350,7 @@ the Pass 129 entry of [Decisions.md](Decisions.md)):
 production's other four templates (invitation, sign-up confirmation, change email, confirmation
 code) have not been sent from production (their dashboard text, pasted back by the owner on
 2026-11-06, equals the files byte for byte); mail scanners (Pass 134); a Resend key is never rotated and nothing reminds anyone; the free
-limits against open sign-up (Pass 135); nothing checks a dashboard template against its file.
+limits against open sign-up (Pass 135: read again 2026-11-12, the free plans kept); nothing checks a dashboard template against its file.
 
 ## Change email and delete my account (Pass 130)
 
@@ -3382,6 +3382,8 @@ screen: [User-Flows.md](User-Flows.md), flow 13.
    address (the recommendation was the same answer, as the sign-in and reset forms do). The cost she accepted:
    a signed-in person can learn whether an address has an account. That is fine while accounts are by
    invitation; **Owner: Pass 135 (reconsider before open sign-up).** Sign-in and reset keep the same-answer rule.
+   **Reconsidered and changed in Pass 135 (2026-11-12, her answer):** a taken address now gets the same screen as any other
+   ([Open sign-up (Pass 135)](#open-sign-up-pass-135), "Change email"). The sentences about `EMAIL_TAKEN_MESSAGE` below describe Pass 130 as built.
 
 **Change email.** `ChangeEmailModal.jsx` calls `client.auth.updateUser({ email }, { emailRedirectTo })` with
 the app's own address (the same redirect a reset link uses, already on the allowed list). Supabase's
@@ -3513,7 +3515,7 @@ account whose address starts that way.
 
 **Left open.** (i) ~~The first link's real address and wording~~ seen working on 2026-11-06 (only where Supabase put the
 message in the address is unknown, and doesn't matter). (ii) No server-side password check (above).
-(iii) The plain "taken" answer shows that an address has an account (Pass 135). (iv) The device record's entry for
+(iii) ~~The plain "taken" answer shows that an address has an account~~ changed in Pass 135 (the screen no longer says so; the service still answers a direct request). (iv) The device record's entry for
 a deleted account is not pruned. (v) Other devices' failing uploads between the deletion and their sign-out
 (nothing lost; not seen). (vi) No email tells the person their account was deleted (the security-notification
 emails are off on both projects, Pass 129). (vii) A mail scanner can use up an email-change link as it can an
@@ -3687,7 +3689,7 @@ job's, and some people report pings failing to prevent a pause. It is belt and b
 a pause. Not provable without waiting for a week with no other activity. **A correction:** the docs said a paused project can
 be restored for 90 days; Supabase's current page says **up to a year** (the dashboard shows the real deadline).
 
-**The plan question (answered for invitations, asked again at Pass 135).** Stay on the **Free plan** through
+**The plan question (answered for invitations, asked again at Pass 135; answered again 2026-11-12: still the Free plan).** Stay on the **Free plan** through
 invitations. Consequences, all already accepted in Free-plan consequences above: a project idle for a week pauses
 (everyone's sync and sign-in from a new device stops until the owner presses Restore project; practice carries on
 because the app works from each person's own browser first), there are no Supabase backups (this job is why that is
@@ -3875,7 +3877,7 @@ email and in Settings). It also opened the mail app on her phone. **Not reported
 **Left open.** (i) ~~Whether to add the link to the sign-in windows~~ added in Pass 133 (2026-11-08).
 (ii) A paused project's answer to the health address is unobserved. (iii) A second email address for alerts, or a text message,
 so that one provider failing does not hide an outage (the free plan's contacts are not stated). (iv) An error-reporting service is
-still not built; revisit before Pass 135 (Design G). (v) The note is English only. (vi) The monitors' addresses and key live in the
+still not built; revisit before Pass 135 (Design G) (revisited 2026-11-12: still no). (v) The note is English only. (vi) The monitors' addresses and key live in the
 owner's UptimeRobot account, not in this repository: a rebuilt project (a new Supabase address) needs the second monitor edited.
 (vii) **No link when the app itself does not load** (a blank page, as a browser that cannot parse the code would show): the link is
 drawn by the app. A plain link in `index.html`, outside the app, would cover it; not built, found in the pass's own review.
@@ -3911,7 +3913,8 @@ look is the owner's, before the app is sold.**
   default; she did not object).
 - **Choose a password** shows "By choosing a password you agree to the Terms and the Privacy Policy, and confirm you're 13 or
   older." in the invitation and the reset-link windows, **never in Change password** (`ChoosePasswordModal`, `!changing`). Pass 135's
-  sign-up checkboxes must not ask a second time.
+  sign-up checkboxes must not ask a second time. (**Pass 135, 2026-11-12:** a person who signs up never sees this window, because the
+  confirmation link signs them in with no password to choose; they would see the sentence only in a later password reset.)
 - **Delete wording.** `DELETE_BACKUP_NOTE` (`lib/backend.js`) now reads "The service also keeps a separate daily backup of its data.
   Backup copies that include your email address and pieces are deleted within about 30 days." It is shown before an account is
   deleted and again after (`describeDeleteAccount`). **It is true: the old backups repository was deleted on 2026-11-10** (from the 2026-11-09 merge until then it ran ahead of the fact).
@@ -3931,7 +3934,8 @@ LLC is formed: change "I" to the company's name in both pages, add a line to eac
 promise that for changes that matter).
 
 **Where each sentence comes from** (the table the pass asked for; keep it true: when a fact changes, change the page, its date and its
-history, and this row). "Vendor page" means read on 2026-11-08 unless a date says otherwise.
+history, and this row). "Vendor page" means read on 2026-11-08 unless a date says otherwise. **Pass 135 (2026-11-12) changed both pages:**
+their date is now November 12, 2026, each has a second line in its change history, and rows P47 to P52 and T2 below say what changed.
 
 | # | The page says | Source |
 |---|---|---|
@@ -3981,8 +3985,14 @@ history, and this row). "Vendor page" means read on 2026-11-08 unless a date say
 | P44 | How I use your information: sign-in and the online copy, the account's emails, backups for restoring, running and fixing the service (including the uptime check), answering a message. "I do not use it for anything else." | The purposes follow P4, P22, P19 (Pass 131: the Free plan keeps no backups of its own, so this copy is what a restore uses), P24 to P26 and P14. **"I do not use it for anything else" is a commitment of the owner**, as P35: she confirms it when she reads the page |
 | P45 | Do Not Track: MeasureOne does not track across websites or build profiles, so the signal changes nothing; the outside services that receive a request are Google (fonts), Vercel (hosting) and, when signed in, Supabase | P5; P24 (Vercel), P25 (Google), P15 and P17 (Supabase). California's online privacy law expects a policy to say how it responds to Do Not Track and whether other parties collect information on the site (California AG guidance; pages from about 2013 to 2016, not re-checked against the current statute) |
 | P46 | Security: the site and the account service are reached over HTTPS; each account reads only its own data; backups are in a private repository with two-factor sign-in; the app never stores your password; no promise of perfect security | `https://measureone.app/` answers `strict-transport-security: max-age=63072000` and `http://` redirects (308) to `https://` (curl, read 2026-11-08); the account service's address is `https://...supabase.co` and answered over HTTPS (HTTP 401 without its key, read 2026-11-08); P29, P19, P11. The last sentence is a plain disclaimer |
+| P47 | *(Pass 135)* A bot check, Cloudflare Turnstile, runs when the sign-in window or the delete-account window is open; Cloudflare, Inc. (United States) receives signals such as the IP address, technical details of the browser and connection, and the site's address; it says it uses them only to detect and block bots, not to identify, profile or target anyone; it does not say how long it keeps them; Cloudflare says the check does not read what is typed; it runs at no other time | Cloudflare's Turnstile Privacy Addendum (read 2026-11-12, dated June 18, 2025: "client IP address, TLS Fingerprint, User-Agent Header and Sitekey and associated origin", "solely to detect and block bots", no retention stated) and Privacy Policy (the company and its address); Cloudflare's docs ("does not access, store, or transmit user communications, form entries, or other page inputs"); `BotCheck.jsx` and `loadTurnstile` (`lib/backend.js`: fetched only when one of those windows opens). **True only once the site key is set in Vercel; before that the page names a service the app does not yet contact** |
+| P48 | *(Pass 135)* The app asks Supabase whether new accounts can be created, when the sign-in window opens and on the first screen before a piece exists, with or without an account; that request shows Supabase the IP address and the browser's name text | `getSignupSettings` (`lib/backend.js`), asked only by `SignInModal.jsx` and `WelcomeCreateAccountLink`; made only by a build that has the site key |
+| P49 | *(Pass 135)* The emails an account needs now include a confirmation when you create an account, sent through Resend like the others (P22, P44) | `supabase/templates/confirmation.html` (Pass 129); `signUpWithEmail` |
+| P50 | *(Pass 135)* MeasureOne sets no cookies of its own; the bot check runs in a frame from Cloudflare, which may set cookies it describes as strictly necessary for telling people from bots (P30 changed) | Cloudflare's Cookie Policy (read 2026-11-12: its CAPTCHA products place strictly necessary cookies); **no page read says whether this widget sets one by default, hence "may"** |
+| P51 | *(Pass 135)* The form for creating an account asks you to confirm you are 13 or older (P42 extended) | `checkSignUpForm`, `SignInModal.jsx`. The answer is not recorded |
+| P52 | *(Pass 135)* The outside services that receive a request: Google, Vercel, Supabase when signed in and for the one question, Cloudflare when a sign-in window is open (P45 changed); "keeping automated programs from creating accounts or guessing passwords" added to how the information is used (P44) | P47, P48 |
 | T1 | A planning tool; plans are suggestions, not promises or a teacher's advice | `docs/Vision.md`; the product's own principles |
-| T2 | Accounts optional, by invitation for now; 13 or older to have an account (younger students can use the app without one, with an adult); one per person | Decided 3 and 4; `SignInModal.jsx` ("Accounts are by invitation for now."). **Edit when invitations end (Pass 135)** |
+| T2 | Accounts optional, by invitation for now; 13 or older to have an account (younger students can use the app without one, with an adult); one per person | Decided 3 and 4; `SignInModal.jsx` ("Accounts are by invitation for now."). ~~Edit when invitations end (Pass 135)~~ **Edited in Pass 135 (2026-11-12):** the line now reads "You get an account by invitation, or by creating one yourself when sign-up is open. Creating one asks you to confirm your email address.", true before and after sign-ups are switched on |
 | T3 | Keep your password private; you are responsible for your account | Standard term, **owner to approve** |
 | T4 | Pieces and notes are yours; I store them only to run MeasureOne | Standard term, **owner to approve**; matches P3 and P4 |
 | T5 | Provided as it is; no promise it never fails or loses data; limits on what I am responsible for | Standard term, **owner to approve, and the lawyer's first read** |
@@ -4167,6 +4177,143 @@ until app code exists. (vii) An account with no synced piece has no importable f
 this one's: a lawyer has not read the pages, and whether "MeasureOne" needs a Colorado trade name filing is her adviser's question
 ([Decisions.md](Decisions.md#open-questions), "Privacy policy and terms (Pass 133): what is still open").
 
+## Open sign-up (Pass 135)
+
+**Built 2026-11-12. Nothing is switched on: sign-ups are still off on both projects, no bot check is configured anywhere, and the pass is
+not merged.** Phase 3's second go-live, and the last of its passes. It started on the owner's word that Pass 134 is done (her message,
+2026-11-12; this repository records no dates for 134's go-live, and its step log above is hers to fill in). The order for switching it on
+is in [DEPLOYMENT.md](../DEPLOYMENT.md#open-sign-up-pass-135); screen by screen it is [User-Flows.md](User-Flows.md#21-creating-an-account-optional-pass-135), flow 21.
+
+**What a person sees.** While the account service accepts sign-ups, the welcome screen shows **Create an account** under **Sign in**, and the
+sign-in window ends with "New here? Create an account". The form asks for an email address, a password twice, and two boxes that must both
+be ticked: **I'm 13 or older** and **I agree to the Terms and the Privacy Policy** (both words are links that open in a new tab). It always
+answers **"Check your email to confirm your account."** The email's button brings the person back signed in, with one quiet line: "Welcome
+to MeasureOne. Your account is confirmed and you're signed in." While sign-ups are off none of this shows, and the sign-in window says
+"Accounts are by invitation for now." as before.
+
+**The owner's answers (2026-11-12, "Go ahead" to the eight recommendations put to her before building).**
+1. **The bot check is on every window that makes a guarded call,** not on the sign-up form alone (the finding below). Two files beyond the
+   pass's list were allowed for it: a new `BotCheck.jsx` and `DeleteAccountModal.jsx`.
+2. **The security script takes Cloudflare's dummy code on the test project, and on production runs before the bot check is switched on;**
+   afterwards a short `--bot-check` probe asks the same question with no account.
+3. **Change email no longer says "That address already has a MeasureOne account."** (her 2026-11-06 choice, made for the invitation stage and
+   marked to be reconsidered here). A taken address now gets the same screen as any other. `ChangeEmailModal.jsx` was allowed for it.
+4. **"Create an account" also hides when Supabase is not requiring the confirmation email.**
+5. **Cloudflare's test keys on previews and the test project; a real widget on production only.**
+6. **Stay on the Free plan of both Supabase and Resend,** with Resend's 100 emails a day as the ceiling, and **no error-reporting service**
+   (it would see error messages that can hold piece names). The proposed wording was accepted as written.
+7. **Pass 124 stays unbuilt:** the automatic-update switch is still off by default for people who sign up.
+8. **The promise to email account holders about changes that matter stays kept by hand,** with no head-count set at which that changes.
+   People who sign up themselves are not on her private list of invited people; their addresses are in Supabase's Users page.
+She also allowed the one line of `public/terms.html` that said accounts are by invitation.
+
+**The finding that shaped the pass: Supabase's bot check is for the whole project.** Read from Supabase's own sign-in server (its route table
+and bot-check step, `supabase/auth` on GitHub, 2026-11-11) and its guide: once "Enable CAPTCHA protection" is on, the service asks for the
+bot check's code on **sign up, a password sign-in, "forgot password", resend, and email codes**, and answers a call without one with a 400,
+"captcha protection: request disallowed (no captcha_token found)". Refreshing a sign-in is exempt, so signed-in devices carry on. So the
+widget is in the sign-in window's three forms and in Delete my account (whose password check is a sign-in), and the security script, which
+signs in as two throwaway accounts, needed a way to carry a code. **Not seen against a real project:** the refusal itself, and the exact
+spelling of its error code (`captcha_failed` is from the source; the app and the script also match the word "captcha" in the message).
+
+**How it works.**
+- **Is sign-up on?** `getSignupSettings` (`lib/backend.js`) reads Supabase's public settings once per page load: `GET <project>/auth/v1/settings`
+  with the public key. (The pass card calls this "the same request 132's check uses"; that monitor asks `/auth/v1/health`, which says nothing
+  about sign-ups. This is the address beside it.) Production's answer on 2026-11-12: `disable_signup: true`, `mailer_autoconfirm: false`,
+  `external.email: true`. `canOfferSignUp` says yes only when sign-ups are open, the confirmation email is required and this build has the
+  bot check's site key. An answer that can't be read, or a failed request, means no. Only two places ask: the welcome screen (through
+  `WelcomeCreateAccountLink`) and the sign-in window. **A build with no site key never asks.**
+- **The bot check** is Cloudflare Turnstile. Its public site key is `VITE_TURNSTILE_SITE_KEY`; its secret is typed only into Supabase's
+  dashboard. `loadTurnstile` fetches Cloudflare's script only when a window that needs it opens, never at startup, so the app's first
+  download and a visitor who never opens sign-in are unchanged (Design K's rule, kept). `BotCheck.jsx` draws the widget in "interaction only"
+  mode (nothing to see unless Cloudflare wants a box ticked), picks the narrow shape when the window has less than 300 pixels of room (a
+  363-wide phone screen has 269), tells the window when a code is ready, and takes a new code after every attempt, because a code works once.
+  The submit button waits while the widget is working, with a line of explanation after four seconds. If the script can't load (offline, a
+  content blocker) the window says so and still lets the person try; Supabase then answers whether a code was needed.
+- **The form.** `checkSignUpForm` requires a plausible address, at least 6 characters, both passwords the same, and both boxes. The button
+  works once the three fields are filled, and pressing it with a box missing says which one. The boxes are cleared when the form is left.
+  **Neither box is recorded anywhere, and the service does not enforce them** (below, Left open).
+- **One answer for every address** (`describeSignUpResult`). Supabase itself answers a sign-up for an address that already has a confirmed
+  account with a look-alike success and sends nothing; an address waiting to be confirmed gets its confirmation sent again (so "sign up again
+  with the same address" is the way to get another link; its password is not changed by the second try). The app adds an **allow-list** of
+  problems it will say plainly, each known not to depend on whether the address has an account: no connection, a refused bot check, sign-ups
+  closed, an address or password the service won't take, and too many requests from one network. **Everything else gets the one answer**,
+  including "too many emails": a new address is refused under that limit and an address with an account is not, so saying it plainly would
+  let someone use up the hour's emails and then read who has an account from the difference. The cost, the same one Forgot password accepts
+  (Sign-in behavior): a real person caught by a limit is told to check their email when none was sent. The service's error code (never the
+  address) is left in the browser's console for that case.
+- **The link.** `parseAuthLink` already returned any link's type; the app's handler now acts on `signup` (`SIGNUP_LINK`), showing the welcome
+  line through the same banner the email-change link uses. No Choose a password window opens (the person chose it in the form), so the
+  sentence that window shows invited people is not asked a second time. An expired or used link is the existing path: the sign-in window
+  with the existing note, and, while sign-ups are on, one more line: "Confirming a new account? Choose Create an account and enter the same
+  address again to get a new link."
+- **Sign-in and reset** send the code too (`captchaOptions`, `passwordResetOptions`). A refused bot check is told apart from a wrong
+  password (`isCaptchaFailure`, tested before any "400 means wrong password" rule) and reads "The bot check didn't pass. Reload the page and
+  try again."; a reset refused that way is not answered "a link is on its way".
+- **Delete my account** passes the code with its password check; a refused bot check is its own outcome ("bot-check-failed"), never "wrong
+  password", and nothing is deleted.
+- **Change email.** `changeEmailOutcome` treats Supabase's "already registered" answer like a success, and the screen now begins "If the new
+  address can be used, we sent a confirmation link to it and another to your current one". **This hides the answer on the screen only:** the
+  service still answers a direct request plainly to anyone signed in, which the app cannot change.
+
+**A bug from Pass 109, found and fixed here.** The sign-in window that an expired link opens never started listening for the sign-in it
+produces, so a person who signed in there was signed in at the service while the app went on showing "Sign in" until a reload. Seen with
+the stand-in before the fix, gone after it. It matters now because an expired link becomes common: a confirmation link opened twice, or
+used up by a mail scanner, is "expired", and that person's next move is to sign in. `App.jsx` now listens whenever the window is open.
+
+**The security script** (`scripts/check-rls.mjs`, still 43 checks). Check 36 was "new sign-ups are switched off"; it is now **"a sign-up
+without a valid bot-check token is refused"**, and passes when the probe is refused by the bot check or because sign-ups are off. Which of
+the two it was is printed at the end ("Bot check: ON", or "NOT ON ... refused only because new sign-ups are switched off"), because the second
+means nothing would stop automated sign-ups the moment they are switched on. Anonymous sign-ins must still be refused (check 37; with the bot
+check on its probe carries the code, so the answer is the service's own "disabled"). `--dummy-token` sends Cloudflare's published dummy code
+with each sign-in (accepted only by a project using Cloudflare's test secret). **`--bot-check`** is a short check that uses no account and
+writes nothing: a sign-in for a made-up address and a sign-up, each with no code, must both be refused by the bot check; the sign-up is only
+tried once the sign-in shows the bot check is on, so a project with the bot check off and sign-ups on does not get a stray account made by it.
+A bot-check refusal can no longer pass "A can no longer sign in" by accident. With the bot check on and no code the script stops before
+anything is written and says what to do.
+
+**Facts for the privacy policy (now in it; the table rows are P47 to P52 below).** Cloudflare, Inc. (San Francisco, United States) provides
+Turnstile; its Turnstile Privacy Addendum (read 2026-11-12, dated June 18, 2025) lists what it processes as "client IP address, TLS
+Fingerprint, User-Agent Header and Sitekey and associated origin", "solely to detect and block bots", not "to identify, profile or target any
+individuals"; it gives no time limit. **Cookies were not settled:** Cloudflare's cookie policy says its bot-check products place strictly
+necessary cookies, and no page read says whether this widget does by default, so the policy says "may". The free plan allows 20 widgets, 10
+hostnames a widget and unlimited checks. Turnstile's supported-browsers page could not be read, so **the oldest Safari it supports is not
+known** (the app targets Safari 14).
+
+**Checked.**
+- `npm test`: 1,795 tests, 0 failing (45 more than before this pass, all in `test/backend.test.mjs` and `test/check-rls.test.mjs`). `npm run build` succeeds.
+- **Re-broken on purpose, 31 changes, all 31 caught**, including the one the pass names (the stand-in stops asking for a code on sign-up: check
+  36 fails, saying the sign-up went through) and each rule above (a refused bot check read as a wrong password, either box not required, the
+  form offered without confirmation emails or without the bot check, "too many emails" said plainly, a taken address said plainly, and so on).
+- **Seen in the browser pane against a local stand-in for the account service** that follows the rules above, with Cloudflare's real script
+  and its test keys: with no site key, the windows and requests are exactly the old ones even with sign-ups on at the service; with the key,
+  "Create an account" on the welcome screen and in the window; no box, only one box, then both; the answer; the same answer for the same
+  address again (a second confirmation sent), for an address that already has an account (none sent) and for a new one; the link arriving
+  signed in with the welcome line and no window; the used link's note and extra line; sign-in, forgot password and Delete my account each
+  sending a code; a wrong password in Delete my account still read as a wrong password; a build with no key against a service with the bot
+  check on getting the bot-check message, not "wrong password"; sign-ups off, then a reload, and the form gone from both places;
+  confirmation emails off and the form gone; Change email's same screen for a taken and a free address; Cloudflare's visible box (the key
+  that forces it) at phone and desktop widths, ticked, and the form sent.
+- The script's `--bot-check` run with the real Supabase library against the stand-in in all four states: passes with the bot check on,
+  fails with it off, and made no account in any.
+
+**Not checked, and why.** Nothing was run against a real project: the script on the test project, a real sign-up, a real confirmation email
+and its link, and Supabase's real refusals all need the owner's dashboards and passwords. No preview address exists yet (nothing is pushed).
+Safari 14, and any real phone, were not tried. The real widget (a real site key and secret) was never used, only Cloudflare's test keys.
+
+**Left open (Pass 135).** (i) The two boxes are not recorded and the service does not require them: someone calling the service directly can
+make an account without ticking anything (the Terms' own first paragraph covers use of the app). Recording the moment of agreement on the
+account is a small change, not built, the owner's call. (ii) Nothing checks from outside that "Confirm email" is on; the app hides the form
+if it is off, but the service would then accept a sign-up for anyone's address. A check for the script was considered and left out to keep it
+at 43. (iii) Cloudflare is a new outside service, so the policy's promise (P43) means the owner emails the people she invited, by hand.
+(iv) A person who signs up with pieces already in the browser gets no nudge to back them up (the Account panel's button is the way, as for
+an invited person). (v) A mail scanner can still spend a confirmation link (Pass 134's item); the extra line in the sign-in window is the
+way out, and the account the scanner confirmed is real, so signing in also works. (vi) The reset window still shows the "By choosing a
+password you agree..." sentence to a person who agreed by the boxes (`ChoosePasswordModal.jsx`, outside this pass's files). (vii) The app
+depends on Cloudflare for every sign-in once the bot check is on (DEPLOYMENT.md says what to switch if it is down). (viii) `App.jsx`'s wiring
+and the three components have no automated test, as ever; the logic they call does. (ix) The dashboard pages for the bot check and the rate
+limits were not seen, so their names here are Supabase's guide's. (x) Self-hosting the fonts, the missing "Report a problem" link when the
+app fails to load, and Pass 124 are untouched.
+
 ## Phase 3: other people's accounts (designed, not built)
 
 **Designed in Pass 127 (2026-10-31). Passes 128 to 133 are built so far** (128, 2026-11-01: the owner's own
@@ -4183,7 +4330,7 @@ steps were done with her the same day, and the old backups repository was delete
 132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
 133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **merged 2026-11-09 as PR 96 (`94e93c4`), live as `index-CJNfVn4Z.js`; the old backups repository was deleted 2026-11-10 (she merged before doing it); still the owner's: pasting the footer into the five email templates in both projects**;
 **134, 2026-11-11: inviting people, see [Inviting people (Pass 134)](#inviting-people-pass-134), prepared (the checklist, the counts and the routine are written and the outside readings made; nothing sent, no one invited, the owner's "go" not yet given)**;
-nothing else in this section is built. **The next steps are 134's own go-live and 135, each only on the owner's word; Pass 124 stays unbuilt (decided 2026-11-11: the automatic-update switch is off for the first invitees).** Phase 3 is what has to
+**135, 2026-11-12: open sign-up, see [Open sign-up (Pass 135)](#open-sign-up-pass-135), built and tried against a stand-in (the form, the bot check on every sign-in window, the confirmation link, the script's check 36); not merged, nothing switched on, and not seen on a real project.** **Every step of switching it on is the owner's; Pass 124 stays unbuilt (decided 2026-11-11 and again 2026-11-12: the automatic-update switch is off by default).** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -4298,7 +4445,8 @@ the docs for `Owner: Pass N` (below).
   see [Inviting people (Pass 134)](#inviting-people-pass-134); nothing sent.**
 - **135** Second go-live: open sign-up. Only on the owner's word, after a period of invitations. On
   the live site: a "Create an account" option, only once sign-ups are switched on, as the very last
-  step. The way back is instant: switch sign-ups off in the dashboard. Needs 134.
+  step. The way back is instant: switch sign-ups off in the dashboard. Needs 134. **Built 2026-11-12 (the owner: "134 is done"):
+  see [Open sign-up (Pass 135)](#open-sign-up-pass-135); nothing switched on.**
 
 **Still to confirm** (the cards mark each as a recommendation or as the owner's; the pass asks):
 the domain name and where to buy it, and a "moved" note instead of a forced redirect (128); which
@@ -4323,6 +4471,7 @@ section, or taken from the later cards' own rationales; the owner can strike any
   (today only an ON is kept: `autoUpdateOn`, `withAutoUpdate`, `changeAccount`), so it is more than
   one line. See [Decisions.md](Decisions.md#accounts-and-backend), "Pass 124 re-scoped". Owner: Pass 124.
   **Decided 2026-11-11 (Pass 134, the owner's answer): not built; the switch stays off by default for the first invitees; revisit before Pass 135.**
+  **Revisited 2026-11-12 (Pass 135): still not built; people who sign up start with the switch off.**
 - *(added by Pass 127)* **Changing the address.** The production project's Site URL and redirect
   list change (keep the old entry while any device uses it), and the domain itself is added in
   Vercel's Domains page (Setup (production project): "Changing it later" and item 4 of the review).
@@ -4356,7 +4505,11 @@ section, or taken from the later cards' own rationales; the owner can strike any
 - *(added by Pass 129)* **Open sign-up and the free email limits.** Supabase allows 30 emails an hour
   once custom SMTP is saved and Resend's free plan 100 a day (3,000 a month); each sign-up sends a
   confirmation. Plenty for invitations, a ceiling for open sign-up. Owner: Pass 135 (read both limits
-  again, and the plan, before opening it).
+  again, and the plan, before opening it). **Done in Pass 135 (2026-11-12) as far as the public pages go:** Supabase's guide gives 30
+  requests per 5 minutes per network for sign-ups and sign-ins and one confirmation per address per 60 seconds, and says the hourly
+  email number is set by the project once custom SMTP is on; Resend's pricing page gives 100 a day and 3,000 a month free, then $20 a
+  month for 50,000. **The owner's decision: stay on the free plans.** Still hers: reading production's Authentication, Rate Limits page
+  (the hourly email number was 30 as last read) and writing it in the go-live notes.
 - **"Delete my account" in the app.** The app's public key can't delete a sign-in account, so the
   planned way is a database function in a new migration that deletes only the caller's own account
   (the rows go with it by cascade, checked in Pass 108); the alternative, a Supabase Edge Function,
@@ -4399,7 +4552,8 @@ section, or taken from the later cards' own rationales; the owner can strike any
   (`lib/backend.js`) returns the `type` of any link that carries one; what is limited is
   `App.jsx`'s handler, which acts on `invite` and `recovery` only, so a change-email or sign-up
   confirmation link arrives as an ordinary sign-in with no message. Pass 130 teaches the handler the
-  email-change link; Pass 135 does the same for the sign-up confirmation. Check what Supabase really
+  email-change link; Pass 135 does the same for the sign-up confirmation (**done 2026-11-12: the handler acts on `signup`; what Supabase
+  really sends was not seen, the type is the one its own server and library use**). Check what Supabase really
   sends on the test project before writing the wording. Owner: Pass 130. **Built in Pass 130
   (2026-11-06) from what Supabase is known to send, and then SEEN WORKING on the test project's preview the same
   day (the owner's trial 1):** the handler acts on `email_change` and on the half-way message, and both banners
@@ -4454,13 +4608,16 @@ section, or taken from the later cards' own rationales; the owner can strike any
 - *(added by Pass 127)* **Invitation only ends.** The sign-in window says "Accounts are by invitation for now."
   (`SignInModal.jsx`), the app has no sign-up form, production refuses sign-ups, and the script's check
   "new sign-ups are switched off" asserts that refusal, so it must change with open sign-up (Setup
-  (production project)). Owner: Pass 135.
+  (production project)). Owner: Pass 135. **Done in Pass 135 (2026-11-12):** the line shows only while the service refuses sign-ups,
+  the form exists, and check 36 is now "a sign-up without a valid bot-check token is refused"
+  ([Open sign-up (Pass 135)](#open-sign-up-pass-135)). Production still refuses sign-ups until the owner switches them on.
 
 ### Not in Phase 3
 
 Payments (parked in the backlog's "Eventually" list, and a non-goal in the SOW), sign in with Google,
 teacher and student accounts (Decided 4 above). An error-reporting service (it would see error
-messages, which can include piece names): recommended, not built; revisit before 135. A public
+messages, which can include piece names): recommended, not built; revisit before 135 (**revisited 2026-11-12, the owner's answer: still
+no**). A public
 status page. A cookie banner: none is needed while there is no tracking, and the policy says why. A
 lawyer's review of the policy and terms: the owner's, before the app is sold. For when selling comes
 up, not now: Vercel's free Hobby plan is for non-commercial use (the card says to check the current

@@ -80,7 +80,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   </div>
   <article>
     <h1>Privacy Policy</h1>
-    <p class="date">Last updated: November 8, 2026</p>
+    <p class="date">Last updated: November 12, 2026</p>
 
     <p>MeasureOne is a practice planner for musicians learning new pieces. It is run by Naomi Fleishour, an individual in Colorado, United States. In this policy, &ldquo;I&rdquo; means her. You can reach me at <a href="mailto:hello@measureone.app">hello@measureone.app</a>.</p>
     <p>This page says what MeasureOne collects, where it is kept, who can see it, and what you can do about it.</p>
@@ -117,9 +117,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
     <p>I use what is collected to:</p>
     <ul>
       <li>let you sign in, and keep your online copy so it can follow you between your devices;</li>
-      <li>send the emails an account needs: an invitation, a password reset, an email change;</li>
+      <li>send the emails an account needs: an invitation, a confirmation when you create an account, a password reset, an email change;</li>
       <li>keep backups, so a lost or damaged copy can be restored;</li>
-      <li>keep the service running and fix problems, including checking that the site and the sign-in service answer;</li>
+      <li>keep the service running and fix problems, including checking that the site and the sign-in service answer, and keeping automated programs from creating accounts or guessing passwords;</li>
       <li>answer a message you send me.</li>
     </ul>
     <p>I do not use it for anything else.</p>
@@ -127,12 +127,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
     <h2>Where it is kept, and for how long</h2>
     <ul>
       <li><strong>Your browser.</strong> Your pieces, practice, technique library and settings, and a few small app settings such as which piece is open. They stay until you delete a piece, clear your browser's site data, or remove them another way.</li>
-      <li><strong>The account service: Supabase.</strong> Supabase (Supabase Inc.) holds the account's database and does the signing in. It holds your email address and the online copy described above. The project is in the East US (North Virginia) region, on Amazon's servers (<code>us-east-1</code>). Supabase also keeps short-lived technical logs of requests to the service, which identify requests by account ID. How long it keeps them depends on its plan. The copy and the account stay until you delete your account (see &ldquo;Deleting&rdquo; below).</li>
+      <li><strong>The account service: Supabase.</strong> Supabase (Supabase Inc.) holds the account's database and does the signing in. It holds your email address and the online copy described above. The project is in the East US (North Virginia) region, on Amazon's servers (<code>us-east-1</code>). Supabase also keeps short-lived technical logs of requests to the service, which identify requests by account ID. How long it keeps them depends on its plan. The copy and the account stay until you delete your account (see &ldquo;Deleting&rdquo; below). The app also asks Supabase one question that is not about you: whether new accounts can be created right now. It asks when you open the sign-in window, and on the first screen before you have added a piece, whether or not you have an account. Like any web request, that one shows Supabase your IP address and your browser's name text.</li>
       <li><strong>A daily backup copy: GitHub.</strong> Each day a copy of the account database is saved to a private repository at GitHub (GitHub Inc., United States) that only I can open, protected by two-factor sign-in. The copy holds every account's email address, piece names, notes and practice history. GitHub deletes each day's copy after about 30 days. The repository's own files hold only counts, with no personal data.</li>
-      <li><strong>Sign-in emails: Resend.</strong> Supabase sends the invitation, password reset and email change messages through Resend (United States), which keeps the content and details of each email for 30 days. The messages travel through Amazon's email system (Amazon SES).</li>
+      <li><strong>Sign-in emails: Resend.</strong> Supabase sends the invitation, account confirmation, password reset and email change messages through Resend (United States), which keeps the content and details of each email for 30 days. The messages travel through Amazon's email system (Amazon SES).</li>
       <li><strong>Mail to hello@measureone.app: ImprovMX.</strong> ImprovMX forwards mail sent to that address to my inbox. It deletes the mail after forwarding, and holds incoming mail briefly in Paris, on Amazon's servers.</li>
       <li><strong>The website: Vercel.</strong> Vercel hosts the app and these pages. It keeps technical logs of requests to the site, such as the page asked for, the time, your browser's name text and, in some of its logs, your IP address. Vercel's documentation gives log retention of one hour to 30 days, depending on the plan.</li>
       <li><strong>Fonts: Google.</strong> The app (not these two pages) loads its fonts from Google, so when the app opens, your browser asks Google for them, whether or not you have an account. Google then receives your IP address, the address requested, your browser's name text and the address of the page. Google says it does not set cookies for this and does not use the data to build profiles or to show ads.</li>
+      <li><strong>A bot check: Cloudflare Turnstile.</strong> When you open the sign-in window (to sign in, create an account or reset a password), or the window that deletes your account, a small check from Cloudflare (Cloudflare, Inc., United States) runs to tell people from automated programs. Most people see nothing; sometimes it shows a box to tick. Your browser contacts Cloudflare for it, and Cloudflare receives signals such as your IP address, technical details of your browser and connection, and the address of the site. Cloudflare says it uses these only to detect and block bots, not to identify, profile or target anyone. It does not say how long it keeps them. The check gives the app a one-time code, which the app passes to Supabase with your request. Cloudflare says the check does not read what you type into the page. It does not run at any other time.</li>
       <li><strong>An uptime check: UptimeRobot.</strong> UptimeRobot (UptimeRobot s. r. o., Slovakia) checks every five minutes that the app's front page and the sign-in service answer. It requests only those two public addresses and receives no one's personal data. It holds my email address, to alert me, and keeps its monitoring logs for about 3 months.</li>
     </ul>
     <p>Some of these services are in the United States, one holds mail in France and one is based in Slovakia, so information may be handled outside the country where you live.</p>
@@ -149,8 +150,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
     <h2>No selling, no ads, no tracking</h2>
     <p>I do not sell your data and I do not share it for advertising. The only others who handle it are the services listed above, to run MeasureOne. There are no ads, no analytics and no tracking tools in the app.</p>
-    <p>MeasureOne does not set cookies. It uses your browser's storage to keep your pieces and your sign-in on your device. Because nothing here tracks you, there is no cookie banner.</p>
-    <p>Some browsers send a &ldquo;Do Not Track&rdquo; signal. MeasureOne does not track you across websites or build profiles of you, so that signal changes nothing here. The outside services that receive a request when you use the app are named above: Google for fonts, Vercel for hosting and, when you are signed in, Supabase.</p>
+    <p>MeasureOne does not set cookies of its own. It uses your browser's storage to keep your pieces and your sign-in on your device. The bot check runs in a small frame from Cloudflare, which may set cookies of its own that Cloudflare describes as strictly necessary for telling people from bots. Because nothing here tracks you, there is no cookie banner.</p>
+    <p>Some browsers send a &ldquo;Do Not Track&rdquo; signal. MeasureOne does not track you across websites or build profiles of you, so that signal changes nothing here. The outside services that receive a request when you use the app are named above: Google for fonts, Vercel for hosting, Supabase when you are signed in (and for the one question described above), and Cloudflare when a sign-in window is open.</p>
 
     <h2>What you can do</h2>
     <ul>
@@ -168,7 +169,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
     <p>When you are signed in and delete a piece, it is marked as deleted in your account copy rather than erased. It appears in &ldquo;Recently deleted&rdquo; for 30 days, where you can bring it back. After that it stays in your account copy, and in the daily backup copies, until you delete your account. If you want a piece's history kept without it being active, archive or pause it instead.</p>
 
     <h2>Age</h2>
-    <p>MeasureOne is for people 13 and older. Students younger than 13 can use MeasureOne without an account, with an adult: without an account, nothing you enter is sent to me. Please do not make an account if you are younger than 13.</p>
+    <p>MeasureOne is for people 13 and older. Students younger than 13 can use MeasureOne without an account, with an adult: without an account, nothing you enter is sent to me. Please do not make an account if you are younger than 13. The form for creating an account asks you to confirm that you are 13 or older.</p>
 
     <h2>Changes to this policy</h2>
     <p>When this policy changes, the date at the top changes and the history below says what changed. If a change matters to you, such as a new service holding your data, I will email the address on your account.</p>
@@ -178,6 +179,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
     <h2>Change history</h2>
     <ul class="history">
+      <li>November 12, 2026: an account can now also be created with a sign-up form, when sign-up is open, and a confirmation email is sent for it. Added the bot check (Cloudflare Turnstile), which runs when a sign-in window or the delete-account window is open. Added that the app asks the account service whether new accounts can be created. Changed the cookie sentence to say that Cloudflare's bot check may set its own.</li>
       <li>November 8, 2026: first version.</li>
     </ul>
 

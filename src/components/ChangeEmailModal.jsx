@@ -3,7 +3,7 @@ import { X, Mail } from "lucide-react";
 import {
   loadBackend,
   checkNewEmail,
-  emailChangeProblem,
+  changeEmailOutcome,
   describeEmailChangeRequested,
   NO_CONNECTION_MESSAGE,
 } from "../lib/backend";
@@ -16,6 +16,11 @@ import {
 // then. The wording and the checks are in lib/backend.js (tested); this window only
 // shows them. No password is asked for: the link that must also be opened at the
 // current address is what stops a stranger at an unlocked device finishing a change.
+//
+// Pass 135: an address that already has an account gets the same "links sent" screen as any
+// other (changeEmailOutcome), worded "If the new address can be used, ...", so this window
+// can't be used to find out who has an account. The service itself still answers a direct
+// request plainly; see the note on isEmailTakenError in lib/backend.js.
 export function ChangeEmailModal({ currentEmail, onClose }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,8 +49,9 @@ export function ChangeEmailModal({ currentEmail, onClose }) {
       { email: check.email },
       { emailRedirectTo: `${window.location.origin}/` }
     );
-    if (updateError) {
-      setError(emailChangeProblem(updateError));
+    const outcome = changeEmailOutcome(updateError);
+    if (!outcome.requested) {
+      setError(outcome.message);
       setBusy(false);
       return;
     }

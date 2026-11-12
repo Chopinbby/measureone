@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, ChevronLeft, Trash2 } from "lucide-react";
-import { DELETE_BACKUP_NOTE } from "../lib/backend";
+import { DELETE_BACKUP_NOTE, isBotCheckConfigured, botCheckBlocksSubmit } from "../lib/backend";
+import { BotCheck } from "./BotCheck";
 
 // Delete the signed-in account (Pass 130, docs/Accounts-and-Backend.md, Phase 3 Design D).
 // The password is asked for again first and checked by signing in with it just before
@@ -14,22 +15,30 @@ import { DELETE_BACKUP_NOTE } from "../lib/backend";
 // device's pieces and technique library are never touched (the owner's choice,
 // 2026-11-06): it only signs out.
 //
-// `onDelete(password)` is App.jsx's handler and resolves to deleteMyAccount's
-// describeDeleteAccount result, { text, problem, deleted }.
+// `onDelete(password, captchaToken)` is App.jsx's handler and resolves to deleteMyAccount's
+// describeDeleteAccount result, { text, problem, deleted }. Pass 135: the password re-check is
+// a sign-in, and once the project's bot check is on the service asks for its token on a
+// sign-in too, so this window carries the widget (BotCheck.jsx) and sends the token along.
+// A token works once, so a new one is taken after every attempt.
 export function DeleteAccountModal({ email, onDelete, onClose }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [doneText, setDoneText] = useState("");
+  const botOn = isBotCheckConfigured();
+  const [bot, setBot] = useState({ token: "", status: botOn ? "working" : "off" });
+  const [botReset, setBotReset] = useState(0);
+  const botWaiting = botOn && botCheckBlocksSubmit(bot.status);
 
   const submit = async (e) => {
     e.preventDefault();
-    if (busy || !password) return;
+    if (busy || !password || botWaiting) return;
     setBusy(true);
     setProblem("");
-    const result = await onDelete(password);
+    const result = await onDelete(password, bot.token);
     setPassword("");
     setBusy(false);
+    setBotReset((n) => n + 1);
     if (result && result.deleted) setDoneText(result.text);
     else setProblem((result && result.text) || "Something went wrong. Try again in a moment.");
   };
@@ -77,13 +86,14 @@ export function DeleteAccountModal({ email, onDelete, onClose }) {
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </label>
+              {botOn && <BotCheck onChange={(token, status) => setBot({ token, status })} resetCount={botReset} />}
               {problem && <p className="tq-error" style={{ marginTop: 8 }} role="alert">{problem}</p>}
             </div>
             <div className="modal-foot">
               <button type="button" className="ghost-btn" onClick={onClose} disabled={busy}>
                 <ChevronLeft size={16} /> Cancel
               </button>
-              <button type="submit" className="danger-btn" disabled={busy || !password}>
+              <button type="submit" className="danger-btn" disabled={busy || !password || botWaiting}>
                 <Trash2 size={15} /> {busy ? "Deleting..." : "Delete my account"}
               </button>
             </div>

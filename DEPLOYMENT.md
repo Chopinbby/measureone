@@ -463,6 +463,35 @@ ones. Full detail: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md
 - **After any change to the pages:** change the "Last updated" date and the change history at the bottom of the page, and the matching row
   of the table in `docs/Accounts-and-Backend.md`, together.
 
+### Inviting people (Pass 134)
+
+The routine for adding someone to the real site. **Prepared 2026-11-11; no one has been invited yet.** The checklist that must read as satisfied
+first, who read each row and what it said are in
+[`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#inviting-people-pass-134). Only the owner decides when to send the first one.
+
+1. **Before each invitation:** the newest backup is under 24 hours old (`LAST_BACKUP.txt` in the private backups repository), both uptime
+   monitors are green, and the Supabase project is not paused.
+2. **Production only** (the dashboard's project header reads `measureone-prod`): Authentication, Users, **Add user, Send invitation**, to the
+   person's address. Never "Create new user" for a real person: it is for the security script's throwaway accounts, it sends nothing and it sets
+   a password by hand.
+3. **The email** comes from `MeasureOne <hello@measureone.app>`. Its link works once and lasts 24 hours (Authentication, Sign In / Providers, Email,
+   Email OTP expiration, 86400 seconds; **read it again before each go-live and after any migration**, because a Supabase issue reports it
+   going back to 3600 after a production migration). The link opens `measureone.app` at Choose a password.
+4. **Sending another** (the link ran out, was used, or never came): **not yet tried.** Rehearse it once on the test project with a spare address
+   before the first real invitation, and write what really worked in the Accounts-and-Backend section. The expected way: if the person's line in
+   the second SQL query (Accounts-and-Backend, "Counts") shows neither an `accepted` date nor a `last_sign_in` date, delete that one Users row and
+   send a fresh invitation. **Never delete a row that shows either one**: that deletes a real account and all of its pieces.
+5. **Limits:** Supabase sends at most 30 emails an hour with custom SMTP, and a second email to the same person within a minute is not sent;
+   Resend's free plan allows 100 a day. Groups of 3 to 5, a week apart, are far under both.
+6. **A mail scanner can use up the link** (some systems open every link in a message, which spends a link that works once; the person sees
+   "Token has expired or is invalid"). Nothing is built for it. Ask the first person which mail service they use; if it happens, send another and
+   write it down.
+7. **The way back:** stop inviting. A person can delete their own account (Settings, Danger zone), and the daily backup keeps copies for about
+   30 days. Turning the email service off ("Enable custom SMTP" off) would stop every invitation and reset, so it is not a way back from a
+   problem with one person. The wider rollback points are under "Rolling back" above.
+8. **Do not put names or email addresses of invited people in this repository** (it is public). The list of who was invited, which is also the
+   list for emailing account holders about changes that matter, is the owner's, kept outside it.
+
 ---
 
 ## Troubleshooting

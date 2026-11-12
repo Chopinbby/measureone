@@ -8868,6 +8868,30 @@ what it rules out.
   data is held that way, but it must go before anyone is invited (**she deleted it on 2026-11-10; read from outside: 404**). Not done: the footer in the five templates in both projects. A check by
   Quincy Jones on 2026-11-09, before the merge, found nothing blocking (1,750 tests and the build pass, the em dash test fails when it
   should, the pages fit a 375 px phone in light and dark) and logged the loose ends under Open questions.
+- **Pass 134 — inviting people, prepared (2026-11-11); nothing sent.** The first Phase 3 go-live: a checklist read from the real things, then one
+  friendly person, then a quiet week, then small groups. No app code. The checklist, the readings, the SQL counts, the inviting routine and the
+  step log are in [Accounts-and-Backend.md](Accounts-and-Backend.md#inviting-people-pass-134); the routine is also in
+  [DEPLOYMENT.md](../DEPLOYMENT.md#inviting-people-pass-134). **The owner's answers (2026-11-11, "Go ahead" to five recommendations):**
+  (1) **Pass 124 is not built: the automatic-update switch stays OFF by default for the first invitees**; a person turns it on by hand or presses
+  Get changes; revisit before 135. **Why:** it matters only to someone with two devices, and building it is an app change (it touches
+  `lib/accountSync.js`, `App.jsx` and the Settings default, with an explicit-OFF record) that reaches her real account at once. **Alternative
+  ruled out:** building 124 first as its own pass, which delays inviting. (2) **The promise to email account holders about changes that matter
+  (the 2026-11-09 open item) is kept by hand for the invitation stage:** the owner emails the invited people herself, from her own address,
+  with Bcc, from a private list kept outside the public repository. **Alternatives ruled out:** building a way to email every account holder
+  first (no broadcast in Supabase, nothing built; unnecessary for a handful of people); sending as `hello@measureone.app` (not clean on the Free
+  plan, Pass 129). Reconsider before 135. (3) The note for invitees is given in chat and not stored in the repository (it is public and holds no
+  drafts). (4) The date of each step is recorded in the docs, with no names and no addresses. (5) After a quiet week, groups of 3 to 5, a week
+  apart. **Her approval of the privacy and terms pages**, which the checklist requires in her own words, was **given later the same day** ("the terms
+  are approved"; "Go ahead" had not covered it). **Readings made from outside on 2026-11-11 (Claude):** all four addresses serve `index-CJNfVn4Z.js`; the domain
+  answers 200 over HTTPS (Let's Encrypt, valid to 2027-01-30); the two pages answer 200, carry no script and read "Last updated: November 8,
+  2026"; the five template files all end with the privacy footer; the account service's health address answers 200; the newest backup was 5 h 26 min
+  old with 1 account, 25 pieces and 1 technique library, the artifacts expire after 30 days (retention cap 30), and the old backups repository
+  answers 404. **Not read, the owner's:** the Site URL, the 24-hour link setting, the SMTP page, the dashboards' template text, the UptimeRobot
+  dashboard, two-factor on Vercel and Supabase, the security script re-run and the SQL counts. **Found while preparing, logged, not fixed:** the
+  24-hour link setting was set on 2026-11-06 and migration `0003` was run on production the same day with no recorded read-back, so it is read
+  again; sending another invitation has never been tried; an account that has synced no piece has no importable file in the backup, so the
+  "next day's backup includes its importable file" check needs the first person to add a piece; the SQL counts were written from the migration
+  files and have not been run.
 
 ## Open questions
 
@@ -10464,9 +10488,11 @@ oversight to silently fix; surface it instead.
      answers 404). The policy's and the delete window's "about 30 days" is true as written.
   2. **The promise to email account holders about changes that matter has no mechanism.** Supabase has no broadcast, and sending AS
      `hello@measureone.app` is not clean on the Free plan (Pass 129). The owner decided on 2026-11-09 that the promise stays as written and
-     that she settles how in Pass 134.
+     that she settles how in Pass 134. **Settled 2026-11-11 for the invitation stage:** by hand, with Bcc, from a private list outside the
+     repository (see "Pass 134" under Accounts and backend above); reconsidered before 135.
   3. **The email footer is not in either Supabase project's dashboard yet**, so no email carries the links; a real email from each project
-     is the only proof it is live.
+     is the only proof it is live. **Still true on 2026-11-11 (the last report was 2026-11-10); it is row 4 of Pass 134's checklist and must read
+     as done before the first invitation.**
   4. **Whether "MeasureOne" needs a Colorado trade name filing, and when to form an LLC** (the owner's adviser). The pages say "an individual".
   5. **No lawyer has read the pages**, and rights worded for particular laws (EU or UK, California) were not added.
   6. **Some vendor figures may rest on third-party sources.** Resend's 30 days, ImprovMX's short hold of failed mail and UptimeRobot's

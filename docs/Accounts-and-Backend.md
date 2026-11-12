@@ -4018,6 +4018,155 @@ checks the two pages only; **`supabase/templates/` has no automated em dash chec
 check was added (the pass fenced the test to em dashes); with the region filled the pages hold no blank, searched for `[[`. (xi) The pass left `docs/Decisions.md` alone (outside its file list); the docs follow-up of 2026-11-09 recorded
 the decisions there ("Pass 133" under Accounts and backend, and "Privacy policy and terms (Pass 133): what is still open" under Open questions). (xii) The old three vercel.app addresses serve the pages too, since they serve the same build. (xiii) ~~The age wording~~ settled 2026-11-08: she chose option A (accounts stay 13 and older, so no parental consent is built; younger students use the app without an account, with an adult). Her first wording (accounts for younger students with adult supervision) contradicted Decided 3 and, as far as is understood, US children's privacy law (COPPA: verifiable parental consent, which supervision is not); it was not used. (xiv) Common-practice gaps raised and **added the same day**: a "How I use your information" section (P44), a Do Not Track sentence (P45) and a security paragraph (P46). **Not added, a lawyer's call:** rights worded for particular laws (EU or UK, California's rights to know and delete). (xv) **The promise to email account holders about changes that matter (P43) has no mechanism yet** ("Before it merged", item 3). (xvi) (iv) says the vendor figures came from earlier passes' readings of the vendors' own pages; the 2026-11-09 check reported that Resend's 30 days, ImprovMX's short hold of failed mail and UptimeRobot's free-plan terms rest on third-party sources instead. The docs cannot tell which; read them from the vendors' own pages before the policy is relied on.
 
+## Inviting people (Pass 134)
+
+**Prepared 2026-11-11 (Phase 3's first go-live). Nothing has been sent: the owner has not said "go" (Step 0 below) and no one has been
+invited.** The pass is a checklist read from the real things, then one friendly person, then a quiet week, then small groups. **No app
+code.** This section is the record. Every checklist row says who read it and how, so "read" never means "assumed": **Claude read** (from
+outside, today), **the owner reads** (a dashboard only she can open; she sends a screenshot or pastes the text), or **from the record**
+(an earlier pass's reading, not repeated). The routine for sending an invitation is also in
+[DEPLOYMENT.md](../DEPLOYMENT.md#inviting-people-pass-134).
+
+**The owner's answers (2026-11-11, "Go ahead" to the plan's five recommendations).**
+1. **Pass 124 stays unbuilt, so the automatic-update switch is OFF for the first invitees.** A person who wants it turns it on by hand in the
+   Account panel, or presses Get changes. Why: it matters only to a person with two devices, and building it is an app change that reaches the
+   owner's real account at once. Revisit before 135 (it is still hers to build, only on her word).
+2. **The promise to email account holders about changes that matter is kept by hand during invitations**: the owner emails the people she
+   invited, from her own address, **using Bcc** so nobody sees anyone else's address, with the addresses in a private list kept **outside this
+   repository** (it is public). Why: Supabase has no broadcast and sending as `hello@measureone.app` is not clean on the Free plan (Pass 129).
+   Reconsider before 135, when a list kept by hand stops being enough.
+3. **The note for invitees is given in chat and is not stored here** (this repository is public and holds no drafts). "What a person is told"
+   below lists what it must cover.
+4. **The date of each step is recorded here, with no names and no email addresses.**
+5. **After a quiet week, invite in groups of 3 to 5, a week apart.** Far under Supabase's 30 emails an hour and Resend's 100 a day.
+
+**Her approval of the privacy and terms pages (checklist row 5) was given separately, later the same day** (her words: "the terms are
+approved"). "Go ahead" had not covered it.
+
+**Step 0, the "go".** Only the owner says it, and only when these are true on the same day: a fresh export made from her real address
+(`measureone.app`, Settings, Backup & restore, Export pieces, in her own browser; Claude never opens her browser data) and the newest backup is under 24
+hours old (read the day of the go: `LAST_BACKUP.txt` in `Chopinbby/measureone-backups-v2`), and rows 1 to 12 below read as satisfied.
+
+### The checklist, each row read on its own
+
+| # | Item | How it was read, and what it said | Status |
+|---|---|---|---|
+| 1 | The domain answers over HTTPS and is the Site URL | **Claude read, 2026-11-11 22:39 UTC:** `https://measureone.app/` answers 200 over HTTPS; the certificate is Let's Encrypt's, for `*.measureone.app`, valid to 2027-01-30 (Vercel renews it); `www.measureone.app` answers 308 to `https://measureone.app/`; **all four addresses serve `index-CJNfVn4Z.js`**. **Not read: the Site URL.** The owner reads production's Authentication, URL Configuration: Site URL `https://measureone.app` and the two Redirect URLs. | Domain: read. Site URL: **open (owner)** |
+| 2 | Email is set up on production, and an invitation on the test project to a non-team address arrived (129) | **From the record, not re-read:** a dashboard invitation on the TEST project to a separate non-team Gmail address arrived on 2026-11-05 (SPF, DKIM and DMARC all pass); a production password reset arrived on 2026-11-06 from `hello@measureone.app` and its text equalled `recovery.html`. The owner reads production's Authentication, Emails, SMTP Settings (custom SMTP on, `smtp.resend.com`, port 465, sender `hello@measureone.app`). | From the record; **fresh read open (owner)** |
+| 3 | Email links last 24 hours | **Not read.** Production read 86400 seconds on 2026-11-06 (the owner's screenshot). **Migration `0003` was run on production the same day and no note records a read-back after it**, while a Supabase issue reports this value going back to 3600 after a production migration. The owner reads Authentication, Sign In / Providers, Email, Email OTP expiration on production. | **Open (owner)** |
+| 4 | Every template has the privacy link | **Claude read, 2026-11-11:** all five files in `supabase/templates/` end with the footer (`MeasureOne · Privacy Policy · Terms`, linking to `https://measureone.app/privacy` and `/terms`) and none holds an em dash. **The dashboards:** the footer had not been pasted into either project as of 2026-11-10, so no sign-in email carries it yet. The owner pastes it into both projects, sends one real email from each (production: a reset for her own account, click Not now at Choose a password; test: an invitation to a spare non-team address) and sends the message's "Show original", or the five dashboard texts, to be compared byte for byte with the files (as in Pass 129). | **Open (owner)** |
+| 5 | The privacy and terms pages are live and approved by the owner | **Claude read, 2026-11-11:** `/privacy` and `/terms` answer 200 with the titles "Privacy Policy \| MeasureOne" and "Terms of Use \| MeasureOne" on `measureone.app` (the `.html` names too, and `/privacy` on the three older addresses); neither holds a script tag; both read "Last updated: November 8, 2026". **Approval:** she asked for edits on 2026-11-08 (applied) and merged on 2026-11-09; **on 2026-11-11 she said "the terms are approved"** (recorded as her approval of both pages, as the checklist asks; if she meant only the terms of use, this row reopens). A lawyer's read is still not done and is not part of this checklist. | Live: read. **Approved: the owner's word, 2026-11-11** |
+| 6 | Migrations 0001 to 0003 are on production and `scripts/check-rls.mjs` passes every check there | **From the record:** `0001` and `0002` run on production 2026-10-10, `0003` on 2026-11-06 ("Success. No rows returned."), and the script passed 43 of 43 on production on 2026-11-06 (her pasted output). **Claude read, 2026-11-11:** the three migration files are in the repository; the live app file holds production's address (`tqamtwdraqsvejvhiptz`), a publishable key and **no secret-key string** (0 matches for `sb_secret_`). **Not re-read: the database itself.** The owner runs the first query under "Counts" below (it also shows the `0003` function exists and who may run it) and re-runs the script on production (two throwaway accounts whose addresses start `rls-check`, the key typed hidden, the left-over account deleted afterwards). | From the record; **re-run open (owner)** |
+| 7 | Change email and delete my account were rehearsed (130) | **From the record:** both passed on the test project's preview on 2026-11-06 (the first link's banner, the second link's banner, sign-in with the new address with the old one refused; Delete my account: the account was gone from Supabase and could not sign in again). **Not seen on a real project:** Delete my account's wrong-password refusal (covered by tests and a stand-in only). **Not tried on production, on purpose:** the owner's real account must not be pressed. | From the record |
+| 8 | Backups: the newest under 24 hours, the artifacts expire as decided, a restore rehearsed (131) | **Claude read, 2026-11-11 22:39 UTC, through the owner's signed-in GitHub, counts and file names only (no copy downloaded, no contents read):** `Chopinbby/measureone-backups-v2` is private; `LAST_BACKUP.txt` reads "Last backup: 2026-11-11 17:13 UTC / Pieces: 25, technique libraries: 1, accounts: 1", which was **5 hours 26 minutes old** (under 24); the five newest artifacts (2026-11-07 to 2026-11-11) each expire 30 days after creation (the newest on 2026-12-11) and the repository's artifact and log retention cap reads **30 days**; the old `measureone-backups` answers **404**; the last 14 scheduled runs (the backup, "Check the backup is recent", the keep-awake) all show success. **Restore, from the record:** a scratch Postgres on the real latest backup 2026-11-06, then the TEST Supabase project 2026-11-07, all 25 pieces seen through a real sign-in. | Read. **"Under 24 hours" is read again on the day of the go** |
+| 9 | Both uptime checks are green and the alert was tested (132) | **Claude read, 2026-11-11:** the front page answers 200 and its title holds `MeasureOne`; the account service's health address (the second monitor's address, with the public key taken from the live app file) answers 200 with `GoTrue`, v2.197.0. **The UptimeRobot dashboard was not read** (it is the owner's). **The alert test, from the record:** she reported on 2026-11-08 that both monitors were set up and the alert emails reached her inbox. The owner sends a screenshot of both monitors up. | Endpoints read; **dashboard open (owner)** |
+| 10 | Pass 124 is decided | **Decided 2026-11-11** (answer 1 above): not built; the switch is OFF by default for the first invitees; revisit before 135. | Decided |
+| 11 | The plan decision is written down (131) | **Written down here:** stay on Supabase's **Free plan through invitations** (the owner's answer, 2026-11-06; asked again at 135). What a pause looks like to an invited person (everyone's sync and sign-in from a new device stops until she presses Restore project; practice carries on, because the app works from each person's own browser first) and how it is restored are in [Other people's data (Pass 131)](#other-peoples-data-backups-that-expire-pass-131), "The plan question". **Claude read:** the daily keep-awake job succeeded on every run from 2026-11-07 to 2026-11-11 (whether Supabase counts it as activity is not documented). | Written down |
+| 12 | Two-factor sign-in is on for the owner's Vercel, Supabase and GitHub accounts (recommended, not a blocker) | **GitHub: on, from the record** (the owner, 2026-10-12; not re-read). **Vercel and Supabase: not recorded anywhere.** The owner reads all three (each account's security settings). | **Open (owner)** |
+| 13 | The mail scanner item (Owner: Pass 134, "watch the first invitees' mail; nothing built") | **Watch only.** Ask the first person which mail service they use (some, Microsoft Defender Safe Links is the known one, open every link to check it, which uses up a link that works once; the person then sees "Token has expired or is invalid"). If it happens, send another invitation and write it down. The fix needs app code (a button page that spends the link only when the person presses it): its own pass, not built, not part of this one. | Watching |
+| 14 | How the "I'll email account holders about changes that matter" promise (P43) is kept | **Decided 2026-11-11** (answer 2 above): by hand, Bcc, from a private list outside the repository, for the invitation stage. | Decided |
+
+### Counts (the "Verify" readings; the owner runs them in production's SQL Editor)
+
+Run in the **production** project (the page header reads `measureone-prod`). They only read. **Claude wrote these from the migration files and
+Supabase's sign-in table and has not run them**; the first real run is the check, and its result goes in the step log. Emails are masked so a
+pasted result carries no full address.
+
+```sql
+-- 1. The three migrations: both tables exist, the delete function exists, and who may run it.
+select to_regclass('public.pieces') is not null                                    as pieces_table,
+       to_regclass('public.technique') is not null                                 as technique_table,
+       to_regprocedure('public.delete_my_account()') is not null                   as delete_function,
+       has_function_privilege('anon', 'public.delete_my_account()', 'execute')          as anon_can_run,       -- must be false
+       has_function_privilege('authenticated', 'public.delete_my_account()', 'execute') as signed_in_can_run;  -- must be true
+
+-- 2. One row per account: pieces, pieces marked deleted, technique rows. Run before the first invitation (1 row) and after.
+select row_number() over (order by u.created_at)                                   as account_no,
+       left(u.email, 1) || '***@' || split_part(u.email, '@', 2)                   as address,
+       u.invited_at::date                                                          as invited,
+       u.email_confirmed_at::date                                                  as accepted,
+       u.last_sign_in_at::date                                                     as last_sign_in,
+       (select count(*) from public.pieces p where p.user_id = u.id)               as pieces,
+       (select count(*) from public.pieces p where p.user_id = u.id and p.deleted_at is not null) as pieces_deleted,
+       (select count(*) from public.technique t where t.user_id = u.id)            as technique_rows
+from auth.users u
+order by u.created_at;
+```
+
+The baseline for the owner's account is **25 pieces and 1 technique row** (read from the 2026-11-11 17:13 UTC backup). After the first
+invitation the second query should show 2 accounts, the new one holding rows only under its own line (and **none at all** until the person
+adds or backs up a piece), and the owner's line unchanged. A line that changed is something to understand before anyone else is invited.
+
+### The inviting routine
+
+Also in [DEPLOYMENT.md](../DEPLOYMENT.md#inviting-people-pass-134). Production project only (the header reads `measureone-prod`).
+
+1. **Before each invitation:** the newest backup is under 24 hours old, both uptime monitors are green, and the project is not paused.
+2. **Authentication, Users, Add user, Send invitation**, to the person's address. This is the path used for the owner's own account (2026-09-30) and
+   for the test project's trial (2026-11-05). **Never "Create new user" for a real person** (that is for the throwaway accounts of the security
+   script; it sends nothing and sets a password by hand).
+3. The email comes from `MeasureOne <hello@measureone.app>` ("You're invited to MeasureOne", a button "Accept the invitation"). **The link works
+   once and lasts 24 hours** (the setting in row 3). The page it opens is `measureone.app` at the Choose a password window; **Not now** leaves the
+   person signed in without a password, so they should choose one.
+4. **Send another** (the link ran out, was already used, or never arrived): **not yet tried by anyone**, so this is a plan, to be rehearsed once
+   on the TEST project with a spare address (invite it, do not accept, send another) before the first real invitation, and written here as it
+   really worked. The expected way: look at the person's line in query 2 above and at their row in Users. If **both** the `accepted` and
+   `last_sign_in` columns are empty (they never got in, so the account holds no data), delete that one row and send a fresh invitation. **Never
+   delete a row that shows either one**: that deletes a real account and all its pieces.
+5. Supabase's limits with custom SMTP: 30 emails an hour in all, and a second email to the same person within a minute is not sent; Resend's free
+   plan is 100 a day. Groups of 3 to 5 are far under both.
+6. **The way back:** stop inviting. A person can delete their own account (Pass 130, Settings, Danger zone), and the daily backup of the account
+   service keeps copies for about 30 days.
+
+### What to watch in the quiet week
+
+- **UptimeRobot:** the history of both monitors (any outage, and whether its alert email arrived).
+- **Supabase's sign-in logs** (the dashboard's Logs, Auth; the exact page name is to be written here when the owner opens it): the first person's
+  sign-in, and anything that is not an expected sign-in, link or password reset.
+- **The next day's backup:** `LAST_BACKUP.txt` should read accounts: 2, and `counts.csv` gains a row with the new totals. The pass also asks that the
+  backup "includes the new account and its importable file": **an account that has synced no piece has no importable file**, so ask the first
+  person to add one throwaway piece (or accept that the check shows the account but no file). Claude lists the artifact's file **names** only
+  (`unzip -l`) and asks the owner first, because the zip holds the invitee's email address and pieces.
+- **Their feedback**, through the owner (a reply to the invitation or a "Report a problem" email reaches `hello@measureone.app`, which forwards to her
+  inbox).
+- **Any alarm that fired**, and whether it was understood: write it in the step log, not only "none".
+
+### What a person is told
+
+The note itself is given in chat (answer 3). It must cover, in plain words: what the invitation email looks like (sender, subject, the button) and
+that its link works once, for 24 hours; Choose a password (at least 6 characters, with a sentence agreeing to the Terms and Privacy Policy and
+confirming they are 13 or older); that the app starts **empty** and what the welcome screen offers ("Start a new piece", "Import a backup"); **how to
+bring over practice they did without an account** (export a backup where they used it: Settings, Backup & restore, Export pieces; then at
+`measureone.app` use Import a backup, on the welcome screen or in Settings; the three older addresses show a "moved" note saying the same); that
+"Report a problem" opens an email to `hello@measureone.app`; that they can delete their own account (Settings, Danger zone); and that the
+owner would like to hear what they saw, including which email service they use.
+
+### The step log (each date is when it happened; no names, no addresses)
+
+| Step | Date | Notes |
+|---|---|---|
+| Preparation: checklist, counts and routine written; outside readings (rows 1, 4, 5, 6, 8, 9, 11) | 2026-11-11 | Claude. Nothing sent. |
+| The owner approves the privacy and terms pages (row 5) | 2026-11-11 | Her words: "the terms are approved". |
+| The owner's readings (rows 1 to 3, 6, 9, 12) and re-run of the security script | not yet | |
+| Footers pasted in both projects; a real email from each | not yet | |
+| A re-send rehearsed on the TEST project | not yet | |
+| Fresh export, newest backup under 24 hours, **"go"** | not yet | |
+| First invitation, to one person | not yet | |
+| The first person signed in (their report, through the owner) | not yet | |
+| Counts per account (query 2) | not yet | |
+| The next day's backup (2 accounts) | not yet | |
+| A quiet week ends (alarms and what they were) | not yet | |
+| First small group (3 to 5) | not yet | |
+
+### Left open (Pass 134)
+
+(i) Sending another invitation is a plan, not a tried routine (step 4). (ii) The SQL under "Counts" has not been run. (iii) Two-factor on Vercel
+and Supabase is unrecorded. (iv) The 24-hour link setting can revert after a migration, so it is read again at every go-live. (v) The promise to
+email account holders is kept by a private list by hand, which stops being enough before open sign-up (135). (vi) The scanner problem has no fix
+until app code exists. (vii) An account with no synced piece has no importable file in the backup. (viii) Still open from earlier passes and not
+this one's: a lawyer has not read the pages, and whether "MeasureOne" needs a Colorado trade name filing is her adviser's question
+([Decisions.md](Decisions.md#open-questions), "Privacy policy and terms (Pass 133): what is still open").
+
 ## Phase 3: other people's accounts (designed, not built)
 
 **Designed in Pass 127 (2026-10-31). Passes 128 to 133 are built so far** (128, 2026-11-01: the owner's own
@@ -4033,7 +4182,8 @@ private backups repository, **no app code and nothing on the live site; merged 2
 steps were done with her the same day, and the old backups repository was deleted on 2026-11-10**);
 132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
 133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **merged 2026-11-09 as PR 96 (`94e93c4`), live as `index-CJNfVn4Z.js`; the old backups repository was deleted 2026-11-10 (she merged before doing it); still the owner's: pasting the footer into the five email templates in both projects**;
-nothing else in this section is built. **The next passes are 134 and 124, each only on the owner's word.** Phase 3 is what has to
+**134, 2026-11-11: inviting people, see [Inviting people (Pass 134)](#inviting-people-pass-134), prepared (the checklist, the counts and the routine are written and the outside readings made; nothing sent, no one invited, the owner's "go" not yet given)**;
+nothing else in this section is built. **The next steps are 134's own go-live and 135, each only on the owner's word; Pass 124 stays unbuilt (decided 2026-11-11: the automatic-update switch is off for the first invitees).** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same
@@ -4144,7 +4294,8 @@ the docs for `Owner: Pass N` (below).
 - **134** First go-live: inviting people. Only on the owner's word. A checklist read from the real
   things, then one friendly person first, then small groups after a quiet week. App changes are not
   expected. The way back: stop inviting; a person can delete their own account (130). Needs 127 to
-  133, and 124 decided.
+  133, and 124 decided. **Prepared 2026-11-11 (124 decided: not built, switch off for the first invitees):
+  see [Inviting people (Pass 134)](#inviting-people-pass-134); nothing sent.**
 - **135** Second go-live: open sign-up. Only on the owner's word, after a period of invitations. On
   the live site: a "Create an account" option, only once sign-ups are switched on, as the very last
   step. The way back is instant: switch sign-ups off in the dashboard. Needs 134.
@@ -4171,6 +4322,7 @@ section, or taken from the later cards' own rationales; the owner can strike any
   owner, 2026-10-28), and when built each device must remember an explicit OFF as well as an ON
   (today only an ON is kept: `autoUpdateOn`, `withAutoUpdate`, `changeAccount`), so it is more than
   one line. See [Decisions.md](Decisions.md#accounts-and-backend), "Pass 124 re-scoped". Owner: Pass 124.
+  **Decided 2026-11-11 (Pass 134, the owner's answer): not built; the switch stays off by default for the first invitees; revisit before Pass 135.**
 - *(added by Pass 127)* **Changing the address.** The production project's Site URL and redirect
   list change (keep the old entry while any device uses it), and the domain itself is added in
   Vercel's Domains page (Setup (production project): "Changing it later" and item 4 of the review).
@@ -4194,7 +4346,8 @@ section, or taken from the later cards' own rationales; the owner can strike any
   that can be used once; the person then sees "Token has expired or is invalid". Links lasting 24
   hours do not make it less likely. It can hit an invitation or a reset. The fix needs app code (a
   button page that spends the link only when the person presses it), so it belongs with inviting
-  people. Owner: Pass 134 (watch the first invitees' mail; nothing built).
+  people. Owner: Pass 134 (watch the first invitees' mail; nothing built). **Prepared 2026-11-11 as row 13 of
+  [Inviting people (Pass 134)](#inviting-people-pass-134): watch only, ask the first person which mail service they use; no one is invited yet.**
 - *(added by Pass 129)* **Email facts for the privacy policy.** Resend keeps email content and
   metadata for 30 days and stores account data in the United States; the mail travels through Amazon
   SES (the Message-ID of a received email is at `email.amazonses.com`). ImprovMX, which forwards

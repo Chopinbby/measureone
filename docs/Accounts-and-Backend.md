@@ -4016,7 +4016,9 @@ their date is now November 12, 2026, each has a second line in its change histor
 answer 200 with the right titles on `measureone.app`, and `/privacy` on the three older addresses; the pages hold no script; the live app
 file (`index-CJNfVn4Z.js`) holds the Choose a password sentence and the new delete wording. **Not done yet, all the owner's:** pasting the
 new footer into the five templates in BOTH Supabase projects, and comparing a real email from each project with the file (a first email
-after the paste is the only proof the footer is live; no sign-in email carries it today).
+after the paste is the only proof the footer is live; no sign-in email carries it today). **Done 2026-11-13 (Pass 135 trial):** pasted into
+all five templates in both projects; a real reset email from each shows the footer (see "Open sign-up (Pass 135)"); the other four templates
+are saved but not yet seen live.
 
 **Left open (Pass 133).** (i) ~~The region~~ filled (P16). (ii) Whether "MeasureOne" needs a Colorado trade name filing, and when to form an LLC:
 the owner's adviser. (iii) The policy was not read by a lawyer. (iv) Resend, ImprovMX and UptimeRobot facts (P22, P23, P26) are from
@@ -4064,7 +4066,7 @@ hours old (read the day of the go: `LAST_BACKUP.txt` in `Chopinbby/measureone-ba
 | 1 | The domain answers over HTTPS and is the Site URL | **Claude read, 2026-11-11 22:39 UTC:** `https://measureone.app/` answers 200 over HTTPS; the certificate is Let's Encrypt's, for `*.measureone.app`, valid to 2027-01-30 (Vercel renews it); `www.measureone.app` answers 308 to `https://measureone.app/`; **all four addresses serve `index-CJNfVn4Z.js`**. **Not read: the Site URL.** The owner reads production's Authentication, URL Configuration: Site URL `https://measureone.app` and the two Redirect URLs. | Domain: read. Site URL: **open (owner)** |
 | 2 | Email is set up on production, and an invitation on the test project to a non-team address arrived (129) | **From the record, not re-read:** a dashboard invitation on the TEST project to a separate non-team Gmail address arrived on 2026-11-05 (SPF, DKIM and DMARC all pass); a production password reset arrived on 2026-11-06 from `hello@measureone.app` and its text equalled `recovery.html`. The owner reads production's Authentication, Emails, SMTP Settings (custom SMTP on, `smtp.resend.com`, port 465, sender `hello@measureone.app`). | From the record; **fresh read open (owner)** |
 | 3 | Email links last 24 hours | **Not read.** Production read 86400 seconds on 2026-11-06 (the owner's screenshot). **Migration `0003` was run on production the same day and no note records a read-back after it**, while a Supabase issue reports this value going back to 3600 after a production migration. The owner reads Authentication, Sign In / Providers, Email, Email OTP expiration on production. | **Open (owner)** |
-| 4 | Every template has the privacy link | **Claude read, 2026-11-11:** all five files in `supabase/templates/` end with the footer (`MeasureOne · Privacy Policy · Terms`, linking to `https://measureone.app/privacy` and `/terms`) and none holds an em dash. **The dashboards:** the footer had not been pasted into either project as of 2026-11-10, so no sign-in email carries it yet. The owner pastes it into both projects, sends one real email from each (production: a reset for her own account, click Not now at Choose a password; test: an invitation to a spare non-team address) and sends the message's "Show original", or the five dashboard texts, to be compared byte for byte with the files (as in Pass 129). | **Open (owner)** |
+| 4 | Every template has the privacy link | **Claude read, 2026-11-11:** all five files in `supabase/templates/` end with the footer (`MeasureOne · Privacy Policy · Terms`, linking to `https://measureone.app/privacy` and `/terms`) and none holds an em dash. **The dashboards:** the footer had not been pasted into either project as of 2026-11-10, so no sign-in email carries it yet. The owner pastes it into both projects, sends one real email from each (production: a reset for her own account, click Not now at Choose a password; test: an invitation to a spare non-team address) and sends the message's "Show original", or the five dashboard texts, to be compared byte for byte with the files (as in Pass 129). **Done 2026-11-13: pasted into all five in both projects, reset email seen with the footer from each.** | **Done (owner), reset template seen live** |
 | 5 | The privacy and terms pages are live and approved by the owner | **Claude read, 2026-11-11:** `/privacy` and `/terms` answer 200 with the titles "Privacy Policy \| MeasureOne" and "Terms of Use \| MeasureOne" on `measureone.app` (the `.html` names too, and `/privacy` on the three older addresses); neither holds a script tag; both read "Last updated: November 8, 2026". **Approval:** she asked for edits on 2026-11-08 (applied) and merged on 2026-11-09; **on 2026-11-11 she said "the terms are approved"** (recorded as her approval of both pages, as the checklist asks; if she meant only the terms of use, this row reopens). A lawyer's read is still not done and is not part of this checklist. | Live: read. **Approved: the owner's word, 2026-11-11** |
 | 6 | Migrations 0001 to 0003 are on production and `scripts/check-rls.mjs` passes every check there | **From the record:** `0001` and `0002` run on production 2026-10-10, `0003` on 2026-11-06 ("Success. No rows returned."), and the script passed 43 of 43 on production on 2026-11-06 (her pasted output). **Claude read, 2026-11-11:** the three migration files are in the repository; the live app file holds production's address (`tqamtwdraqsvejvhiptz`), a publishable key and **no secret-key string** (0 matches for `sb_secret_`). **Not re-read: the database itself.** The owner runs the first query under "Counts" below (it also shows the `0003` function exists and who may run it) and re-runs the script on production (two throwaway accounts whose addresses start `rls-check`, the key typed hidden, the left-over account deleted afterwards). | From the record; **re-run open (owner)** |
 | 7 | Change email and delete my account were rehearsed (130) | **From the record:** both passed on the test project's preview on 2026-11-06 (the first link's banner, the second link's banner, sign-in with the new address with the old one refused; Delete my account: the account was gone from Supabase and could not sign in again). **Not seen on a real project:** Delete my account's wrong-password refusal (covered by tests and a stand-in only). **Not tried on production, on purpose:** the owner's real account must not be pressed. | From the record |
@@ -4179,8 +4181,8 @@ this one's: a lawyer has not read the pages, and whether "MeasureOne" needs a Co
 
 ## Open sign-up (Pass 135)
 
-**Built 2026-11-12. Nothing is switched on: sign-ups are still off on both projects, no bot check is configured anywhere, and the pass is
-not merged.** Phase 3's second go-live, and the last of its passes. It started on the owner's word that Pass 134 is done (her message,
+**Built 2026-11-12, tried on the TEST project and its preview 2026-11-13 (see "Seen on real projects" below). Nothing is switched on in
+production: sign-ups are off there, no bot check is configured there, and the pass is not merged.** Phase 3's second go-live, and the last of its passes. It started on the owner's word that Pass 134 is done (her message,
 2026-11-12; this repository records no dates for 134's go-live, and its step log above is hers to fill in). The order for switching it on
 is in [DEPLOYMENT.md](../DEPLOYMENT.md#open-sign-up-pass-135); screen by screen it is [User-Flows.md](User-Flows.md#21-creating-an-account-optional-pass-135), flow 21.
 
@@ -4212,8 +4214,8 @@ and bot-check step, `supabase/auth` on GitHub, 2026-11-11) and its guide: once "
 bot check's code on **sign up, a password sign-in, "forgot password", resend, and email codes**, and answers a call without one with a 400,
 "captcha protection: request disallowed (no captcha_token found)". Refreshing a sign-in is exempt, so signed-in devices carry on. So the
 widget is in the sign-in window's three forms and in Delete my account (whose password check is a sign-in), and the security script, which
-signs in as two throwaway accounts, needed a way to carry a code. **Not seen against a real project:** the refusal itself, and the exact
-spelling of its error code (`captcha_failed` is from the source; the app and the script also match the word "captcha" in the message).
+signs in as two throwaway accounts, needed a way to carry a code. **Seen on a real project since (2026-11-12):** the refusal itself, 400 with
+code `captcha_failed` (the app and the script still also match the word "captcha" in the message).
 
 **How it works.**
 - **Is sign-up on?** `getSignupSettings` (`lib/backend.js`) reads Supabase's public settings once per page load: `GET <project>/auth/v1/settings`
@@ -4296,9 +4298,48 @@ known** (the app targets Safari 14).
 - The script's `--bot-check` run with the real Supabase library against the stand-in in all four states: passes with the bot check on,
   fails with it off, and made no account in any.
 
-**Not checked, and why.** Nothing was run against a real project: the script on the test project, a real sign-up, a real confirmation email
-and its link, and Supabase's real refusals all need the owner's dashboards and passwords. No preview address exists yet (nothing is pushed).
-Safari 14, and any real phone, were not tried. The real widget (a real site key and secret) was never used, only Cloudflare's test keys.
+**Before the trial, not checked:** the script on the test project, a real sign-up, a real confirmation email and its link, and Supabase's real
+refusals all needed the owner's dashboards and passwords; that is what the next paragraphs record.
+
+**Seen on real projects (2026-11-12 to 2026-11-13), the owner's trial on the TEST project and the preview of this branch** (the preview
+`measureone-git-claude-pass-135-open-signup-d2d888-measure-one.vercel.app`, built with `VITE_TURNSTILE_SITE_KEY` = Cloudflare's test key set for
+Preview only; the test project with the bot check on using Cloudflare's test secret, sign-ups on, "Confirm email" on, the redirect list already
+holding `https://*-measure-one.vercel.app/**`):
+- **The security script, `node scripts/check-rls.mjs --dummy-token`, against the TEST project: 43 of 43 passed**, check 36 ("a sign-up without a
+  valid bot-check token is refused") and 37 included, and the last line read "Bot check: ON (the sign-up with no token was refused by the bot
+  check)". Her terminal output; no password or key was printed.
+- **A real sign-up on the preview** with a brand-new address (a Proton Mail one): "Create an account" showed on the first screen; the
+  confirmation email arrived from `MeasureOne <hello@measureone.app>` in the inbox (not spam) in the new wording; its button brought her back to
+  the preview **signed in with "Welcome to MeasureOne. Your account is confirmed and you're signed in."**; no bot-check box appeared (the test key
+  shows nothing); the form fits a phone screen.
+- **The one answer for an address that already has an account, on a real project:** her spare address had been invited a week before and its
+  account was confirmed; she signed up with it twice and got the usual "Check your email to confirm your account." and **no email**, exactly the
+  look-alike success read from Supabase's server code. (She had first taken the missing email for a fault; the screen cannot say why, by design.)
+- She reported that deleting the trial account in the app worked and that, with sign-ups switched off on the test project, a reload took
+  "Create an account" away. (Reported, not seen by Claude.)
+- **A real refusal, read from outside:** with the bot check switched on by mistake on production (below), a sign-in with no code answered
+  400, code `captcha_failed`, message "captcha protection: request disallowed (no captcha_token found)". **That settles the spelling:** the
+  code is `captcha_failed`.
+- **The email footers** ("MeasureOne · Privacy Policy · Terms", the owner's step from Pass 133) were pasted into all five templates in both
+  projects on 2026-11-13. A real reset email was seen from each project with the footer at the bottom and both words as links. Only the reset
+  template was seen live; the other four are saved in both projects and show their footer the first time each is sent.
+- **An independent check by Quincy Jones (2026-11-12, branch tip `6b30197`)** found no defect: 1,795 tests and the build pass, six of his own
+  re-breaks were caught, and the preview talked to the test project. His own P2s: no "already have an account? sign in" hint on the "Check your
+  email" screen, this document's old "no preview address" line (fixed here), the privacy and terms edits going live on merge before the
+  Production site key exists, and Safari 14 unknown. See the Decisions.md list.
+
+**A mistake worth keeping (2026-11-12): the test-project steps were first done on PRODUCTION.** For a while production had the bot check on with
+Cloudflare's test secret, sign-ups on, and the preview's address in its redirect list; then the undo switched off the Email provider instead of
+sign-ups, so for a while nobody could sign in by email and sign-ups stayed open. Read from outside (`<project>/auth/v1/settings` with the public
+key, plus a sign-in probe), both were caught and put back by the owner; **her Users page showed no new account, and a read from outside on
+2026-11-13 confirmed production is back (email provider on, sign-ups off, confirmation required).** Two lessons are in DEPLOYMENT.md: read the
+project name in the header before any change, and **never put Cloudflare's test secret on production: it is public, and it accepts Cloudflare's
+public dummy code, so anyone could then get past the bot check.**
+
+**Not seen, and why.** The second confirmation email for an address waiting to be confirmed (the "enter the same address again" hint rests on
+Supabase's code, not on a real try); the real Cloudflare widget (a real site key and secret) and its box; Safari 14 and any older phone; the
+other four templates' emails; the script's `--bot-check` run against a real project (only the stand-in); anything on production beyond the
+read-backs above. Nothing is merged and nothing is switched on in production.
 
 **Left open (Pass 135).** (i) The two boxes are not recorded and the service does not require them: someone calling the service directly can
 make an account without ticking anything (the Terms' own first paragraph covers use of the app). Recording the moment of agreement on the
@@ -4330,7 +4371,7 @@ steps were done with her the same day, and the old backups repository was delete
 132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
 133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **merged 2026-11-09 as PR 96 (`94e93c4`), live as `index-CJNfVn4Z.js`; the old backups repository was deleted 2026-11-10 (she merged before doing it); still the owner's: pasting the footer into the five email templates in both projects**;
 **134, 2026-11-11: inviting people, see [Inviting people (Pass 134)](#inviting-people-pass-134), prepared (the checklist, the counts and the routine are written and the outside readings made; nothing sent, no one invited, the owner's "go" not yet given)**;
-**135, 2026-11-12: open sign-up, see [Open sign-up (Pass 135)](#open-sign-up-pass-135), built and tried against a stand-in (the form, the bot check on every sign-in window, the confirmation link, the script's check 36); not merged, nothing switched on, and not seen on a real project.** **Every step of switching it on is the owner's; Pass 124 stays unbuilt (decided 2026-11-11 and again 2026-11-12: the automatic-update switch is off by default).** Phase 3 is what has to
+**135, 2026-11-12: open sign-up, see [Open sign-up (Pass 135)](#open-sign-up-pass-135), built, tried against a stand-in and then on the TEST project and its preview (43 of 43 with `--dummy-token`, a real sign-up, email and link; 2026-11-13); not merged, nothing switched on in production.** **Every step of switching it on is the owner's; Pass 124 stays unbuilt (decided 2026-11-11 and again 2026-11-12: the automatic-update switch is off by default).** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same

@@ -8943,7 +8943,9 @@ what it rules out.
   `ChangeEmailModal.jsx`, `public/terms.html`. **A correction to the card:** it says the form reads "the same request 132's check uses";
   that monitor asks the health address, which says nothing about sign-ups. The form reads the settings address beside it.
   **Status (2026-11-12):** built, 1,795 tests passing, 31 of 31 deliberate breakages caught, every screen walked against a local stand-in
-  with Cloudflare's test keys. **Not merged, not pushed, nothing switched on, and nothing seen on a real project.**
+  with Cloudflare's test keys. Then (2026-11-13) pushed, previewed, and tried on the TEST project: the
+  script 43 of 43 with `--dummy-token`, a real sign-up, email, link and welcome, and the footers pasted into both projects (see "Seen on real
+  projects" in Accounts-and-Backend.md). **Not merged, nothing switched on in production, nothing seen with a real Cloudflare widget.**
 
 ## Open questions
 
@@ -10556,9 +10558,15 @@ oversight to silently fix; surface it instead.
      automated em dash check.
 - **Open sign-up (Pass 135): what is still open (logged 2026-11-12).** Built, not merged; see "Pass 135" under Accounts and backend above and
   [Accounts-and-Backend.md](Accounts-and-Backend.md#open-sign-up-pass-135).
-  1. **Nothing has been seen on a real project.** The script on the test project with the bot check on, a real sign-up, the real confirmation
-     email and its link, and Supabase's real refusal of a call without a code are all the owner's steps. The exact spelling of that refusal's
-     error code is from Supabase's source, not an observed answer (the app and the script also match the word "captcha" in the message).
+  1. **Seen on the TEST project and its preview only (2026-11-12 to 13), nothing on production.** The script 43 of 43, a real sign-up, the
+     confirmation email, its link and the welcome, and the real refusal (`captcha_failed`, read from production by mistake) are seen. Not
+     seen: the second email for an unconfirmed address (the "enter the same address again" hint), the real Cloudflare widget, Safari 14, the
+     script's `--bot-check` against a real project, and the other four email templates live.
+     **1b. The test-project steps were first done on production by mistake (2026-11-12)** and put back (see Accounts-and-Backend.md); a test
+     secret on production would let anyone use Cloudflare's public dummy code. DEPLOYMENT.md now says so.
+     **1c. Quincy Jones's P2s (2026-11-12):** the "Check your email" screen has no "already have an account? sign in" hint; the privacy and
+     terms edits go live on merge before the Production site key exists (so for a while the policy names Cloudflare before the app contacts
+     it); Safari 14 with Turnstile is unknown.
   2. **The oldest Safari that Cloudflare's widget supports is not known** (its supported-browsers page could not be read); the app targets
      Safari 14. If the widget fails there, that person cannot sign in once the bot check is on. Try it on the oldest device to hand.
   3. **The two boxes are not recorded, and the service does not require them.** Someone calling the service directly makes an account without

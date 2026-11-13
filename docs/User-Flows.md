@@ -1349,6 +1349,7 @@ and deleting the account is in the Danger zone ([flow 13](#13-account-settings-o
 beside its password field.
 
 **Not covered:** the two boxes are not recorded with the account; a person with pieces already in the browser is not prompted to back
-them up; there is no "send it again" button (signing up again with the same address is the way); nothing here was seen on the real account
-service yet (only against a local stand-in), so the email and its link are as designed, not as observed. Design, checks and what is still
+them up; there is no "send it again" button (signing up again with the same address is the way); the sign-up, the email, its link and the welcome were seen on the TEST
+project's preview (2026-11-13, bot check on with Cloudflare's test key); the second email for an address still waiting to be confirmed,
+the real Cloudflare widget and anything on production were not. Design, checks and what is still
 open: [Accounts-and-Backend.md](Accounts-and-Backend.md#open-sign-up-pass-135).

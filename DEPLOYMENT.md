@@ -527,6 +527,12 @@ site key `1x00000000000000000000AA` (Vercel, Preview only, and `.env.local`), an
 `1x0000000000000000000000000000000AA` (both are printed in Cloudflare's own docs, so neither is a secret). A test key always passes, which
 means a preview proves the app's side of the bot check, not Cloudflare's judgment; the owner's phone sign-up on production is the real proof.
 
+**Do the test-project steps ONLY on the project whose header reads `measureone-test`, and read that name aloud to whoever is helping before
+changing anything.** On 2026-11-12 they were done on production by mistake, and the undo switched off the Email provider instead of "Allow new
+users to sign up" (the two toggles sit close together). Read the result back from outside afterwards: `<project>/auth/v1/settings` shows
+`disable_signup`, `external.email` and `mailer_autoconfirm`. **Cloudflare's test secret must never be on production:** it is public and it
+accepts Cloudflare's public dummy code, so anyone could get past the bot check.
+
 **Trying it on the test project (before any of this reaches production).**
 1. TEST project dashboard: switch the bot check on with provider Turnstile and the test secret above; switch "Allow new users to sign up" on;
    read that "Confirm email" is on (Authentication, Sign In / Providers, Email); read Authentication, Rate Limits and write the numbers down;

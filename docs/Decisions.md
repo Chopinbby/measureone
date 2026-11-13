@@ -10559,8 +10559,9 @@ oversight to silently fix; surface it instead.
 - **Open sign-up (Pass 135): what is still open (logged 2026-11-12).** Built, not merged; see "Pass 135" under Accounts and backend above and
   [Accounts-and-Backend.md](Accounts-and-Backend.md#open-sign-up-pass-135).
   1. **Seen on the TEST project and its preview only (2026-11-12 to 13), nothing on production.** The script 43 of 43, a real sign-up, the
-     confirmation email, its link and the welcome, and the real refusal (`captcha_failed`, read from production by mistake) are seen. Not
-     seen: the second email for an unconfirmed address (the "enter the same address again" hint), the real Cloudflare widget, Safari 14, the
+     confirmation email, its link and the welcome, the second email for an unconfirmed address (the "enter the same address again" hint is
+     true), and the real refusal (`captcha_failed`, read from production by mistake) are seen. Not
+     seen: the real Cloudflare widget, Safari 14, the
      script's `--bot-check` against a real project, and the other four email templates live.
      **1b. The test-project steps were first done on production by mistake (2026-11-12)** and put back (see Accounts-and-Backend.md); a test
      secret on production would let anyone use Cloudflare's public dummy code. DEPLOYMENT.md now says so.

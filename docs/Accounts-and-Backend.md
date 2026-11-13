@@ -4315,6 +4315,9 @@ holding `https://*-measure-one.vercel.app/**`):
 - **The one answer for an address that already has an account, on a real project:** her spare address had been invited a week before and its
   account was confirmed; she signed up with it twice and got the usual "Check your email to confirm your account." and **no email**, exactly the
   look-alike success read from Supabase's server code. (She had first taken the missing email for a fault; the screen cannot say why, by design.)
+- **The second email for an address still waiting to be confirmed, on a real project (2026-11-13):** she signed up a new address, did not press
+  the button, signed up the same address again after two minutes, and **a second confirmation email arrived at once; its link signed her in.**
+  So "enter the same address again to get a new link" (the hint under an expired link) is true as written.
 - She reported that deleting the trial account in the app worked and that, with sign-ups switched off on the test project, a reload took
   "Create an account" away. (Reported, not seen by Claude.)
 - **A real refusal, read from outside:** with the bot check switched on by mistake on production (below), a sign-in with no code answered
@@ -4336,8 +4339,7 @@ key, plus a sign-in probe), both were caught and put back by the owner; **her Us
 project name in the header before any change, and **never put Cloudflare's test secret on production: it is public, and it accepts Cloudflare's
 public dummy code, so anyone could then get past the bot check.**
 
-**Not seen, and why.** The second confirmation email for an address waiting to be confirmed (the "enter the same address again" hint rests on
-Supabase's code, not on a real try); the real Cloudflare widget (a real site key and secret) and its box; Safari 14 and any older phone; the
+**Not seen, and why.** The real Cloudflare widget (a real site key and secret) and its box; Safari 14 and any older phone; the
 other four templates' emails; the script's `--bot-check` run against a real project (only the stand-in); anything on production beyond the
 read-backs above. Nothing is merged and nothing is switched on in production.
 

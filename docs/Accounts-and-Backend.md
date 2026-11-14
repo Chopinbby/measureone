@@ -4182,7 +4182,7 @@ this one's: a lawyer has not read the pages, and whether "MeasureOne" needs a Co
 ## Open sign-up (Pass 135)
 
 **Built 2026-11-12, tried on the TEST project and its preview 2026-11-13 (see "Seen on real projects" below). Nothing is switched on in
-production: sign-ups are off there, no bot check is configured there, and the pass is not merged.** Phase 3's second go-live, and the last of its passes. It started on the owner's word that Pass 134 is done (her message,
+production: sign-ups are off there, no bot check is configured there. The pass was merged 2026-11-13 (PR #100, merge commit `affeaec`); the live app file is `index-CPjfjkAv.js`, which holds no site key, so no form shows.** Phase 3's second go-live, and the last of its passes. It started on the owner's word that Pass 134 is done (her message,
 2026-11-12; this repository records no dates for 134's go-live, and its step log above is hers to fill in). The order for switching it on
 is in [DEPLOYMENT.md](../DEPLOYMENT.md#open-sign-up-pass-135); screen by screen it is [User-Flows.md](User-Flows.md#21-creating-an-account-optional-pass-135), flow 21.
 
@@ -4341,7 +4341,7 @@ public dummy code, so anyone could then get past the bot check.**
 
 **Not seen, and why.** The real Cloudflare widget (a real site key and secret) and its box; Safari 14 and any older phone; the
 other four templates' emails; the script's `--bot-check` run against a real project (only the stand-in); anything on production beyond the
-read-backs above. Nothing is merged and nothing is switched on in production.
+read-backs above. Nothing is switched on in production. (Merged 2026-11-13, after this list was written; read from outside the same day: the live bundle holds the code and no site key, production `disable_signup` true, confirmation required, email provider on, `/privacy` and `/terms` live and dated November 12, 2026.)
 
 **Left open (Pass 135).** (i) The two boxes are not recorded and the service does not require them: someone calling the service directly can
 make an account without ticking anything (the Terms' own first paragraph covers use of the app). Recording the moment of agreement on the
@@ -4373,7 +4373,7 @@ steps were done with her the same day, and the old backups repository was delete
 132, 2026-11-07: alarms, see [Alarms (Pass 132)](#alarms-pass-132), **one small app change (the "Report a problem" link), built, tested and merged 2026-11-08 (PR 94, `a9835db`); the outside uptime check was set up and its alert emails seen by the owner on 2026-11-08, and the usage-email read-back and a trial of the link, on a computer and on a phone, were reported the same day**;
 133, 2026-11-08: the privacy policy and terms, see [Privacy policy and terms (Pass 133)](#privacy-policy-and-terms-pass-133), **merged 2026-11-09 as PR 96 (`94e93c4`), live as `index-CJNfVn4Z.js`; the old backups repository was deleted 2026-11-10 (she merged before doing it); still the owner's: pasting the footer into the five email templates in both projects**;
 **134, 2026-11-11: inviting people, see [Inviting people (Pass 134)](#inviting-people-pass-134), prepared (the checklist, the counts and the routine are written and the outside readings made; nothing sent, no one invited, the owner's "go" not yet given)**;
-**135, 2026-11-12: open sign-up, see [Open sign-up (Pass 135)](#open-sign-up-pass-135), built, tried against a stand-in and then on the TEST project and its preview (43 of 43 with `--dummy-token`, a real sign-up, email and link; 2026-11-13); not merged, nothing switched on in production.** **Every step of switching it on is the owner's; Pass 124 stays unbuilt (decided 2026-11-11 and again 2026-11-12: the automatic-update switch is off by default).** Phase 3 is what has to
+**135, 2026-11-12: open sign-up, see [Open sign-up (Pass 135)](#open-sign-up-pass-135), built, tried against a stand-in and then on the TEST project and its preview (43 of 43 with `--dummy-token`, a real sign-up, email and link; 2026-11-13); merged 2026-11-13 (PR #100, merge commit `affeaec`), nothing switched on in production.** **Every step of switching it on is the owner's; Pass 124 stays unbuilt (decided 2026-11-11 and again 2026-11-12: the automatic-update switch is off by default).** Phase 3 is what has to
 be true before anyone but the owner has an account. This is the one place Passes 128 to 135
 read first: each runs in a fresh chat, so what it needs is here or linked from here. It rests on
 the owner's answers of 2026-10-31 and on the Tier 11 cards of her backlog page (drafted the same

@@ -82,7 +82,7 @@ import { resolveMethods, buildDayList, completeTask, uncompleteTask, topUpDayLis
 import { ManuscriptDoodle } from "./components/Manuscript";
 import { RevivalEntryModal } from "./components/RevivalEntryModal";
 import { DeletePieceModal } from "./components/DeletePieceModal";
-import { SignInModal } from "./components/SignInModal";
+import { SignInModal, WelcomeCreateAccountLink } from "./components/SignInModal";
 import { ChoosePasswordModal } from "./components/ChoosePasswordModal";
 import { ChangeEmailModal } from "./components/ChangeEmailModal";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
@@ -97,6 +97,7 @@ import {
   deleteMyAccount,
   describeDeleteAccount,
   SINGLE_CONFIRMATION_LINK,
+  SIGNUP_LINK,
   EXPIRED_LINK_MESSAGE,
   SIGN_IN_AGAIN_NOTICE,
 } from "./lib/backend";
@@ -457,6 +458,9 @@ export default function App() {
   const [authChecking, setAuthChecking] = useState(() => needsBackendAtStartup());
   const [signInOpen, setSignInOpen] = useState(false);
   const [signInNotice, setSignInNotice] = useState("");
+  // Pass 135: which form the sign-in window opens on, "signin" or "signup" (the welcome
+  // screen's "Create an account" opens it straight on the sign-up form).
+  const [signInStartMode, setSignInStartMode] = useState("signin");
   const [choosePasswordMode, setChoosePasswordMode] = useState(null); // null | "invite" | "reset" | "change"
   // Account settings (Pass 113): signing out of every device. The question is
   // asked in the Account panel (never a browser pop-up), `signOutNotice` is the
@@ -1353,6 +1357,12 @@ export default function App() {
             // browser in with the account's new address, so say so, once.
             authLinkHandledRef.current = true;
             setEmailLinkNotice(describeEmailLinkNotice({ type: "email_change", email: session.user.email || "" }));
+          } else if (session && authLink && authLink.type === SIGNUP_LINK) {
+            // The confirmation link of a new account (Pass 135): it has signed the person in,
+            // and they chose their password when they signed up, so there is nothing to ask.
+            // One short welcome, once.
+            authLinkHandledRef.current = true;
+            setEmailLinkNotice(describeEmailLinkNotice({ type: SIGNUP_LINK, email: session.user.email || "" }));
           }
         }
       });
@@ -1371,9 +1381,29 @@ export default function App() {
     else setAuthChecking(false);
   }, []);
 
+  // Whenever the sign-in window is open, the app must be listening for the sign-in it can
+  // produce. Found in Pass 135: the window an EXPIRED link opens (the effect above) never
+  // attached the listener, so a person who then signed in there was signed in at the service
+  // but the app went on showing "Sign in" until a reload. That path is common once people
+  // confirm new accounts by email (a link opened twice, or spent by a mail scanner, is
+  // "expired"), so the rule is stated once, here, for every way the window can open.
+  useEffect(() => {
+    if (signInOpen) attachAuthListener();
+  }, [signInOpen]);
+
   const openSignIn = () => {
     if (!authEnabled) return;
     setSignInNotice("");
+    setSignInStartMode("signin");
+    setSignInOpen(true);
+    attachAuthListener();
+  };
+  // Pass 135: the same window, opened on its "Create an account" form. Only reachable from
+  // a link that shows while sign-ups are on (WelcomeCreateAccountLink).
+  const openSignUp = () => {
+    if (!authEnabled) return;
+    setSignInNotice("");
+    setSignInStartMode("signup");
     setSignInOpen(true);
     attachAuthListener();
   };
@@ -1405,6 +1435,7 @@ export default function App() {
   const handleSignInAgainToChangePassword = () => {
     setChoosePasswordMode(null);
     setSignInNotice(SIGN_IN_AGAIN_NOTICE);
+    setSignInStartMode("signin");
     setSignInOpen(true);
   };
 
@@ -1485,7 +1516,7 @@ export default function App() {
   // tested); this only keeps the automatic backup and the account flows from running while
   // it does, and reports the result in the window, never a pop-up. Resolves to
   // describeDeleteAccount's { text, problem, deleted }.
-  const handleDeleteAccount = async (password) => {
+  const handleDeleteAccount = async (password, captchaToken) => {
     if (!authEnabled || !authSession) {
       return describeDeleteAccount({ status: "signed-out" });
     }
@@ -1499,7 +1530,8 @@ export default function App() {
     let result;
     try {
       const client = await loadBackend();
-      result = await deleteMyAccount({ client, email: authSession.email, password });
+      // Pass 135: the bot check's token goes with the password re-check (a sign-in).
+      result = await deleteMyAccount({ client, email: authSession.email, password, captchaToken });
     } catch (e) {
       result = { status: "could-not-check" };
     } finally {
@@ -4521,9 +4553,14 @@ export default function App() {
                     <button type="button" className="link-btn" onClick={openDeleteAccount}>Delete my account</button>
                   </p>
                 ) : (
-                  <button type="button" className="link-btn" style={{ display: "block", marginTop: 18 }} onClick={openSignIn}>
-                    Sign in
-                  </button>
+                  <>
+                    <button type="button" className="link-btn" style={{ display: "block", marginTop: 18 }} onClick={openSignIn}>
+                      Sign in
+                    </button>
+                    {/* Pass 135: beside Sign in, and only while the account service accepts
+                        sign-ups (it asks the service; shows nothing otherwise). */}
+                    <WelcomeCreateAccountLink onOpen={openSignUp} />
+                  </>
                 )
               )}
               {/* Pass 132: a plain email link, here whether or not an account service is
@@ -4873,7 +4910,7 @@ export default function App() {
         <RevivalEntryModal piece={piece} onCancel={() => setRevivalModalOpen(false)} onStart={handleStartRevival} />
       )}
       {authEnabled && signInOpen && (
-        <SignInModal notice={signInNotice} onClose={() => { setSignInOpen(false); setSignInNotice(""); }} />
+        <SignInModal notice={signInNotice} startMode={signInStartMode} onClose={() => { setSignInOpen(false); setSignInNotice(""); }} />
       )}
       {authEnabled && choosePasswordMode && (
         <ChoosePasswordModal

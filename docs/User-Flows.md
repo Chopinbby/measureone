@@ -607,7 +607,11 @@ data** (nothing is uploaded or downloaded,
 and no piece, technique data or banner changes); it only says who's signed
 in. Copying this device's data to the account is a separate, explicit step
 ([flow 11](#11-backing-up-this-device-optional-pass-110)).
-Accounts are **by invitation for now**: there's no sign-up form. See
+Accounts are **by invitation** until the owner switches sign-up on. Since Pass
+135 the window can also create an account, but that choice shows only while
+the account service accepts sign-ups
+([flow 21](#21-creating-an-account-optional-pass-135)); until then the window
+says "Accounts are by invitation for now." See
 [Accounts-and-Backend.md](Accounts-and-Backend.md).
 
 **Two ways in** (`SignInModal`, opened by `openSignIn`, `App.jsx`):
@@ -629,6 +633,16 @@ Accounts are **by invitation for now**: there's no sign-up form. See
    the pages in a new tab, so nothing typed is lost; the third opens the
    person's own email app ([flow 19](#19-reporting-a-problem-pass-132)). See
    [flow 20](#20-reading-the-privacy-policy-and-terms-pass-133).
+4. **The bot check (Pass 135), only on a site set up with it.** A small check
+   from Cloudflare runs in the sign-in form and in the reset form. Most
+   people see nothing. Sometimes a box, "Verify you are human", appears to be
+   ticked. The button waits while the check is working, and after a few
+   seconds a line says "Checking that you're not a bot. If a box appears
+   above, tick it to go on." If the check can't load (no connection, a
+   content blocker) a line says so. If the account service refuses the
+   attempt for the bot check, the message is "The bot check didn't pass.
+   Reload the page and try again.", never the wrong-password message, and a
+   reset is not answered "a link is on its way".
 
 **Arriving from a link in an email** (an invitation from the Supabase
 dashboard, or a reset link):
@@ -884,11 +898,12 @@ only the fallback.
    **New email address**, and **Send confirmation links**.
 2. A slip is caught before anything is sent: "That doesn't look like a valid email address."
    or "That's already the email address on this account." An address that already has a
-   MeasureOne account gets "That address already has a MeasureOne account. Use a different
-   address." (the owner's choice, 2026-11-06). Too many emails: "Too many emails were sent
+   MeasureOne account gets **the same "sent" screen as any other address** (Pass 135; until
+   then it got "That address already has a MeasureOne account. Use a different address.",
+   the owner's 2026-11-06 choice for the invitation stage). Too many emails: "Too many emails were sent
    just now. Wait a few minutes and try again." No connection: the usual "Couldn't reach the
    account service..." The window stays open with what was typed.
-3. Sent: the window says "We sent a confirmation link to (new) and another to (current).
+3. Sent: the window says "If (new) can be used, we sent a confirmation link to it and another to (current).
    Open both emails and press the button in each. Your address changes only after both are
    confirmed. Until then you still sign in with (current). If an email doesn't arrive,
    check the spam folder." **Done** closes it; **nothing has changed yet.**
@@ -920,6 +935,10 @@ piece** is no longer on the Edit piece settings page.
 2. **Type your password to confirm.** The red **Delete my account** button is off until
    something is typed. A wrong password: "That password isn't right. Check it and try again.
    Nothing was deleted." Nothing else happens.
+   On a site set up with the bot check (Pass 135) the check runs here too, because checking
+   the password is a sign-in; if the account service refuses it for the bot check the window
+   says "The bot check didn't pass. Reload the page and try again. Nothing was deleted.",
+   not the wrong-password message.
 3. The right password deletes the account and signs this device out. The window then says
    "Your account is deleted, along with the copy of your pieces and technique library it kept
    online. The pieces and technique on this device are still here, and you're signed out..."
@@ -1282,7 +1301,55 @@ short change history. The two pages link to each other and back to the app. Ther
 **Addresses.** `/privacy.html` and `/terms.html` always work; `/privacy` and `/terms` work on the live site (a Vercel rewrite, read from outside
 2026-11-09) and are the ones emails use. A static preview or the local dev server does not have the short ones.
 
-**Not covered:** the pages cannot be opened without a connection (the offline worker keeps only the app); there is no banner or
-checkbox for agreeing (an invited person agrees by the sentence in Choose a password; open sign-up's checkboxes are Pass 135); no
-cookie banner, because nothing tracks. Design and the source of each sentence:
+**Not covered:** the pages cannot be opened without a connection (the offline worker keeps only the app); there is no banner for
+agreeing (an invited person agrees by the sentence in Choose a password; a person who creates their own account ticks two boxes,
+[flow 21](#21-creating-an-account-optional-pass-135)); no cookie banner, because nothing tracks. Design and the source of each sentence:
 [Accounts-and-Backend.md](Accounts-and-Backend.md#privacy-policy-and-terms-pass-133).
+
+## 21. Creating an account (optional, Pass 135)
+
+**Only while the account service accepts sign-ups.** The owner switches that on and off in the account service's dashboard, and it is
+**off** as this is written (2026-11-12). The app asks the service once each time the page loads, so a change shows after a reload. It also
+needs the site to be set up with the bot check and the service to require a confirmation email; if any of the three is missing, nothing
+below appears and accounts are by invitation ([flow 10](#10-signing-in-optional-pass-109)).
+
+**Two ways in:**
+1. The welcome screen (no pieces yet): **Create an account**, under **Sign in**.
+2. The sign-in window: "New here? **Create an account**" near the bottom.
+
+**The form** (the same window, titled "Create an account"):
+1. A line saying what an account is for, and that MeasureOne can be used without one.
+2. **Email**, **Password** ("Use at least 6 characters."), **Password again**.
+3. Two boxes, both needed: **I'm 13 or older**, and **I agree to the Terms and the Privacy Policy** (the two names open the pages in a new
+   tab). Leaving the form unticks them.
+4. The bot check, as in the sign-in form (usually nothing to see).
+5. **Create account** works once the three fields are filled. If something is missing it says what, and sends nothing: "That doesn't
+   look like a valid email address.", "That password is too short. Use at least 6 characters.", "The two passwords don't match.",
+   "Confirm that you're 13 or older to create an account.", or "Agree to the Terms and the Privacy Policy to create an account."
+
+**What it answers.** "**Check your email to confirm your account.**" and, under it, "If it doesn't arrive in a few minutes, check your
+spam folder." It says this for a new address, for an address already waiting to be confirmed (which gets its email again) and for an
+address that already has an account (which gets no email), so the form can't be used to find out who has an account. The only other
+answers are ones that don't depend on the address: no connection, the bot check not passing, an address or password the service won't
+take, too many attempts from one network, or "New accounts can't be created right now." if sign-ups were switched off meanwhile. A person
+who is told to check their email and gets none may have been caught by an email limit; trying again later works.
+
+**The email** ("Confirm your email for MeasureOne", from `hello@measureone.app`) has one button, **Confirm my email**. Pressing it opens the
+app on the device where the email was read, **signed in**, with one quiet line at the top that can be dismissed: "Welcome to MeasureOne.
+Your account is confirmed and you're signed in." No password window opens (the password was chosen in the form). The window where the
+person signed up, if it is on another device, is not signed in by this; they sign in there with their email and password.
+
+**A link that was already used, or has run out,** opens the sign-in window with "That link has expired or was already used. You can ask
+for a password reset link below." and, while sign-ups are on, "Confirming a new account? Choose Create an account and enter the same
+address again to get a new link." If the account was in fact confirmed (the link was opened twice, or an email scanner opened it
+first), signing in with the email and password works.
+
+**After that** it is an ordinary account: Settings, Account has **Back up this device** ([flow 11](#11-backing-up-this-device-optional-pass-110)),
+and deleting the account is in the Danger zone ([flow 13](#13-account-settings-optional-pass-113)), which now also carries the bot check
+beside its password field.
+
+**Not covered:** the two boxes are not recorded with the account; a person with pieces already in the browser is not prompted to back
+them up; there is no "send it again" button (signing up again with the same address is the way); the sign-up, the email, its link and the welcome were seen on the TEST
+project's preview (2026-11-13, bot check on with Cloudflare's test key), and so was the second email for an address still waiting to be
+confirmed (it arrives at once, and its link signs the person in); the real Cloudflare widget and anything on production were not. Design, checks and what is still
+open: [Accounts-and-Backend.md](Accounts-and-Backend.md#open-sign-up-pass-135).

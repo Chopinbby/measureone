@@ -125,6 +125,15 @@ Vercel should auto-detect these, but verify:
   These values are built into the app when Vercel builds it, so after adding
   or changing one, redeploy (or push a new commit) for it to take effect.
 
+  - `VITE_TURNSTILE_SITE_KEY` (Pass 135, optional): the bot check's **public**
+    site key (Cloudflare Turnstile). With it empty the app never loads the bot
+    check and never offers "Create an account": it behaves exactly as it did
+    before open sign-up. **Preview** and local development get Cloudflare's
+    published test key `1x00000000000000000000AA` (it works on any address and
+    always passes); **Production** gets the real site key of the owner's widget,
+    ticked for Production only. The bot check's **secret** key is typed only
+    into Supabase's dashboard, never here. See "Open sign-up (Pass 135)" below.
+
 Click "Deploy"
 
 ### Step 6: Wait for Deployment
@@ -491,6 +500,80 @@ first, who read each row and what it said are in
    problem with one person. The wider rollback points are under "Rolling back" above.
 8. **Do not put names or email addresses of invited people in this repository** (it is public). The list of who was invited, which is also the
    list for emailing account holders about changes that matter, is the owner's, kept outside it.
+
+### Open sign-up (Pass 135)
+
+How people create their own accounts, and the order to switch it on. **Built 2026-11-12; nothing is switched on, and switching it on is only
+the owner's.** What was built, what was seen and what was not: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#open-sign-up-pass-135).
+
+**Three switches, and what each does.**
+- **The site key in Vercel** (`VITE_TURNSTILE_SITE_KEY`, Step 5 above). Without it the merged app is exactly the app before this pass: no bot
+  check, no "Create an account", no new request to anyone.
+- **The bot check in Supabase** ("Enable CAPTCHA protection", in the project's Authentication settings; Supabase's guide lists it under "Bot
+  and Abuse Protection", and the page was not seen while building). **It is not only for sign-up:** once on, Supabase asks for the bot check's
+  code on every sign up, every password sign-in and every "forgot password". The app sends it from all of those windows, and from the
+  password check before Delete my account. A device that is already signed in is not affected.
+- **"Allow new users to sign up"** in Supabase (Authentication, Sign In / Providers). The app reads this, and shows "Create an account" only
+  while it is on, "Confirm email" is on, and the site key is present. It is read once per page load, so a change shows after a reload.
+
+**Cloudflare (the owner's, free).** Create a Turnstile widget in the Cloudflare dashboard, mode Managed, with these hostnames: `measureone.app`
+and the three older addresses (`measureone.vercel.app`, `measureone-git-main-measure-one.vercel.app`, `measureone-measure-one.vercel.app`).
+The free plan allows 10 hostnames per widget and has no limit on checks. **An address missing from that list cannot sign in once the
+bot check is on** (the widget refuses to run there), so add every address people really use before step 4 below. It gives a **site key** (public: it goes in Vercel, Production only)
+and a **secret key** (it goes only into Supabase's production dashboard; never Vercel, `.env.local`, this repository or a chat).
+
+**The test project and previews use Cloudflare's published test keys**, so no real widget is involved and the script can run there:
+site key `1x00000000000000000000AA` (Vercel, Preview only, and `.env.local`), and in the TEST project's Supabase dashboard the test secret
+`1x0000000000000000000000000000000AA` (both are printed in Cloudflare's own docs, so neither is a secret). A test key always passes, which
+means a preview proves the app's side of the bot check, not Cloudflare's judgment; the owner's phone sign-up on production is the real proof.
+
+**Do the test-project steps ONLY on the project whose header reads `measureone-test`, and read that name aloud to whoever is helping before
+changing anything.** On 2026-11-12 they were done on production by mistake, and the undo switched off the Email provider instead of "Allow new
+users to sign up" (the two toggles sit close together). Read the result back from outside afterwards: `<project>/auth/v1/settings` shows
+`disable_signup`, `external.email` and `mailer_autoconfirm`. **Cloudflare's test secret must never be on production:** it is public and it
+accepts Cloudflare's public dummy code, so anyone could get past the bot check.
+
+**Trying it on the test project (before any of this reaches production).**
+1. TEST project dashboard: switch the bot check on with provider Turnstile and the test secret above; switch "Allow new users to sign up" on;
+   read that "Confirm email" is on (Authentication, Sign In / Providers, Email); read Authentication, Rate Limits and write the numbers down;
+   add this branch's preview address to the Redirect URLs (Authentication, URL Configuration), as for a reset link.
+2. Vercel: add `VITE_TURNSTILE_SITE_KEY` = `1x00000000000000000000AA`, ticked **Preview only**, and redeploy the preview.
+3. The security script, with two new throwaway accounts whose addresses start `rls-check`:
+   `node scripts/check-rls.mjs --dummy-token`. Expect 43 of 43 and the last line "Bot check: ON". Delete the account left over.
+4. On the preview: Create an account with a spare address, open the email, press the button, arrive signed in with the welcome line. Sign up
+   the same address again: the same "Check your email" answer. Switch sign-ups off in the test dashboard and reload: the form is gone.
+
+**Going live on production, in this order, each step only on the owner's word.**
+1. The pass is merged and live. Nothing has changed for anyone yet (no site key in Production).
+2. Add the **real site key** to Vercel, ticked **Production only**, and redeploy. Check in a private window at `measureone.app`: Sign in still
+   works. (The app now sends the bot check's code; Supabase ignores it until step 4.)
+3. **The full security script on production, while the bot check is still off:** `node scripts/check-rls.mjs` with two throwaway accounts.
+   Expect 43 of 43, and the last line "Bot check: NOT ON" (check 36 passes here because sign-ups are off). Delete the account left over. Read
+   back the 24-hour link setting (Email OTP expiration 86400) and Authentication, Rate Limits.
+4. Switch the **bot check on** in the production project (provider Turnstile, the real secret, Save). **Straight away**, in a private window,
+   sign in at `measureone.app`. If it fails, switch the bot check off again: that is the way back, and nothing is lost.
+5. `node scripts/check-rls.mjs --bot-check` (it asks only for the URL and the public key, uses no account and writes nothing). Both lines must
+   pass: a sign-in and a sign-up without the code are refused by the bot check.
+6. Switch **"Allow new users to sign up" on.** Reload `measureone.app` in a private window: "Create an account" is there.
+7. From a phone, sign up a fresh address of the owner's, confirm it from the email, arrive signed in, then delete that account in the app
+   (Settings, Danger zone, or the link on the first screen).
+
+**The way back is instant:** switch "Allow new users to sign up" off. The form disappears at each person's next reload, and a sign-up sent
+from a page still open is refused by Supabase. The bot check can stay on.
+
+**Things that follow from the bot check being on.**
+- **The full security script cannot sign in on production** (a real code can only be made in a browser). To run it there again (after a
+  migration, say): switch sign-ups off, switch the bot check off, run the script, switch the bot check on, run `--bot-check`, switch sign-ups
+  on. For those few minutes nobody can create an account; signing in keeps working.
+- **A tab or phone still on a version from before this pass cannot sign in** until it is reloaded (it sends no code; the message says the
+  bot check didn't pass and to reload). Devices already signed in carry on.
+- **If Cloudflare is down or blocked on someone's network**, they cannot sign in, sign up or reset a password until it is back; signed-in
+  devices and practice are unaffected. Switching the bot check off in Supabase lets everyone in again (switch sign-ups off first).
+
+**Limits (read from Supabase's and Resend's pages, 2026-11-12).** Sign-ups and sign-ins: 30 requests per 5 minutes from one network. One
+confirmation email per address per 60 seconds. Emails: the project's hourly number (30 with custom SMTP as last read; the owner reads it
+again). Resend's free plan: 100 emails a day and 3,000 a month, shared by every confirmation, reset, invitation and email change, so it is
+the real daily ceiling; its first paid plan is $20 a month for 50,000. The owner's decision (2026-11-12): stay on the free plans of both.
 
 ---
 

@@ -503,7 +503,7 @@ first, who read each row and what it said are in
 
 ### Open sign-up (Pass 135)
 
-How people create their own accounts, and the order to switch it on. **Built 2026-11-12; nothing is switched on, and switching it on is only
+How people create their own accounts, and the order to switch it on. **Built 2026-11-12, merged 2026-11-13 (PR #100, merge commit `affeaec`); nothing is switched on, and switching it on is only
 the owner's.** What was built, what was seen and what was not: [`docs/Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#open-sign-up-pass-135).
 
 **Three switches, and what each does.**

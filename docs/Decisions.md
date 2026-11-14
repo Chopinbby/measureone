@@ -8945,7 +8945,7 @@ what it rules out.
   **Status (2026-11-12):** built, 1,795 tests passing, 31 of 31 deliberate breakages caught, every screen walked against a local stand-in
   with Cloudflare's test keys. Then (2026-11-13) pushed, previewed, and tried on the TEST project: the
   script 43 of 43 with `--dummy-token`, a real sign-up, email, link and welcome, and the footers pasted into both projects (see "Seen on real
-  projects" in Accounts-and-Backend.md). **Not merged, nothing switched on in production, nothing seen with a real Cloudflare widget.**
+  projects" in Accounts-and-Backend.md). **Merged 2026-11-13 (PR #100, merge commit `affeaec`); nothing switched on in production, nothing seen with a real Cloudflare widget.**
 
 ## Open questions
 
@@ -10556,7 +10556,7 @@ oversight to silently fix; surface it instead.
   7. Vercel's plan (so its log retention) and whether Supabase's logs hold IP addresses are not recorded, so the policy gives a range and
      claims neither. The pages cannot be opened offline, their colours are a hand copy of the app's, and `supabase/templates/` has no
      automated em dash check.
-- **Open sign-up (Pass 135): what is still open (logged 2026-11-12).** Built, not merged; see "Pass 135" under Accounts and backend above and
+- **Open sign-up (Pass 135): what is still open (logged 2026-11-12).** Built, merged 2026-11-13 (PR #100, merge commit `affeaec`); see "Pass 135" under Accounts and backend above and
   [Accounts-and-Backend.md](Accounts-and-Backend.md#open-sign-up-pass-135).
   1. **Seen on the TEST project and its preview only (2026-11-12 to 13), nothing on production.** The script 43 of 43, a real sign-up, the
      confirmation email, its link and the welcome, the second email for an unconfirmed address (the "enter the same address again" hint is

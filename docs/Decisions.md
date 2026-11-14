@@ -8945,7 +8945,7 @@ what it rules out.
   **Status (2026-11-12):** built, 1,795 tests passing, 31 of 31 deliberate breakages caught, every screen walked against a local stand-in
   with Cloudflare's test keys. Then (2026-11-13) pushed, previewed, and tried on the TEST project: the
   script 43 of 43 with `--dummy-token`, a real sign-up, email, link and welcome, and the footers pasted into both projects (see "Seen on real
-  projects" in Accounts-and-Backend.md). **Merged 2026-11-13 (PR #100, merge commit `affeaec`); nothing switched on in production, nothing seen with a real Cloudflare widget.**
+  projects" in Accounts-and-Backend.md). **Merged 2026-11-13 (PR #100, merge commit `affeaec`); switched on in production 2026-11-14, and seen with the real Cloudflare widget then (see Accounts-and-Backend.md, Open sign-up).**
 
 ## Open questions
 

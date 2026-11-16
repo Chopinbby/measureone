@@ -614,7 +614,7 @@ Before going live:
 4. ✅ Ready for public access (if deployed as public)
 
 Your pieces are stored in the browser first. Since go-live (Pass 114) an
-optional, invitation-only account holds a second copy in a Supabase project,
+optional account (invitation only until 2026-11-14, open sign-up since) holds a second copy in a Supabase project,
 protected by row-level security: nobody can read or change another account's
 rows, and nobody can delete a row. `scripts/check-rls.mjs` checks that against
 a project (43 checks since Pass 130, two throwaway accounts whose addresses must start `rls-check`; the last

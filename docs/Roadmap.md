@@ -500,16 +500,16 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    that keeps a checked copy of every piece and the technique library, restore,
    account settings, live since Pass 114) is Done above, and **Phase 2 is built apart from one parked pass** (Passes 115 to 123 and 126, Done above). Still to build in **Phase 2**: turning other devices' changes on by default after a real-use trial (124; the owner chose on 2026-10-28 to wait with the flip until Phase 3). Pass 126 (merged 2026-10-31): the most recent change wins item by item (a deletion, the piece's place in the list and every single-value setting follow it; collections, whole shapes, the chunk grid and a tie are still held and asked about). No owner yet: "always keep both" as a remembered
    answer, and size and schedule travelling together. **Phase 3**, other people's
-   accounts, is **designed (Pass 127, 2026-10-31); Passes 128 to 133 are built, the rest are not.** The owner's answers:
+   accounts, is **designed (Pass 127, 2026-10-31); Passes 128 to 133 and 135 are built (135 live in production since 2026-11-14), 134 is done by the owner's word (2026-11-12), and 124 is not built.** The owner's answers:
    invitations first and open sign-up later as two go-lives, her own web address, 13 and
    over. The plan, in order: 128 her own web address (done); 129 a real email service (done, 2026-11-06; Supabase's
    built-in sender reaches only the project's own team and only a couple of messages an
-   hour, which is why the owner's is the only account for now); 130 change email and
+   hour, which is why the owner's was the only account then); 130 change email and
    "delete my account" in the app (a database function; done 2026-11-06, merged as PR #90); 131 backups that expire, a real
    restore and the plan question (done, 2026-11-07, merged as PR #92); 132 alarms (done, 2026-11-08, merged as PR #94); 133 a privacy policy and terms (done, 2026-11-09, merged as PR #96; the old backups repository was deleted 2026-11-10; the email footers are still the owner's); then Pass 124
    (the automatic-update switch's default: **not built, decided 2026-11-11, the switch stays off for the first invitees**); 134 inviting people
-   (**prepared 2026-11-11: the checklist, the counts and the inviting routine are written and the outside readings made; nothing sent and no one invited, until the owner says "go"**)
-   and 135 open sign-up, each only on the owner's word. The design and who owns each loose
+   (prepared 2026-11-11: the checklist, the counts and the inviting routine are written and the outside readings made; **the owner said on 2026-11-12 that it is done**, and this repository records no dates for its go-live)
+   and 135 open sign-up (**built 2026-11-12, merged 2026-11-13 as PR #100, switched on in production 2026-11-14 by the owner, step by step**). The design and who owns each loose
    end: [Accounts-and-Backend.md](Accounts-and-Backend.md#phase-3-other-peoples-accounts-designed-not-built).
    Phase 1's loose ends are in [Decisions.md](Decisions.md#open-questions). Manual
    export and the export reminder stay throughout. See

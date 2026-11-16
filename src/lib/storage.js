@@ -722,6 +722,9 @@ function normalizeDayList(raw) {
       done: !!t.done,
       tier: typeof t.tier === "string" ? t.tier : null,
       tempo: positiveNumberOrNull(t.tempo),
+      // Pass 137: the seconds a done task's timer ran. A key only when there is a real time, never a
+      // materialized null, so every existing library keeps its fingerprint (no device re-uploads).
+      ...(t.done && Number.isFinite(t.seconds) && t.seconds >= 1 ? { seconds: Math.round(t.seconds) } : {}),
       ...(t.done && isPlainObject(t.undo) ? { undo: normalizeUndo(t.undo) } : {}),
     }));
   return { date: raw.date, tasks };

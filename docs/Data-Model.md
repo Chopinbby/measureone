@@ -262,8 +262,10 @@ piece = {
                          // a real chunk id: "__consolidation__" holds the
                          // whole-piece consolidation-day run-through's history —
                          // `doneDays` plus `sessions: [{ day, stopCount, loggedAt,
-                         // loggedDate }]` (Pass 6, Repertoire-Lifecycle.md's
-                         // "Post-run-through logging"). DayChecklist.jsx and
+                         // loggedDate, durationSeconds? }]` (Pass 6, Repertoire-Lifecycle.md's
+                         // "Post-run-through logging"; `durationSeconds` is the card's timer,
+                         // Pass 137, present only when a time was logged, so older sessions are
+                         // unchanged: Algorithms.md#time-on-a-practice-card-pass-137). DayChecklist.jsx and
                          // ProgressTab.jsx key off this literal string directly; as of
                          // Pass 7, computeRevivalTriggers (lib/revival.js) reads its
                          // `sessions[].stopCount` too (the > 5 auto-trigger condition), and
@@ -372,7 +374,9 @@ ChunkProgress = {
                             // see below and Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29.
                             // Never both true on the same record.
   }],                       // durationSeconds comes from the ChecklistItem timer, or from
-                            // the manual minutes field when the user typed one instead.
+                            // the manual minutes field when the user typed one instead. Since
+                            // Pass 137 the card also shows it: "N min planned, M min spent", M the
+                            // total over that day's attempts on the card.
                             // loggedAt (epoch ms) is what actually distinguishes same-day
                             // entries — a precise timestamp, set by handleLogSession
                             // (App.jsx) at log time. A placeholder keying scheme, not the
@@ -1204,9 +1208,15 @@ The schema is `validateAndMigrateTechnique` / `defaultTechnique`
   methodLastUsed: { [itemId]: { [methodId]: ISO } }, // written only on completion
   walkPosition: 0-23,           // circle-of-fifths position; moves on completion
   dayList: { date: ISO, tasks: [{ itemId, methodIds, done, tier, tempo,
-    undo? }] } | null,          // undo: only on a done task (Pass 101) — what
+    seconds?, undo? }] } | null, // undo: only on a done task (Pass 101) — what
                                 // the check-off changed, for uncompleteTask,
-                                // plus the check octaves at the time
+                                // plus the check octaves at the time.
+                                // seconds: only on a done task (Pass 137) — whole
+                                // seconds the card's timer ran, saved with the
+                                // completion; no key when there was no time;
+                                // cleared by an undo; kept for that day only
+                                // (the list is replaced daily). A part of the
+                                // task's done state for the merge.
   settings: { scalesPerDay: 3, minutesPerScale: 5 }, // defaults only, no UI in v1
   partTimes?: { [part key]: epoch ms }, // Pass 126 — when a scale's octaves (`octaves:<id>`),
                                 // hands (`hands:<id>`) or one of the two settings

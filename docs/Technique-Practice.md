@@ -96,6 +96,13 @@ plus a Technique page for managing the library.
 - A **check circle**. Done = filled teal checkmark plus a tinted card, no
   strikethrough. A **bare check-off** is allowed: it counts as done and
   practiced but does not change the saved tempo.
+- A **timer** (Pass 137), the same one the practice cards have: Start or Stop, the
+  running time, or "minutes practiced" to type one instead. Whichever way the task is
+  finished (the check circle or **Log check**), the seconds are saved with it, and a
+  done card says "Time spent: m:ss". It is display only: the pace, the walk and today's
+  list never read it, and it is kept for that day (the list is replaced daily). Undoing
+  the check-off clears it. Leaving the card (another tab) before finishing loses a
+  running timer, as on the practice cards.
 - **Expanded** card:
   - each method's instructions;
   - **"Recommended starting tempo"** = 85% of the last verified even tempo,
@@ -259,8 +266,8 @@ did, with no question asked**:
 - **Different things changed on different scales, or different settings of the same
   scale, are all kept.** A star on one device and a tempo on the other, even on the
   same scale, are both there afterwards.
-- **A check-off on one device shows on the other**, along with its tempo, its day and
-  its methods. **If both devices checked off the same task, it is checked off once.**
+- **A check-off on one device shows on the other**, along with its tempo, the seconds its
+  timer ran (Pass 137), its day and its methods. **If both devices checked off the same task, it is checked off once.**
   **An undo on one device travels** (the task is unchecked, and the day, tempo and walk
   step it had added go back). If one device undid a check-off and the other undid it and
   did it again, **whichever device's library changed most recently decides**: the

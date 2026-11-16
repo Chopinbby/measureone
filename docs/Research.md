@@ -121,6 +121,37 @@ diverged from the original guess:
 | Revival auto-trigger thresholds | stop count > 5; 2+ chunks (or 1 combo) lost in a run-through; 60+ days untouched | Product judgment calls, not research-backed — flagged here so that's explicit |
 | Abandoned-plan reminder thresholds (Pass 83) | First fires at 14 days since last logged session; re-fires every 7 days after (21, 28, ...) | Product judgment calls, same category as the revival thresholds above — not research-backed, and not derived from the 60-day revival threshold either (a different question: this fires for a piece *not yet* finished, not one already learned) |
 
+## Review model v2 constants (planned)
+
+Decided 2026-11-16, **not built**: nothing in `src/` uses any of these yet. The rules are in
+[Algorithms.md](Algorithms.md#review-model-v2-planned) and the reasons in
+[Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16). Every number below was
+chosen by the owner or by a simulation's reading of her intent, not derived from any study; the
+simulation itself only checks how even the daily load comes out and whether every chunk reaches
+Holding, never whether a person retains the music. For a piece on the new model, the table's "Ladder
+stage intervals" and "Graduation pass-count" rows above are replaced by the rows here. A build pass
+that changes a number updates its row.
+
+| Constant | Value | Where it will live | What it should eventually be backed by |
+|---|---|---|---|
+| Passes to leave Stabilizing and Settling | Workable, Challenging, Difficult: 1, 2, 3 up to 30 days; 2, 3, 3 to 60; 3, 4, 4 to 90; 3, 4, 5 beyond (the owner's table, 2026-11-16) | Pass 139, `lib/ladder.js` | Motor-learning data on passes to consolidation by difficulty, and whether it really falls with a longer plan |
+| Plan-length boundaries | 30, 60 and 90 calendar days, upper bound included (confirmed 2026-11-16) | Pass 139 | Whether the number of passes a chunk needs changes in steps at these lengths or smoothly |
+| Row for a plan set by minutes per day | the longest row ("over 90 days") and the 90-day windows | Passes 139, 140, 143 | Typical real lengths of minutes plans |
+| Strong pass | a Full pass at 85% or more of target tempo counts as two | Pass 139 | Where "close to target" starts to predict durable retention (the existing tempo-maintenance threshold, 0.85, is a different row above and happens to be the same number) |
+| Half credit for a join | 0.5 of a pass for each chunk a Full join covers, never enough to move a chunk up | Pass 141 | Whether practising a seam helps each of its two chunks, and by how much |
+| Next-day touch | for Difficult chunks and any chunk whose learning session was not a Full pass; counts as one pass; cannot promote | Pass 138 | Whether a touch the next day, for these chunks only, is the right rung (the existing Tier 1 first touch is the same idea; see the first rows of the ladder section above) |
+| Whole-piece run-through cadence | from the day the last chunk is introduced, every 3 practice days, final day kept | Pass 142 | Whether a run-through every 3 days helps more than every 2 or 5 |
+| Run-through credit | one pass for each chunk past Stabilizing whose last visit was at least that stage's earliest gap ago | Pass 142 | Whether one clean full run counts for the chunks inside it |
+| Stabilizing window | earliest 4.5% of the plan (2 to 3 days), latest 16% (3 to 7) | Pass 140 | Forgetting-curve data for a just-learned passage, and what spacing an early review window actually needs |
+| Settling window | earliest 8% (3 to 4 days), latest 28% (6 to 12) | Pass 140 | Same, for a passage already stabilized |
+| Holding first gap, window and growth | first gap 16% of the plan (7 to 10 days), plus or minus 40%, each later gap 30% longer | Pass 140 | How retention of a consolidated passage decays, which sets how fast the gap can safely grow |
+| Holding maximum | 30 days for every plan length (the owner changed it from 35% of the plan, 2026-11-16) | Pass 140 | How long a learned piece can go unreviewed before it needs a refresher; it also governs a piece long after its plan |
+| Protected share of each day | a third, for new material and for chunks not yet at their third review | Pass 140 | How much of a day new and newly learned material needs to keep pace |
+| Slip allowance | a review the day's budget keeps deferring may pass its latest day by up to 2 extra intervals | Pass 140 | How late a review can be before the passage is lost, by stage |
+| Timer alert | 20 minutes on a chunk's first session, 15 on each of the next two, 10 from the fourth (the last rung "to test") | Pass 138, a lib table | Real data on how long a session on one chunk stays productive |
+| Run-through time, until a piece has its own | 8 minutes per 100 measures, a guess; replaced by the "typical run time" field, then by the median of two or more logged run-throughs | Pass 142 | Real timing of whole-piece run-throughs |
+| Simulation assumptions | reviews at one third of the app's price, and at full price; every pass a Full pass; every run-through clean | the scratch simulation (not committed) | Real review durations and real outcome rates, from logged sessions (Tier 13) |
+
 ## Technique practice constants
 
 Canonical inventory for Technique practice (built in Passes 99–104; the

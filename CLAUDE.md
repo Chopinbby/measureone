@@ -1699,3 +1699,8 @@ silently.
   check 36 is "a sign-up without a valid bot-check token is refused", with `--dummy-token` and a no-account `--bot-check`; the privacy and
   terms pages name it all. Built 2026-11-12 on the owner's eight answers; **merged 2026-11-13 (PR #100, merge commit `affeaec`); switching it on is hers, step by step**.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#open-sign-up-pass-135)
+- **Pass 136** — the review model overhaul written into the docs as design only ("Review model v2", decided 2026-11-16, **not built: nothing in
+  `src/` reads it**): a pass table by difficulty and plan length, review windows as a share of the plan, transitions and combos as forms a chunk's
+  review takes, early whole-piece run-throughs, and a switch so a piece in progress keeps today's model. The rules are in
+  [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned); the reasons, the 48-scenario simulation and four open questions are in
+  [`Decisions.md`](docs/Decisions.md#review-model-overhaul-decided-2026-11-16). Passes 137 to 144 build it, in order. Docs only.

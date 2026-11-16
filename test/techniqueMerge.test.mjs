@@ -86,8 +86,8 @@ const engineState = (t) => ({
 const withTopUp = (t) => (t.dayList ? { ...t, dayList: topUpDayList(engineState(t), t.dayList, t.dayList.date, t.settings.scalesPerDay) } : t);
 
 // Each of these does what App.jsx's handler of the same name does.
-const complete = (t, id, tempo = null) => {
-  const o = completeTask({ items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition }, id, t.dayList.date, tempo, ++stamp);
+const complete = (t, id, tempo = null, seconds = null) => {
+  const o = completeTask({ items: t.items, dayList: t.dayList, methodLastUsed: t.methodLastUsed, walkPosition: t.walkPosition }, id, t.dayList.date, tempo, ++stamp, seconds);
   return stamped({ ...t, items: o.items, dayList: o.dayList, methodLastUsed: o.methodLastUsed, walkPosition: o.walkPosition });
 };
 const uncheck = (t, id) => {
@@ -740,6 +740,45 @@ describe("today's list (Pass 118)", () => {
     });
   });
 
+  test("[Pass 137] the seconds a task's timer ran are a part of its done state: they travel with it, from either side", () => {
+    const base = withList();
+    const timed = complete(base, "c", null, 725);
+    const x = techniquePartFingerprints(complete(base, "c")), y = techniquePartFingerprints(timed);
+    assert.deepEqual(Object.keys(y).filter((k) => x[k] !== y[k]), [K.taskDone(DAY1, "c")], "the seconds change exactly the task's done part, nothing else");
+    bothWays(base, timed, toggleStar(base, "e"), (r, who) => {
+      assert.equal(taskOf(r.merged, "c").done, true, who);
+      assert.equal(taskOf(r.merged, "c").seconds, 725, who);
+      assert.equal(item(r.merged, "e").starred, true, who);
+    });
+    // a task with no time has no key at all, the shape it had before this pass
+    assert.equal("seconds" in taskOf(complete(base, "c"), "c"), false);
+  });
+
+  test("[Pass 137] an undo takes the seconds with it, on either side", () => {
+    const base = complete(withList(), "c", 80, 600);
+    const undone = uncheck(base, "c");
+    assert.equal("seconds" in taskOf(undone, "c"), false);
+    bothWays(base, undone, toggleStar(base, "e"), (r, who) => {
+      assert.equal(taskOf(r.merged, "c").done, false, who);
+      assert.equal("seconds" in taskOf(r.merged, "c"), false, who);
+    });
+  });
+
+  test("[Pass 137] done on both with different seconds: the details of the right completion, seconds included", () => {
+    const base = withList();
+    const a = complete(base, "c", null, 300), b = complete(base, "c", null, 500);
+    // two bare check-offs: the account's, like any other tie, and the same answer for the same pair
+    assert.equal(taskOf(merge(a, b, base).merged, "c").seconds, 500);
+    assert.equal(taskOf(merge(b, a, base).merged, "c").seconds, 300);
+    // one logged a tempo and the other only checked it off: the tempo's completion, with ITS seconds
+    bothWays(base, complete(base, "c", null, 900), complete(base, "c", 70, 120), (r, who) => {
+      assert.equal(taskOf(r.merged, "c").tempo, 70, who);
+      assert.equal(taskOf(r.merged, "c").seconds, 120, who);
+    });
+    // the same completion on both sides is agreement
+    assert.equal(merge(complete(base, "c", null, 300), complete(base, "c", null, 300), base).status, "identical");
+  });
+
   test("done on both sides is done, keeping the details of the tempo logged later; the same bare check-off on both is agreement", () => {
     const base = withList();
     const a = complete(base, "c", 80), b = complete(base, "c", 90);
@@ -1199,8 +1238,10 @@ describe("two simulated devices (Pass 118)", () => {
     const finished = tasks.filter((x) => x.done);
     const anyId = () => pickOf(rng, t.items).id;
     let next = null;
-    if (kind === "complete" && open.length) next = complete(t, pickOf(rng, open).itemId, null);
-    else if (kind === "tempo" && open.length) next = complete(t, pickOf(rng, open).itemId, intIn(rng, 40, 200));
+    // Pass 137: a check-off carries the seconds the card's timer read about half the time (none otherwise).
+    const timerSeconds = () => (rng() < 0.5 ? intIn(rng, 30, 3600) : null);
+    if (kind === "complete" && open.length) next = complete(t, pickOf(rng, open).itemId, null, timerSeconds());
+    else if (kind === "tempo" && open.length) next = complete(t, pickOf(rng, open).itemId, intIn(rng, 40, 200), timerSeconds());
     else if (kind === "undo" && finished.length) next = uncheck(t, pickOf(rng, finished).itemId);
     else if (kind === "rotation" && t.items.length) next = toggleRotation(t, anyId());
     else if (kind === "octaves" && t.items.length) next = editItem(t, anyId(), { octaves: intIn(rng, 1, 4) });
@@ -1240,7 +1281,7 @@ describe("two simulated devices (Pass 118)", () => {
   const later = (a, b) => (!a ? b || null : !b ? a : a >= b ? a : b);
   const tripleOf = (it) => ({ evenTempo: it.evenTempo, lastCheckedDate: it.lastCheckedDate, lastCheckedAt: it.lastCheckedAt, checkOctaves: it.checkOctaves });
   const byId = (T) => new Map(T.items.map((it) => [it.id, it]));
-  const taskState = (task) => (task && task.done ? { tempo: task.tempo, undo: task.undo } : null);
+  const taskState = (task) => (task && task.done ? { tempo: task.tempo, seconds: task.seconds, undo: task.undo } : null);
 
   function runOne(seed, tally, weights) {
     const rng = seeded(seed);
@@ -1459,18 +1500,29 @@ describe("two simulated devices (Pass 118)", () => {
             // done on both in different ways: the one that logged a tempo; of two, the side the scale's tempo came from, else the one logged later, else the account's
             if (lt.done && rt.done && cl && cr && !same(sl, sr)) {
               const lHas = lt.tempo != null, rHas = rt.tempo != null;
-              let expectedTempo;
-              if (lHas !== rHas) expectedTempo = lHas ? lt.tempo : rt.tempo;
-              else if (lHas) {
+              let winner;
+              if (lHas !== rHas) winner = lHas ? lt : rt;
+              else {
+                // The side the scale's tempo came from decides, whether or not either task logged a tempo
+                // (Pass 137 found this: two bare check-offs that differ only in their seconds are decided the
+                // same way, so the seconds follow the scale's side, else the later tempo, else the account's).
                 const side = checkSide.get(id);
-                if (side) expectedTempo = side === "local" ? lt.tempo : rt.tempo;
-                else {
+                if (side) winner = side === "local" ? lt : rt;
+                else if (lHas) {
                   const lat = (lI.get(id) || {}).lastCheckedAt, rat = (rI.get(id) || {}).lastCheckedAt;
-                  expectedTempo = lat != null && (rat == null || lat > rat) ? lt.tempo : rt.tempo;
-                }
-              } else expectedTempo = rt.tempo;
-              assert.equal(mt.tempo, expectedTempo, `${id} done on both: the details of the right one (${where})`);
+                  winner = lat != null && (rat == null || lat > rat) ? lt : rt;
+                } else winner = rt;
+              }
+              assert.equal(mt.tempo, winner.tempo, `${id} done on both: the details of the right one (${where})`);
+              // Pass 137: the seconds the timer ran belong to the same completion as its tempo
+              assert.equal(mt.seconds, winner.seconds, `${id} done on both: the seconds of the right one (${where})`);
             }
+            // Pass 137: a completion that stands on one side only keeps its own seconds; undone, they are gone
+            if (expected && !(cl && cr && !same(sl, sr))) {
+              const from = !cl && cr ? rt : lt;
+              assert.equal(mt.seconds, from.seconds, `${id}: the seconds travel with the completion (${where})`);
+            }
+            if (!expected) assert.equal(mt.seconds, undefined, `${id}: an undone task holds no seconds (${where})`);
             if (expected) tally.completionsKept += 1;
             if (cl !== cr && !expected && sb) tally.undosTravelled += 1;
             if (lt.done && rt.done) tally.doneOnBoth += 1;

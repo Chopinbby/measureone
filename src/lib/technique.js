@@ -551,7 +551,7 @@ const PRACTICED_DATES_KEPT = 14; // two calendar weeks is all paceStatus reads
 //
 // state: { items, dayList, methodLastUsed, walkPosition }
 // Returns a new state object; inputs are not mutated.
-export function completeTask(state, itemId, today, tempo = null, now = null) {
+export function completeTask(state, itemId, today, tempo = null, now = null, seconds = null) {
   const { items = [], dayList, methodLastUsed = {}, walkPosition = 0 } = state;
   const task = dayList?.tasks.find((t) => t.itemId === itemId);
   if (!task || task.done) return state;
@@ -559,6 +559,12 @@ export function completeTask(state, itemId, today, tempo = null, now = null) {
   const keyOfDayPos = effectiveWalkPosition(walkPosition, items);
   const hasTempo = typeof tempo === "number" && Number.isFinite(tempo) && tempo > 0;
   const checkedAt = typeof now === "number" && Number.isFinite(now) && now > 0 ? now : null;
+  // Pass 137 — the seconds the task's timer ran, saved with the task's done state (never with
+  // the scale: it is how long THIS completion took, so it lives on the day's task and goes when
+  // the day's list does). Only a real time is saved: no key at all otherwise, so a task done
+  // without one is exactly what it was before this pass. Display only: nothing here or in the
+  // walk, the pace or the day's list reads it (technique stays out of every schedule path).
+  const hasSeconds = typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 1;
 
   let completedItem = null;
   const nextItems = items.map((it) => {
@@ -608,7 +614,9 @@ export function completeTask(state, itemId, today, tempo = null, now = null) {
     items: nextItems,
     dayList: {
       ...dayList,
-      tasks: dayList.tasks.map((t) => (t.itemId === itemId ? { ...t, done: true, tempo: hasTempo ? tempo : null, undo } : t)),
+      tasks: dayList.tasks.map((t) =>
+        t.itemId === itemId ? { ...t, done: true, tempo: hasTempo ? tempo : null, ...(hasSeconds ? { seconds: Math.round(seconds) } : {}), undo } : t
+      ),
     },
     methodLastUsed: { ...methodLastUsed, [itemId]: usedForItem },
     walkPosition: nextWalk,
@@ -660,7 +668,8 @@ export function uncompleteTask(state, itemId) {
       ...dayList,
       tasks: dayList.tasks.map((t) => {
         if (t.itemId !== itemId) return t;
-        const { undo: _drop, ...rest } = t;
+        // The saved seconds go with the completion they belong to, as the tempo does (Pass 137).
+        const { undo: _drop, seconds: _seconds, ...rest } = t;
         return { ...rest, done: false, tempo: null };
       }),
     },

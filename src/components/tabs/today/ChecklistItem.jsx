@@ -12,6 +12,7 @@ import {
   resolveRequiredReps,
 } from "../../../lib/confidence";
 import { focusSpotGate } from "../../../lib/scheduling";
+import { plannedMinutesFor, plannedAboutText, plannedSpentText, secondsSpentIn } from "../../../lib/plannedMinutes";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
 import { ReassessPanel } from "./ReassessPanel";
@@ -95,6 +96,13 @@ export function ChecklistItem({
   // reachable rather than gated behind undoing the first.
   const sessionsToday = (entry.sessions || []).filter((s) => s.day === day);
   const session = sessionsToday[sessionsToday.length - 1];
+  // Pass 137 — the card's one price (lib/plannedMinutes.js), shown beside the
+  // timer, and after logging beside what was actually spent today (all of
+  // today's attempts on this card, since the price is for the whole task).
+  // null for a task the schedule never priced (a section run-through): no
+  // estimate is shown rather than an invented one.
+  const plannedMinutes = plannedMinutesFor(chunk);
+  const spentTodaySeconds = secondsSpentIn(sessionsToday);
   // Honest undo copy (docs/Decisions.md's "session undo should fully
   // reverse the ladder" entry): undo only fully reverses stage/tempo/
   // nextDueDate when the session being undone is this chunk's most recent
@@ -494,12 +502,15 @@ export function ChecklistItem({
             </div>
           </div>
         ) : session ? (
-          <p className="tip-line">
-            Logged: {session.cleanReps} consecutive clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM
-            {session.durationSeconds ? ` in ${formatDuration(session.durationSeconds)}` : ""}
-            {outcomeMeta ? ` · ${outcomeMeta.label}` : ""}
-            {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
-          </p>
+          <>
+            <p className="tip-line">
+              Logged: {session.cleanReps} consecutive clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM
+              {plannedMinutes == null && session.durationSeconds ? ` in ${formatDuration(session.durationSeconds)}` : ""}
+              {outcomeMeta ? ` · ${outcomeMeta.label}` : ""}
+              {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
+            </p>
+            {plannedMinutes != null && <p className="tip-line">{plannedSpentText(plannedMinutes, spentTodaySeconds)}</p>}
+          </>
         ) : null}
         {/* Pass 59 — the tempo-ratchet overlearning bonus is the only path
             that can push practiceBPM above targetBPM (the normal step and
@@ -546,6 +557,7 @@ export function ChecklistItem({
                 />
               </label>
             )}
+            {plannedMinutes != null && <span className="timer-planned">{plannedAboutText(plannedMinutes)}</span>}
           </div>
         )}
 

@@ -41,6 +41,7 @@ import {
   TECHNIQUE_WALK_LAP_DAYS,
 } from "../src/lib/constants.js";
 import { addDaysISO, startOfWeekISO } from "../src/lib/utils.js";
+import { validateAndMigrateTechnique } from "../src/lib/storage.js";
 
 /* ------------------------------- Fixtures ------------------------------- */
 
@@ -444,6 +445,62 @@ describe("completeTask, startingTempo, changeCheckOctaves", () => {
     earlier.dayList = buildDayList(earlier, MONDAY);
     assert.equal(completeTask(earlier, "c", MONDAY, null, NOW).items[0].lastCheckedAt, 5, "a bare check-off logs no tempo, so the time of the last tempo stays");
     assert.equal(completeTask(earlier, "c", MONDAY, 112, NOW).items[0].lastCheckedAt, NOW);
+  });
+
+  test("[Pass 137] the seconds a task's timer ran are saved with the task, in whole seconds, and never touch the scale", () => {
+    const timed = completeTask(setup(), "c", MONDAY, null, null, 725.4);
+    assert.equal(timed.dayList.tasks[0].seconds, 725);
+    assert.equal(timed.dayList.tasks[0].done, true);
+    const bare = completeTask(setup(), "c", MONDAY);
+    assert.deepEqual(timed.items, bare.items, "the scale is exactly what a check-off without a time leaves");
+    assert.deepEqual(timed.methodLastUsed, bare.methodLastUsed);
+    assert.equal(timed.walkPosition, bare.walkPosition);
+    const withTempo = completeTask(setup(), "c", MONDAY, 112, 1_760_000_000_000, 90);
+    assert.equal(withTempo.dayList.tasks[0].seconds, 90);
+    assert.equal(withTempo.dayList.tasks[0].tempo, 112);
+  });
+
+  test("[Pass 137] no time, or a time that is not a real one, leaves no key at all: the task is exactly what it was before", () => {
+    for (const bad of [undefined, null, 0, 0.9, -5, NaN, Infinity, "300", {}]) {
+      const t = completeTask(setup(), "c", MONDAY, null, null, bad).dayList.tasks[0];
+      assert.equal("seconds" in t, false, String(bad));
+    }
+    assert.deepEqual(Object.keys(completeTask(setup(), "c", MONDAY).dayList.tasks[0]).sort(), ["done", "itemId", "methodIds", "tempo", "tier", "undo"]);
+  });
+
+  test("[Pass 137] unchecking takes the seconds away with the tempo, so the card is as it was before the check-off", () => {
+    const done = completeTask(setup(), "c", MONDAY, 112, null, 300);
+    assert.equal(done.dayList.tasks[0].seconds, 300);
+    const undone = uncompleteTask(done, "c");
+    const t = undone.dayList.tasks[0];
+    assert.equal(t.done, false);
+    assert.equal("seconds" in t, false);
+    assert.equal("undo" in t, false);
+    assert.equal(t.tempo, null);
+  });
+
+  test("[Pass 137] a saved library keeps a done task's seconds through a reload, drops them from a task that is not done, and gains no key where there were none", () => {
+    const raw = {
+      dayList: {
+        date: MONDAY,
+        tasks: [
+          { itemId: "a", methodIds: [], done: true, tier: "walk", tempo: 90, seconds: 725 },
+          { itemId: "b", methodIds: [], done: false, tier: "walk", tempo: null, seconds: 40 },
+          { itemId: "c", methodIds: [], done: true, tier: "walk", tempo: null },
+          { itemId: "d", methodIds: [], done: true, tier: "walk", tempo: null, seconds: -3 },
+          { itemId: "e", methodIds: [], done: true, tier: "walk", tempo: null, seconds: 12.6 },
+        ],
+      },
+    };
+    const once = validateAndMigrateTechnique(JSON.parse(JSON.stringify(raw)));
+    const byId = Object.fromEntries(once.dayList.tasks.map((t) => [t.itemId, t]));
+    assert.equal(byId.a.seconds, 725);
+    assert.equal("seconds" in byId.b, false, "a task that is not done holds no seconds");
+    assert.equal("seconds" in byId.c, false, "no time saved: no key materialized, so no fingerprint changes");
+    assert.equal("seconds" in byId.d, false);
+    assert.equal(byId.e.seconds, 13);
+    const twice = validateAndMigrateTechnique(JSON.parse(JSON.stringify(once)));
+    assert.deepEqual(twice.dayList, once.dayList, "loading it again changes nothing");
   });
 
   test("starting tempo is 85% of the last verified tempo, null when there is none", () => {

@@ -140,7 +140,7 @@ export const techniquePartKey = {
   customMethod: (methodId) => `customMethod:${methodId}`,
   setting: (name) => `setting:${name}`,
   walk: "walk",
-  taskDone: (date, itemId) => `taskDone:${date}:${itemId}`, // done, tempo, undo note
+  taskDone: (date, itemId) => `taskDone:${date}:${itemId}`, // done, tempo, seconds the timer ran (Pass 137), undo note
   taskPlan: (date, itemId) => `taskPlan:${date}:${itemId}`, // methods and tier
 };
 
@@ -196,7 +196,7 @@ function partsOfCanonical(T) {
   const list = isObject(T.dayList) ? T.dayList : null;
   if (list) {
     (Array.isArray(list.tasks) ? list.tasks : []).forEach((t) => {
-      if (t.done) parts[K.taskDone(list.date, t.itemId)] = { tempo: t.tempo, ...(t.undo ? { undo: t.undo } : {}) };
+      if (t.done) parts[K.taskDone(list.date, t.itemId)] = { tempo: t.tempo, ...(Number.isFinite(t.seconds) ? { seconds: t.seconds } : {}), ...(t.undo ? { undo: t.undo } : {}) };
       parts[K.taskPlan(list.date, t.itemId)] = { methodIds: t.methodIds, tier: t.tier };
     });
   }
@@ -704,6 +704,7 @@ export function planTechniqueMerge({ local, remote, base }) {
         done: !!done,
         tier: plan.tier,
         tempo: done ? done.tempo : null,
+        ...(done && Number.isFinite(done.seconds) ? { seconds: done.seconds } : {}),
         ...(done && done.undo ? { undo: copy(done.undo) } : {}),
       });
     });

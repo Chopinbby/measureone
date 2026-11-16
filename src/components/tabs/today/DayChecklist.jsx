@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChecklistItem } from "./ChecklistItem";
 import { NumberInput } from "../../NumberInput";
-import { formatMinutes } from "../../../lib/utils";
+import { formatMinutes, formatDuration } from "../../../lib/utils";
+import { elapsedSeconds } from "../../../lib/plannedMinutes";
 import { classifyDayEmptyState, movedIdsForDay } from "../../../lib/scheduling";
 import { findHistoricalItemsForDay } from "../../../lib/history";
 
@@ -16,10 +17,33 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
   const lastSession = sessionsToday[sessionsToday.length - 1];
   const [stopCount, setStopCount] = useState("");
 
+  // Pass 137 — a timer for the whole-piece run-through, same shape as the
+  // practice cards' (ChecklistItem.jsx, Pass 72): the running stretch remembers
+  // the wall-clock moment it began and the seconds it already held, and every
+  // reading is recomputed from the clock (lib/plannedMinutes.js elapsedSeconds),
+  // so a backgrounded tab that skips ticks is still right when it comes back.
+  // The seconds are saved on the logged session beside the stop count. There is
+  // deliberately no "planned" figure on this card: today the schedule bills this
+  // day at the whole daily budget, a placeholder, not a price (Pass 142).
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  const timerStartRef = useRef(null);
+  useEffect(() => {
+    if (!timerRunning) return;
+    timerStartRef.current = { startedAt: Date.now(), baseSeconds: durationSeconds };
+    const id = setInterval(() => setDurationSeconds(elapsedSeconds(timerStartRef.current, Date.now())), 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerRunning]);
+
   const submit = () => {
     if (stopCount === "") return;
-    onLogRunThrough(day, Number(stopCount));
+    // Read from the clock at the moment of the click, not from the last tick.
+    const finalSeconds = timerRunning && timerStartRef.current ? elapsedSeconds(timerStartRef.current, Date.now(), Math.floor) : durationSeconds;
+    onLogRunThrough(day, Number(stopCount), finalSeconds);
     setStopCount("");
+    setTimerRunning(false);
+    setDurationSeconds(0);
   };
 
   return (
@@ -29,9 +53,28 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
       {lastSession && (
         <p className="tip-line">
           Logged: stopped {lastSession.stopCount} time{lastSession.stopCount === 1 ? "" : "s"}
+          {lastSession.durationSeconds ? ` in ${formatDuration(lastSession.durationSeconds)}` : ""}
           {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
         </p>
       )}
+      <div className="timer-row">
+        <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
+          {timerRunning ? "Stop" : "Start"} timer
+        </button>
+        {timerRunning ? (
+          <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
+        ) : (
+          <label className="timer-manual">
+            <span>minutes practiced</span>
+            <NumberInput
+              value={durationSeconds ? Math.round(durationSeconds / 60) : ""}
+              min={0}
+              onCommit={(n) => setDurationSeconds(Math.round(n * 60))}
+              placeholder="e.g. 10"
+            />
+          </label>
+        )}
+      </div>
       <div className="log-row">
         <label>
           <span>Times stopped</span>

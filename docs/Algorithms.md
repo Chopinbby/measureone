@@ -364,6 +364,13 @@ mirroring `handleLogRunThrough`/`handleUnlogRunThrough`'s shape.
 
 ## Timeline / scheduler
 
+> **Planned change (decided 2026-11-16, not built):** for a piece on
+> [Review model v2](#review-model-v2-planned), rule 4's review placement (a review on its
+> `nextDueDate`, flexing forward under pressure), the Tier 1 first touch, the treatment of
+> transitions and combos as their own placed items, and the plan's one final-day
+> "consolidation" run-through (which gains earlier ones) all change. Introduction placement (rule 1 and Pass 90's smoothing)
+> does not. Everything below describes the model a piece is on today.
+
 `computeTimeline(piece, chunkSet)` is the scheduler. It runs on every
 `piece` change (see [Architecture.md](Architecture.md#state-management)),
 so it always reflects the latest logged sessions. `piece.daysToLearn` is a
@@ -667,6 +674,11 @@ investigation history, including why the original two-reading framing
 missed what was actually being asked.
 
 ## Deriving daysToLearn from minutesPerDay (scheduleMode: "minutes")
+
+> **Planned change (decided 2026-11-16, not built):** the derivation below assumes two reviews of
+> each chunk at full price. For a piece on [Review model v2](#review-model-v2-planned) that
+> overestimates, so Pass 143 replaces it with a calculation that follows the new ladder, on the
+> "over 90 days" row of the pass table and the 90-day windows. The reschedule-marker floor stays.
 
 `computeTimeline` treats `piece.daysToLearn` purely as an input — it never
 asks "is this actually enough days for this piece's effort at this pace,"
@@ -1599,6 +1611,13 @@ without this function existing at all.
 
 ## Session outcomes & the maintenance ladder
 
+> **Planned change (decided 2026-11-16, not built):** for a piece on
+> [Review model v2](#review-model-v2-planned), the ladder's stage lengths, its "4 consecutive full
+> passes" and its fixed gaps below are replaced by a pass table by difficulty and plan length, strong
+> passes, half credit from joins, and review windows. How a single session is judged
+> (`classifySessionOutcome`) does not change. This section describes the model every piece is on
+> until it is switched.
+
 Data shapes: [Data-Model.md](Data-Model.md#the-piece-object) (`ChunkProgress.stage`
 etc., `piece.ladderConfig`). Design: [Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built](Repertoire-Lifecycle.md#stage-4--maintenance-mostly-built).
 Replaces the old flat pass/fail and free-standing "how did it feel"
@@ -2247,7 +2266,155 @@ crashing, but logs a `console.warn` first — found in self-review as a
 silent-failure risk (a corrupted or future stage value would otherwise
 misclassify with no trace).
 
+## Review model v2 (planned)
+
+> **Status: decided 2026-11-16, not built. Nothing in `src/` reads any of this yet.** This is
+> the one place the rules are written out. The reasons, what was rejected and the simulation
+> that checked them are in
+> [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16); the hand-picked
+> numbers are tracked in [Research.md](Research.md#review-model-v2-constants-planned). A
+> build pass reads this section first, then re-checks the rule it builds against the real code.
+
+The ladder above gives every chunk, transition and combo the same fixed gaps and the same
+four passes in each stage, whatever the chunk's difficulty or the plan's length. Review model
+v2 replaces that for a piece whose `piece.reviewModel` is `2` (a field Pass 138 adds;
+`null` means today's model). **A piece already in progress keeps today's model until the
+owner presses "Update this piece's review plan" in its Settings, and a new piece gets the new
+model only when the owner says so (Pass 144).** Three things apply to every piece whichever
+model it is on, because they only change what a card shows or says: the time estimate and timers
+on cards (Pass 137), "Need N clean reps in a row", and the timer alert (rule 9).
+
+Names used below are the screen's own: a **Full pass**, **Partial pass** and **Needs rework**
+are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME_META`,
+`lib/constants.js`); **Workable, Challenging and Difficult** are the labels for `easy`,
+`medium` and `hard`.
+
+1. **Passes needed to leave Stabilizing and Settling.** The count is the same for each of the
+   two stages, and depends on the chunk's difficulty and the plan's length (`daysToLearn`):
+
+   | Plan length | Workable | Challenging | Difficult |
+   |---|---|---|---|
+   | up to 30 days | 1 | 2 | 3 |
+   | over 30 up to 60 days | 2 | 3 | 3 |
+   | over 60 up to 90 days | 3 | 4 | 4 |
+   | over 90 days | 3 | 4 | 5 |
+
+   The boundaries read as 30, 60 and 90 calendar days, each upper bound included (confirmed by
+   the owner 2026-11-16). A plan set by minutes per day uses the last row. A chunk keeps the
+   passes it has already earned if a reschedule changes the plan's length, and reads the new row
+   from its next pass. Each piece can override the table: automatic by default, labelled with
+   the plan length it follows, "set by you" on a changed number, and a "Reset to automatic".
+2. **What counts as a pass.** A Full pass counts; a chunk's first learning session counts as
+   its first pass; the clean reps must be in a row; a Full pass at 85% or more of the chunk's
+   target tempo counts double (a "strong pass"); a Partial pass starts the count over; Needs
+   rework steps the chunk back one stage. **A chunk never moves up on its first session, even
+   where the table says 1, and only moves up on its own turn** (not on credit from a neighbour
+   or from the next-day touch).
+3. **A next-day touch** for every Difficult chunk, and for any chunk whose learning session was
+   not a Full pass. It counts as one pass and cannot move the chunk up by itself. (Today the
+   design notes already promise a touch the day after introduction, but `computeTimeline`
+   places it only for a chunk never logged, so it vanishes once the introduction is logged:
+   [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2).)
+4. **Transitions and combos stop being tasks of their own.** They have no ladder, no
+   introduction day and no progress key. A chunk's review takes a **form** in rotation: the
+   chunk itself, a join (a transition) with a neighbour, with the sides alternating, and, for
+   Difficult chunks only, a combo. The order is chunk, join, combo for a Difficult chunk and
+   chunk, join, chunk for the others. A join's first appearance is priced as a review, not as
+   new material, and its neighbour must already be introduced. A Full pass on a join counts as
+   **half a pass for each chunk it covers**; a Partial pass or a failed join gives no credit
+   and demotes nothing, because one session cannot tell which chunk it was. Half credit never
+   moves a chunk up (rule 2).
+5. **Whole-piece run-throughs start as soon as the last chunk is introduced** and repeat every
+   3 practice days, with the plan's final-day run-through kept. A clean one counts as one pass
+   for every chunk past Stabilizing whose last visit was at least that stage's earliest gap
+   ago, and restarts that chunk's window. A chunk flagged rough or lost in the run-through is
+   not credited (and demotes as today).
+6. **Review timing is a window**: an earliest day and a latest day, each a percentage of the
+   plan's length held between day limits (rounded to whole days). Plans set by minutes per day
+   use the 90-day figures.
+
+   | Stage | Earliest | Latest |
+   |---|---|---|
+   | Stabilizing | 4.5% of the plan, held to 2 to 3 days | 16%, held to 3 to 7 days |
+   | Settling | 8%, held to 3 to 4 days | 28%, held to 6 to 12 days |
+   | Holding | the window's lower end: the gap less 40%, where the first gap is 16% of the plan, held to 7 to 10 days | the window's upper end: the gap plus 40%, where each later gap is 30% longer than the one before |
+
+   **Holding never goes past 30 days, for every plan length**, and the window never extends
+   past that maximum: Holding is also what keeps a piece in shape after the plan ends, so it is
+   not shortened for a short plan. What the rule gives, for reference (Holding as the first gap):
+
+   | Plan | Stabilizing | Settling | Holding, first gap |
+   |---|---|---|---|
+   | 30 days | 2 to 5 | 3 to 8 | about 7 |
+   | 45 days | 2 to 7 | 4 to 12 | about 7 |
+   | 60 or 75 days | 3 to 7 | 4 to 12 | about 10 |
+   | 90 days or more, and minutes plans | 3 to 7 | 4 to 12 | about 10 |
+7. **Placement.** Each day takes the day's fixed work first (new material, next-day touches,
+   run-throughs), then the reviews that have reached the end of their window, then pulls
+   reviews forward from inside their window, most overdue first, until the day reaches the
+   plan's average load. **At least a third of each day is protected** for new material and for
+   chunks that have not yet had their third review; time not needed there goes back to
+   reviews. A review the day's budget keeps deferring may slip past its latest day by up to 2
+   extra intervals (twice the stage's normal gap). **A late review is slack, never a failure:**
+   only the logged outcome touches the ladder
+   ([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2)).
+8. **Worst first.** Reviews on a day are ordered by last outcome (Needs rework, then Partial
+   pass), then how far below target tempo, then earlier stage, then most overdue. Pass 149
+   adds "ran long last time". A review that runs past its timer alert still counts toward
+   moving up, for now.
+9. **The timer alert** on a card: 20 minutes on a chunk's first session, 15 on each of the next
+   two, 10 from the fourth. Text only, shown once per session, with an "Add a focus spot"
+   button. There is no lower-tempo button: the learner records a lower tempo on the card, as
+   today.
+10. **The switch.** As above: `piece.reviewModel`, never set by a load, never part of the
+    Settings form (so a Settings save cannot overwrite it), changed only by the Settings
+    button and its way back ("Switch back to the earlier review plan"). Practice already
+    logged is kept either way.
+
+**Not changed by these rules, as far as the decided design says:** how a single session is
+judged (`classifySessionOutcome`: the card's wording changes, the classification does not,
+Pass 138), the tempo ratchet, and Needs rework stepping a chunk back a stage. The design
+says nothing about the other ladder mechanics (Holding's periodic harder check, the
+Cold-Start rules), so each keeps working as documented above until a build pass says
+otherwise. **One consequence:** transitions and combos lose their own progress (rule 4), so
+every reader of them has to be checked and changed for a piece on model 2: `isPlanActuallyComplete`
+(practice chunks only), `estimateRescheduleFit`, `computeRemainingConnectorIds` and the
+reschedule marker's connector lists, `classifyDayCompletion`, Master Agenda, Piece Map's "Related
+chunks", the Progress estimated-versus-actual panel, Interleaved eligibility and the revival
+reassessment walk. Pass 141 lists each decision it makes.
+
+**What builds each rule** (the backlog's pass numbers; each pass applies only to a piece on
+`reviewModel` 2 unless it says so): 137 shows a time estimate and a timer on every card
+(display only); 138 adds the switch, the real next-day touch, "in a row" wording and the
+alert (rules 3 and 9, and rule 10's switch); 139 the pass table, strong pass, half credit and
+per-piece override (rules 1 and 2); 140 the windows, placement, protected third and worst-first
+order (rules 6 to 8); 141 joins as forms (rule 4); 142 early run-throughs (rule 5), with a
+"typical run time at target tempo" piece field; 143 the minutes-mode day count (which today
+assumes two reviews of each chunk at full price: [above](#deriving-daystolearn-from-minutesperday-schedulemode-minutes));
+144 checks the whole model and decides, with the owner, the default for new pieces.
+
+**Questions the decided rules leave open** (a build pass must settle each with the owner, and
+the simulation in Decisions.md is then re-run with the answer):
+- *Who gets credit on a join?* Rule 4 says half a pass for each chunk it covers, which includes
+  the chunk whose turn it is. The simulation gave that chunk a full pass and only the
+  neighbour half. The two read very differently for a Difficult chunk, where one return in
+  three is a join. Settle in Pass 141 (Pass 139 supplies the half-credit function).
+- *How is a combo return credited*, as the chunk's own turn or as half credit? The rules do not
+  say. The simulation treated it as a full turn. Settle in Pass 141.
+- *The Holding maximum:* this section applies it to the window (never past 30 days), the
+  stricter reading, matching Pass 140's wording. Pass 136's own text applied it to the gap.
+- *Whether the protected third and the 2-extra-intervals slip hold up* in the real
+  placement: the simulation did not model either (Decisions.md lists what it did not model).
+- *A light second half.* All introductions finish by the plan's midpoint, so the back of a plan
+  is light. Spreading introductions later is untested and undecided (Pass 143, only if the owner
+  decides).
+
 ## What's due — the live maintenance query
+
+> **Planned change (decided 2026-11-16, not built):** for a piece on
+> [Review model v2](#review-model-v2-planned) a review has a window, not one due date: available
+> from its earliest day, due by its latest, ordered worst first rather than most-overdue-first
+> (Pass 140). Today's query is described below.
 
 `computeDueReviews(piece, chunkSet, asOfDate)` (`lib/maintenance.js`,
 Pass 8) is the query that finally *reads* the `nextDueDate` the ladder has

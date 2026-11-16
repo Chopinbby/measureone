@@ -248,6 +248,10 @@ designed.
 
 ### The unifying idea
 
+> **Planned change (decided 2026-11-16, not built):** under
+> [Review model v2](#review-model-v2-planned) only practice chunks ride the ladder; a transition or
+> combo becomes a form a chunk's review takes. The paragraph below describes today's model.
+
 Learning-review and maintenance are **not two separate systems** — they're
 one continuous card-based ladder that every practice chunk, transition, and
 combo rides after its initial introduction. What changes between "a piece
@@ -285,6 +289,12 @@ sitting on `piece.progress`, not that the derivation pattern itself
 changed.
 
 ### The ladder: three stages
+
+> **Planned change (decided 2026-11-16, not built):** under
+> [Review model v2](#review-model-v2-planned) the fixed intervals and the flat "4 consecutive full
+> passes" below become a window and a pass count that depend on the chunk's difficulty and the
+> plan's length ([the rules](Algorithms.md#review-model-v2-planned)). The table is today's model,
+> which every piece keeps until its owner switches it.
 
 | Stage | Interval | Graduates after | Tempo floor |
 |---|---|---|---|
@@ -372,6 +382,12 @@ ambiguity concrete:
   [Decisions.md](Decisions.md#ux).
 
 ### Introduction-window review scheduling: Tier 1 / Tier 2
+
+> **Planned change (decided 2026-11-16, not built):** under
+> [Review model v2](#review-model-v2-planned) the first touch becomes a real next-day touch (for
+> Difficult chunks and any chunk whose learning session was not a Full pass) that survives the
+> introduction being logged, and Tier 2's rolling becomes placement inside a window. The rule that
+> a late review is slack, never a failure, stays. Today's behavior is described below.
 
 **Implemented** (Pass 5 of the maintenance-ladder build) — `computeTimeline`
 (`src/lib/scheduling.js`) places both tiers directly; full mechanics:
@@ -1345,6 +1361,59 @@ one check.
   `targetBPM`/`practiceBPM` or surfacing a derived delta; extending the
   repeating-threshold treatment to section-pair run-throughs (a separate
   open question from Pass 49, untouched here).
+
+### Review model v2 (planned)
+
+**Status: decided 2026-11-16, not built.** The rules are written once, in
+[Algorithms.md](Algorithms.md#review-model-v2-planned); the reasons, what was rejected and the
+simulation behind them are in
+[Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16). This section says where
+it sits in the lifecycle and what each part of Stage 4 above will say once it is built. It
+applies to a piece on `reviewModel` 2 only: a piece already in progress keeps the ladder as
+described above until the owner presses "Update this piece's review plan", and a new piece gets
+the new model only when she says so.
+
+What does not change, because it is the product's rule and not a tuning: **a review arriving
+late is schedule slack, never a failure** (only the logged outcome touches the ladder), there
+are no streaks and no punishment mechanics
+([Product-Principles.md](Product-Principles.md#no-punishment-mechanics)), and anything the app
+computes keeps a manual way out
+([Product-Principles.md](Product-Principles.md#always-provide-a-manual-escape-hatch)): here a
+per-piece override of the pass table with "Reset to automatic", and a way back to the earlier
+review plan. Confidence is still earned: a chunk moves up only on passes it earns itself.
+
+What the model changes, by the section it replaces:
+
+- **"The unifying idea" (every practice chunk, transition and combo rides the ladder).** Only
+  practice chunks have a ladder. A transition (shown as "Review") or a combo (shown as "Focus
+  block") becomes a form a chunk's review takes, and counts as half a pass for each chunk it
+  covers. They have no introduction day and no progress of their own.
+- **"The ladder: three stages" (4 days, 7 days, then 14 growing, four passes each).** The number
+  of passes to leave Stabilizing and Settling depends on the chunk's difficulty and the plan's
+  length (one pass for a Workable chunk on a plan of a month or less, up to five for a Difficult
+  chunk on a plan over three months). The gaps become windows measured against the plan's length,
+  and Holding grows 30% a visit to a maximum of 30 days whatever the plan's length. A Full pass at
+  85% of target tempo or more counts double.
+- **"Introduction-window review scheduling: Tier 1 / Tier 2".** Tier 1's first touch becomes a
+  real next-day touch for every Difficult chunk and for any chunk whose learning session was not
+  a Full pass, and it survives the introduction being logged (today it is placed only for a chunk
+  never logged). Tier 2's "roll to the next day under pressure" becomes placement inside a window:
+  most overdue first, a third of each day protected for new material, worst first.
+- **"Session outcomes: three tiers".** Unchanged. The card says "Need N clean reps in a row" and
+  asks for the best run; classification does not change.
+- **"Post-run-through logging".** Whole-piece run-throughs start as soon as the last chunk is
+  introduced and repeat every 3 practice days; a clean one counts as a pass for the chunks past
+  Stabilizing that are due for a visit. The rough and lost flags demote as today, and a flagged
+  chunk is not credited.
+- **Not touched by the decided rules themselves:** the Cold-Start check, the tempo ratchet and
+  how Revival judges a chunk. **One consequence to know about:** Interleaved mode's eligibility and
+  Revival's reassessment walk read transitions and combos, which stop having their own progress, so
+  Pass 141 has to check and change those readers (it lists them, with `isPlanActuallyComplete`,
+  the reschedule estimates and Master Agenda).
+
+Questions the decided rules leave open are listed in
+[Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16) and at the end of its
+open-questions list.
 
 ### Explicitly not designed/built here
 

@@ -4053,6 +4053,181 @@ best-case assumption, with a fixed 90-day bar — not compared against
   already at/above goal). `npm test`: 507/507.
 - See [Algorithms.md](Algorithms.md#tempo-convergence-simulation-pass-62).
 
+### Review model overhaul (decided 2026-11-16)
+
+**Status: decided, not built. Pass 136 (docs only) records it; Passes 137 to 144 build it, in
+order, and Tier 13 (time estimates) follows.** The rules themselves are written once, in
+[Algorithms.md](Algorithms.md#review-model-v2-planned); this entry holds the reasons, what was
+rejected, the simulation record and the limits of that simulation. The story for a reader of the
+lifecycle is in [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#review-model-v2-planned).
+
+**Decision: replace the one-size ladder (fixed gaps, four passes in each stage, transitions and
+combos riding their own ladders) with a model where a chunk earns its way up by passes that
+depend on its difficulty and the plan's length, reviews have a window instead of a day, and a
+chunk's return takes a form.** It applies to a piece only when `piece.reviewModel` is `2`; pieces
+in progress keep the old model until the owner presses "Update this piece's review plan", and
+new pieces get the new one only when she says so.
+
+- **Why.** The owner's own use found that the old ladder's reviews of easy early material ate the
+  last weeks of a plan, and she had not realised that every transition and combo rides its own
+  ladder (a 100-measure piece has about 25 chunks but about 55 things returning for review,
+  more than twice the work). A simulation across 48 scenarios (below) showed today's fixed gaps
+  leave the daily load lumpy and some chunks short of Holding on short plans.
+- **The ten rules are numbered in Algorithms.md and are not repeated here.** The reasons for the
+  ones the bullets below do not cover:
+  - *Rule 1, the pass table.* Today every chunk needs four passes in each stage whatever its
+    difficulty or the plan's length. The owner's table gives an easy chunk on a short plan one pass
+    and a Difficult chunk on a long plan five; it replaced a first table she gave earlier the same
+    day. A minutes plan reads the longest row because her word was to assume the longest plan length.
+  - *Rule 2, passes.* A Full pass at 85% or more of target tempo counting double was confirmed on
+    2026-11-15. Clean reps in a row (her answer, 2026-11-16) is also the substitute for the dropped
+    Clean and Miss counter. A chunk never moves up on its first session, so the session that
+    introduced it can never promote it, even where the table says 1.
+  - *Rule 3, the next-day touch.* The design notes already promised a touch the day after
+    introduction. Checked 2026-11-16: `computeTimeline`'s first-touch branch returns for any chunk
+    that has a stage or a session, so the touch vanishes the moment the introduction is logged and
+    the first return is four days later, and `tier1Done` is carried through the three session
+    handlers but never set to true. The design conversation's run put the cost of a touch for
+    Difficult chunks at about 1 to 3 minutes a day (not re-run for this pass).
+  - *Rule 9, the timer alert.* It gives soft help when clean reps are not coming, without a
+    one-tap error count (rejected below) and without a lower-tempo button.
+  - *Rule 10, the switch.* So a piece in progress is never changed without the owner pressing the
+    button, and so the model can meet new pieces first.
+- **Why Holding's maximum is 30 days for every plan, and not shorter for a short plan.** The first
+  version of the rule capped Holding at 35% of the plan, held to 14 to 30 days, so a one-month plan
+  capped Holding at 14 days. The owner changed it: Holding is also what carries a piece into
+  maintenance after the plan ends, resurfacing parts at longer gaps. Re-running with the 30-day
+  maximum gave the same grid-wide evenness (0.41) and the same completion (the cap rarely binds
+  inside a plan; the 75-day plans read 0.43 against 0.42). Maintenance cost, for the record (the
+  design conversation's arithmetic, not re-run): a 200-measure piece is 50 chunks, so
+  chunk-by-chunk reviews at 30-day gaps are about 1.7 a day, about 10 minutes a day at a third of
+  the app's price and 29 at full price. That is why a clean whole-piece run-through counting for
+  the chunks inside it matters (rule 5).
+- **Why a window and not a day.** A fixed gap cannot give way to a heavy day. A window lets the
+  placement put a review on a lighter day inside it and be forced only at its latest day.
+  Ranges without that placement rule were worse than fixed gaps in the design conversation's
+  earlier single-piece run (evenness 0.78 against 0.47; not re-run for this pass), so the two
+  are one decision.
+- **Why one ladder per chunk with joins as forms.** From the design conversation's scratch runs
+  (104 measures, a 1.5-month plan, the app's review price; average minutes a day, then busiest
+  week; not re-run for this pass): today's structure, every join on its own ladder, 110 and 165;
+  joins keeping their own schedule but counting toward their chunks, 84 and 130; a join coming
+  back once and then retiring, 60 and 99; never coming back, 55 and 89; the owner's own idea,
+  one ladder per chunk with joins as forms in its rotation, 43 and 69. The owner's reading: a
+  join's first appearance counts as a review, not as new material, and combos belong only on
+  Difficult chunks' rotations. Much of the saving is that a join's first appearance is priced as
+  a review; that was raised before it was decided.
+- **Why a chunk moves up only on its own turn.** A join covers only part of a chunk, so credit
+  from a neighbour's transition banks half a pass but cannot promote. The next-day touch likewise
+  counts but cannot promote.
+- **Why run-throughs start early.** A single final-day run-through was unintuitive to the owner;
+  starting them when the last chunk is introduced (about halfway) and repeating every 3 practice
+  days also gave the lowest load in the simulation and left the last week light. A clean one
+  moves the stable chunks inside it, at any time of day.
+- **Why a third of each day is protected.** The problem it answers is the one the owner met:
+  reviews of old material eating the time meant for new and newly learned material. At least a
+  third of each day stays for new material and chunks that have not yet had their third review;
+  unused time goes back to reviews.
+- **Worst first** replaces oldest-first (the owner's decision; no further reason was recorded).
+  The order: last outcome, then how far below target tempo, then the earlier stage, then the
+  most overdue. Pass 149 adds "ran long last time" (time compared with what is typical for that
+  chunk size at the same review number: the owner's addition).
+- **Rejected, with reasons.**
+  - *Gaps as a share of the days remaining.* In the design conversation's run it piled work into
+    the plan's final weeks (the last week at 78 to 91 minutes a day against 16 to 26) and raised
+    load 45 to 90% (not re-run for this pass). The version kept measures the share against the
+    plan's whole length, with a minutes plan on a 3-month basis.
+  - *One-tap "how did the tries go" buckets* (to give the app a tempo-help signal). Errors would
+    be under-reported; the entry field asks for the best run in a row instead.
+  - *A Clean and Miss counter* for overlearning. Dropped for now (the owner, 2026-11-15); the
+    substitute is requiring clean reps in a row plus the timer alert. It may return.
+  - *A fourth ladder tier.* Holding already is the expanding tier.
+  - *A Holding maximum of 70 days* (today's). The owner proposed a maximum around 30 (and then
+    30 for every plan length, above); in the simulation the cap rarely binds inside a plan, so it
+    costs the plan nothing and it is what keeps a piece resurfacing after the plan ends.
+  - *A separate "light review" of stable chunks.* The owner's test instead: a stable chunk gives 2
+    clean in 2 or 3 tries, or it is not that stable.
+  - *A lower-tempo button on the timer alert.* The learner can record a lower tempo on the card.
+  - *Changing pieces in progress without being asked.* Hence the switch.
+- **Answers the owner gave (2026-11-16) that shape the build.** Clean reps must be consecutive; a
+  10-minute alert rung from the fourth session on (to test); a stable chunk may be pushed back by
+  up to 2 extra intervals (not 1); a review that runs past its alert still counts toward moving up
+  for now; a chunk keeps earned passes when a reschedule changes the plan's length; the
+  "typical run time" piece field is built with the run-through pass (142); the pass table's
+  30, 60 and 90 day boundaries, each upper bound included, so a plan of exactly 30 days reads the
+  first row (confirmed 2026-11-16).
+
+**The simulation record (so a later pass can re-check it against the real code).** Re-run on
+2026-11-16 for this pass against this repository's chunking and scheduling code (commit
+`4912ed7`), and it reproduced the figures the design conversation had reported. The scratch
+scripts are not committed. 48 scenarios: piece lengths 60, 100, 200 and 400 measures; three
+difficulty mixes (mostly easy, balanced, mostly hard); plans of 30, 45, 75 and 120 days; 7
+practice days a week; every pass a Full pass; review price at a third of the app's, and again
+at the app's full price. "Evenness" is the coefficient of variation of daily minutes (the
+standard deviation of a day's load as a share of the average; lower is more even).
+
+| | Today's fixed gaps | The rule decided (windows as a percentage of the plan, Holding maximum 30) |
+|---|---|---|
+| Evenness, mean of 48 (reviews at a third) | 0.61 | **0.41** |
+| Evenness, worst scenario | 1.21 | 0.70 |
+| Evenness, reviews at full price | 0.65 | 0.46 |
+| Busiest week against the average, mean | 1.68 | 1.39 |
+| Total hours against today's | 1.00 | 1.03 (about 3% more) |
+| Chunks in Holding at the end, worst scenario | 58% | 100% |
+| Scenarios with some chunk short of Holding | 29 of 48 | 0 of 48 |
+| Chunk visits per chunk | 5.3 | 7.1 |
+
+By plan length (evenness, reviews at a third), today against the rule: 30 days 0.51 against
+0.38; 45 days 0.54 against 0.35; 75 days 0.62 against 0.43; 120 days 0.75 against 0.47. By
+piece length: 60 measures 0.81 against 0.55; 100 measures 0.64 against 0.43; 200 measures 0.50
+against 0.33; 400 measures 0.47 against 0.32. Chunks in Holding at the end by plan length, today:
+80% (30 days), 88% (45), 99% (75), 100% (120); the rule: 100% at every length. Piece length
+matters more than difficulty mix (the three mixes read 0.40 to 0.41). The same grid for a plain
+days-based range (Stabilizing 2 to 7, Settling 4 to 12 days, Holding plus or minus 40%) gave 0.42
+overall. Writing the windows as a percentage of the plan wins on plans of two months or less (30
+days 0.38 against 0.43; 45 days 0.35 against 0.41) and is level or very slightly worse beyond
+(75 days 0.43 against 0.42; 120 days 0.47 against 0.45; the only difference there is the
+percentage rule's Stabilizing window starting at 3 days and not 2). The design conversation had
+called the two "identical" at about three months and over; the re-run does not quite show that.
+
+*One figure to avoid mixing up:* Pass 140's card quotes "about 0.38 variation" for the simulation.
+That is the 30-day plan's mean (0.38); the grid's mean for the decided rule is 0.41. A later pass
+re-checking the real placement should compare against 0.41 (grid) and 0.61 (today), and against
+the per-length figures above.
+
+**What the simulation did not model, and assumed.** It is the design conversation's script, not
+the app: it imports `generateAllChunks` and `computeTimeline` to lay out introductions and prices,
+but the ladder, the placement and everything about reviews is the script's own, so it does not yet
+test the real placement (Pass 140 does that). It assumed: every pass a Full pass and every
+run-through clean; a run-through costs 8 minutes per 100 measures (a guess; Pass 142 adds the
+real field); reviews at one third of the app's price, and at full price; a join or combo visit
+priced at its own effort; the placement is "forced reviews at their latest day, then fill
+toward a target load, most overdue first", where **the target load was the average daily load
+of today's rules on the same piece**, not the new plan's own average (the real placement's target
+is the plan's average load, so total hours may differ). **Not modelled:** the protected third of
+each day; the slip of up to 2 extra intervals; Partial passes and Needs rework; the next-day
+touch for a chunk whose learning session was not a Full pass (only for Difficult chunks).
+**What it leaves:** a light second half, the second half's average daily load being 0.65 of the
+first half's (today's rules 0.47), because all introductions end by the plan's midpoint. **It
+also credited a join differently from the rule as written**: the chunk whose turn it was got a
+full pass and only the neighbour half. See the open questions below.
+
+**Open questions this decision leaves** (also in Algorithms.md; not resolved by this pass):
+- *Credit on a join, and on a combo.* As above: the rule gives each chunk a join covers half a
+  pass; the simulation gave the visiting chunk a full pass and only the neighbour half. How a
+  combo return is credited is not stated. Both change how fast a Difficult chunk climbs.
+  **Owner: Pass 141**, with the owner, before it builds; re-run the simulation with the answer.
+- *The "second half is light" outcome.* All introductions finish by the plan's midpoint, so the
+  back of a plan is light (the second half at 0.65 of the first half's load in the re-run). The
+  owner has not decided whether to spread introductions later (about 65% of a minutes plan was
+  suggested and is untested) or give the freed time to polish. **Owner: Pass 143**, not in that
+  pass unless she decides.
+- *The Holding maximum is applied to the window* (the stricter reading, Pass 140's wording);
+  Pass 136's card applied it to the gap.
+- *Whether the protected third, the slip of up to 2 extra intervals and the plan's own average
+  as the fill target hold up in the real placement.* The simulation modelled none of the three
+  (above). Pass 140 measures the real placement; Pass 144 re-runs the 48-scenario grid.
+
 ## UX
 
 **Decision: a day whose original content has moved elsewhere shows what was
@@ -10588,3 +10763,14 @@ oversight to silently fix; surface it instead.
       check on, `--bot-check`, sign-ups on) is written down and has never been tried.
   11. Self-hosting the fonts, the missing "Report a problem" link when the app fails to load, the mail-scanner page (134), and Pass 124 are
       as they were. `App.jsx`'s wiring and the windows have no automated test; the functions they call do.
+
+- **Review model v2 (decided 2026-11-16, not built): four questions the decided rules leave open (Pass 136).** Nothing here blocks Pass
+  137; each has an owner pass and the full wording is in [the decision's entry](#review-model-overhaul-decided-2026-11-16).
+  1. **Credit on a join and on a combo.** The rule gives each chunk a join covers half a pass, including the chunk whose turn it is; the
+     simulation gave that chunk a full pass and the neighbour half, and nothing says how a combo return counts. Pass 141, with the owner,
+     before it builds; re-run the simulation with her answer.
+  2. **A light second half.** Introductions end at the midpoint, so the back of a plan is light (0.65 of the first half's load). Spreading
+     introductions later is untested and undecided. Pass 143, only if she decides.
+  3. **The Holding maximum is read as applying to the window** (Pass 140's wording), not to the gap (Pass 136's card). Settled when 140 is built.
+  4. **The simulation did not model the protected third or the slip of up to 2 extra intervals,** and its fill target was today's average load.
+     Pass 140's measurement on the real code is the check; Pass 144 re-runs the 48-scenario grid.

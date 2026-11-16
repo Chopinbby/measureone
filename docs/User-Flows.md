@@ -607,11 +607,11 @@ data** (nothing is uploaded or downloaded,
 and no piece, technique data or banner changes); it only says who's signed
 in. Copying this device's data to the account is a separate, explicit step
 ([flow 11](#11-backing-up-this-device-optional-pass-110)).
-Accounts are **by invitation** until the owner switches sign-up on. Since Pass
-135 the window can also create an account, but that choice shows only while
-the account service accepts sign-ups
-([flow 21](#21-creating-an-account-optional-pass-135)); until then the window
-says "Accounts are by invitation for now." See
+Accounts were **by invitation** until open sign-up went live on 2026-11-14. Since
+Pass 135 the window can also create an account, but that choice shows only while
+the account service accepts sign-ups (it does in production now; see
+[flow 21](#21-creating-an-account-optional-pass-135)); whenever it does not, the
+window says "Accounts are by invitation for now." See
 [Accounts-and-Backend.md](Accounts-and-Backend.md).
 
 **Two ways in** (`SignInModal`, opened by `openSignIn`, `App.jsx`):
@@ -1308,8 +1308,8 @@ agreeing (an invited person agrees by the sentence in Choose a password; a perso
 
 ## 21. Creating an account (optional, Pass 135)
 
-**Only while the account service accepts sign-ups.** The owner switches that on and off in the account service's dashboard, and it is
-**off** as this is written (2026-11-12). The app asks the service once each time the page loads, so a change shows after a reload. It also
+**Only while the account service accepts sign-ups.** The owner switches that on and off in the account service's dashboard. It has been
+**on** in production since 2026-11-14 (it was off when this flow was written, 2026-11-12). The app asks the service once each time the page loads, so a change shows after a reload. It also
 needs the site to be set up with the bot check and the service to require a confirmation email; if any of the three is missing, nothing
 below appears and accounts are by invitation ([flow 10](#10-signing-in-optional-pass-109)).
 

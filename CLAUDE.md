@@ -42,9 +42,10 @@ philosophy — most importantly, **confidence is earned, not assumed**, and
   injected via a `<style>` tag inside the root component, using CSS custom
   properties defined on `.measureone-app`. No Tailwind, no CSS modules.
 - No backend of our own. The working copy is always client-side `localStorage`.
-  An optional account sign-in (Supabase), by invitation until the owner switches
-  sign-up on (a sign-up form exists since Pass 135 and shows only while the service
-  accepts sign-ups, which is off), exists on sites
+  An optional account sign-in (Supabase), by invitation and, since open sign-up went
+  live on 2026-11-14 (Pass 135), by a person creating their own (the form shows only
+  while the service accepts sign-ups, requires the confirmation email and the build has
+  the bot check's site key), exists on sites
   connected to an account service (the live site too, since Pass 114): signed in,
   this browser's pieces and technique library are copied to the account and kept
   current, can be restored or brought back with "Get changes", and the app notices
@@ -515,14 +516,14 @@ Holding" boolean, and the two are never read from each other.
 
 ## Accounts, sync and deploys: rules for working on them
 
-**What exists.** An optional, invitation-only account (Supabase). Signed in, this
+**What exists.** An optional account (Supabase), by invitation and, since 2026-11-14, open to anyone who signs up (Pass 135). Signed in, this
 browser's pieces and technique library are copied to the account (the first backup,
 Pass 110), every later change goes up by itself (Pass 111), restore / "Get changes" /
 Review bring things back (Pass 112), the person can change their password and sign out
 of all devices (Pass 113), and since Pass 116 the app notices, quietly, that another
 device changed something ("Changes from another device: 3 pieces. Press Get changes.";
-it applies nothing). Live on the real site since Pass 114 (2026-10-10), with the
-owner's account the only one. **Phase 2:** the two merge-by-part engines (Passes 117 and
+it applies nothing). Live on the real site since Pass 114 (2026-10-10), and open to
+anyone who signs up since 2026-11-14 (Pass 135). **Phase 2:** the two merge-by-part engines (Passes 117 and
 118) are called between tabs of one browser (Pass 119) and, since Pass 120, by an
 automatic update from other devices that is **off by default**. **Decided 2026-10-15, built
 in Pass 126 for single-value settings:** the most recent change winning item by item, with
@@ -1376,8 +1377,9 @@ A "Create an account" form in the sign-in window, a bot check (Cloudflare Turnst
   settings and redeploying takes accounts off the live site again. Production has the
   production project's two settings (`measureone-prod`); Preview and local development
   keep the test project's. Accounts appear on a site only while
-  `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` were present when it was built. The
-  owner's own account is the only one.
+  `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` were present when it was built. How many
+  accounts exist is read in Supabase (Authentication, Users) and never listed in this repository;
+  the daily backup held 3 at the 2026-11-14 go-live.
 - **Two things learned shipping Passes 115 to 118 (2026-10-15).** (1) **"Merged" on
   GitHub means merged into that pull request's own base.** A pass built on another
   unmerged pass's branch and merged "separately" lands in that branch, not `main`
@@ -1697,7 +1699,7 @@ silently.
   whole project; the confirmation link arrives signed in with a short welcome; the form shows only while the service accepts sign-ups,
   requires the confirmation email and the build has the site key; Change email no longer says an address is taken; the security script's
   check 36 is "a sign-up without a valid bot-check token is refused", with `--dummy-token` and a no-account `--bot-check`; the privacy and
-  terms pages name it all. Built 2026-11-12 on the owner's eight answers; **merged 2026-11-13 (PR #100, merge commit `affeaec`); switching it on is hers, step by step**.
+  terms pages name it all. Built 2026-11-12 on the owner's eight answers; **merged 2026-11-13 (PR #100, merge commit `affeaec`); switched on in production 2026-11-14 by the owner, step by step**.
   [`Accounts-and-Backend.md`](docs/Accounts-and-Backend.md#open-sign-up-pass-135)
 - **Pass 136** — the review model overhaul written into the docs as design only ("Review model v2", decided 2026-11-16, **not built: nothing in
   `src/` reads it**): a pass table by difficulty and plan length, review windows as a share of the plan, transitions and combos as forms a chunk's

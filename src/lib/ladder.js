@@ -115,6 +115,179 @@ export function isPieceLearned(piece, chunkSet) {
   return practiceChunks.every((c) => (((piece && piece.progress) || {})[c.id] || {}).stage === "holding");
 }
 
+/* ------------------------------------------------------------------ */
+/*  Review model v2: the pass table and pass credit (Pass 139)         */
+/*  docs/Algorithms.md#review-model-v2-planned, rules 1 and 2.         */
+/* ------------------------------------------------------------------ */
+
+// Rule 1: how many passes a base practice chunk needs to leave Stabilizing,
+// and again to leave Settling (the same count for both), by the chunk's
+// difficulty and the plan's length. The owner's table, 2026-11-16; the
+// boundaries are 30, 60 and 90 calendar days with each upper bound included,
+// so a plan of exactly 30 days reads the first row. Only a piece on
+// `reviewModel` 2 reads it (ladderContextFor, lib/scheduling.js builds the
+// context computeLadderAdvance takes); a piece on today's plan keeps
+// `ladderConfig.stabilizing/settling.graduationPasses`.
+export const PASS_TABLE_ROWS = [
+  { upToDays: 30, easy: 1, medium: 2, hard: 3 },
+  { upToDays: 60, easy: 2, medium: 3, hard: 3 },
+  { upToDays: 90, easy: 3, medium: 4, hard: 4 },
+  { upToDays: null, easy: 3, medium: 4, hard: 5 },
+];
+
+// The row's plan length, as the Settings table labels it ("the plan length it follows").
+export const PASS_TABLE_ROW_LABELS = ["up to 30 days", "over 30 up to 60 days", "over 60 up to 90 days", "over 90 days"];
+
+// The two stages the table covers (Holding has no stage above it to move up to).
+export const PASS_TABLE_STAGES = ["stabilizing", "settling"];
+// `easy`/`medium`/`hard` are the stored names; the screen says Workable,
+// Challenging and Difficult (DIFFICULTY_META, constants.js).
+export const PASS_TABLE_DIFFICULTIES = ["easy", "medium", "hard"];
+
+// Rule 2: a Full pass at or above this share of the chunk's target tempo
+// counts as two passes (the owner confirmed it 2026-11-15). Deliberately its
+// own constant: the tempo-maintenance threshold
+// (`ladderConfig.tempoRatchet.tempoAchievedThreshold`) is a different
+// question that happens to share the number 0.85 today.
+export const STRONG_PASS_FRACTION = 0.85;
+
+// What a join (a transition) adds to each chunk it covers when it is a Full
+// pass (rule 4). Nothing in the app calls addHalfPass yet; Pass 141 does.
+export const HALF_PASS_CREDIT = 0.5;
+
+// Rule 6: the longest a Holding review may wait, for every plan length. It
+// governs nothing until Pass 140 builds the review windows; the Settings
+// editor already lets the owner change it (`ladderConfig.overrides`).
+export const HOLDING_MAX_DAYS_V2 = 30;
+
+// Which row of the table a plan reads. A plan set by minutes per day uses the
+// last row (the owner's word, "assume the longest plan length"); so does a
+// plan whose length can't be read.
+export function passTableRowIndex(daysToLearn, scheduleMode) {
+  if (scheduleMode === "minutes") return PASS_TABLE_ROWS.length - 1;
+  const days = Number(daysToLearn);
+  if (!Number.isFinite(days) || days <= 0) return PASS_TABLE_ROWS.length - 1;
+  const idx = PASS_TABLE_ROWS.findIndex((row) => row.upToDays != null && days <= row.upToDays);
+  return idx === -1 ? PASS_TABLE_ROWS.length - 1 : idx;
+}
+
+// A difficulty the table doesn't know (a chunk with no label) reads the middle
+// column, the same fall-back direction as REQUIRED_REPS' "|| 4".
+function passTableDifficulty(difficultyLabel) {
+  return PASS_TABLE_DIFFICULTIES.includes(difficultyLabel) ? difficultyLabel : "medium";
+}
+
+// The table's own number, before any override.
+export function autoPassesNeeded(difficultyLabel, daysToLearn, scheduleMode) {
+  return PASS_TABLE_ROWS[passTableRowIndex(daysToLearn, scheduleMode)][passTableDifficulty(difficultyLabel)];
+}
+
+// The owner's own number for one cell of the table, or null when the cell
+// follows the plan. `ladderConfig.overrides.passesNeeded` is absent on every
+// piece until she changes a cell, and holds only the cells she changed:
+// `{ stabilizing: { hard: 4 } }`. A value that isn't a whole number of at
+// least 1 is ignored (a hand-edited backup must not stop a chunk moving up).
+export function passesOverrideFor(ladderConfig, stage, difficultyLabel) {
+  const table = ladderConfig && ladderConfig.overrides && ladderConfig.overrides.passesNeeded;
+  const v = table && table[stage] ? table[stage][passTableDifficulty(difficultyLabel)] : null;
+  return Number.isInteger(v) && v >= 1 ? v : null;
+}
+
+// Passes needed to leave `stage` for a chunk of this difficulty on a plan of
+// this length: the owner's override for that cell, else the table. null for
+// Holding (nothing above it to move up to).
+export function resolvePassesNeeded({ stage, difficultyLabel, daysToLearn, scheduleMode }, ladderConfig) {
+  if (!PASS_TABLE_STAGES.includes(stage)) return null;
+  const override = passesOverrideFor(ladderConfig, stage, difficultyLabel);
+  return override != null ? override : autoPassesNeeded(difficultyLabel, daysToLearn, scheduleMode);
+}
+
+// The longest Holding review may wait on the new plan: the owner's number
+// (`ladderConfig.overrides.holdingMaxDays`) or 30 days.
+export function effectiveHoldingMaxDaysV2(ladderConfig) {
+  const v = ladderConfig && ladderConfig.overrides && ladderConfig.overrides.holdingMaxDays;
+  return Number.isInteger(v) && v >= 1 ? v : HOLDING_MAX_DAYS_V2;
+}
+
+// The plan length a piece's table row follows, in words for the Settings
+// editor ("labelled with the plan length it follows").
+export function passTableRowLabelFor(daysToLearn, scheduleMode) {
+  if (scheduleMode === "minutes") return "a plan set by minutes per day (it reads the longest row, " + PASS_TABLE_ROW_LABELS[PASS_TABLE_ROWS.length - 1] + ")";
+  return PASS_TABLE_ROW_LABELS[passTableRowIndex(daysToLearn, scheduleMode)];
+}
+
+// --- Editing the owner's numbers (Settings' ladder editor) ---------------
+// `ladderConfig.overrides` is absent until she changes a number and absent
+// again once nothing is changed, so a piece she has reset is byte-for-byte
+// the piece she had before (a stored empty object would change its
+// fingerprint and upload it again). Each helper returns a new config.
+
+function withOverrides(ladderConfig, overrides) {
+  const { overrides: _dropped, ...rest } = ladderConfig;
+  const clean = { ...overrides };
+  if (clean.passesNeeded) {
+    const cells = {};
+    for (const stage of Object.keys(clean.passesNeeded)) {
+      const row = clean.passesNeeded[stage];
+      if (row && Object.keys(row).length) cells[stage] = row;
+    }
+    if (Object.keys(cells).length) clean.passesNeeded = cells;
+    else delete clean.passesNeeded;
+  }
+  if (clean.holdingMaxDays == null) delete clean.holdingMaxDays;
+  return Object.keys(clean).length ? { ...rest, overrides: clean } : rest;
+}
+
+// Set one cell of the table. A number equal to what the table gives is not an
+// override (it follows the plan again), so typing the automatic value back in
+// clears the cell, and the screen's "set by you" marker goes with it.
+export function withPassesOverride(ladderConfig, stage, difficultyLabel, value, autoValue) {
+  const key = passTableDifficulty(difficultyLabel);
+  const current = (ladderConfig.overrides && ladderConfig.overrides.passesNeeded) || {};
+  const row = { ...(current[stage] || {}) };
+  const whole = Math.max(1, Math.round(Number(value)));
+  if (!Number.isFinite(whole) || whole === autoValue) delete row[key];
+  else row[key] = whole;
+  return withOverrides(ladderConfig, { ...(ladderConfig.overrides || {}), passesNeeded: { ...current, [stage]: row } });
+}
+
+// "Reset to automatic" for the whole table.
+export function withPassesOverridesCleared(ladderConfig) {
+  const { passesNeeded: _dropped, ...others } = ladderConfig.overrides || {};
+  return withOverrides(ladderConfig, others);
+}
+
+// Any cell of the table changed by the owner?
+export function hasPassesOverride(ladderConfig) {
+  const table = ladderConfig && ladderConfig.overrides && ladderConfig.overrides.passesNeeded;
+  return !!table && PASS_TABLE_STAGES.some((stage) => PASS_TABLE_DIFFICULTIES.some((d) => passesOverrideFor(ladderConfig, stage, d) != null));
+}
+
+// The Holding maximum on the new plan: a whole number of days, or null to
+// follow the automatic 30.
+export function withHoldingMaxOverride(ladderConfig, days) {
+  const whole = days == null ? null : Math.max(1, Math.round(Number(days)));
+  return withOverrides(ladderConfig, { ...(ladderConfig.overrides || {}), holdingMaxDays: Number.isFinite(whole) ? whole : null });
+}
+
+// A Full pass played at 85% or more of the chunk's target tempo. `bpm` is the
+// tempo logged for the session; a chunk with no target tempo has nothing to
+// be close to, so it never earns one.
+export function isStrongPass(result, bpm, targetBPM) {
+  if (result !== "pass" || bpm == null || targetBPM == null || !(targetBPM > 0)) return false;
+  return bpm >= targetBPM * STRONG_PASS_FRACTION;
+}
+
+// Rule 4's half credit: a join that was a Full pass adds half a pass to each
+// chunk it covers. It only ever adds to the count; the stage is left alone
+// (a chunk moves up only inside computeLadderAdvance, on its own turn), and
+// a chunk outside Stabilizing and Settling is returned as it was. The count
+// can therefore be fractional.
+export function addHalfPass(chunkLadderState, credit = HALF_PASS_CREDIT) {
+  if (!chunkLadderState || !PASS_TABLE_STAGES.includes(chunkLadderState.stage)) return chunkLadderState;
+  return { ...chunkLadderState, consecutivePasses: (chunkLadderState.consecutivePasses || 0) + credit };
+}
+
 // Duplicated from adaptiveReviewOffsets (scheduling.js:94-100) rather than
 // imported — factoring it into a shared helper would mean editing
 // scheduling.js, which isn't in this pass's Touches list (new-file-only).
@@ -368,7 +541,24 @@ export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
 //
 // Returns a new chunkLadderState-shaped object (same fields, plus
 // `graduated/demoted/needsRelearning` informational flags for this call).
-export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
+//
+// ladderContext (Pass 139) is null for a piece on today's plan, and then
+// nothing below differs from before this pass (`test/ladder-table.test.mjs`
+// compares it with the earlier code on a table of cases). For a base chunk of
+// a piece on review model 2, lib/scheduling.js's ladderContextFor builds it:
+//   passesNeeded — the passes to leave the chunk's current stage (the pass
+//                  table, or the owner's override); null means "read
+//                  ladderConfig[stage].graduationPasses as before"
+//   canPromote   — false on the chunk's first session and on any session
+//                  before the day its next review is due (the learning day,
+//                  the next-day touch, an early look): a chunk moves up only
+//                  on its own turn. Passes are still counted.
+//   maxCredit    — the most one pass may count for (1 for the touch, so a
+//                  fast touch is still one pass); null means no cap
+// A pass at or above STRONG_PASS_FRACTION of the target tempo counts as two
+// whenever a context is given. The three outcome rules otherwise stand: a
+// Partial pass starts the count over, Needs rework steps back one stage.
+export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig, ladderContext = null) {
   const stage = STAGES.includes(chunkLadderState.stage) ? chunkLadderState.stage : "stabilizing";
   const consecutivePasses = chunkLadderState.consecutivePasses || 0;
   const consecutiveStabilizingFails = chunkLadderState.consecutiveStabilizingFails || 0;
@@ -526,9 +716,24 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
 
   // outcome.result === "pass"
   const clearsFloor = clearsStageFloor(stage, practiceBPM, targetBPM, ladderConfig);
-  const passesIfCounted = clearsFloor ? consecutivePasses + 1 : consecutivePasses;
-  const graduationPasses = ladderConfig[stage].graduationPasses;
-  const shouldGraduate = clearsFloor && graduationPasses != null && passesIfCounted >= graduationPasses;
+  // Pass 139 (review model 2 only; with no context this is exactly the old
+  // "+1, then compare with graduationPasses"): a strong pass counts as two,
+  // capped where the context says so (the next-day touch is one pass), and the
+  // promotion itself can be held back (first session, before the due day)
+  // while the count keeps growing, so the chunk moves up at its next own turn
+  // if it still has enough.
+  const ctx = ladderContext;
+  // Only in the two stages the table covers: in Holding the count drives how
+  // far the next review gap grows (intervalForStage), and doubling it there
+  // would stretch the gaps; Pass 140 rebuilds Holding's gaps on its own terms.
+  const strongPass = ctx != null && PASS_TABLE_STAGES.includes(stage) && isStrongPass(outcome.result, outcome.bpm, targetBPM);
+  const rawCredit = strongPass ? 2 : 1;
+  const passCredit = ctx != null && ctx.maxCredit != null ? Math.min(ctx.maxCredit, rawCredit) : rawCredit;
+  const passesIfCounted = clearsFloor ? consecutivePasses + passCredit : consecutivePasses;
+  const graduationPasses = ctx != null && ctx.passesNeeded != null ? ctx.passesNeeded : ladderConfig[stage].graduationPasses;
+  const enoughPasses = clearsFloor && graduationPasses != null && passesIfCounted >= graduationPasses;
+  const promotionHeld = enoughPasses && ctx != null && ctx.canPromote === false;
+  const shouldGraduate = enoughPasses && !promotionHeld;
   const newStage = shouldGraduate ? promote(stage) : stage;
   const passesAfter = shouldGraduate ? 0 : passesIfCounted;
   const demonstratedOnPass = computeDemonstratedTempoBaseline({
@@ -607,6 +812,10 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig) {
     // flagged chunk can be in) clears the flag same as a manual override
     // would. Any other pass just carries the flag through unchanged.
     needsRelearning: stage === "stabilizing" && shouldGraduate ? false : wasFlagged,
+    // Pass 139 informational flags (not persisted, like graduated/demoted),
+    // present only when a context was given so a piece on today's plan gets
+    // back exactly the object it always did.
+    ...(ctx != null ? { strongPass, promotionHeld } : {}),
   };
 }
 
@@ -670,7 +879,13 @@ export const TEMPO_CONVERGENCE_WARNING_DAYS = 90;
 //     applicable or when the cap was hit without converging.
 //   iterations — how many simulated passes it took (0 for "already there"
 //     or "not applicable").
-export function simulateTempoConvergence(chunkLadderState, ladderConfig, startDate) {
+//
+// passesNeededByStage (Pass 139, optional) — for a base chunk of a piece on
+// review model 2, `{ stabilizing: n, settling: n }` (what passesNeededByStageFor,
+// lib/scheduling.js, returns), so the projection promotes the chunk after the
+// passes the new plan asks for instead of the old graduationPasses. Omitted
+// (or null) for a piece on today's plan, and then nothing here differs.
+export function simulateTempoConvergence(chunkLadderState, ladderConfig, startDate, passesNeededByStage = null) {
   const { targetBPM, practiceBPM } = chunkLadderState;
   if (targetBPM == null || practiceBPM == null) {
     return { applicable: false, converged: false, days: null, iterations: 0 };
@@ -685,7 +900,10 @@ export function simulateTempoConvergence(chunkLadderState, ladderConfig, startDa
   let totalDays = 0;
 
   for (let i = 1; i <= MAX_SIMULATION_STEPS; i++) {
-    const advance = computeLadderAdvance(state, { result: "pass", effectiveness: "good", asOfDate }, ladderConfig);
+    const stepContext = passesNeededByStage
+      ? { passesNeeded: passesNeededByStage[STAGES.includes(state.stage) ? state.stage : "stabilizing"] ?? null, canPromote: true, maxCredit: null }
+      : null;
+    const advance = computeLadderAdvance(state, { result: "pass", effectiveness: "good", asOfDate }, ladderConfig, stepContext);
     totalDays += daysBetweenInclusive(asOfDate, advance.nextDueDate) - 1;
     asOfDate = advance.nextDueDate;
     state = { ...state, ...advance };

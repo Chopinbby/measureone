@@ -317,7 +317,8 @@ MeasureOne.jsx/
         │       RecordingsEditor.jsx, RecordingsList.jsx,
         │       DocumentsEditor.jsx, DocumentsList.jsx,
         │       LadderConfigEditor.jsx (Pass 17; used only by SettingsTab's
-        │       edit page, in its "Maintenance ladder" panel, not by Wizard)
+        │       edit page, in its "Maintenance ladder" panel, not by Wizard;
+        │       Pass 139: also shows the pass table for a piece on review model 2)
         └── tabs/
             ├── OverviewTab.jsx, TimelineTab.jsx, PieceMapTab.jsx,
             │   ProgressTab.jsx, SettingsTab.jsx,

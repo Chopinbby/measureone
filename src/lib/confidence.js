@@ -451,6 +451,11 @@ export function computeProgressTier(chunk, piece) {
   return "learned";
 }
 
+// A pass count for display: a whole number as it is, a half pass as "2.5".
+export function formatPassCount(n) {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+}
+
 // Plain-language summary of a chunk's position on the spaced-repetition
 // maintenance ladder (lib/ladder.js) — Pass 15, the first UI surface for
 // stage/consecutivePasses/nextDueDate (previously computed and persisted on
@@ -489,21 +494,31 @@ export function computeProgressTier(chunk, piece) {
 // it's paused. dueLabel reports that instead of the date. stageLabel/
 // progressLabel are unaffected — consecutivePasses is genuinely 0/graduationPasses
 // while flagged (any fail resets it), so showing it is accurate, not a leak.
-export function formatLadderStatus(entry, ladderConfig, asOfDate) {
+//
+// Pass 139 — `passesNeeded` (optional): for a base chunk of a piece on review
+// model 2, the passes the pass table asks for in this chunk's stage
+// (passesNeededForChunk, lib/scheduling.js). Omitted or null reads
+// `ladderConfig[stage].graduationPasses`, as before. The count can be
+// fractional there (a strong pass is two, a join adds a half), and it is
+// shown no higher than what's needed: a chunk that has enough passes but was
+// held back on its first session or its touch reads "3/3 to Settling" and
+// moves up at its next own turn.
+export function formatLadderStatus(entry, ladderConfig, asOfDate, passesNeeded = null) {
   if (!entry) return null;
   const hasHistory = loggedSessions(entry.sessions).length > 0;
   if (!STAGES.includes(entry.stage) && !hasHistory) return null;
   const stage = STAGES.includes(entry.stage) ? entry.stage : "stabilizing";
   const consecutivePasses = entry.consecutivePasses || 0;
   const nextStage = STAGES[STAGES.indexOf(stage) + 1] || null;
-  const graduationPasses = ladderConfig && ladderConfig[stage] ? ladderConfig[stage].graduationPasses : null;
+  const graduationPasses =
+    passesNeeded != null ? passesNeeded : ladderConfig && ladderConfig[stage] ? ladderConfig[stage].graduationPasses : null;
 
   // Holding has no next stage (STAGES' ceiling) and no graduationPasses in
   // DEFAULT_LADDER_CONFIG — "N consecutive passes" instead of a fraction
   // that would divide by nothing to progress toward.
   const progressLabel =
     nextStage && graduationPasses != null
-      ? `${consecutivePasses}/${graduationPasses} to ${STAGE_LABEL[nextStage]}`
+      ? `${formatPassCount(passesNeeded != null ? Math.min(consecutivePasses, graduationPasses) : consecutivePasses)}/${graduationPasses} to ${STAGE_LABEL[nextStage]}`
       : `${consecutivePasses} consecutive pass${consecutivePasses === 1 ? "" : "es"}`;
 
   let dueLabel = null;

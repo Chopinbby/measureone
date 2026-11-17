@@ -47,7 +47,7 @@ import {
   splitPracticeChunk,
   splitPointsAfterStructureEdit,
 } from "./lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain, tier1DoneAfterSession } from "./lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain, tier1DoneAfterSession, ladderContextFor } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -3213,6 +3213,16 @@ export default function App() {
       // comment described.
       const effectiveness = outcome === "fail" ? "low" : outcome === "pass" ? "high" : "good";
 
+      // Pass 139: for a base chunk of a piece on review model 2, how many
+      // passes it needs, and whether this session may move it up (not its
+      // first session, the learning day or its next-day touch). null for a
+      // piece on today's plan, and then the ladder is exactly as before.
+      const ladderContext = ladderContextFor(
+        p,
+        chunkSet && chunkSet.practiceChunks.find((c) => c.id === chunkId),
+        prevEntry,
+        loggedDate
+      );
       const advance = computeLadderAdvance(
         {
           stage: prevEntry.stage,
@@ -3230,7 +3240,8 @@ export default function App() {
           holdingReviewCount: prevEntry.holdingReviewCount,
         },
         { result: outcome, effectiveness, asOfDate: loggedDate, cleanReps, bpm },
-        p.ladderConfig
+        p.ladderConfig,
+        ladderContext
       );
 
       progress[chunkId] = {
@@ -3599,6 +3610,16 @@ export default function App() {
 
       const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : target.bpm;
       const effectiveness = target.outcome === "fail" ? "low" : target.outcome === "pass" ? "high" : "good";
+      // Pass 139: same context handleLogSession builds, dated by the attempt
+      // itself (the practice happened then; only the ladder math runs as of
+      // today). The provisional attempt is not a logged session yet, so it
+      // still reads as the chunk's first one when it is.
+      const ladderContext = ladderContextFor(
+        p,
+        chunkSet && chunkSet.practiceChunks.find((c) => c.id === chunkId),
+        prevEntry,
+        target.loggedDate || loggedDate
+      );
       const advance = computeLadderAdvance(
         {
           stage: prevEntry.stage,
@@ -3616,7 +3637,8 @@ export default function App() {
           holdingReviewCount: prevEntry.holdingReviewCount,
         },
         { result: target.outcome, effectiveness, asOfDate: loggedDate, cleanReps: target.cleanReps, bpm: target.bpm },
-        p.ladderConfig
+        p.ladderConfig,
+        ladderContext
       );
 
       sessions[idx] = { ...target, provisional: false, ladderSnapshot };
@@ -3765,8 +3787,10 @@ export default function App() {
   };
 
   // Rule 2's manual half of needsRelearning's dual exit (the other half is
-  // automatic: 4 consecutive full Stabilizing passes, handled inside
-  // computeLadderAdvance itself — lib/ladder.js). Same escape-hatch shape
+  // automatic: getting through Stabilizing again (the stage's pass count,
+  // 4 by default; the pass table's number for a base chunk of a piece on
+  // review model 2), handled inside computeLadderAdvance itself —
+  // lib/ladder.js). Same escape-hatch shape
   // as handleSetManualConfidence above: a direct field write, no snapshot
   // to restore, since "resume normal review now" needs nothing reversed —
   // unlike handleSetFlag's rough/lost cycle, which undoes a demotion this

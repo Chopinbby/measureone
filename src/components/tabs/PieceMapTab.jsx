@@ -15,6 +15,7 @@ import {
   hasClimbingTempo,
 } from "../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../lib/ladder";
+import { passesNeededForChunk, passesNeededByStageFor } from "../../lib/scheduling";
 import { isInRevival } from "../../lib/revival";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
@@ -65,7 +66,11 @@ export function PieceMapTab({
   // Pass 15 — surfaces stage/consecutivePasses/nextDueDate, computed and
   // persisted on every logged session (lib/ladder.js) but never shown
   // anywhere before now. null for a chunk with no session history yet.
-  const ladderStatus = selectedChunk ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate()) : null;
+  // Pass 139: on a piece using the new review plan the "N/M to next stage" line
+  // reads the pass table (passesNeededForChunk), not the old graduationPasses.
+  const ladderStatus = selectedChunk
+    ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate(), passesNeededForChunk(piece, selectedChunk, selectedEntry))
+    : null;
   // Pass 30 — live-derived, same as the tile marker above; recomputed on
   // every render from session history, no persisted "seen" state.
   const selectedClimbing = selectedChunk ? hasClimbingTempo(selectedEntry) : false;
@@ -94,7 +99,8 @@ export function PieceMapTab({
           holdingReviewCount: selectedEntry.holdingReviewCount,
         },
         piece.ladderConfig,
-        todayISODate()
+        todayISODate(),
+        passesNeededByStageFor(piece, selectedChunk)
       )
     : null;
   const tempoWarning = tempoConvergenceExceedsWarning(tempoSimulation);
@@ -341,7 +347,7 @@ export function PieceMapTab({
                   <div className="manual-conf-row">
                     <p className="wizard-hint relearning-hint" style={{ margin: 0, flex: 1 }}>
                       <RotateCcw size={13} /> Needs reinforcement. Review is paused while this chunk rebuilds
-                      consistency in the Introductory phase. Clears automatically after 4 consecutive full passes.
+                      consistency in the Introductory phase. Clears automatically once it gets through that phase again.
                     </p>
                     <button className="ghost-btn" onClick={() => onClearRelearning(selectedChunk.id)}>
                       Clear, resume review

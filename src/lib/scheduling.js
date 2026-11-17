@@ -3,7 +3,7 @@ import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WE
 import { generateAllChunks } from "./chunking";
 import { sessionOutcome } from "./confidence";
 import { isInRevival } from "./revival";
-import { isPieceLearned } from "./ladder";
+import { isPieceLearned, STAGES, PASS_TABLE_STAGES, resolvePassesNeeded } from "./ladder";
 import { plannedMinutesFor } from "./plannedMinutes";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
@@ -413,6 +413,86 @@ export function tier1DoneAfterSession(piece, prevEntry, passedThrough, sessionDa
   const firstDate = sessionDateOf(logged[0]);
   if (firstDate && sessionDate && sessionDate > firstDate) return true;
   return passedThrough;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Review model v2: what a session counts for (Pass 139)               */
+/* ------------------------------------------------------------------ */
+
+// Passes a base chunk needs to leave `stage` (rule 1's table, or the owner's
+// override), for a piece on review model 2. null for any other piece, for a
+// chunk that is not a base practice chunk (transitions and combos keep
+// `graduationPasses` until Pass 141 turns them into forms), and for Holding.
+function passesNeededOnModelTwo(piece, chunk, stage) {
+  if (!isReviewModelV2(piece) || !chunk || chunk.kind !== "section") return null;
+  return resolvePassesNeeded(
+    { stage, difficultyLabel: chunk.difficultyLabel, daysToLearn: piece.daysToLearn, scheduleMode: piece.scheduleMode },
+    piece.ladderConfig
+  );
+}
+
+// What the Piece Map, Daily Practice and revival cards show as "N/M to next
+// stage": M for the chunk's current stage, or null (the card then reads the
+// piece's own `graduationPasses`, as before).
+export function passesNeededForChunk(piece, chunk, entry) {
+  const stage = entry && STAGES.includes(entry.stage) ? entry.stage : "stabilizing";
+  return passesNeededOnModelTwo(piece, chunk, stage);
+}
+
+// `{ stabilizing: n, settling: n }` for the tempo projection
+// (simulateTempoConvergence), or null for a piece or chunk that doesn't use
+// the table.
+export function passesNeededByStageFor(piece, chunk) {
+  const out = {};
+  for (const stage of PASS_TABLE_STAGES) {
+    const n = passesNeededOnModelTwo(piece, chunk, stage);
+    if (n == null) return null;
+    out[stage] = n;
+  }
+  return out;
+}
+
+// The third argument computeLadderAdvance takes (lib/ladder.js documents each
+// field). null for a piece on today's plan and for any chunk that is not a
+// base practice chunk, and then the ladder behaves exactly as it always has.
+//
+// A chunk moves up only on its own turn (rule 2), and its turn is the day its
+// next review is due. So `canPromote` is false
+//   - for the chunk's first logged session (its learning session counts as its
+//     first pass, but never promotes, even where the table says 1), and
+//   - for any session logged BEFORE the date in `nextDueDate`: a repeat on the
+//     learning day, the next-day touch, a repeat on the touch's day, or an
+//     early look the day after learning. Passes are still counted; the chunk
+//     moves up at its first session on or after that date (a late review is
+//     slack, never a failure, so being late never blocks it).
+// Decided by the owner 2026-11-17 (option 2 of her two open edge cases), in
+// place of three separate patches (learning day, touch, touch day); see
+// Decisions.md, Pass 139. A chunk with no `nextDueDate` (older data) is not
+// held back by it.
+//
+// `maxCredit` is 1 for the next-day touch (rule 3): the first session on a
+// later day for a chunk that owes one, logged before its return date, counts
+// as exactly one pass even when strong.
+// `sessionDate` is the calendar date the practice happened on.
+export function ladderContextFor(piece, chunk, prevEntry, sessionDate) {
+  if (!isReviewModelV2(piece) || !chunk || chunk.kind !== "section") return null;
+  const e = prevEntry || {};
+  const stage = STAGES.includes(e.stage) ? e.stage : "stabilizing";
+  const passesNeeded = passesNeededOnModelTwo(piece, chunk, stage);
+  const logged = loggedSessions(e.sessions);
+  let canPromote = true;
+  let maxCredit = null;
+  if (logged.length === 0) {
+    canPromote = false;
+  } else {
+    const beforeDue = !!(e.nextDueDate && sessionDate && sessionDate < e.nextDueDate);
+    if (beforeDue) canPromote = false;
+    const touch = nextDayTouchState(piece, chunk, e);
+    if (touch && !touch.touched && touch.afterDate && sessionDate && sessionDate > touch.afterDate && (beforeDue || !e.nextDueDate)) {
+      maxCredit = 1;
+    }
+  }
+  return { passesNeeded, canPromote, maxCredit };
 }
 
 // Rule: the whole piece gets introduced within the first half of the

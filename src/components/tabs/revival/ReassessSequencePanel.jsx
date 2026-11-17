@@ -6,6 +6,7 @@ import { clamp, formatRange, formatDuration, todayISODate } from "../../../lib/u
 import { DIFFICULTY_META, CONFIDENCE_PRESETS, ROLE_LABEL } from "../../../lib/constants";
 import { computeConfidence, isManualConfidence, getDefaultTargetBPM, formatLadderStatus, hasClimbingTempo } from "../../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../../lib/ladder";
+import { passesNeededForChunk, passesNeededByStageFor } from "../../../lib/scheduling";
 import { ReassessPanel } from "../today/ReassessPanel";
 
 const DIFFICULTY_SIGNAL_ICON = {
@@ -49,7 +50,9 @@ export function ReassessSequencePanel({
   const selectedEntry = selectedChunk ? piece.progress[selectedChunk.id] || {} : {};
   const selectedIsManual = selectedChunk ? isManualConfidence(selectedChunk, piece.progress) : false;
   const selectedIdx = selectedChunk ? chunks.findIndex((c) => c.id === selected) : -1;
-  const ladderStatus = selectedChunk ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate()) : null;
+  const ladderStatus = selectedChunk
+    ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate(), passesNeededForChunk(piece, selectedChunk, selectedEntry))
+    : null;
   const selectedClimbing = selectedChunk ? hasClimbingTempo(selectedEntry) : false;
   const resolvedTargetBPM = selectedChunk ? selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk) || null : null;
   const tempoSimulation = selectedChunk
@@ -69,7 +72,8 @@ export function ReassessSequencePanel({
           holdingReviewCount: selectedEntry.holdingReviewCount,
         },
         piece.ladderConfig,
-        todayISODate()
+        todayISODate(),
+        passesNeededByStageFor(piece, selectedChunk)
       )
     : null;
   const tempoWarning = tempoConvergenceExceedsWarning(tempoSimulation);
@@ -236,7 +240,7 @@ export function ReassessSequencePanel({
           <div className="manual-conf-row">
             <p className="wizard-hint relearning-hint" style={{ margin: 0, flex: 1 }}>
               <RotateCcw size={13} /> Needs reinforcement. Review is paused while this chunk rebuilds
-              consistency in the Introductory phase. Clears automatically after 4 consecutive full passes.
+              consistency in the Introductory phase. Clears automatically once it gets through that phase again.
             </p>
             <button className="ghost-btn" onClick={() => onClearRelearning(selectedChunk.id)}>
               Clear, resume review

@@ -120,6 +120,14 @@ export function mergeLadderConfig(existing) {
     // for them, same as bpmSteps needed none when Pass 59 added
     // tempoRatchet itself alongside it.
     tempoRatchet: { ...DEFAULT_LADDER_CONFIG.tempoRatchet, ...existing.tempoRatchet },
+    // Pass 139 — the owner's own numbers for a piece on review model 2
+    // (`overrides.passesNeeded`, `overrides.holdingMaxDays`). Carried through
+    // only when the piece already has them: there is deliberately NO default
+    // here, because writing `overrides: null` into every piece on every load
+    // would change every piece's fingerprint and upload every piece again
+    // (the Pass 138 rule for `reviewModel`). This builds a new object from an
+    // explicit key list, so a key not named here would be dropped on load.
+    ...(existing.overrides != null ? { overrides: existing.overrides } : {}),
   };
 }
 

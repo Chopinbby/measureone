@@ -290,10 +290,11 @@ changed.
 
 ### The ladder: three stages
 
-> **Planned change (decided 2026-11-16, not built):** under
+> **Planned change (decided 2026-11-16, partly built):** under
 > [Review model v2](#review-model-v2-planned) the fixed intervals and the flat "4 consecutive full
 > passes" below become a window and a pass count that depend on the chunk's difficulty and the
-> plan's length ([the rules](Algorithms.md#review-model-v2-planned)). The table is today's model,
+> plan's length ([the rules](Algorithms.md#review-model-v2-planned)); the pass count is built for
+> base chunks (Pass 139), the windows are not. The table is today's model,
 > which every piece keeps until its owner switches it.
 
 | Stage | Interval | Graduates after | Tempo floor |
@@ -1366,7 +1367,7 @@ one check.
 
 ### Review model v2 (planned)
 
-**Status: decided 2026-11-16. Pass 138 has built the switch, the next-day touch, the timer alert and the "in a row" wording; the rest is not built.** The rules are written once, in
+**Status: decided 2026-11-16. Pass 138 has built the switch, the next-day touch, the timer alert and the "in a row" wording; Pass 139 the pass table, strong passes, half credit and the per-piece override; the rest is not built.** The rules are written once, in
 [Algorithms.md](Algorithms.md#review-model-v2-planned); the reasons, what was rejected and the
 simulation behind them are in
 [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16). This section says where
@@ -1393,9 +1394,10 @@ What the model changes, by the section it replaces:
 - **"The ladder: three stages" (4 days, 7 days, then 14 growing, four passes each).** The number
   of passes to leave Stabilizing and Settling depends on the chunk's difficulty and the plan's
   length (one pass for a Workable chunk on a plan of a month or less, up to five for a Difficult
-  chunk on a plan over three months). The gaps become windows measured against the plan's length,
+  chunk on a plan over three months; **built in Pass 139**). The gaps become windows measured against the plan's length,
   and Holding grows 30% a visit to a maximum of 30 days whatever the plan's length. A Full pass at
-  85% of target tempo or more counts double.
+  85% of target tempo or more counts double (built in Pass 139, in Stabilizing and Settling), and a
+  chunk never moves up on its first session, and only on or after the day its next review is due.
 - **"Introduction-window review scheduling: Tier 1 / Tier 2".** Tier 1's first touch becomes a
   real next-day touch for every Difficult chunk and for any chunk whose learning session was not
   a Full pass, and it survives the introduction being logged (today it is placed only for a chunk

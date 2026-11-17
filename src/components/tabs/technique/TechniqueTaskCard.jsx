@@ -1,10 +1,12 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, Music, Star } from "lucide-react";
 import { NumberInput } from "../../NumberInput";
 import { StarButton } from "./StarButton";
 import { KeyText } from "./KeyText";
 import { itemTitle, itemMeta, octavesText } from "./format";
 import { startingTempo, isRepertoireItem } from "../../../lib/technique";
+import { formatDuration } from "../../../lib/utils";
+import { elapsedSeconds } from "../../../lib/plannedMinutes";
 import { TECHNIQUE_MIN_TEMPO, TECHNIQUE_MAX_TEMPO } from "../../../lib/constants";
 
 // One scale/arpeggio task on today's list (Pass 101). Layout and copy follow
@@ -19,6 +21,28 @@ export function TechniqueTaskCard({
   const tempoRef = useRef(tempo);
   const [tempoError, setTempoError] = useState(false);
   const setTempoBoth = (v) => { tempoRef.current = v; setTempo(v); };
+
+  // Pass 137 — a timer for the task, the same wall-clock rule as the practice cards (Pass 72):
+  // the running stretch remembers when it began and the seconds it already held, and every
+  // reading is recomputed from the clock (lib/plannedMinutes.js), so a backgrounded tab that
+  // skips ticks is still right on return. The seconds are saved with the task's done state,
+  // by whichever way it is finished (the tick or the even-rhythm check). Display only: nothing
+  // reads them back into any list or schedule. Like the practice cards' timers, this one is
+  // lost if the card is left (another tab) before the task is finished.
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  const timerStartRef = useRef(null);
+  useEffect(() => {
+    if (!timerRunning) return;
+    timerStartRef.current = { startedAt: Date.now(), baseSeconds: durationSeconds };
+    const id = setInterval(() => setDurationSeconds(elapsedSeconds(timerStartRef.current, Date.now())), 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerRunning]);
+  // What to save at the moment of a click: read from the clock, not from the last tick.
+  const secondsNow = () =>
+    timerRunning && timerStartRef.current ? elapsedSeconds(timerStartRef.current, Date.now(), Math.floor) : durationSeconds;
+  const finishTimer = () => { setTimerRunning(false); setDurationSeconds(0); };
 
   const title = itemTitle(item);
   const start = startingTempo(item);
@@ -37,7 +61,9 @@ export function TechniqueTaskCard({
       return;
     }
     setTempoError(false);
-    onLogTempo(item.id, v);
+    const seconds = secondsNow();
+    finishTimer();
+    onLogTempo(item.id, v, seconds);
   };
 
   return (
@@ -48,7 +74,12 @@ export function TechniqueTaskCard({
         aria-label={cantUndo ? `${title} is done. ${cantUndoText}` : task.done ? `Mark ${title} not done` : `Mark ${title} done`}
         title={cantUndo ? cantUndoText : undefined}
         disabled={cantUndo}
-        onClick={() => (task.done ? onUncheck(item.id) : onCheckOff(item.id))}
+        onClick={() => {
+          if (task.done) return onUncheck(item.id);
+          const seconds = secondsNow();
+          finishTimer();
+          onCheckOff(item.id, seconds);
+        }}
       >
         {task.done && <Check size={12} strokeWidth={3} />}
       </button>
@@ -86,6 +117,28 @@ export function TechniqueTaskCard({
             <span className="tq-pill"><Music size={12} /> Repertoire in this key</span>
           </div>
         )}
+
+        {!task.done && (
+          <div className="timer-row">
+            <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
+              {timerRunning ? "Stop" : "Start"} timer
+            </button>
+            {timerRunning ? (
+              <span className="timer-display mono">{formatDuration(durationSeconds)}</span>
+            ) : (
+              <label className="timer-manual">
+                <span>minutes practiced</span>
+                <NumberInput
+                  value={durationSeconds ? Math.round(durationSeconds / 60) : ""}
+                  min={0}
+                  onCommit={(n) => setDurationSeconds(Math.round(n * 60))}
+                  placeholder="e.g. 10"
+                />
+              </label>
+            )}
+          </div>
+        )}
+        {task.done && task.seconds ? <p className="tq-hint">Time spent: {formatDuration(task.seconds)}</p> : null}
 
         {open && (
           <div className="tq-expanded">

@@ -2268,6 +2268,54 @@ crashing, but logs a `console.warn` first — found in self-review as a
 silent-failure risk (a corrupted or future stage value would otherwise
 misclassify with no trace).
 
+## Time on a practice card (Pass 137)
+
+Display only. Nothing here changes how days are planned or priced, and nothing reads a card's
+logged time back into a schedule (a learned estimate is Pass 145's, and a later pass's to settle).
+
+**The price.** `plannedMinutesFor(chunk)` (`lib/plannedMinutes.js`) is the chunk's `effort` times
+`EFFORT_TO_MIN`, rounded to a whole minute. It is the same conversion the schedule and the due-reviews
+list already use: `computeTimeline`'s `minutesFor` sums `effort * EFFORT_TO_MIN` for a day and rounds the
+SUM, and `maintenance.js` prices a due review as `Math.round((effort || 1) * EFFORT_TO_MIN)`.
+`test/plannedMinutes.test.mjs` pins all three together over a chunk, a transition and a combo, so a change to
+one fails there until the others follow. A due review is the same chunk, so it shows the same price.
+
+**Cards can differ from the day's header.** The card rounds one task, the header rounds a sum: three
+2.5-minute tasks read "3 min" on their cards (9) and "8" on the header (7.5 rounded). Whole minutes were
+chosen over decimals, knowingly.
+
+**No price, no estimate.** A section run-through (`sr_<id>`) and a section-pair run-through (`st_<id>`)
+are built by `computeSectionRunThroughs` with no `effort`, and `computeTimeline` never places them, so they
+have no price today. `plannedMinutesFor` returns `null` for them and their cards show no estimate (they keep
+their old "in m:ss" on the logged line). The whole-piece run-through card (the consolidation day) shows none
+either: the schedule bills that day at the whole daily budget, a placeholder, not a price; Pass 142 prices it.
+Interleaved mode's, a focus spot's and the revival reassessment's cards have their own timers and are unchanged.
+
+**The words.** Beside a practice card's timer: "planned about N min". After logging, one line: "N min planned,
+M min spent", where M is the rounded total of the logged times of every attempt that day on that card ("under
+1 min spent" below a minute; just "N min planned" when no time was logged). No colour and no word that judges
+a longer or a shorter time; `test/plannedMinutes.test.mjs` fails on one.
+
+**Timers.** All of them follow Pass 72: a running stretch remembers the wall-clock moment it began and the
+seconds it already held, and every reading is recomputed from the clock (`elapsedSeconds`), rounded for the
+display and floored for the value saved at a click, so a backgrounded tab that skips ticks is right when it
+returns. Pass 137 added two: the whole-piece run-through (`ConsolidationPanel`, `DayChecklist.jsx`) and a
+technique task (`TechniqueTaskCard.jsx`). A timer lives in its card, so leaving the card before the task is
+finished loses it, as the practice cards' always have.
+
+**Where the time is saved.**
+- A whole-piece run-through: `progress["__consolidation__"].sessions[].durationSeconds`, beside `stopCount`, built
+  by `buildRunThroughSession` and present only when a time exists (a session without one has exactly the shape it
+  had before, nothing materialized). Totals (`sumPracticeSeconds`, `sumPracticeSecondsSince`) add every entry's
+  `durationSeconds`, so a run-through's time joins "time practiced" and the week's total from now on; earlier
+  run-throughs have none, so nothing already shown changes. Revival's stop-count trigger and the Cold-Start
+  check read `stopCount` and are unaffected.
+- A technique task: `seconds` (whole seconds) on today's task, written by `completeTask` only for a real time.
+  It is part of the task's `taskDone:<date>:<itemId>` merge part (`{ tempo, seconds?, undo? }`), so it travels with
+  the completion that wins; `uncompleteTask` clears it with the tempo. `normalizeDayList` keeps it only on a done
+  task and never materializes a null, so no existing library changes fingerprint. Today's list is replaced each
+  day, so the seconds are kept for that day only. Technique stays out of every schedule path: nothing reads them.
+
 ## Review model v2 (planned)
 
 > **Status: decided 2026-11-16. Built so far: Pass 138 only** (the switch `piece.reviewModel`, rule 3's
@@ -2396,17 +2444,19 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    an "Add a focus spot" button. There is no lower-tempo button: the learner records a lower tempo
    on the card, as today.
 
-   **Built in Pass 138, for every piece (either model).** `plannedMinutesFor(chunk)`
-   (`lib/scheduling.js`: the chunk's effort times `EFFORT_TO_MIN`, rounded, at least 1; the same
-   price `computeTimeline`, `computeDueReviews` and revival's plan put on the card, and the number
-   Pass 137's "planned about N min" is to show, so **Pass 137 reuses this function and does not
-   write a second one**), `timerAlertMinutes` (`lib/scheduling.js`: the planned time held to at
-   least `TIMER_ALERT_FLOOR_MINUTES`, 5; the floor is on the alert only, so the planned time stays
-   as the plan prices it) and `timerAlertMessage` (`lib/ladder.js`) with `ChecklistItem.jsx`: a
+   **Built in Pass 138, for every piece (either model).** The planned time is Pass 137's
+   `plannedMinutesFor(chunk)` (`lib/plannedMinutes.js`, see
+   [Time on a practice card](#time-on-a-practice-card-pass-137): the chunk's effort times
+   `EFFORT_TO_MIN`, rounded, the same price the plan and the due list put on the card and the
+   number the card shows as "planned about N min"). Pass 138 added `timerAlertMinutes`
+   (`lib/scheduling.js`: that planned time held to at least `TIMER_ALERT_FLOOR_MINUTES`, 5; the
+   floor is on the alert only, so the card keeps showing the plan's own price) and
+   `timerAlertMessage` (`lib/ladder.js`), used by `ChecklistItem.jsx`: a
    Difficult 4-measure chunk plans 30 minutes and a Workable one 10, so the alert comes at those
    times, whether the card is a new chunk or a review of it, and a chunk planned at 3 minutes
    alerts at 5. A card the plan puts no price on (a
-   section run-through carries no `effort`) never alerts; Pass 137 has to decide a price for those.
+   section run-through carries no `effort`, and `plannedMinutesFor` returns `null` for it) never
+   alerts; what a run-through should cost is left to Passes 142 and 145.
    The alert shows when the running timer reaches that time, stays until dismissed or the
    session is logged, and does not return within that session. Typing minutes by hand does not
    trigger it, only the running timer. It is on Daily Practice cards only, not in Interleaved mode (one timer for the

@@ -4,6 +4,7 @@ import { generateAllChunks } from "./chunking";
 import { sessionOutcome } from "./confidence";
 import { isInRevival } from "./revival";
 import { isPieceLearned } from "./ladder";
+import { plannedMinutesFor } from "./plannedMinutes";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -322,28 +323,13 @@ export function smoothOverloadedDays({ dayNumbers, items, loadFor, ceiling, floo
   }
 }
 
-// The minutes a card is planned for: the chunk's effort priced through
-// EFFORT_TO_MIN, rounded to whole minutes (at least 1). It is the same price
-// computeTimeline's `minutesFor`, computeDueReviews (lib/maintenance.js) and
-// revival's plan put on a chunk (those add up and round per day, this rounds
-// the one card), and the same for a new chunk, a review, a transition and a
-// combo. Pass 138's timer alert fires at this; Pass 137's "planned about N
-// min" is meant to show it, so use this and do not write a second formula.
-// null where the plan puts no price on the card: a section run-through
-// (`sr_...`, `st_...`) carries no `effort`, and a missing or non-positive
-// effort is not a price.
-export function plannedMinutesFor(chunk) {
-  const effort = chunk ? Number(chunk.effort) : NaN;
-  if (!Number.isFinite(effort) || effort <= 0) return null;
-  return Math.max(1, Math.round(effort * EFFORT_TO_MIN));
-}
-
-// The timer alert fires at the card's planned time, but never sooner than this
-// many minutes into the timer: a chunk planned at 2 or 3 minutes would
-// otherwise tell the learner they had "been on it a while" almost at once
-// (the owner's floor, 2026-11-16). It lives here and not in plannedMinutesFor
-// because the planned time is a price the plan shows as it is (Pass 137), and
-// only the alert needs a floor.
+// The timer alert fires at the card's planned time (plannedMinutesFor,
+// lib/plannedMinutes.js: Pass 137's one price for a card, the same one the card
+// shows as "planned about N min"), but never sooner than this many minutes into
+// the timer: a chunk planned at 2 or 3 minutes would otherwise tell the learner
+// they had "been on it a while" almost at once (the owner's floor, 2026-11-16).
+// It lives here and not in plannedMinutesFor because the planned time is a price
+// the card shows as it is, and only the alert needs a floor.
 export const TIMER_ALERT_FLOOR_MINUTES = 5;
 
 // Minutes into a running timer at which a card's alert shows: its planned

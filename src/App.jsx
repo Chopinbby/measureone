@@ -184,6 +184,7 @@ import { compareSwitcherOrder, sortPiecesForSwitcher, planSwitcherMove, makeOrde
 import { stampChangedSettings, pieceWithChange } from "./lib/settingTimes";
 import { stampChangedTechnique } from "./lib/techniqueMerge";
 import { deletionsElsewhere, deletedForPerson, recentlyDeletedList } from "./lib/recentlyDeleted";
+import { buildRunThroughSession } from "./lib/plannedMinutes";
 import { NEW_ADDRESS, NEW_ADDRESS_URL, movedNote } from "./lib/address";
 import { ReportProblemLink } from "./components/ReportProblemLink";
 import { CONTACT_ADDRESS } from "./lib/reportProblem";
@@ -1805,8 +1806,10 @@ export default function App() {
     updateTechnique((t) => ({ ...t, items: t.items.map((it) => (it.id === itemId ? fn(it) : it)) }));
 
   // Check-off (tempo omitted: a bare check-off, saved tempo unchanged) or
-  // an even-rhythm check with a tempo, which sets the new baseline.
-  const handleTechniqueComplete = (itemId, tempo = null) =>
+  // an even-rhythm check with a tempo, which sets the new baseline. `seconds`
+  // (Pass 137) is what the card's timer read at the click; saved with the task's
+  // done state only when there is one.
+  const handleTechniqueComplete = (itemId, tempo = null, seconds = null) =>
     updateTechnique((t) => {
       if (!t.dayList) return t;
       const done = completeTask(
@@ -1814,11 +1817,12 @@ export default function App() {
         itemId,
         t.dayList.date,
         tempo,
-        Date.now() // the exact time of the check (Pass 118): when two devices log a tempo the same day, the later wins
+        Date.now(), // the exact time of the check (Pass 118): when two devices log a tempo the same day, the later wins
+        seconds
       );
       return { ...t, items: done.items, dayList: done.dayList, methodLastUsed: done.methodLastUsed, walkPosition: done.walkPosition };
     });
-  const handleTechniqueCheckOff = (itemId) => handleTechniqueComplete(itemId, null);
+  const handleTechniqueCheckOff = (itemId, seconds = null) => handleTechniqueComplete(itemId, null, seconds);
   // Un-check: reverses everything the check-off changed (uncompleteTask).
   const handleTechniqueUncheck = (itemId) =>
     updateTechnique((t) => {
@@ -1835,7 +1839,7 @@ export default function App() {
   // 101). Nothing already on the list is replaced.
   const withTopUp = (t) =>
     t.dayList ? { ...t, dayList: topUpDayList(techniqueEngineState(t), t.dayList, t.dayList.date, t.settings.scalesPerDay) } : t;
-  const handleTechniqueLogTempo = (itemId, tempo) => handleTechniqueComplete(itemId, tempo);
+  const handleTechniqueLogTempo = (itemId, tempo, seconds = null) => handleTechniqueComplete(itemId, tempo, seconds);
 
   const handleTechniqueToggleStarItem = (itemId) =>
     updateTechniqueItem(itemId, (it) => ({ ...it, starred: !it.starred }));
@@ -2994,13 +2998,15 @@ export default function App() {
   // (doneDays append-if-missing, sessions appended and keyed by loggedAt,
   // multiple same-day attempts allowed) against the synthetic
   // "__consolidation__" progress key rather than a real chunk id.
-  const handleLogRunThrough = (day, stopCount) => {
+  const handleLogRunThrough = (day, stopCount, durationSeconds) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress["__consolidation__"] || { doneDays: [] };
       const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
       const loggedDate = todayISODate();
-      const sessions = [...(prevEntry.sessions || []), { day, stopCount, loggedAt: Date.now(), loggedDate }];
+      // Pass 137 — the card's timer, saved only when there is a time
+      // (lib/plannedMinutes.js buildRunThroughSession says why).
+      const sessions = [...(prevEntry.sessions || []), buildRunThroughSession({ day, stopCount, loggedAt: Date.now(), loggedDate, durationSeconds })];
       progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress, lastLoggedAt: loggedDate };
     });
@@ -5433,6 +5439,7 @@ const CSS = `
 .timer-btn { border: 1px solid var(--line); background: var(--white); color: var(--ink-soft); border-radius: 7px; padding: 5px 12px; font-size: 12px; font-weight: 600; }
 .timer-btn.running { background: var(--brick); border-color: var(--brick); color: var(--white); }
 .timer-display { font-size: 13px; color: var(--ink-soft); min-width: 40px; }
+.timer-planned { font-size: 12px; color: var(--ink-soft); }
 .timer-manual { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); font-weight: 600; }
 .timer-manual input { width: 70px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 13px; background: var(--white); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
 .log-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 4px; }

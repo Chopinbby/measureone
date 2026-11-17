@@ -15,12 +15,11 @@ import {
   isReviewModelV2,
   nextDayTouchState,
   tier1DoneAfterSession,
-  plannedMinutesFor,
   timerAlertMinutes,
   TIMER_ALERT_FLOOR_MINUTES,
 } from "../src/lib/scheduling.js";
 import { computeLadderAdvance, timerAlertMessage } from "../src/lib/ladder.js";
-import { computeDueReviews } from "../src/lib/maintenance.js";
+import { plannedMinutesFor } from "../src/lib/plannedMinutes.js";
 import { EFFORT_TO_MIN } from "../src/lib/constants.js";
 import { requirementLine, repsShortfallMessage, tempoShortfallMessage, cleanRepsInARow } from "../src/lib/confidence.js";
 import { validateAndMigratePiece } from "../src/lib/storage.js";
@@ -361,34 +360,15 @@ describe("[Pass 138] the switch is never filled in by a load or an edit", () => 
 });
 
 describe("[Pass 138] timer alert: fires at the card's planned time, never sooner than 5 minutes", () => {
-  test("the planned minutes are the chunk's effort priced through EFFORT_TO_MIN, rounded", () => {
+  test("the planned minutes are Pass 137's price for the card (lib/plannedMinutes.js: effort times EFFORT_TO_MIN, rounded)", () => {
     const piece = basePiece();
     const set = generateAllChunks(piece);
     for (const c of set.all) {
-      assert.equal(plannedMinutesFor(c), Math.max(1, Math.round(c.effort * EFFORT_TO_MIN)), `${c.id} (${c.kind})`);
+      assert.equal(plannedMinutesFor(c), Math.round(c.effort * EFFORT_TO_MIN), `${c.id} (${c.kind})`);
     }
     // And the numbers the alert was changed to follow: a Difficult 4-measure chunk plans 30, a Workable one 10.
     assert.equal(plannedMinutesFor(chunkOf(piece, "c1")), 30);
     assert.equal(plannedMinutesFor(chunkOf(piece, "c5")), 10);
-  });
-
-  test("it is the price the plan itself puts on the card (a day holding one new chunk reads the same minutes)", () => {
-    const piece = basePiece();
-    const set = generateAllChunks(piece);
-    const t = computeTimeline(piece, set);
-    const day = t.days.find((d) => d.newChunkIds.length === 1 && !d.specialChunkIds.length && !d.reviewChunkIds.length && d.type === "learning");
-    assert.ok(day, "setup: a day with exactly one new chunk and nothing else");
-    assert.equal(plannedMinutesFor(set.all.find((c) => c.id === day.newChunkIds[0])), day.minutes);
-  });
-
-  test("it is the price Master Agenda's live due-review list puts on a review (computeDueReviews)", () => {
-    const piece = basePiece({ progress: { c1: learnedEntry({ day: 1 }) } });
-    piece.progress.c1.nextDueDate = "2026-01-02";
-    const set = generateAllChunks(piece);
-    const items = computeDueReviews(piece, set, "2026-01-10");
-    const item = items.find((it) => it.chunkId === "c1");
-    assert.ok(item, "setup: c1 is due");
-    assert.equal(plannedMinutesFor(set.all.find((c) => c.id === "c1")), item.minutes);
   });
 
   test("a card the plan puts no price on never alerts: no effort, zero, negative, not a number", () => {
@@ -398,10 +378,6 @@ describe("[Pass 138] timer alert: fires at the card's planned time, never sooner
     assert.equal(plannedMinutesFor({ effort: "x" }), null);
     assert.equal(plannedMinutesFor(null), null);
     assert.equal(plannedMinutesFor(undefined), null);
-  });
-
-  test("a very small chunk plans at least 1 minute, not 0", () => {
-    assert.equal(plannedMinutesFor({ effort: 0.1 }), 1);
   });
 
   test("the alert time is the planned time, held to a floor of 5 minutes", () => {
@@ -417,10 +393,11 @@ describe("[Pass 138] timer alert: fires at the card's planned time, never sooner
     assert.equal(timerAlertMinutes({ effort: 1.8 }), 5, "4.5 rounds to 5 planned");
   });
 
-  test("the floor is on the alert only: the planned time keeps the plan's own price", () => {
+  test("the floor is on the alert only: the card keeps showing the plan's own price", () => {
     assert.equal(plannedMinutesFor({ effort: 1.2 }), 3);
     assert.equal(timerAlertMinutes({ effort: 1.2 }), 5);
-    assert.equal(plannedMinutesFor({ effort: 0.1 }), 1);
+    assert.equal(plannedMinutesFor({ effort: 0.1 }), 0, "Pass 137's price rounds a tiny chunk to 0 minutes");
+    assert.equal(timerAlertMinutes({ effort: 0.1 }), 5, "and the alert still waits for 5");
   });
 
   test("a card the plan puts no price on never alerts (no floor turns it into an alert)", () => {

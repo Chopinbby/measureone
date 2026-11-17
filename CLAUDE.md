@@ -1717,11 +1717,15 @@ silently.
   review takes, early whole-piece run-throughs, and a switch so a piece in progress keeps today's model. The rules are in
   [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned); the reasons, the 48-scenario simulation and four open questions are in
   [`Decisions.md`](docs/Decisions.md#review-model-overhaul-decided-2026-11-16). Passes 137 to 144 build it, in order. Docs only.
+- **Pass 137** — time on cards: a practice card says "planned about N min" beside its timer and, once logged, "N min planned, M min spent" (one
+  price, `plannedMinutesFor` in `lib/plannedMinutes.js`, the same conversion the schedule and the due-reviews list use, pinned by a test; none for a
+  section run-through, which has no price today); the whole-piece run-through and a technique task each got a wall-clock timer, whose seconds are
+  saved (`durationSeconds` beside `stopCount`; `seconds` on the day's task, part of its merge part, cleared by undo). Display only: no schedule
+  reads them. [`Algorithms.md`](docs/Algorithms.md#time-on-a-practice-card-pass-137)
 - **Pass 138** — the review plan switch and the first card changes: `piece.reviewModel` (null is today's
   plan, 2 the overhaul) with Settings' "Update this piece's review plan" button and its way back, a real
   next-day touch on the new plan (Difficult chunks and any chunk whose learning session was not a Full pass;
   it sits the day after the chunk was learned, stays once logged, and drops quietly if skipped), "Need N clean
   reps in a row" on every card, and a one-time timer alert at the card's planned time, never sooner than 5 minutes
-  (`timerAlertMinutes`: 30 minutes for a Difficult 4-measure chunk, 10 for a Workable one) with an "Add a focus spot" button. Built 2026-11-16, not committed or merged
-  when this line was written. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
+  (`timerAlertMinutes`: 30 minutes for a Difficult 4-measure chunk, 10 for a Workable one) with an "Add a focus spot" button. Built 2026-11-16 (PR #106). [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
   [`Decisions.md`](docs/Decisions.md#review-model-pass-138-build-2026-11-16)

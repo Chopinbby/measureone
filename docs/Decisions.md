@@ -4255,15 +4255,16 @@ answer the four questions one by one, so any of them can be reversed):
 - **The timer alert fires at the card's planned time, not at fixed limits (the owner's change, 2026-11-16, after the first build).** The
   design as decided had 20 minutes on a chunk's first session, 15 on the next two and 10 from the fourth, with a table in `lib/ladder.js`.
   She asked for "the initial suggested time instead of arbitrary intervals", so the alert now fires at `plannedMinutesFor(chunk)`
-  (`lib/scheduling.js`), the minutes the plan puts on that card, and the table is gone. Reasons: it needs no separate hand-picked number
+  (Pass 137's helper in `lib/plannedMinutes.js`, merged to `main` while this pass was open; this pass first wrote its own copy
+  and dropped it for theirs), the minutes the plan puts on that card, and the table is gone. Reasons: it needs no separate hand-picked number
   (the plan's own estimate, itself a guess in Research.md, is the single source), a Workable chunk planned at 10 minutes is no longer
   allowed 20, and it will follow Pass 145's learned estimates by itself. Consequences: a Difficult 4-measure chunk now alerts at 30 minutes
   (it was 20) and a Workable one at 10; the same minutes apply to a review of that chunk; a section run-through
-  has no planned time, so it never alerts (Pass 137 must price it). **Two follow-ups the same day, on her word:** the alert's words went
+  has no planned time, so it never alerts (Pass 137 found the same and left the price to Passes 142 and 145). **Two follow-ups the same day, on her word:** the alert's words went
   back to "You've been on this chunk for N minutes" (a first version said "You've reached the N minutes planned for this chunk"; she
   preferred the original), and the alert has a **floor of 5 minutes** (`TIMER_ALERT_FLOOR_MINUTES`, `timerAlertMinutes` in
   `lib/scheduling.js`), so a chunk planned at 3 minutes alerts at 5. The floor is on the alert only: `plannedMinutesFor` keeps
-  the plan's own price (at least 1 minute), because Pass 137 shows that number as it is. The alert is on Daily Practice cards only, not in Interleaved mode (one timer for the whole rotation, whose point is short
+  the plan's own price, because the card shows that number as it is. The alert is on Daily Practice cards only, not in Interleaved mode (one timer for the whole rotation, whose point is short
   turns). The "mark the exact spot" half and the "Add a focus spot" button show only where focus spots are on for the piece.
 - **The review plan panel is on the Settings landing page** and shows for every piece until Pass 144 decides the default.
 
@@ -4280,7 +4281,7 @@ answer the four questions one by one, so any of them can be reversed):
 - *A non-latest session undone leaves `tier1Done` as it was* (the existing fallback removes only the record), so a touch whose
   session is undone that way still reads as touched. Same limit as every other ladder field.
 - *The alert inherits the plan's own estimate* (`EFFORT_TO_MIN`, hand-picked: Research.md), so it is only as good as the planned time.
-  **Owner: Pass 137** (a price for a section run-through, and to show the same number on the card) and **Pass 145** (learned estimates).
+  **Owner: Pass 142** (a price for a section run-through, which `plannedMinutesFor` leaves `null`) and **Pass 145** (learned estimates).
 
 ## UX
 

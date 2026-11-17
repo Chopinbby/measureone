@@ -1613,10 +1613,11 @@ without this function existing at all.
 
 ## Session outcomes & the maintenance ladder
 
-> **Planned change (decided 2026-11-16, not built):** for a piece on
+> **Planned change (decided 2026-11-16, partly built):** for a piece on
 > [Review model v2](#review-model-v2-planned), the ladder's stage lengths, its "4 consecutive full
 > passes" and its fixed gaps below are replaced by a pass table by difficulty and plan length, strong
-> passes, half credit from joins, and review windows. How a single session is judged
+> passes, half credit from joins, and review windows. The pass table and strong passes are built for
+> base chunks (Pass 139); the gaps and windows are not. How a single session is judged
 > (`classifySessionOutcome`) does not change. This section describes the model every piece is on
 > until it is switched.
 
@@ -1751,8 +1752,9 @@ Settling → Holding stages:
   a **persisted, sticky boolean**, not just a per-call informational
   return value: `computeLadderAdvance` reads it back in via
   `chunkLadderState.needsRelearning` on every call, so once set it stays
-  set across subsequent sessions until either 4 consecutive full passes
-  graduate the chunk out of Stabilizing (the pass branch clears it
+  set across subsequent sessions until either the stage's pass count (4 by default;
+  the pass table's number for a base chunk of a piece on the new review plan, Pass 139) graduates
+  the chunk out of Stabilizing (the pass branch clears it
   automatically) or a manual override does (`handleClearRelearning`,
   `App.jsx`). The exact fail that turns it on also does two more things in
   the same call, only on that one transition — not reapplied on later
@@ -2318,9 +2320,10 @@ finished loses it, as the practice cards' always have.
 
 ## Review model v2 (planned)
 
-> **Status: decided 2026-11-16. Built so far: Pass 138 only** (the switch `piece.reviewModel`, rule 3's
-> real next-day touch, rule 9's timer alert and the "in a row" wording); **every other rule is not built,
-> and nothing else in `src/` reads any of this.** This is
+> **Status: decided 2026-11-16. Built so far: Pass 138** (the switch `piece.reviewModel`, rule 3's
+> real next-day touch, rule 9's timer alert and the "in a row" wording) **and Pass 139** (rules 1 and 2:
+> the pass table, strong passes, the half-credit function and the per-piece override); **every other rule is
+> not built, and nothing else in `src/` reads any of this.** This is
 > the one place the rules are written out. The reasons, what was rejected and the simulation
 > that checked them are in
 > [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16); the hand-picked
@@ -2362,6 +2365,58 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    rework steps the chunk back one stage. **A chunk never moves up on its first session, even
    where the table says 1, and only moves up on its own turn** (not on credit from a neighbour
    or from the next-day touch).
+
+   **Built in Pass 139, for base practice chunks of a piece on `reviewModel` 2 (rules 1 and 2).**
+   `PASS_TABLE_ROWS` (`lib/ladder.js`) is the table, `passTableRowIndex` picks the row (30, 60 and
+   90 days with each upper bound included; a plan set by minutes per day, or a length that cannot
+   be read, uses the last row) and `resolvePassesNeeded` gives the number for a stage: the owner's
+   override for that cell, else the table, `null` for Holding. The same count applies to
+   Stabilizing and to Settling. `computeLadderAdvance` takes a **fourth argument**, a context
+   `{ passesNeeded, canPromote, maxCredit }` built by `ladderContextFor` (`lib/scheduling.js`) and
+   passed by `App.jsx`'s `handleLogSession` and `handleConfirmProvisionalSession`; `null` (a piece on
+   today's plan, a transition, a combo, a section run-through) leaves the function exactly as it was, which
+   a recorded set of 160 cases from before the pass checks (`test/ladder-table.test.mjs`).
+   - **A strong pass** (a Full pass whose logged tempo is at least `STRONG_PASS_FRACTION`, 0.85, of
+     the chunk's target tempo; no target tempo, no strong pass) counts as two, in Stabilizing and
+     Settling only. In Holding the count drives how far the next gap grows, so doubling it there
+     would stretch the gaps; Pass 140 rebuilds those. A pass below the stage's tempo floor still
+     counts for nothing. The count is no longer always whole: `consecutivePasses` can read
+     `2.5` (after half credit), and `formatLadderStatus` shows it as "2.5/4 to Building" and never
+     above what is needed.
+   - **Own turn: a chunk moves up only on or after the day its next review is due** (the owner's
+     rule, 2026-11-17; see [Decisions.md](Decisions.md#review-model-pass-139-build-2026-11-17)).
+     `canPromote` is false for the chunk's **first logged session** (a skipped or still-provisional
+     attempt is not one) and for **any session logged before the date in `nextDueDate`**: a repeat
+     on the learning day, the next-day touch, a second attempt on the touch's day, or an early
+     look the day after learning, even for a chunk that owes no touch. A session on or after that
+     date can promote, however late (a late review is slack, never a failure), and a chunk with no
+     `nextDueDate` (older data) is not held back. Passes are counted either way: a chunk that has
+     enough passes but was held back keeps them and moves up at its first session on or after the
+     due day, and its card reads "3/3". Because every logged pass sets the next review four (or
+     seven) days from that session, an early extra session also moves the due day out, as it
+     always has.
+   - **The next-day touch** (rule 3: the first session on a later day of a chunk that owes one,
+     logged before its return date) is capped at one pass (`maxCredit`), strong or not, so it
+     "counts as one pass and cannot promote" as rule 3 says; the due-day rule is what stops it
+     promoting. A skipped touch is dropped: the session on the return date is the chunk's own turn.
+   - **A Partial pass** starts the count over (fractions too) and **Needs rework** steps back one
+     stage, both unchanged.
+   - **Half credit** is `addHalfPass` (`lib/ladder.js`): adds `HALF_PASS_CREDIT` (0.5) to a
+     Stabilizing or Settling chunk's count and changes nothing else, never the stage. Nothing calls
+     it yet; Pass 141 does.
+   - **A reschedule that changes the plan's length** rewrites nothing: the chunk keeps its count and
+     reads the new row from its next pass.
+   - **The owner's override** is `ladderConfig.overrides` (see
+     [Data-Model.md](Data-Model.md#ladder-config-pieceladderconfig)): cell by cell
+     (`passesNeeded[stage][difficulty]`) plus `holdingMaxDays`, absent until she changes something
+     and absent again after "Reset to automatic". Settings' ladder editor shows the table, the plan
+     length it follows and "set by you" on a changed cell; the two "Passes to graduate" boxes stay
+     for the Review and Focus block cards (transitions and combos), which keep `graduationPasses`
+     until Pass 141. `holdingMaxDays` (`effectiveHoldingMaxDaysV2`, 30 by default) is saved and read
+     by nothing yet; Pass 140 uses it.
+   - **Shown on:** Piece Map's chunk detail, Daily Practice cards, Interleaved cards and the revival
+     reassessment (`passesNeededForChunk`), and the tempo projection
+     (`simulateTempoConvergence`'s optional fourth argument, `passesNeededByStageFor`).
 3. **A next-day touch** for every Difficult chunk, and for any chunk whose learning session was
    not a Full pass. It counts as one pass and cannot move the chunk up by itself. (Today the
    design notes already promise a touch the day after introduction, but `computeTimeline`
@@ -2385,8 +2440,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    lands on the same day, one card covers both. Transitions and combos keep today's Tier 1 rule
    until Pass 141. **Two limits to know:** the touch is an ordinary logged session as far as
    today's ladder goes (it advances `consecutivePasses` like any pass and cannot move a chunk up
-   alone only because a stage needs more than two passes; Pass 139's pass table must make "counts
-   as one pass, cannot promote" explicit), and a touch that falls after a reschedule's `asOfDay` is
+   alone only because a stage needs more than two passes; **closed in Pass 139**: the touch is capped
+   at one pass and cannot promote, see rule 2), and a touch that falls after a reschedule's `asOfDay` is
    not placed for a chunk already done (the chunk set the reschedule recomputes from leaves done
    chunks out).
 4. **Transitions and combos stop being tasks of their own.** They have no ladder, no
@@ -2494,7 +2549,7 @@ reassessment walk. Pass 141 lists each decision it makes.
 **What builds each rule** (the backlog's pass numbers; each pass applies only to a piece on
 `reviewModel` 2 unless it says so): 137 shows a time estimate and a timer on every card
 (display only); 138 (built) adds the switch, the real next-day touch, "in a row" wording and the
-alert (rules 3 and 9, and rule 10's switch); 139 the pass table, strong pass, half credit and
+alert (rules 3 and 9, and rule 10's switch); 139 (built) the pass table, strong pass, half credit and
 per-piece override (rules 1 and 2); 140 the windows, placement, protected third and worst-first
 order (rules 6 to 8); 141 joins as forms (rule 4); 142 early run-throughs (rule 5), with a
 "typical run time at target tempo" piece field; 143 the minutes-mode day count (which today
@@ -2506,7 +2561,7 @@ the simulation in Decisions.md is then re-run with the answer):
 - *Who gets credit on a join?* Rule 4 says half a pass for each chunk it covers, which includes
   the chunk whose turn it is. The simulation gave that chunk a full pass and only the
   neighbour half. The two read very differently for a Difficult chunk, where one return in
-  three is a join. Settle in Pass 141 (Pass 139 supplies the half-credit function).
+  three is a join. Settle in Pass 141 (Pass 139 built the half-credit function, `addHalfPass`).
 - *How is a combo return credited*, as the chunk's own turn or as half credit? The rules do not
   say. The simulation treated it as a full turn. Settle in Pass 141.
 - *The Holding maximum:* this section applies it to the window (never past 30 days), the

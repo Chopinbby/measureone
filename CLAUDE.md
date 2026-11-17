@@ -462,6 +462,15 @@ chunking, scheduling, and confidence are actually computed, see
   and a rule that forgets the gate fails `test/review-model-v2.test.mjs`. On the new plan `tier1Done`
   means "the first session on a later day than the learning session is logged"
   (`tier1DoneAfterSession`); a new session handler must pass it through, as the three in `App.jsx` do.
+- **The new review plan reaches the ladder only through `computeLadderAdvance`'s fourth argument, and `ladderConfig.overrides` is never
+  given a default (Pass 139).** `ladderContextFor` (`lib/scheduling.js`) builds the context (`{ passesNeeded, canPromote, maxCredit }`) and
+  returns `null` for a piece on today's plan and for anything but a base practice chunk; `null` leaves the function exactly as it was
+  (160 recorded cases in `test/fixtures/ladder-before-pass-139.json` prove it). **A new code path that logs a session must build and pass
+  the context**, as `handleLogSession` and `handleConfirmProvisionalSession` do, or a piece on the new plan silently reads the old counts
+  (nothing errors). `consecutivePasses` can now be fractional and above what the stage needs: do not assume a whole number or a
+  value below the requirement. `mergeLadderConfig` builds its result from a named key list, so `overrides` is carried only when the piece
+  already has it; writing `overrides: null` as a default would change every piece's fingerprint and upload every piece again. A new
+  field under `ladderConfig` needs the same two checks (named in `mergeLadderConfig`, and no materialized default).
 
 ## Revival
 
@@ -1729,3 +1738,10 @@ silently.
   reps in a row" on every card, and a one-time timer alert at the card's planned time, never sooner than 5 minutes
   (`timerAlertMinutes`: 30 minutes for a Difficult 4-measure chunk, 10 for a Workable one) with an "Add a focus spot" button. Built 2026-11-16 (PR #106). [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
   [`Decisions.md`](docs/Decisions.md#review-model-pass-138-build-2026-11-16)
+- **Pass 139** — the ladder engine for the new review plan: a pass table by difficulty and plan length (1, 2, 3 up to 30 days; 2, 3, 3 to 60;
+  3, 4, 4 to 90; 3, 4, 5 beyond and for minutes plans; `PASS_TABLE_ROWS`, `lib/ladder.js`), a Full pass at 85% or more of target tempo
+  counting as two (Stabilizing and Settling only), a chunk moving up only on its own turn (never on its first session, and only on or after
+  the day its next review is due; the next-day touch counts one pass), `addHalfPass` for Pass 141 to use, and a per-piece override (`ladderConfig.overrides`, shown in
+  Settings as a table with "set by you" and "Reset to automatic"). Base practice chunks of a piece on `reviewModel` 2 only; a piece on today's
+  plan is checked byte-for-byte unchanged. Built 2026-11-17, not yet merged. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
+  [`Decisions.md`](docs/Decisions.md#review-model-pass-139-build-2026-11-17)

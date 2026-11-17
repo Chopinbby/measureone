@@ -11,6 +11,7 @@ import {
   requirementLine,
   cleanRepsInARow,
 } from "../../../lib/confidence";
+import { passesNeededForChunk } from "../../../lib/scheduling";
 import { NumberInput } from "../../NumberInput";
 import { ReassessPanel } from "./ReassessPanel";
 
@@ -135,7 +136,8 @@ export function InterleavePanel({
   // this value feeds straight into classifySessionOutcome below.
   const requiredReps = resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount);
   const suggestedStartingBPM = getSuggestedStartingBPM(piece, chunk);
-  const ladderStatus = formatLadderStatus(entry, ladderConfig, todayISODate());
+  // Pass 139: the new review plan reads its pass table here (null otherwise).
+  const ladderStatus = formatLadderStatus(entry, ladderConfig, todayISODate(), passesNeededForChunk(piece, chunk, entry));
   const canLog = reps !== "" && bpm !== "";
   // A chunk can come back around in rotation (or the learner can revisit
   // it) while an earlier turn's soft-miss/fail is still sitting

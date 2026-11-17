@@ -1,4 +1,19 @@
 import { NumberInput } from "../NumberInput";
+import { DIFFICULTY_META } from "../../lib/constants";
+import { isReviewModelV2 } from "../../lib/scheduling";
+import {
+  PASS_TABLE_STAGES,
+  PASS_TABLE_DIFFICULTIES,
+  PASS_TABLE_ROW_LABELS,
+  HOLDING_MAX_DAYS_V2,
+  autoPassesNeeded,
+  passesOverrideFor,
+  passTableRowLabelFor,
+  hasPassesOverride,
+  withPassesOverride,
+  withPassesOverridesCleared,
+  withHoldingMaxOverride,
+} from "../../lib/ladder";
 
 /* ------------------------------------------------------------------ */
 /*  Editor for piece.ladderConfig — the spaced-repetition maintenance */
@@ -29,12 +44,69 @@ function SubHeading({ children }) {
 // button for getting back to null.
 export function LadderConfigEditor({ draft, set }) {
   const config = draft.ladderConfig;
+  // Pass 139: a piece on the new review plan reads how many passes a chunk
+  // needs from a table (plan length by difficulty) instead of the two
+  // "Passes to graduate" boxes below.
+  const newPlan = isReviewModelV2(draft);
 
   const updateStage = (stage, patch) =>
     set({ ladderConfig: { ...config, [stage]: { ...config[stage], ...patch } } });
 
+  const stageName = { stabilizing: "Stabilizing", settling: "Settling" };
+  const holdingMax = config.overrides && config.overrides.holdingMaxDays;
+  const graduateLabel = newPlan ? "Passes to graduate (Review and Focus block cards)" : "Passes to graduate";
+
   return (
     <div>
+      {newPlan && (
+        <>
+          <SubHeading>Passes to move up a stage</SubHeading>
+          <p className="wizard-hint">
+            This piece is on the new review plan. How many passes a chunk needs to leave Stabilizing, and again to
+            leave Settling, depends on its difficulty and on the length of your plan.{" "}
+            {draft.scheduleMode === "minutes"
+              ? `Your plan is set by minutes per day, so this piece reads the longest row ("${PASS_TABLE_ROW_LABELS[PASS_TABLE_ROW_LABELS.length - 1]}").`
+              : `Your plan is ${draft.daysToLearn} day${Number(draft.daysToLearn) === 1 ? "" : "s"} long, so this piece reads the "${passTableRowLabelFor(draft.daysToLearn, draft.scheduleMode)}" row.`}{" "}
+            A chunk never moves up on its first session, and it keeps the passes it has earned if you change the
+            plan length. A pass played at 85% or more of the target tempo counts as two.
+          </p>
+          {PASS_TABLE_STAGES.map((stage) => (
+            <div key={stage}>
+              <p className="wizard-hint" style={{ marginBottom: 2 }}>{stageName[stage]}</p>
+              <div className="field-row">
+                {PASS_TABLE_DIFFICULTIES.map((difficulty) => {
+                  const auto = autoPassesNeeded(difficulty, draft.daysToLearn, draft.scheduleMode);
+                  const own = passesOverrideFor(config, stage, difficulty);
+                  return (
+                    <label className="field" key={difficulty}>
+                      <span>{DIFFICULTY_META[difficulty].label}{own != null ? " (set by you)" : " (automatic)"}</span>
+                      <NumberInput
+                        value={own != null ? own : auto}
+                        min={1}
+                        onCommit={(n) => set({ ladderConfig: withPassesOverride(config, stage, difficulty, n, auto) })}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <div className="manual-conf-row">
+            <button
+              className="ghost-btn"
+              disabled={!hasPassesOverride(config)}
+              onClick={() => set({ ladderConfig: withPassesOverridesCleared(config) })}
+            >
+              Reset to automatic
+            </button>
+          </div>
+          <p className="wizard-hint">
+            Review and Focus block cards (the ones that join two chunks) still use the "Passes to graduate" numbers
+            below, until they are reworked.
+          </p>
+        </>
+      )}
+
       <p className="wizard-hint">
         Advanced tuning for the spaced-repetition maintenance ladder: how often a chunk comes back
         for review, how many clean passes it takes to move up a stage, and the tempo floors that
@@ -50,7 +122,7 @@ export function LadderConfigEditor({ draft, set }) {
           <NumberInput value={config.stabilizing.intervalDays} min={1} onCommit={(n) => updateStage("stabilizing", { intervalDays: n })} />
         </label>
         <label className="field">
-          <span>Passes to graduate</span>
+          <span>{graduateLabel}</span>
           <NumberInput
             value={config.stabilizing.graduationPasses}
             min={1}
@@ -89,7 +161,7 @@ export function LadderConfigEditor({ draft, set }) {
           <NumberInput value={config.settling.intervalDays} min={1} onCommit={(n) => updateStage("settling", { intervalDays: n })} />
         </label>
         <label className="field">
-          <span>Passes to graduate</span>
+          <span>{graduateLabel}</span>
           <NumberInput
             value={config.settling.graduationPasses}
             min={1}
@@ -130,7 +202,33 @@ export function LadderConfigEditor({ draft, set }) {
             onCommit={(n) => updateStage("holding", { maxIntervalDays: n })}
           />
         </label>
+        {newPlan && (
+          <label className="field">
+            <span>Maximum interval on the new plan (days)</span>
+            {holdingMax == null ? (
+              <NumberInput
+                value=""
+                min={1}
+                placeholder={`${HOLDING_MAX_DAYS_V2} (automatic)`}
+                onCommit={(n) => set({ ladderConfig: withHoldingMaxOverride(config, n) })}
+              />
+            ) : (
+              <div className="manual-conf-row">
+                <NumberInput value={holdingMax} min={1} onCommit={(n) => set({ ladderConfig: withHoldingMaxOverride(config, n) })} />
+                <button className="ghost-btn" onClick={() => set({ ladderConfig: withHoldingMaxOverride(config, null) })}>
+                  Reset to automatic
+                </button>
+              </div>
+            )}
+          </label>
+        )}
       </div>
+      {newPlan && (
+        <p className="wizard-hint">
+          The new maximum is saved for the new review timing, which is not switched on yet. Until then reviews still
+          use the maximum interval above.
+        </p>
+      )}
     </div>
   );
 }

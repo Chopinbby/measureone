@@ -16,7 +16,7 @@ import {
   cleanRepsInARow,
 } from "../../../lib/confidence";
 import { timerAlertMessage } from "../../../lib/ladder";
-import { focusSpotGate, timerAlertMinutes } from "../../../lib/scheduling";
+import { focusSpotGate, timerAlertMinutes, passesNeededForChunk } from "../../../lib/scheduling";
 import { plannedMinutesFor, plannedAboutText, plannedSpentText, secondsSpentIn } from "../../../lib/plannedMinutes";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
@@ -252,7 +252,8 @@ export function ChecklistItem({
   // Pass 15 — surfaces stage/consecutivePasses/nextDueDate, computed and
   // persisted on every logged session (lib/ladder.js) but never shown
   // anywhere before now. null for a chunk with no session history yet.
-  const ladderStatus = formatLadderStatus(entry, piece.ladderConfig, todayISODate());
+  // Pass 139: the new review plan reads its pass table here (null otherwise).
+  const ladderStatus = formatLadderStatus(entry, piece.ladderConfig, todayISODate(), passesNeededForChunk(piece, chunk, entry));
 
   const submitLog = () => {
     if (!canLog) return;

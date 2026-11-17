@@ -134,11 +134,11 @@ that changes a number updates its row.
 
 | Constant | Value | Where it will live | What it should eventually be backed by |
 |---|---|---|---|
-| Passes to leave Stabilizing and Settling | Workable, Challenging, Difficult: 1, 2, 3 up to 30 days; 2, 3, 3 to 60; 3, 4, 4 to 90; 3, 4, 5 beyond (the owner's table, 2026-11-16) | Pass 139, `lib/ladder.js` | Motor-learning data on passes to consolidation by difficulty, and whether it really falls with a longer plan |
-| Plan-length boundaries | 30, 60 and 90 calendar days, upper bound included (confirmed 2026-11-16) | Pass 139 | Whether the number of passes a chunk needs changes in steps at these lengths or smoothly |
-| Row for a plan set by minutes per day | the longest row ("over 90 days") and the 90-day windows | Passes 139, 140, 143 | Typical real lengths of minutes plans |
-| Strong pass | a Full pass at 85% or more of target tempo counts as two | Pass 139 | Where "close to target" starts to predict durable retention (the existing tempo-maintenance threshold, 0.85, is a different row above and happens to be the same number) |
-| Half credit for a join | 0.5 of a pass for each chunk a Full join covers, never enough to move a chunk up | Pass 141 | Whether practising a seam helps each of its two chunks, and by how much |
+| Passes to leave Stabilizing and Settling | Workable, Challenging, Difficult: 1, 2, 3 up to 30 days; 2, 3, 3 to 60; 3, 4, 4 to 90; 3, 4, 5 beyond (the owner's table, 2026-11-16) | Pass 139 (built), `PASS_TABLE_ROWS` in `lib/ladder.js` | Motor-learning data on passes to consolidation by difficulty, and whether it really falls with a longer plan |
+| Plan-length boundaries | 30, 60 and 90 calendar days, upper bound included (confirmed 2026-11-16) | Pass 139 (built), `passTableRowIndex` | Whether the number of passes a chunk needs changes in steps at these lengths or smoothly |
+| Row for a plan set by minutes per day | the longest row ("over 90 days") and the 90-day windows | Pass 139 (built, the row), 140, 143 | Typical real lengths of minutes plans |
+| Strong pass | a Full pass at 85% or more of target tempo counts as two | Pass 139 (built), `STRONG_PASS_FRACTION` in `lib/ladder.js` | Where "close to target" starts to predict durable retention (the existing tempo-maintenance threshold, 0.85, is a different row above and happens to be the same number) |
+| Half credit for a join | 0.5 of a pass for each chunk a Full join covers, never enough to move a chunk up | Pass 141 (the function, `addHalfPass`, is built, Pass 139) | Whether practising a seam helps each of its two chunks, and by how much |
 | Next-day touch | for Difficult chunks and any chunk whose learning session was not a Full pass; counts as one pass; cannot promote | Pass 138 (built) | Whether a touch the next day, for these chunks only, is the right rung (the existing Tier 1 first touch is the same idea; see the first rows of the ladder section above) |
 | Whole-piece run-through cadence | from the day the last chunk is introduced, every 3 practice days, final day kept | Pass 142 | Whether a run-through every 3 days helps more than every 2 or 5 |
 | Run-through credit | one pass for each chunk past Stabilizing whose last visit was at least that stage's earliest gap ago | Pass 142 | Whether one clean full run counts for the chunks inside it |

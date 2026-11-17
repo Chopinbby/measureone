@@ -524,6 +524,11 @@ ChunkProgress = {
   consecutivePasses,          // number, default 0 — consecutive full passes at the current stage
                                // that cleared that stage's tempo floor. Live, via
                                // computeLadderAdvance on every logged session (see stage above).
+                               // Pass 139: for a base chunk of a piece on reviewModel 2 it can be
+                               // FRACTIONAL (a strong pass counts 2, a join will add 0.5) and can
+                               // exceed what the stage needs while a promotion is held back (first
+                               // session, or before the day its next review is due); readers must not assume a
+                               // whole number or a value below the requirement.
   consecutiveStabilizingFails, // number, default 0 — fails logged back-to-back while
                                 // stage === 'stabilizing'. Distinct from consecutivePasses, which
                                 // only counts passes and can't tell a 1st fail from a 2nd (a fail
@@ -724,6 +729,18 @@ ladderConfig = {
   // though in practice a real fail almost always uses its own separate
   // entry-tempo reset instead (see progress[id].practiceBPM above), not
   // this flat step.
+  overrides: { passesNeeded, holdingMaxDays },
+  // Pass 139, for a piece on reviewModel 2 only. ABSENT on every piece until the owner changes
+  // a number in Settings' ladder editor, and absent again after "Reset to automatic": never
+  // written as a default or as `null` (mergeLadderConfig builds the config from a named key list
+  // and carries `overrides` only when the piece already has it), because a default written on
+  // every load would change every piece's fingerprint and upload every piece again.
+  // passesNeeded: { stabilizing?: { easy?, medium?, hard? }, settling?: { ... } } holds only the
+  // cells she changed (a whole number of at least 1), each beating the table in lib/ladder.js's
+  // PASS_TABLE_ROWS; a number equal to the table's own is not stored. holdingMaxDays: a whole
+  // number of days, 30 when absent (effectiveHoldingMaxDaysV2); nothing reads it before Pass 140.
+  // The old graduationPasses above stay what transitions, combos and run-throughs read, and what
+  // a piece on today's plan reads for everything.
   tempoRatchet: { k, kCapBpm, tempoAchievedThreshold, maintenanceK },
   // k: 0.3, kCapBpm: 8 (Pass 59) — the default gap-proportional rate a
   // pass/soft-miss steps practiceBPM by (clamp(round(k * gap), 1,
@@ -759,7 +776,8 @@ its original `daysToLearn` — see
 [Decisions.md](Decisions.md#spaced-repetition--maintenance).
 
 Stage lengths, graduation pass-counts, tempo floors, and `bpmSteps` are all
-editable via `LadderConfigEditor` (Pass 17, see above). The four
+editable via `LadderConfigEditor` (Pass 17, see above). For a piece on the new review plan the
+same editor also shows the pass table and writes `overrides` (Pass 139). The four
 `tempoRatchet` fields are the one part of this config still without their
 own editing UI — `LadderConfigEditor`'s "Tempo ratchet" heading currently
 exposes `bpmSteps` instead, a pre-existing labeling gap unrelated to

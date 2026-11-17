@@ -142,6 +142,36 @@ export function resolveRequiredReps(chunk, stage, holdingReviewCount) {
   return upcomingReviewCount % HOLDING_HARDER_CHECK_INTERVAL === 0 ? baseline + HOLDING_HARDER_CHECK_BONUS : baseline;
 }
 
+// Pass 138 — the wording of what a chunk needs, in one place. The clean reps
+// have to come in a row (that is what the count has always meant: the entry
+// field is the best unbroken run, and classifySessionOutcome judges it as
+// such), so the card now says so. Display only: nothing here changes how a
+// session is classified. "In a row" is left off when only 1 rep is needed,
+// where it says nothing. ChecklistItem and InterleavePanel both use these,
+// so a chunk reads the same on either screen (the same reason
+// resolveRequiredReps is shared).
+export function cleanRepsInARow(n) {
+  return n === 1 ? "1 clean rep" : `${n} clean reps in a row`;
+}
+
+export function requirementLine(requiredReps, practiceBPM) {
+  const reps = cleanRepsInARow(requiredReps);
+  return practiceBPM != null
+    ? `Need ${reps} at ${practiceBPM}+ BPM to progress this chunk.`
+    : `Need ${reps} to progress this chunk.`;
+}
+
+// The "Save anyway?" question when the best run is shorter than required.
+export function repsShortfallMessage(cleanReps, requiredReps, practiceBPM) {
+  const tempo = practiceBPM != null ? ` at ${practiceBPM}+ BPM` : "";
+  return `Your best run was ${cleanRepsInARow(cleanReps)}. You need ${cleanRepsInARow(requiredReps)}${tempo} to progress this chunk. Save anyway?`;
+}
+
+// The same question when the reps were enough but the tempo was under.
+export function tempoShortfallMessage(cleanReps, bpmAttempted, practiceBPM) {
+  return `You logged ${cleanRepsInARow(cleanReps)} at ${bpmAttempted} BPM, under the ${practiceBPM}+ BPM needed to progress this chunk. Save anyway?`;
+}
+
 // Classifies one logged attempt into the three-tier outcome model
 // (Repertoire-Lifecycle.md's "Session outcomes: three tiers, not two"):
 // - full pass: required clean reps hit, at/above the tempo currently asked

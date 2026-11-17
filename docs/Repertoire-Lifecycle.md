@@ -387,7 +387,9 @@ ambiguity concrete:
 > [Review model v2](#review-model-v2-planned) the first touch becomes a real next-day touch (for
 > Difficult chunks and any chunk whose learning session was not a Full pass) that survives the
 > introduction being logged, and Tier 2's rolling becomes placement inside a window. The rule that
-> a late review is slack, never a failure, stays. Today's behavior is described below.
+> a late review is slack, never a failure, stays. **Pass 138 built the touch** for a piece on
+> `reviewModel` 2 ([Algorithms.md](Algorithms.md#review-model-v2-planned), rule 3); Tier 2's windows are
+> still planned. Today's behavior is described below.
 
 **Implemented** (Pass 5 of the maintenance-ladder build) — `computeTimeline`
 (`src/lib/scheduling.js`) places both tiers directly; full mechanics:
@@ -560,7 +562,7 @@ evidence.
   `practiceBPM`" action — `practiceBPM` (when set) shows as the BPM
   field's placeholder/suggestion, and (Pass 26) as part of the task card's
   stated requirement, "Need N clean reps at `practiceBPM`+ BPM to progress
-  this chunk" (superseding an earlier plain "Practice tempo: N BPM" tip
+  this chunk" ("in a row" added in Pass 138: "Need N clean reps in a row at ...") (superseding an earlier plain "Practice tempo: N BPM" tip
   line — see "Session outcomes: three tiers, not two" above).
   `classifySessionOutcome` reads whatever the learner actually typed
   against `practiceBPM`, so the free-text field already doubles as the
@@ -623,7 +625,7 @@ classification above is unchanged):
 
 - **The task card states its actual requirement before logging**
   (`ChecklistItem.jsx`): "Need N clean reps at M+ BPM to progress this
-  chunk," reusing the exact `requiredReps`/`practiceBPM` values
+  chunk" (**since Pass 138**: "Need N clean reps in a row at M+ BPM...", "in a row" left off when N is 1; the field's label is "Most clean reps in a row", and the two "Save anyway?" questions below are worded to match, all from `lib/confidence.js`), reusing the exact `requiredReps`/`practiceBPM` values
   `classifySessionOutcome` itself judges against — no separate,
   independently-maintained copy of the number to drift out of sync. No
   tempo clause when `practiceBPM` hasn't been seeded yet (a first attempt
@@ -1364,7 +1366,7 @@ one check.
 
 ### Review model v2 (planned)
 
-**Status: decided 2026-11-16, not built.** The rules are written once, in
+**Status: decided 2026-11-16. Pass 138 has built the switch, the next-day touch, the timer alert and the "in a row" wording; the rest is not built.** The rules are written once, in
 [Algorithms.md](Algorithms.md#review-model-v2-planned); the reasons, what was rejected and the
 simulation behind them are in
 [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16). This section says where
@@ -1397,10 +1399,10 @@ What the model changes, by the section it replaces:
 - **"Introduction-window review scheduling: Tier 1 / Tier 2".** Tier 1's first touch becomes a
   real next-day touch for every Difficult chunk and for any chunk whose learning session was not
   a Full pass, and it survives the introduction being logged (today it is placed only for a chunk
-  never logged). Tier 2's "roll to the next day under pressure" becomes placement inside a window:
+  never logged; **built in Pass 138**). Tier 2's "roll to the next day under pressure" becomes placement inside a window:
   most overdue first, a third of each day protected for new material, worst first.
 - **"Session outcomes: three tiers".** Unchanged. The card says "Need N clean reps in a row" and
-  asks for the best run; classification does not change.
+  asks for the best run; classification does not change (built in Pass 138, for every piece).
 - **"Post-run-through logging".** Whole-piece run-throughs start as soon as the last chunk is
   introduced and repeat every 3 practice days; a clean one counts as a pass for the chunks past
   Stabilizing that are due for a visit. The rough and lost flags demote as today, and a flagged

@@ -387,6 +387,11 @@ export function validateAndMigratePiece(piece) {
     // Pieces saved before the manual "finished elsewhere" override existed
     // default to false — only ever set true explicitly, from Settings.
     markedLearnedElsewhere: !!piece.markedLearnedElsewhere,
+    // Pass 138 — `reviewModel` is deliberately NOT given a default here:
+    // `...piece` above already carries it when it exists, and a missing key
+    // must stay missing (a default written on every load would change every
+    // piece's fingerprint, so every piece would upload again, and a Settings
+    // save must never touch it: lib/pieceEdit.js takes it from the live piece).
     // Pass 91 (experimental v1) — whether this piece tracks focus spots at
     // all, set from the Wizard's yes/no step and changeable later from
     // Settings (docs/Data-Model.md#focus-spots-v1). Scoped to UI only: it

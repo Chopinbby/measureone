@@ -451,6 +451,17 @@ chunking, scheduling, and confidence are actually computed, see
 - **Technique stays out of every schedule path (Pass 102):** no behind-schedule
   count, `ScheduleBanner`, reschedule dialog or piece-progress code may read it. It
   isn't part of any piece.
+- **`piece.reviewModel` gets no default on load and is never edited by the Settings form
+  (Pass 138).** Absent or `null` is today's review plan, `2` is the overhaul (Review model v2,
+  [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned)); `isReviewModelV2(piece)`
+  (`lib/scheduling.js`) is the only test. `validateAndMigratePiece` must add nothing for it (a
+  default written on every load changes every piece's fingerprint, so every piece uploads again),
+  and it stays out of `EDIT_FORM_FIELDS`, so a Settings save takes it from the live piece. Every rule
+  of the overhaul gates on `isReviewModelV2`, and a piece on today's plan must stay byte-identical:
+  Pass 138 compared `computeTimeline` with the pre-pass code on 400 generated pieces (0 differences),
+  and a rule that forgets the gate fails `test/review-model-v2.test.mjs`. On the new plan `tier1Done`
+  means "the first session on a later day than the learning session is logged"
+  (`tier1DoneAfterSession`); a new session handler must pass it through, as the three in `App.jsx` do.
 
 ## Revival
 
@@ -1711,3 +1722,10 @@ silently.
   section run-through, which has no price today); the whole-piece run-through and a technique task each got a wall-clock timer, whose seconds are
   saved (`durationSeconds` beside `stopCount`; `seconds` on the day's task, part of its merge part, cleared by undo). Display only: no schedule
   reads them. [`Algorithms.md`](docs/Algorithms.md#time-on-a-practice-card-pass-137)
+- **Pass 138** — the review plan switch and the first card changes: `piece.reviewModel` (null is today's
+  plan, 2 the overhaul) with Settings' "Update this piece's review plan" button and its way back, a real
+  next-day touch on the new plan (Difficult chunks and any chunk whose learning session was not a Full pass;
+  it sits the day after the chunk was learned, stays once logged, and drops quietly if skipped), "Need N clean
+  reps in a row" on every card, and a one-time timer alert at the card's planned time, never sooner than 5 minutes
+  (`timerAlertMinutes`: 30 minutes for a Difficult 4-measure chunk, 10 for a Workable one) with an "Add a focus spot" button. Built 2026-11-16 (PR #106). [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
+  [`Decisions.md`](docs/Decisions.md#review-model-pass-138-build-2026-11-16)

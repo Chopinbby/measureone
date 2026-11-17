@@ -8,6 +8,8 @@ import {
   getSuggestedStartingBPM,
   formatLadderStatus,
   resolveRequiredReps,
+  requirementLine,
+  cleanRepsInARow,
 } from "../../../lib/confidence";
 import { NumberInput } from "../../NumberInput";
 import { ReassessPanel } from "./ReassessPanel";
@@ -234,9 +236,7 @@ export function InterleavePanel({
           />
 
           <p className="tip-line">
-            {practiceBPM != null
-              ? `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} at ${practiceBPM}+ BPM to progress this chunk.`
-              : `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} to progress this chunk.`}
+            {requirementLine(requiredReps, practiceBPM)}
           </p>
           <p className="tip-line">
             Ladder:{" "}
@@ -250,8 +250,7 @@ export function InterleavePanel({
           {pendingProvisional && (
             <div className="tip-line">
               <div>
-                Unresolved from earlier: {pendingProvisional.cleanReps} clean rep
-                {pendingProvisional.cleanReps === 1 ? "" : "s"} at {pendingProvisional.bpm} BPM, which would be a{" "}
+                Unresolved from earlier: {cleanRepsInARow(pendingProvisional.cleanReps)} at {pendingProvisional.bpm} BPM, which would be a{" "}
                 {(SESSION_OUTCOME_META[pendingProvisional.outcome] || {}).label?.toLowerCase() || "non-pass"}.
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -271,7 +270,7 @@ export function InterleavePanel({
 
           <div className="log-row">
             <label>
-              <span>Clean reps (aim {requiredReps})</span>
+              <span>Most clean reps in a row (aim {requiredReps})</span>
               <NumberInput
                 value={reps}
                 min={0}

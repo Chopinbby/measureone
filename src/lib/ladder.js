@@ -76,6 +76,26 @@ export function isInterleaveEligible(entry) {
   return stage === "settling" || stage === "holding";
 }
 
+// Pass 138 (every piece, model 1 or 2): the timer alert's words. The alert
+// itself fires when a card's running timer reaches its planned time, held to
+// at least 5 minutes (timerAlertMinutes, lib/scheduling.js; the planned time
+// is the same price the plan and Pass 137's "planned about N min" use), so
+// there is no table of limits here: the owner changed it from fixed
+// 20/15/15/10 minute limits to the card's own planned time on 2026-11-16,
+// then asked for the 5 minute floor and for these words (the number is the
+// time on the timer, not the plan). Text only: nothing about it changes how a
+// session counts, and a review that runs past it still counts toward moving up.
+//
+// The "mark the exact spot" half and its button are only offered where a
+// focus spot can actually be added (the piece has focus spots turned on and
+// the card is a base chunk), so the alert never points at something that
+// isn't there. `noun` is "chunk" for a base chunk, "task" for a review or
+// focus block card.
+export function timerAlertMessage(minutes, { canAddFocusSpot = false, noun = "chunk" } = {}) {
+  const advice = canAddFocusSpot ? "try a slower tempo, or mark the exact spot that's going wrong." : "try a slower tempo.";
+  return `You've been on this ${noun} for ${minutes} minute${minutes === 1 ? "" : "s"}. If clean reps aren't coming, ${advice}`;
+}
+
 // Stage 3's "learned" rollup
 // (Repertoire-Lifecycle.md#stage-3--learned-defined-not-yet-implemented) —
 // decided long before this existed as a real function: a piece is

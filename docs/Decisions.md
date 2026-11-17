@@ -4055,8 +4055,9 @@ best-case assumption, with a fixed 90-day bar — not compared against
 
 ### Review model overhaul (decided 2026-11-16)
 
-**Status: decided, not built. Pass 136 (docs only) records it; Passes 137 to 144 build it, in
-order, and Tier 13 (time estimates) follows.** The rules themselves are written once, in
+**Status: decided. Pass 136 (docs only) records it; Passes 137 to 144 build it, in
+order, and Tier 13 (time estimates) follows. Pass 138 is built (see
+[Review model, Pass 138 build](#review-model-pass-138-build-2026-11-16)); the rest is not.** The rules themselves are written once, in
 [Algorithms.md](Algorithms.md#review-model-v2-planned); this entry holds the reasons, what was
 rejected, the simulation record and the limits of that simulation. The story for a reader of the
 lifecycle is in [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#review-model-v2-planned).
@@ -4227,6 +4228,60 @@ full pass and only the neighbour half. See the open questions below.
 - *Whether the protected third, the slip of up to 2 extra intervals and the plan's own average
   as the fill target hold up in the real placement.* The simulation modelled none of the three
   (above). Pass 140 measures the real placement; Pass 144 re-runs the 48-scenario grid.
+
+### Review model, Pass 138 build (2026-11-16)
+
+**Built:** the per-piece switch (`piece.reviewModel`, `null` = today's plan, `2` = the overhaul), the real next-day touch for a
+piece on the new plan, the timer alert and the "in a row" wording. The rules are in
+[Algorithms.md](Algorithms.md#review-model-v2-planned) (rules 3, 9 and 10, each with a "Built in Pass 138" paragraph). **Decisions
+made while building, each on the owner's go-ahead to the recommendation** (she said "Go ahead" to a plan that listed them; she did not
+answer the four questions one by one, so any of them can be reversed):
+- **A touch the learner skips is dropped quietly** (not carried to the next practice day). It follows from the existing rule that a
+  past-day review of a chunk that has a `nextDueDate` is treated as stale, not owed (`withLiveReviewStatus`), so it never counts as
+  behind; the chunk's ordinary return, four days after the learning session today, takes over. Alternative not taken: carry it to the
+  next practice day, which would need `computeTimeline` to know today's date.
+- **The touch counts from the date the chunk was actually learned**, not the planned day, so a chunk learned two days late has its
+  touch two days later. Counting from the planned day would put the touch in the past, where it is dropped as stale.
+- **`tier1Done` means "the first session on a later day than the learning session has been logged"** on a piece on the new plan, set
+  for any chunk then, not only one that owed a touch. Whether a touch is owed is derived (`nextDayTouchState`), so a piece switched to
+  the new plan after chunks were already returned to does not suddenly owe a pile of old touches: a chunk with a later-day session
+  reads as touched even where `tier1Done` was never set.
+- **A done touch stays on its own day** in the plan (placed while `doneDays` includes that day), so its card and Undo stay where the
+  learner logged it; undo restores `tier1Done` from the session's snapshot like every other ladder field.
+- **Base practice chunks only.** Transitions and combos keep today's Tier 1 first touch on the new plan until Pass 141 turns them into
+  forms. For the new plan, a never-logged **Workable** chunk is no longer promised a touch in the plan view (only a Difficult chunk
+  is, the one case known before its first session); a piece on today's plan is unchanged, checked against the code before this pass on
+  400 generated pieces.
+- **The timer alert fires at the card's planned time, not at fixed limits (the owner's change, 2026-11-16, after the first build).** The
+  design as decided had 20 minutes on a chunk's first session, 15 on the next two and 10 from the fourth, with a table in `lib/ladder.js`.
+  She asked for "the initial suggested time instead of arbitrary intervals", so the alert now fires at `plannedMinutesFor(chunk)`
+  (Pass 137's helper in `lib/plannedMinutes.js`, merged to `main` while this pass was open; this pass first wrote its own copy
+  and dropped it for theirs), the minutes the plan puts on that card, and the table is gone. Reasons: it needs no separate hand-picked number
+  (the plan's own estimate, itself a guess in Research.md, is the single source), a Workable chunk planned at 10 minutes is no longer
+  allowed 20, and it will follow Pass 145's learned estimates by itself. Consequences: a Difficult 4-measure chunk now alerts at 30 minutes
+  (it was 20) and a Workable one at 10; the same minutes apply to a review of that chunk; a section run-through
+  has no planned time, so it never alerts (Pass 137 found the same and left the price to Passes 142 and 145). **Two follow-ups the same day, on her word:** the alert's words went
+  back to "You've been on this chunk for N minutes" (a first version said "You've reached the N minutes planned for this chunk"; she
+  preferred the original), and the alert has a **floor of 5 minutes** (`TIMER_ALERT_FLOOR_MINUTES`, `timerAlertMinutes` in
+  `lib/scheduling.js`), so a chunk planned at 3 minutes alerts at 5. The floor is on the alert only: `plannedMinutesFor` keeps
+  the plan's own price, because the card shows that number as it is. The alert is on Daily Practice cards only, not in Interleaved mode (one timer for the whole rotation, whose point is short
+  turns). The "mark the exact spot" half and the "Add a focus spot" button show only where focus spots are on for the piece.
+- **The review plan panel is on the Settings landing page** and shows for every piece until Pass 144 decides the default.
+
+**Open, found while building** (none blocks a later pass; each has the owner listed):
+- *The touch counts as an ordinary pass in today's ladder.* It advances `consecutivePasses` like any Full pass and cannot move a chunk
+  up alone only because a stage needs more than two passes today. **Owner: Pass 139**, which must make "counts as one pass, cannot
+  promote by itself" explicit in the pass table.
+- *A touch after a reschedule's `asOfDay` is not placed for a chunk already done*, because the chunk set a reschedule recomputes from
+  leaves done chunks out. Rare (a Difficult or non-Full-pass chunk logged the day before a reschedule). **Owner: Pass 140**, when it
+  rebuilds placement.
+- *Account Review words the switch from the raw field name* ("Review model", with the values "2" and "not set") if two devices disagree
+  about it, because `accountSync.js`'s field list has no entry for it and that file was outside this pass's list. **Owner: Pass 144**
+  (which decides the default and checks the whole model), or any earlier pass that touches that list.
+- *A non-latest session undone leaves `tier1Done` as it was* (the existing fallback removes only the record), so a touch whose
+  session is undone that way still reads as touched. Same limit as every other ladder field.
+- *The alert inherits the plan's own estimate* (`EFFORT_TO_MIN`, hand-picked: Research.md), so it is only as good as the planned time.
+  **Owner: Pass 142** (a price for a section run-through, which `plannedMinutesFor` leaves `null`) and **Pass 145** (learned estimates).
 
 ## UX
 

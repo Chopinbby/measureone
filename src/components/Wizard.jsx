@@ -33,6 +33,13 @@ export function defaultPiece() {
     // the schedule banner stops judging it) the same way genuinely
     // finishing the plan would. See docs/Decisions.md#open-questions.
     markedLearnedElsewhere: false,
+    // Pass 138 — which review plan this piece uses: null is today's plan, 2 is
+    // the overhaul (docs/Algorithms.md#review-model-v2-planned). Set only by
+    // Settings' "Update this piece's review plan" button, never by this
+    // wizard or a load (validateAndMigratePiece leaves a missing key missing:
+    // filling it in on every piece would change every piece's fingerprint and
+    // re-upload them all). Pass 144 decides what new pieces get.
+    reviewModel: null,
     totalMeasures,
     measureDifficulty: Array(totalMeasures).fill(1),
     diffMode: "grid",

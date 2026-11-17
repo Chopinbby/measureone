@@ -10,8 +10,13 @@ import {
   getSuggestedStartingBPM,
   formatLadderStatus,
   resolveRequiredReps,
+  requirementLine,
+  repsShortfallMessage,
+  tempoShortfallMessage,
+  cleanRepsInARow,
 } from "../../../lib/confidence";
-import { focusSpotGate } from "../../../lib/scheduling";
+import { timerAlertMessage } from "../../../lib/ladder";
+import { focusSpotGate, timerAlertMinutes } from "../../../lib/scheduling";
 import { plannedMinutesFor, plannedAboutText, plannedSpentText, secondsSpentIn } from "../../../lib/plannedMinutes";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
@@ -134,6 +139,14 @@ export function ChecklistItem({
   const [timerRunning, setTimerRunning] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [noteOpen, setNoteOpen] = useState(false);
+  // Pass 138 — the timer alert (every piece). "idle" until the running timer
+  // reaches the minutes this card is PLANNED for, held to at least 5
+  // (timerAlertMinutes, lib/scheduling.js: the plan's own price for it),
+  // "shown" from then until it is dismissed or the session is logged,
+  // "dismissed" so it never reappears within the same session. A card the
+  // plan puts no price on (a section run-through) never alerts. Text only: it changes nothing about
+  // how the session counts.
+  const [timerAlert, setTimerAlert] = useState("idle");
 
   // Read straight off the piece rather than requiring a prop. The note is
   // durable per-chunk metadata keyed by chunk id in piece.memoryAnchors
@@ -195,6 +208,10 @@ export function ChecklistItem({
   // itself, so canLog, its tooltip text, and submitLog's own guard all stay
   // correct together automatically.
   const canLog = hasRepsDraft && hasBpmDraft && !isPaused;
+  const alertMinutes = timerAlertMinutes(chunk);
+  useEffect(() => {
+    if (alertMinutes != null && timerAlert === "idle" && timerRunning && durationSeconds >= alertMinutes * 60) setTimerAlert("shown");
+  }, [timerAlert, timerRunning, durationSeconds, alertMinutes]);
   const targetBPM = entry.targetBPM || getDefaultTargetBPM(piece, chunk);
   const practiceBPM = entry.practiceBPM ?? null;
   // Single source of truth for "how many reps does this chunk actually
@@ -229,10 +246,9 @@ export function ChecklistItem({
   // already-cleared (lib/confidence.js), so a first attempt genuinely only
   // has a reps requirement, not a tempo one — stating a BPM floor that
   // isn't actually being enforced yet would be misleading, not clarifying.
-  const requirementText =
-    practiceBPM != null
-      ? `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} at ${practiceBPM}+ BPM to progress this chunk.`
-      : `Need ${requiredReps} clean rep${requiredReps === 1 ? "" : "s"} to progress this chunk.`;
+  // Pass 138 — the wording says the reps must be in a row (requirementLine,
+  // lib/confidence.js, shared with InterleavePanel). Display only.
+  const requirementText = requirementLine(requiredReps, practiceBPM);
   // Pass 15 — surfaces stage/consecutivePasses/nextDueDate, computed and
   // persisted on every logged session (lib/ladder.js) but never shown
   // anywhere before now. null for a chunk with no session history yet.
@@ -269,10 +285,8 @@ export function ChecklistItem({
     const isTempoOnlyShortfall = cleanReps >= requiredReps && !clearsTempo;
     if ((isRepsShortfall || isTempoOnlyShortfall) && !manualFail) {
       const confirmMessage = isRepsShortfall
-        ? practiceBPM != null
-          ? `You logged ${cleanReps} of the ${requiredReps} reps needed at ${practiceBPM}+ BPM to progress this chunk. Save anyway?`
-          : `You logged ${cleanReps} of the ${requiredReps} reps needed to progress this chunk. Save anyway?`
-        : `You logged ${cleanReps} clean reps at ${bpmAttempted} BPM, under the ${practiceBPM}+ BPM needed to progress this chunk. Save anyway?`;
+        ? repsShortfallMessage(cleanReps, requiredReps, practiceBPM)
+        : tempoShortfallMessage(cleanReps, bpmAttempted, practiceBPM);
       if (!window.confirm(confirmMessage)) return;
     }
     const priorSessions = entry.sessions || [];
@@ -302,6 +316,7 @@ export function ChecklistItem({
     setManualFail(false);
     setDurationSeconds(0);
     setTimerRunning(false);
+    setTimerAlert("idle");
   };
 
   return (
@@ -484,7 +499,7 @@ export function ChecklistItem({
           // never happened — this is also how a rough attempt gets "redone."
           <div className="tip-line">
             <div>
-              Provisional: {session.cleanReps} clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM,
+              Provisional: {cleanRepsInARow(session.cleanReps)} at {session.bpm} BPM,
               which would be a {outcomeMeta ? outcomeMeta.label.toLowerCase() : "non-pass"}. Not yet applied. Confirm or
               discard, or log a fresh attempt below.
             </div>
@@ -504,7 +519,7 @@ export function ChecklistItem({
         ) : session ? (
           <>
             <p className="tip-line">
-              Logged: {session.cleanReps} consecutive clean rep{session.cleanReps === 1 ? "" : "s"} at {session.bpm} BPM
+              Logged: {cleanRepsInARow(session.cleanReps)} at {session.bpm} BPM
               {plannedMinutes == null && session.durationSeconds ? ` in ${formatDuration(session.durationSeconds)}` : ""}
               {outcomeMeta ? ` · ${outcomeMeta.label}` : ""}
               {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
@@ -561,10 +576,31 @@ export function ChecklistItem({
           </div>
         )}
 
+        {!historical && !isPaused && timerAlert === "shown" && (
+          <div className="tip-line" role="status">
+            <div>
+              {timerAlertMessage(alertMinutes, {
+                canAddFocusSpot,
+                noun: chunk.kind === "section" ? "chunk" : "task",
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              {canAddFocusSpot && !addFocusSpotOpen && (
+                <button type="button" className="ghost-btn sm" onClick={() => setAddFocusSpotOpen(true)}>
+                  <Plus size={12} /> Add a focus spot
+                </button>
+              )}
+              <button type="button" className="ghost-btn sm" onClick={() => setTimerAlert("dismissed")}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {!historical && !isPaused && (
           <div className="log-row">
             <label>
-              <span>Clean reps (aim {requiredReps})</span>
+              <span>Most clean reps in a row (aim {requiredReps})</span>
               <NumberInput
                 value={reps}
                 min={0}

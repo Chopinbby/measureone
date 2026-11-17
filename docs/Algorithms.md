@@ -369,7 +369,9 @@ mirroring `handleLogRunThrough`/`handleUnlogRunThrough`'s shape.
 > `nextDueDate`, flexing forward under pressure), the Tier 1 first touch, the treatment of
 > transitions and combos as their own placed items, and the plan's one final-day
 > "consolidation" run-through (which gains earlier ones) all change. Introduction placement (rule 1 and Pass 90's smoothing)
-> does not. Everything below describes the model a piece is on today.
+> does not. Everything below describes the model a piece is on today. **Pass 138 has built the Tier 1
+> part** for a piece on `reviewModel` 2 (rule 3 of [Review model v2](#review-model-v2-planned)); a piece
+> on today's plan places its first touch as described in rule 4 below.
 
 `computeTimeline(piece, chunkSet)` is the scheduler. It runs on every
 `piece` change (see [Architecture.md](Architecture.md#state-management)),
@@ -2316,7 +2318,9 @@ finished loses it, as the practice cards' always have.
 
 ## Review model v2 (planned)
 
-> **Status: decided 2026-11-16, not built. Nothing in `src/` reads any of this yet.** This is
+> **Status: decided 2026-11-16. Built so far: Pass 138 only** (the switch `piece.reviewModel`, rule 3's
+> real next-day touch, rule 9's timer alert and the "in a row" wording); **every other rule is not built,
+> and nothing else in `src/` reads any of this.** This is
 > the one place the rules are written out. The reasons, what was rejected and the simulation
 > that checked them are in
 > [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16); the hand-picked
@@ -2363,6 +2367,28 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    design notes already promise a touch the day after introduction, but `computeTimeline`
    places it only for a chunk never logged, so it vanishes once the introduction is logged:
    [Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2).)
+
+   **Built in Pass 138, for a piece on `reviewModel` 2 and base practice chunks only.**
+   `nextDayTouchState` (`lib/scheduling.js`) says whether a chunk owes a touch (a Difficult chunk, or
+   one whose learning session, its first logged one, was a Partial pass or Needs rework; a session
+   with no recorded outcome is not read as "not a Full pass"; a chunk flagged for re-learning owes
+   none) and whether it has had one: `tier1Done`, or a logged session on a **later calendar day**
+   than the learning session (a same-day re-attempt is not a touch). `tier1DoneAfterSession` sets
+   `tier1Done` in the session handlers when the first session on a later day is logged (a skipped
+   or still-provisional attempt does not). `computeTimeline` places the touch on **the day after
+   the date the chunk was actually learned** (the planned day while it has never been logged, and
+   only for a Difficult chunk then, the one case known before the first session), snapped forward
+   off a rest day. Once done it stays on its own day, so its card and its Undo stay where the
+   learner logged it. **A touch the learner skips is dropped quietly:** by then the chunk has a
+   `nextDueDate`, so `withLiveReviewStatus` treats a past-day touch as a stale review, never as
+   work owed, and the ordinary return takes over (a late review is slack). Where the ordinary return
+   lands on the same day, one card covers both. Transitions and combos keep today's Tier 1 rule
+   until Pass 141. **Two limits to know:** the touch is an ordinary logged session as far as
+   today's ladder goes (it advances `consecutivePasses` like any pass and cannot move a chunk up
+   alone only because a stage needs more than two passes; Pass 139's pass table must make "counts
+   as one pass, cannot promote" explicit), and a touch that falls after a reschedule's `asOfDay` is
+   not placed for a chunk already done (the chunk set the reschedule recomputes from leaves done
+   chunks out).
 4. **Transitions and combos stop being tasks of their own.** They have no ladder, no
    introduction day and no progress key. A chunk's review takes a **form** in rotation: the
    chunk itself, a join (a transition) with a neighbour, with the sides alternating, and, for
@@ -2410,14 +2436,48 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    pass), then how far below target tempo, then earlier stage, then most overdue. Pass 149
    adds "ran long last time". A review that runs past its timer alert still counts toward
    moving up, for now.
-9. **The timer alert** on a card: 20 minutes on a chunk's first session, 15 on each of the next
-   two, 10 from the fourth. Text only, shown once per session, with an "Add a focus spot"
-   button. There is no lower-tempo button: the learner records a lower tempo on the card, as
-   today.
+9. **The timer alert** on a card: it fires when the running timer reaches **the minutes the card
+   was planned for, never sooner than 5 minutes** (the owner changed this on 2026-11-16, after
+   Pass 138 was first built with fixed limits of 20 minutes on a chunk's first session, 15 on the
+   next two and 10 from the fourth, which is what the design as first decided on 2026-11-16 had;
+   she then added the 5 minute floor). Text only, shown once per session, with
+   an "Add a focus spot" button. There is no lower-tempo button: the learner records a lower tempo
+   on the card, as today.
+
+   **Built in Pass 138, for every piece (either model).** The planned time is Pass 137's
+   `plannedMinutesFor(chunk)` (`lib/plannedMinutes.js`, see
+   [Time on a practice card](#time-on-a-practice-card-pass-137): the chunk's effort times
+   `EFFORT_TO_MIN`, rounded, the same price the plan and the due list put on the card and the
+   number the card shows as "planned about N min"). Pass 138 added `timerAlertMinutes`
+   (`lib/scheduling.js`: that planned time held to at least `TIMER_ALERT_FLOOR_MINUTES`, 5; the
+   floor is on the alert only, so the card keeps showing the plan's own price) and
+   `timerAlertMessage` (`lib/ladder.js`), used by `ChecklistItem.jsx`: a
+   Difficult 4-measure chunk plans 30 minutes and a Workable one 10, so the alert comes at those
+   times, whether the card is a new chunk or a review of it, and a chunk planned at 3 minutes
+   alerts at 5. A card the plan puts no price on (a
+   section run-through carries no `effort`, and `plannedMinutesFor` returns `null` for it) never
+   alerts; what a run-through should cost is left to Passes 142 and 145.
+   The alert shows when the running timer reaches that time, stays until dismissed or the
+   session is logged, and does not return within that session. Typing minutes by hand does not
+   trigger it, only the running timer. It is on Daily Practice cards only, not in Interleaved mode (one timer for the
+   whole rotation). The "mark the exact spot" half and the "Add a focus spot" button show only
+   where a focus spot can be added (focus spots on for the piece, and a base chunk); otherwise the
+   alert ends at "try a slower tempo." The words are "You've been on this
+   chunk for N minutes. If clean reps aren't coming, try a slower tempo, or mark the exact spot that's going wrong."
 10. **The switch.** As above: `piece.reviewModel`, never set by a load, never part of the
     Settings form (so a Settings save cannot overwrite it), changed only by the Settings
     button and its way back ("Switch back to the earlier review plan"). Practice already
     logged is kept either way.
+
+    **Built in Pass 138.** `isReviewModelV2(piece)` (`lib/scheduling.js`) is the one test
+    (`reviewModel === 2`). The Wizard's `defaultPiece` writes `reviewModel: null`;
+    `validateAndMigratePiece` adds nothing (a default written on every load would change every
+    piece's fingerprint, so every piece would upload again); `mergeEditedPiece` takes it from the
+    live piece (it is not in `EDIT_FORM_FIELDS`); Settings' "Review plan" panel on the landing page
+    writes it through `updatePiece` (`handleSetReviewModel`, `App.jsx`) and asks in the page first.
+    For the account merge it is an ordinary part, not on the most-recent-wins list, so two devices
+    that disagree reach Review as one question, worded from the raw field name ("Review model",
+    "2" and "not set") until a later pass gives it a label in `accountSync.js`'s field list.
 
 **Not changed by these rules, as far as the decided design says:** how a single session is
 judged (`classifySessionOutcome`: the card's wording changes, the classification does not,
@@ -2433,7 +2493,7 @@ reassessment walk. Pass 141 lists each decision it makes.
 
 **What builds each rule** (the backlog's pass numbers; each pass applies only to a piece on
 `reviewModel` 2 unless it says so): 137 shows a time estimate and a timer on every card
-(display only); 138 adds the switch, the real next-day touch, "in a row" wording and the
+(display only); 138 (built) adds the switch, the real next-day touch, "in a row" wording and the
 alert (rules 3 and 9, and rule 10's switch); 139 the pass table, strong pass, half credit and
 per-piece override (rules 1 and 2); 140 the windows, placement, protected third and worst-first
 order (rules 6 to 8); 141 joins as forms (rule 4); 142 early run-throughs (rule 5), with a

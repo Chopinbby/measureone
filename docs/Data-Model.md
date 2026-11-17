@@ -80,6 +80,14 @@ piece = {
                          // revival, the schedule banner, bulk reschedule
                          // eligibility), the same way genuinely finishing the plan
                          // would. Freely reversible from the same Settings control.
+  reviewModel,           // null | 2 (Pass 138) — which review plan the piece uses: null/absent
+                         // is today's ladder, 2 is Review model v2 (Algorithms.md#review-model-v2-planned).
+                         // Never set by a load (validateAndMigratePiece adds no default, since one
+                         // would change every piece's fingerprint), never part of the Settings form
+                         // (mergeEditedPiece takes it from the live piece), changed only by Settings'
+                         // "Update this piece's review plan" button and its way back. The Wizard's
+                         // defaultPiece writes null. isReviewModelV2(piece) (lib/scheduling.js) is the
+                         // one test. An ordinary part for the merge engines (not a most-recent-wins field).
                          // See Decisions.md#open-questions.
   totalMeasures,         // number
   measureDifficulty,     // number[totalMeasures], each 1|2|3 (easy/medium/hard)
@@ -647,13 +655,17 @@ ChunkProgress = {
                                 // on (see needsRelearning above), but that value is never actually
                                 // surfaced anywhere while the flag is set; it's what a manual clear
                                 // resumes review against.
-  tier1Done,                   // boolean, default false — whether the one-time first-touch review
-                                // (Repertoire-Lifecycle.md's "Tier 1") has happened for this chunk.
-                                // Read/passed through unchanged by computeLadderAdvance; still
-                                // never set true by anything. Pass 5's Tier 1 scheduling is a live,
-                                // recomputed-every-time decision (stage:null and zero sessions) —
-                                // it doesn't write back to this field, so tier1Done stays
-                                // permanently false and unused even now that Tier 1 itself exists.
+  tier1Done,                   // boolean, default false — passed through unchanged by
+                                // computeLadderAdvance. For a piece on today's plan (reviewModel null)
+                                // nothing sets it true: Pass 5's Tier 1 first touch is a live,
+                                // recomputed-every-time decision (stage:null and zero sessions) that
+                                // doesn't write back. **Since Pass 138**, on a piece with reviewModel 2
+                                // the session handlers set it true (tier1DoneAfterSession,
+                                // lib/scheduling.js) when the first session on a LATER calendar day than
+                                // the chunk's learning session is logged, i.e. its next-day touch (it is
+                                // set for any chunk then, not only one that owed a touch; whether a touch
+                                // is owed is nextDayTouchState's job). Restored by undo through the
+                                // session's ladderSnapshot like the other ladder fields.
   troubleSpots,                 // TroubleSpot[] | null, default null (Pass 91, experimental v1) —
                                 // see #focus-spots-v1 below for the full shape and mechanism.
                                 // Backfills to null, not [], same false-import-conflict reasoning

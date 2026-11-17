@@ -529,11 +529,11 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    3 tasks a day bothers real use (Decided 5); technique time in
    Progress / "time practiced" / the consistency heatmap; offering to add
    a missing key's scales. See [Technique-Practice.md](Technique-Practice.md#not-in-v1).
-8. **Review model overhaul (v2)** — decided 2026-11-16, **not built**: chunks earn their way up by
+8. **Review model overhaul (v2)** — decided 2026-11-16, **Pass 138 built** (the per-piece switch, the real next-day touch, the timer alert and the "in a row" wording), the rest **not built**: chunks earn their way up by
    passes that depend on difficulty and plan length, reviews get a window and are placed on lighter
    days, transitions and combos become forms a chunk's review takes, whole-piece run-throughs start
-   early, and a piece in progress keeps today's model until its owner switches it. Design only so
-   far: [Algorithms.md](Algorithms.md#review-model-v2-planned),
+   early, and a piece in progress keeps today's model until its owner switches it. Design only apart
+   from Pass 138: [Algorithms.md](Algorithms.md#review-model-v2-planned),
    [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16).
 
 ## Housekeeping (not urgent, but compounding)

@@ -20,7 +20,7 @@ import { RecordingsEditor } from "../fields/RecordingsEditor";
 import { RecordingsList } from "../fields/RecordingsList";
 import { DocumentsEditor } from "../fields/DocumentsEditor";
 import { DocumentsList } from "../fields/DocumentsList";
-import { isPlanActuallyComplete } from "../../lib/scheduling";
+import { isPlanActuallyComplete, isReviewModelV2 } from "../../lib/scheduling";
 import { isInRevival } from "../../lib/revival";
 import { formatMinutes } from "../../lib/utils";
 import { ASK_ME_AGAIN_LABEL, describeAskMeAgainHint } from "../../lib/accountSync";
@@ -49,6 +49,9 @@ export function SettingsTab({
   onExportClick,
   onImportClick,
   onSetStatus,
+  // Pass 138: switches this piece to the updated review plan (2) or back to the
+  // earlier one (null). App.jsx's handleSetReviewModel.
+  onSetReviewModel,
   // Account sign-in (Pass 109). authEnabled is false whenever no account
   // backend is configured (the live site, a fresh checkout), and then the
   // Account panel doesn't render at all.
@@ -151,6 +154,14 @@ export function SettingsTab({
   useEffect(() => {
     if (editing) setMultiPart(!!(editDraft?.workId || editDraft?.workName));
   }, [editing]);
+
+  // Pass 138: whether the review plan question is open. Asked in the page,
+  // never in a browser pop-up (a blocked pop-up reads as "No"). Closed again
+  // whenever the piece changes, so a question never carries over to another piece.
+  const [reviewPlanAsking, setReviewPlanAsking] = useState(false);
+  useEffect(() => {
+    setReviewPlanAsking(false);
+  }, [piece.id]);
 
   // The last "Sign out of all devices" result, in plain words (Pass 113).
   const signOutNoticeBlock = (marginTop) =>
@@ -489,6 +500,85 @@ export function SettingsTab({
             <Pencil size={15} /> Edit piece settings
           </button>
         </div>
+        {/* Review plan (Pass 138). The switch between today's review plan and the updated one
+            (docs/Algorithms.md#review-model-v2-planned). It changes piece.reviewModel only: the
+            practice already logged is never touched, and the way back is always here. Visible
+            for every piece until Pass 144 decides the default for new ones. */}
+        {typeof onSetReviewModel === "function" && (
+          <div className="panel">
+            <h3>Review plan</h3>
+            {isReviewModelV2(piece) ? (
+              <>
+                <p className="wizard-hint" style={{ marginBottom: 12 }}>
+                  This piece uses the updated review plan. It adds a next-day review for Difficult chunks and for
+                  any chunk whose first session wasn't a Full pass. More changes to reviews will come to the updated
+                  plan over time.
+                </p>
+                {reviewPlanAsking ? (
+                  <div role="alert">
+                    <p style={{ margin: "0 0 10px", fontSize: 14 }}>
+                      Switch "{piece.name || "this piece"}" back to the earlier review plan? Its plan will change back.
+                      Practice you've already logged is kept.
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        className="primary-btn"
+                        onClick={() => {
+                          onSetReviewModel(null);
+                          setReviewPlanAsking(false);
+                        }}
+                      >
+                        Switch back
+                      </button>
+                      <button className="ghost-btn" onClick={() => setReviewPlanAsking(false)}>
+                        Keep the updated plan
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="ghost-btn" onClick={() => setReviewPlanAsking(true)}>
+                    Switch back to the earlier review plan
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="wizard-hint" style={{ marginBottom: 12 }}>
+                  This piece uses the earlier review plan. The updated plan adds a next-day review for Difficult
+                  chunks and for any chunk whose first session wasn't a Full pass. More changes to reviews will come
+                  to the updated plan over time.
+                </p>
+                {reviewPlanAsking ? (
+                  <div role="alert">
+                    <p style={{ margin: "0 0 10px", fontSize: 14 }}>
+                      Update the review plan for "{piece.name || "this piece"}"? Its plan will change: some days will
+                      gain or lose review tasks. Practice you've already logged is kept, and you can switch back whenever you
+                      like.
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        className="primary-btn"
+                        onClick={() => {
+                          onSetReviewModel(2);
+                          setReviewPlanAsking(false);
+                        }}
+                      >
+                        Update the review plan
+                      </button>
+                      <button className="ghost-btn" onClick={() => setReviewPlanAsking(false)}>
+                        Not now
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="ghost-btn" onClick={() => setReviewPlanAsking(true)}>
+                    Update this piece's review plan
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
         {/* Report a problem (Pass 132). A plain email link, shown signed in or out and whether
             or not an account service is configured, so a person who can't sign in can still
             reach it. It opens the person's own email app; nothing is sent from here, and the

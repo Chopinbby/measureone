@@ -128,6 +128,12 @@ header, before the piece's own tasks — in the revival view too.
    outcome (not a free-standing "effectiveness" rating); checking it off
    calls `submitLog()` directly once those inputs are valid (see
    [UX-Principles.md](UX-Principles.md#direct-manipulation-over-confirmation-ceremony)).
+   **Since Pass 138** the card says "Need N clean reps in a row" (the field asks for "Most clean reps in
+   a row"), and a running timer shows a one-time alert once it reaches the minutes that card was planned
+   for, and never sooner than 5 minutes (30 for a Difficult 4-measure chunk, 10 for a Workable one): "You've been on
+   this chunk for 30 minutes. If clean reps aren't coming, try a slower tempo, or mark the exact spot that's
+   going wrong," with an "Add a focus spot" button and Dismiss (the spot half and the button show only
+   where focus spots are on). It is text only and changes nothing about how the session counts.
    **Since Pass 23**, each item also carries an inline, editable free-text
    note (reusing `piece.memoryAnchors`, labeled "Notes" in the UI) — "+ Add
    a note" / "Edit note," committing on blur. **Since Pass 90**, a day can
@@ -1353,3 +1359,20 @@ them up; there is no "send it again" button (signing up again with the same addr
 project's preview (2026-11-13, bot check on with Cloudflare's test key), and so was the second email for an address still waiting to be
 confirmed (it arrives at once, and its link signs the person in); the real Cloudflare widget and anything on production were not. Design, checks and what is still
 open: [Accounts-and-Backend.md](Accounts-and-Backend.md#open-sign-up-pass-135).
+
+## 22. Switching a piece to the updated review plan (Pass 138)
+
+**What you do:** open **Settings** with the piece selected and press **Update this piece's review plan**, in the **Review plan**
+panel between "Current piece details" and "Report a problem". Every piece shows the panel, whichever plan it is on.
+
+**What you see.** The page asks, in place (never a browser pop-up): "Update the review plan for "<name>"? Its plan will change: some
+days will gain or lose review tasks. Practice you've already logged is kept, and you can switch back whenever you like." with
+**Update the review plan** and **Not now**. **Not now** changes nothing. After you update, the panel says "This piece uses the
+updated review plan" and offers **Switch back to the earlier review plan**, which asks the same way ("Switch back" or "Keep the
+updated plan") and puts the piece back on the earlier plan. Nothing you logged is touched either way, and the choice survives a reload.
+
+**What changes on the updated plan, so far:** a Difficult chunk, and any chunk whose first session wasn't a Full pass, gets a
+next-day review. It sits on the day after you actually learned the chunk and stays when you log the introduction; a touch you skip
+just drops off (it never counts as behind). More of the updated plan arrives in later passes. A new piece starts on the earlier plan
+until a later pass decides otherwise (Pass 144). Design:
+[Algorithms.md](Algorithms.md#review-model-v2-planned); decisions: [Decisions.md](Decisions.md#review-model-pass-138-build-2026-11-16).

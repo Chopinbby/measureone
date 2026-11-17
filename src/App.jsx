@@ -47,7 +47,7 @@ import {
   splitPracticeChunk,
   splitPointsAfterStructureEdit,
 } from "./lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain } from "./lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain, tier1DoneAfterSession } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
@@ -3237,7 +3237,11 @@ export default function App() {
         consecutiveStabilizingFails: advance.consecutiveStabilizingFails,
         practiceBPM: advance.practiceBPM,
         nextDueDate: advance.nextDueDate,
-        tier1Done: advance.tier1Done,
+        // Pass 138: on a piece using the new review plan, the first session on
+        // a LATER day than the chunk's learning session is its next-day touch,
+        // and sets this flag (tier1DoneAfterSession, lib/scheduling.js). For a
+        // piece on today's plan it returns advance.tier1Done untouched.
+        tier1Done: tier1DoneAfterSession(p, prevEntry, advance.tier1Done, loggedDate),
         needsRelearning: advance.needsRelearning,
         stabilizingEntryBPM: advance.stabilizingEntryBPM,
         settlingEntryBPM: advance.settlingEntryBPM,
@@ -3622,7 +3626,9 @@ export default function App() {
         consecutiveStabilizingFails: advance.consecutiveStabilizingFails,
         practiceBPM: advance.practiceBPM,
         nextDueDate: advance.nextDueDate,
-        tier1Done: advance.tier1Done,
+        // Pass 138: same as handleLogSession. The date is the attempt's own
+        // (the practice happened then; only the ladder math runs as of today).
+        tier1Done: tier1DoneAfterSession(p, prevEntry, advance.tier1Done, target.loggedDate || loggedDate),
         needsRelearning: advance.needsRelearning,
         stabilizingEntryBPM: advance.stabilizingEntryBPM,
         settlingEntryBPM: advance.settlingEntryBPM,
@@ -3858,6 +3864,14 @@ export default function App() {
 
   const handleSetPieceStatus = (status) => {
     updatePiece((p) => ({ ...p, status }));
+  };
+
+  // Pass 138 — the review plan switch (Settings, "Update this piece's review
+  // plan" and its way back). Writes piece.reviewModel and nothing else:
+  // logged practice is untouched, and no other field is derived from it.
+  // 2 = the updated plan, null = the earlier one.
+  const handleSetReviewModel = (model) => {
+    updatePiece((p) => ({ ...p, reviewModel: model === 2 ? 2 : null }));
   };
 
   const handleUpdateRevival = (patch) => {
@@ -4854,6 +4868,7 @@ export default function App() {
                 onExportClick={handleExportClick}
                 onImportClick={handleImportClick}
                 onSetStatus={handleSetPieceStatus}
+                onSetReviewModel={handleSetReviewModel}
                 authEnabled={authEnabled}
                 authChecking={authChecking}
                 authEmail={authSession ? authSession.email : null}

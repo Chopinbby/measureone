@@ -1,4 +1,4 @@
-import { clamp, daysBetweenInclusive, addDaysISO, todayISODate, elapsedDay, getCurrentDay } from "./utils";
+import { clamp, daysBetweenInclusive, addDaysISO, todayISODate, elapsedDay, getCurrentDay, loggedSessions, isoDateFromEpoch } from "./utils";
 import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
 import { generateAllChunks } from "./chunking";
 import { sessionOutcome } from "./confidence";
@@ -322,6 +322,113 @@ export function smoothOverloadedDays({ dayNumbers, items, loadFor, ceiling, floo
   }
 }
 
+// The minutes a card is planned for: the chunk's effort priced through
+// EFFORT_TO_MIN, rounded to whole minutes (at least 1). It is the same price
+// computeTimeline's `minutesFor`, computeDueReviews (lib/maintenance.js) and
+// revival's plan put on a chunk (those add up and round per day, this rounds
+// the one card), and the same for a new chunk, a review, a transition and a
+// combo. Pass 138's timer alert fires at this; Pass 137's "planned about N
+// min" is meant to show it, so use this and do not write a second formula.
+// null where the plan puts no price on the card: a section run-through
+// (`sr_...`, `st_...`) carries no `effort`, and a missing or non-positive
+// effort is not a price.
+export function plannedMinutesFor(chunk) {
+  const effort = chunk ? Number(chunk.effort) : NaN;
+  if (!Number.isFinite(effort) || effort <= 0) return null;
+  return Math.max(1, Math.round(effort * EFFORT_TO_MIN));
+}
+
+// The timer alert fires at the card's planned time, but never sooner than this
+// many minutes into the timer: a chunk planned at 2 or 3 minutes would
+// otherwise tell the learner they had "been on it a while" almost at once
+// (the owner's floor, 2026-11-16). It lives here and not in plannedMinutesFor
+// because the planned time is a price the plan shows as it is (Pass 137), and
+// only the alert needs a floor.
+export const TIMER_ALERT_FLOOR_MINUTES = 5;
+
+// Minutes into a running timer at which a card's alert shows: its planned
+// time, held to at least TIMER_ALERT_FLOOR_MINUTES. null for a card the plan
+// puts no price on (a section run-through), which never alerts.
+export function timerAlertMinutes(chunk) {
+  const planned = plannedMinutesFor(chunk);
+  return planned == null ? null : Math.max(TIMER_ALERT_FLOOR_MINUTES, planned);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Review model v2: the switch and the next-day touch (Pass 138)       */
+/* ------------------------------------------------------------------ */
+
+// `piece.reviewModel`: null/undefined = today's review plan, 2 = the
+// overhaul (docs/Algorithms.md#review-model-v2-planned). Never set by a
+// load, never part of the Settings form (lib/pieceEdit.js), changed only by
+// Settings' "Update this piece's review plan" button and its way back.
+export const REVIEW_MODEL_V2 = 2;
+export function isReviewModelV2(piece) {
+  return !!piece && piece.reviewModel === REVIEW_MODEL_V2;
+}
+
+// The calendar date a logged session happened on. Sessions saved before
+// `loggedDate` existed carry only `loggedAt` (an epoch time); a session with
+// neither has no usable date, and callers treat that as "can't tell".
+function sessionDateOf(session) {
+  if (!session) return null;
+  if (session.loggedDate) return session.loggedDate;
+  return session.loggedAt ? isoDateFromEpoch(session.loggedAt) : null;
+}
+
+// Review model v2, rule 3: does this chunk call for a next-day touch, and has
+// it had one? null = no touch applies. Otherwise { afterDate, touched }:
+// `afterDate` is the calendar date of the chunk's learning session (its first
+// logged one), or null while the chunk has never been logged (the plan view
+// promises a touch only for a Difficult chunk then, the one case known
+// before the first session); `touched` is true once the chunk has been
+// practised on a LATER day than its learning session (a same-day re-attempt
+// is not a touch), by `tier1Done` or, for data from before the switch, by
+// the sessions themselves.
+//
+// A touch is called for by a Difficult chunk, or by any chunk whose learning
+// session was not a Full pass (an unknown outcome does not count as "not a
+// Full pass"). Base practice chunks only: transitions and combos keep
+// today's first-touch rule until Pass 141 turns them into forms a chunk's
+// review takes. A chunk flagged for re-learning has no reviews at all (the
+// Pass 11 rule), so no touch either.
+export function nextDayTouchState(piece, chunk, entry) {
+  if (!isReviewModelV2(piece) || !chunk || chunk.kind !== "section") return null;
+  const e = entry || {};
+  if (e.needsRelearning) return null;
+  const logged = loggedSessions(e.sessions);
+  const isDifficult = chunk.difficultyLabel === "hard";
+  if (logged.length === 0) return isDifficult ? { afterDate: null, touched: false } : null;
+  const learning = logged[0];
+  const afterDate = sessionDateOf(learning);
+  if (!afterDate) return null;
+  const outcome = sessionOutcome(learning);
+  const notFullPass = outcome != null && outcome !== "pass";
+  if (!isDifficult && !notFullPass) return null;
+  const touched =
+    e.tier1Done === true ||
+    logged.some((s) => {
+      const d = sessionDateOf(s);
+      return d != null && d > afterDate;
+    });
+  return { afterDate, touched };
+}
+
+// The value to store as `tier1Done` after a session is logged (or a
+// provisional one confirmed). `passedThrough` is whatever
+// computeLadderAdvance handed back, which is returned untouched for a piece
+// on today's plan, so nothing changes for it. On the new plan the first
+// session on a LATER day than the chunk's learning session is its touch, and
+// sets the flag. `sessionDate` is the date the practice happened on.
+export function tier1DoneAfterSession(piece, prevEntry, passedThrough, sessionDate) {
+  if (!isReviewModelV2(piece) || passedThrough === true) return passedThrough;
+  const logged = loggedSessions(prevEntry && prevEntry.sessions);
+  if (!logged.length) return passedThrough;
+  const firstDate = sessionDateOf(logged[0]);
+  if (firstDate && sessionDate && sessionDate > firstDate) return true;
+  return passedThrough;
+}
+
 // Rule: the whole piece gets introduced within the first half of the
 // learning days. The back half mixes review, seam transitions, and
 // hard-section focus blocks (entered from a different point than the
@@ -641,10 +748,39 @@ export function computeTimeline(piece, chunkSet) {
   // logged, at which point handleLogSession (App.jsx) gives it real
   // ladder state and it starts taking the Tier 2 path below like any
   // other chunk on the ladder.
+  //
+  // Pass 138 — review model v2 replaces this rule for a BASE PRACTICE chunk
+  // on a piece whose reviewModel is 2 (nextDayTouchState, above): the touch
+  // is placed for a Difficult chunk or one whose learning session was not a
+  // Full pass, and it no longer vanishes once the introduction is logged.
+  // It sits on the day after the date the chunk was actually learned (the
+  // planned day while it has never been logged). A touch the learner skips
+  // is dropped quietly: the chunk has a nextDueDate by then, so
+  // withLiveReviewStatus treats a past-day touch as stale and lets the
+  // ordinary return take over (a late review is slack, never a failure).
+  // Once done it stays on its own day, so the checked-off card and its Undo
+  // stay where the learner logged it. Transitions and combos, and every
+  // piece on today's plan, keep the rule above unchanged.
   all.forEach((chunk) => {
     const start = introducedDay[chunk.id];
     if (!start) return;
     const entry = piece.progress[chunk.id] || {};
+    if (isReviewModelV2(piece) && chunk.kind === "section") {
+      const touch = nextDayTouchState(piece, chunk, entry);
+      if (!touch) return;
+      const rawDay = touch.afterDate ? daysBetweenInclusive(piece.startDate, addDaysISO(touch.afterDate, 1)) : start + 1;
+      if (rawDay == null) return;
+      const touchDay = snapCapped(rawDay);
+      if (touch.touched && !(entry.doneDays || []).includes(touchDay)) return;
+      // The ordinary return can land on the same day (long runs of rest
+      // days): one card that day covers both.
+      if (entry.stage != null && entry.nextDueDate) {
+        const dueRaw = daysBetweenInclusive(piece.startDate, entry.nextDueDate);
+        if (dueRaw != null && snapOrDrop(Math.max(dueRaw, start + 1)) === touchDay) return;
+      }
+      days[touchDay - 1].reviewChunkIds.push(chunk.id);
+      return;
+    }
     const everLogged = entry.stage != null || (entry.sessions && entry.sessions.length > 0);
     if (everLogged) return;
     const day = snapCapped(start + 1);

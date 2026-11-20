@@ -11,11 +11,10 @@ import {
   computeAutoConfidence,
   isManualConfidence,
   getDefaultTargetBPM,
-  formatLadderStatus,
   hasClimbingTempo,
 } from "../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../lib/ladder";
-import { passesNeededForChunk, passesNeededByStageFor } from "../../lib/scheduling";
+import { passesNeededByStageFor, reviewWindowContextFor, ladderStatusFor } from "../../lib/scheduling";
 import { isInRevival } from "../../lib/revival";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
@@ -68,9 +67,8 @@ export function PieceMapTab({
   // anywhere before now. null for a chunk with no session history yet.
   // Pass 139: on a piece using the new review plan the "N/M to next stage" line
   // reads the pass table (passesNeededForChunk), not the old graduationPasses.
-  const ladderStatus = selectedChunk
-    ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate(), passesNeededForChunk(piece, selectedChunk, selectedEntry))
-    : null;
+  // Pass 140: and, inside a review's window, "Ready to review" with its latest day in a tooltip.
+  const ladderStatus = selectedChunk ? ladderStatusFor(piece, selectedChunk, selectedEntry, todayISODate()) : null;
   // Pass 30 — live-derived, same as the tile marker above; recomputed on
   // every render from session history, no persisted "seen" state.
   const selectedClimbing = selectedChunk ? hasClimbingTempo(selectedEntry) : false;
@@ -100,7 +98,8 @@ export function PieceMapTab({
         },
         piece.ladderConfig,
         todayISODate(),
-        passesNeededByStageFor(piece, selectedChunk)
+        passesNeededByStageFor(piece, selectedChunk),
+        reviewWindowContextFor(piece, selectedChunk)
       )
     : null;
   const tempoWarning = tempoConvergenceExceedsWarning(tempoSimulation);
@@ -215,7 +214,7 @@ export function PieceMapTab({
         </span>
       </div>
       {ladderStatus && ladderStatus.dueLabel && (
-        <div><span className="lbl">Next review</span><span className="val">{ladderStatus.dueLabel}</span></div>
+        <div><span className="lbl">Next review</span><span className="val" title={ladderStatus.dueTitle}>{ladderStatus.dueLabel}</span></div>
       )}
       {tempoWarning && (
         <div>

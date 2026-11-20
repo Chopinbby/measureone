@@ -503,7 +503,7 @@ export function formatPassCount(n) {
 // shown no higher than what's needed: a chunk that has enough passes but was
 // held back on its first session or its touch reads "3/3 to Settling" and
 // moves up at its next own turn.
-export function formatLadderStatus(entry, ladderConfig, asOfDate, passesNeeded = null) {
+export function formatLadderStatus(entry, ladderConfig, asOfDate, passesNeeded = null, reviewWindow = null) {
   if (!entry) return null;
   const hasHistory = loggedSessions(entry.sessions).length > 0;
   if (!STAGES.includes(entry.stage) && !hasHistory) return null;
@@ -522,23 +522,35 @@ export function formatLadderStatus(entry, ladderConfig, asOfDate, passesNeeded =
       : `${consecutivePasses} consecutive pass${consecutivePasses === 1 ? "" : "es"}`;
 
   let dueLabel = null;
+  // Pass 140 (review model 2): `reviewWindow` is reviewWindowStatus's answer
+  // (lib/scheduling.js). Between a review's earliest and latest day it reads
+  // "ready to review", with the latest day only in a tooltip (`dueTitle`); from
+  // its latest day it reads as due, counted from that day. Absent (a piece on
+  // today's plan, or a chunk with no window) nothing below differs.
+  let dueSentence;
+  let dueTitle;
+  const shortDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   if (entry.needsRelearning) {
     dueLabel = "paused (needs reinforcement)";
   } else if (entry.nextDueDate) {
-    // Same daysOverdue direction/off-by-one as computeDueReviews
-    // (lib/maintenance.js), reused rather than reinvented so "N days" means
-    // the same thing in both places.
-    const daysOverdue = daysBetweenInclusive(entry.nextDueDate, asOfDate) - 1;
-    const dateLabel = new Date(`${entry.nextDueDate}T00:00:00`).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-    if (daysOverdue > 0) dueLabel = `was due ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} ago (${dateLabel})`;
-    else if (daysOverdue === 0) dueLabel = `due today (${dateLabel})`;
-    else dueLabel = `in ${-daysOverdue} day${daysOverdue === -1 ? "" : "s"} (${dateLabel})`;
+    if (reviewWindow && reviewWindow.status === "available") {
+      dueLabel = "ready to review";
+      dueSentence = "Ready to review";
+      dueTitle = `Due by ${shortDate(reviewWindow.latestDate)}`;
+    } else {
+      const dueOn = reviewWindow && reviewWindow.status === "due" ? reviewWindow.latestDate : entry.nextDueDate;
+      // Same daysOverdue direction/off-by-one as computeDueReviews
+      // (lib/maintenance.js), reused rather than reinvented so "N days" means
+      // the same thing in both places.
+      const daysOverdue = daysBetweenInclusive(dueOn, asOfDate) - 1;
+      const dateLabel = shortDate(dueOn);
+      if (daysOverdue > 0) dueLabel = `was due ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} ago (${dateLabel})`;
+      else if (daysOverdue === 0) dueLabel = `due today (${dateLabel})`;
+      else dueLabel = `in ${-daysOverdue} day${daysOverdue === -1 ? "" : "s"} (${dateLabel})`;
+    }
   }
 
-  return { stageLabel: STAGE_LABEL[stage], progressLabel, dueLabel };
+  return { stageLabel: STAGE_LABEL[stage], progressLabel, dueLabel, ...(dueSentence ? { dueSentence, dueTitle } : {}) };
 }
 
 export function isManualConfidence(chunk, progress) {

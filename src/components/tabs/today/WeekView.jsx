@@ -85,13 +85,14 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
               <p className="day-card-note" style={{ color: "var(--ink-faint)" }}>n/a</p>
             ) : dayItems.length ? (
               <div className="day-card-group">
-                <span className="day-card-tag review">Due</span>
+                {/* Pass 140: on the new review plan a day ahead shows reviews whose window OPENS that day. */}
+                <span className="day-card-tag review">{dayItems.every((it) => it.status === "available") ? "Ready" : "Due"}</span>
                 {dayRanges.map((r) => (
                   <span key={`due-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                 ))}
               </div>
             ) : (
-              <p className="day-card-note">Nothing due</p>
+              <p className="day-card-note">{dueItems.some((it) => it.status) ? "Nothing ready" : "Nothing due"}</p>
             );
 
             if (!isToday) {

@@ -160,6 +160,8 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               // still two things to practice.
               dueCount: dueItems.length,
               dueOverdueCount: dueItems.filter((i) => i.daysOverdue > 0).length,
+              // Pass 140: reviews whose window is open but not yet at its latest day.
+              dueReadyCount: dueItems.filter((i) => i.status === "available").length,
               totalTime: dueMinutes,
               behindDaysCount: 0,
             });
@@ -388,7 +390,7 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
     )
   );
 
-  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, emptyState, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, needsReschedule }) => (
+  const renderPieceCard = ({ pieceId, piece, day, newRanges, specialRanges, reviewRanges, specialIsCombo, emptyState, totalTime, behindDaysCount, isDueList, dueRanges, dueCount, dueOverdueCount, dueReadyCount, needsReschedule }) => (
     <div key={pieceId} className="piece-card">
       <div className="piece-card-head">
         <div>
@@ -453,7 +455,9 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
           {needsReschedule
             ? `Past target date${behindDaysCount > 0 ? `, ${behindDaysCount} day${behindDaysCount === 1 ? "" : "s"} behind` : ""}`
             : isDueList
-              ? `Maintenance: ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
+              ? dueReadyCount > 0 && dueReadyCount === dueCount
+                ? `Maintenance: ${dueCount} spot${dueCount === 1 ? "" : "s"} ready to review`
+                : `Maintenance: ${dueCount} spot${dueCount === 1 ? "" : "s"} due${dueOverdueCount > 0 ? ", some waiting a few days" : ""}`
               : behindDaysCount > 0
                 ? `${behindDaysCount} day${behindDaysCount === 1 ? "" : "s"} behind schedule`
                 : "On schedule"}

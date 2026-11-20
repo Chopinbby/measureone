@@ -6,12 +6,11 @@ import {
   classifySessionOutcome,
   getDefaultTargetBPM,
   getSuggestedStartingBPM,
-  formatLadderStatus,
   resolveRequiredReps,
   requirementLine,
   cleanRepsInARow,
 } from "../../../lib/confidence";
-import { passesNeededForChunk } from "../../../lib/scheduling";
+import { ladderStatusFor } from "../../../lib/scheduling";
 import { NumberInput } from "../../NumberInput";
 import { ReassessPanel } from "./ReassessPanel";
 
@@ -137,7 +136,7 @@ export function InterleavePanel({
   const requiredReps = resolveRequiredReps(chunk, entry.stage, entry.holdingReviewCount);
   const suggestedStartingBPM = getSuggestedStartingBPM(piece, chunk);
   // Pass 139: the new review plan reads its pass table here (null otherwise).
-  const ladderStatus = formatLadderStatus(entry, ladderConfig, todayISODate(), passesNeededForChunk(piece, chunk, entry));
+  const ladderStatus = ladderStatusFor(piece, chunk, entry, todayISODate());
   const canLog = reps !== "" && bpm !== "";
   // A chunk can come back around in rotation (or the learner can revisit
   // it) while an earlier turn's soft-miss/fail is still sitting
@@ -242,11 +241,19 @@ export function InterleavePanel({
           </p>
           <p className="tip-line">
             Ladder:{" "}
-            {ladderStatus
-              ? `${ladderStatus.stageLabel}, ${ladderStatus.progressLabel}${
-                  ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
-                }`
-              : "not started yet"}
+            {ladderStatus ? (
+              <>
+                {ladderStatus.stageLabel}, {ladderStatus.progressLabel}
+                {ladderStatus.dueLabel ? (
+                  <>
+                    {" · "}
+                    <span title={ladderStatus.dueTitle}>{ladderStatus.dueSentence || `Next review ${ladderStatus.dueLabel}`}</span>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              "not started yet"
+            )}
           </p>
 
           {pendingProvisional && (

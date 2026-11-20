@@ -659,7 +659,25 @@ ChunkProgress = {
                                 // nextDueDate still gets pinned to today the moment the flag turns
                                 // on (see needsRelearning above), but that value is never actually
                                 // surfaced anywhere while the flag is set; it's what a manual clear
-                                // resumes review against.
+                                // resumes review against. For a base chunk of a piece on reviewModel 2
+                                // (Pass 140) this is the EARLIEST day of the review's window: the day
+                                // it becomes available, and the day a chunk may first move up a stage
+                                // (Pass 139); dueByDate, next, is the latest.
+  dueByDate,                   // string ("YYYY-MM-DD") | ABSENT — Pass 140, a base practice chunk of a piece
+                                // on reviewModel 2 only: the LATEST day of the next review's window
+                                // (rule 6 of Algorithms.md#review-model-v2-planned), written by
+                                // computeLadderAdvance next to nextDueDate. The key is simply ABSENT
+                                // when there is no window (a window of one day, a piece on today's
+                                // plan, a transition or combo, a chunk saved before this field) and
+                                // never stored as null (withDueByDate, lib/ladder.js, removes it), so
+                                // none of those is changed by this pass and no piece uploads again.
+                                // Read only through effectiveDueByDate: absent, equal to or earlier than
+                                // nextDueDate all mean "the same day", so a stale value left by a writer
+                                // that moved nextDueDate alone is ignored. Part of the ladder state: it is in the
+                                // undo snapshot (`ladderSnapshot.dueByDate`, written only on model 2 or where the
+                                // key exists), in `LADDER_STATE_FIELDS` (a missing key and a null read the same),
+                                // taken from the same side as nextDueDate by the import merge and by the practice
+                                // union, and cleared when a rough or lost flag pins the review to today.
   tier1Done,                   // boolean, default false — passed through unchanged by
                                 // computeLadderAdvance. For a piece on today's plan (reviewModel null)
                                 // nothing sets it true: Pass 5's Tier 1 first touch is a live,
@@ -738,7 +756,8 @@ ladderConfig = {
   // passesNeeded: { stabilizing?: { easy?, medium?, hard? }, settling?: { ... } } holds only the
   // cells she changed (a whole number of at least 1), each beating the table in lib/ladder.js's
   // PASS_TABLE_ROWS; a number equal to the table's own is not stored. holdingMaxDays: a whole
-  // number of days, 30 when absent (effectiveHoldingMaxDaysV2); nothing reads it before Pass 140.
+  // number of days, 30 when absent (effectiveHoldingMaxDaysV2); read since Pass 140 as the longest a Holding review
+  // window may reach.
   // The old graduationPasses above stay what transitions, combos and run-throughs read, and what
   // a piece on today's plan reads for everything.
   tempoRatchet: { k, kCapBpm, tempoAchievedThreshold, maintenanceK },

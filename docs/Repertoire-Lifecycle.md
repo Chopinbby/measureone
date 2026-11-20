@@ -1367,7 +1367,7 @@ one check.
 
 ### Review model v2 (planned)
 
-**Status: decided 2026-11-16. Pass 138 has built the switch, the next-day touch, the timer alert and the "in a row" wording; Pass 139 the pass table, strong passes, half credit and the per-piece override; the rest is not built.** The rules are written once, in
+**Status: decided 2026-11-16. Pass 138 has built the switch, the next-day touch, the timer alert and the "in a row" wording; Pass 139 the pass table, strong passes, half credit and the per-piece override; Pass 140 the review windows, placement on the lightest day, the protected third, the slip and worst-first order; joins as forms and early run-throughs are not built.** The rules are written once, in
 [Algorithms.md](Algorithms.md#review-model-v2-planned); the reasons, what was rejected and the
 simulation behind them are in
 [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16). This section says where
@@ -1394,8 +1394,9 @@ What the model changes, by the section it replaces:
 - **"The ladder: three stages" (4 days, 7 days, then 14 growing, four passes each).** The number
   of passes to leave Stabilizing and Settling depends on the chunk's difficulty and the plan's
   length (one pass for a Workable chunk on a plan of a month or less, up to five for a Difficult
-  chunk on a plan over three months; **built in Pass 139**). The gaps become windows measured against the plan's length,
-  and Holding grows 30% a visit to a maximum of 30 days whatever the plan's length. A Full pass at
+  chunk on a plan over three months; **built in Pass 139**). The gaps become windows measured against the plan's length
+  (**built in Pass 140**: a review is "ready" from its earliest day and "due" from its latest, and the app puts it on
+  the lightest day between them), and Holding grows 30% a visit to a maximum of 30 days whatever the plan's length. A Full pass at
   85% of target tempo or more counts double (built in Pass 139, in Stabilizing and Settling), and a
   chunk never moves up on its first session, and only on or after the day its next review is due.
 - **"Introduction-window review scheduling: Tier 1 / Tier 2".** Tier 1's first touch becomes a

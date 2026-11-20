@@ -155,9 +155,10 @@ export const STRONG_PASS_FRACTION = 0.85;
 // pass (rule 4). Nothing in the app calls addHalfPass yet; Pass 141 does.
 export const HALF_PASS_CREDIT = 0.5;
 
-// Rule 6: the longest a Holding review may wait, for every plan length. It
-// governs nothing until Pass 140 builds the review windows; the Settings
-// editor already lets the owner change it (`ladderConfig.overrides`).
+// Rule 6: the longest a Holding review may wait, for every plan length, and
+// the longest its window may reach (the window never extends past it). Pass 140
+// reads it in `reviewWindowDays`; the Settings editor lets the owner change it
+// (`ladderConfig.overrides`).
 export const HOLDING_MAX_DAYS_V2 = 30;
 
 // Which row of the table a plan reads. A plan set by minutes per day uses the
@@ -207,6 +208,104 @@ export function resolvePassesNeeded({ stage, difficultyLabel, daysToLearn, sched
 export function effectiveHoldingMaxDaysV2(ladderConfig) {
   const v = ladderConfig && ladderConfig.overrides && ladderConfig.overrides.holdingMaxDays;
   return Number.isInteger(v) && v >= 1 ? v : HOLDING_MAX_DAYS_V2;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Review model v2: review windows (Pass 140)                          */
+/*  docs/Algorithms.md#review-model-v2-planned, rule 6.                 */
+/* ------------------------------------------------------------------ */
+
+// A review has a window, not one due date: an earliest day (`nextDueDate`) and
+// a latest day (`dueByDate`), each a share of the plan's length held between
+// day limits and rounded to whole days. The shares are hand-picked (the owner
+// approved "rule P4" on 2026-11-16; tracked in Research.md) and were chosen by
+// a simulation of 48 plans: written as a share of the plan they made the daily
+// load more even than fixed gaps on plans of two months or less.
+export const WINDOW_SHARES = {
+  stabilizing: { earliest: 0.045, earliestMin: 2, earliestMax: 3, latest: 0.16, latestMin: 3, latestMax: 7 },
+  settling: { earliest: 0.08, earliestMin: 3, earliestMax: 4, latest: 0.28, latestMin: 6, latestMax: 12 },
+};
+// Holding: the first gap is a share of the plan held to 7..10 days, every later
+// gap is 30% longer, and the window is that gap plus or minus 40%.
+export const HOLDING_FIRST_GAP_SHARE = 0.16;
+export const HOLDING_FIRST_GAP_MIN = 7;
+export const HOLDING_FIRST_GAP_MAX = 10;
+export const HOLDING_GAP_GROWTH = 1.3;
+export const HOLDING_WINDOW_SPREAD = 0.4;
+// A plan set by minutes per day has no target date, so its windows read the
+// 90-day figures (the owner's word for the pass table too: "assume the longest").
+export const WINDOW_PLAN_DAYS_FOR_MINUTES_PLANS = 90;
+// A review the day's budget keeps deferring may slip past its latest day by up
+// to this many extra intervals (an interval being its stage's normal gap).
+export const REVIEW_SLIP_INTERVALS = 2;
+
+function clampInt(n, lo, hi) {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+// The plan length the windows follow: `daysToLearn`, or 90 for a plan set by
+// minutes per day (and for a length that cannot be read).
+export function reviewPlanDays(daysToLearn, scheduleMode) {
+  if (scheduleMode === "minutes") return WINDOW_PLAN_DAYS_FOR_MINUTES_PLANS;
+  const days = Number(daysToLearn);
+  return Number.isFinite(days) && days > 0 ? days : WINDOW_PLAN_DAYS_FOR_MINUTES_PLANS;
+}
+
+// The window, in days after a session, for a chunk that ends that session in
+// `stage`. `holdingVisits` is how many Holding passes in a row it has logged
+// since it last entered Holding (0 for the first gap after promotion); it is
+// ignored outside Holding. `holdingMaxDays` is the Holding maximum (30 unless
+// the owner changed it). Returns whole days with 1 <= earliest <= latest.
+export function reviewWindowDays({ stage, planDays, holdingVisits = 0, holdingMaxDays = HOLDING_MAX_DAYS_V2 }) {
+  if (stage === "holding") {
+    const max = Math.max(1, Math.round(Number(holdingMaxDays) || HOLDING_MAX_DAYS_V2));
+    const first = clampInt(Math.round(HOLDING_FIRST_GAP_SHARE * planDays), HOLDING_FIRST_GAP_MIN, HOLDING_FIRST_GAP_MAX);
+    const visits = Math.max(0, Number(holdingVisits) || 0);
+    const gap = Math.min(max, Math.max(1, Math.round(first * Math.pow(HOLDING_GAP_GROWTH, visits))));
+    const earliest = Math.max(1, Math.round(gap * (1 - HOLDING_WINDOW_SPREAD)));
+    const latest = Math.min(max, Math.max(earliest, Math.round(gap * (1 + HOLDING_WINDOW_SPREAD))));
+    return { earliest: Math.min(earliest, latest), latest };
+  }
+  const shares = WINDOW_SHARES[stage] || WINDOW_SHARES.stabilizing;
+  const earliest = clampInt(Math.round(shares.earliest * planDays), shares.earliestMin, shares.earliestMax);
+  const latest = Math.max(earliest, clampInt(Math.round(shares.latest * planDays), shares.latestMin, shares.latestMax));
+  return { earliest, latest };
+}
+
+// A review's latest day, read defensively: `dueByDate` only counts when it is a
+// calendar date on or after `nextDueDate`. An absent or older one means "the
+// same day" (a chunk saved before the windows, one whose window is a single day,
+// or a field left behind by a writer that moved `nextDueDate` and not it).
+export function effectiveDueByDate(entry) {
+  if (!entry || !entry.nextDueDate) return null;
+  const by = entry.dueByDate;
+  return typeof by === "string" && by > entry.nextDueDate ? by : entry.nextDueDate;
+}
+
+// A chunk entry with `dueByDate` set to `dueBy`, or with the key REMOVED when
+// `dueBy` is null: "no window" is an absent key, never a stored null, so an
+// entry that has no window is byte-for-byte what it was before this pass (a
+// stored null would change every piece's fingerprint and upload it again).
+export function withDueByDate(entry, dueBy) {
+  if (dueBy) return { ...entry, dueByDate: dueBy };
+  if (!("dueByDate" in entry)) return entry;
+  const { dueByDate: _dropped, ...rest } = entry;
+  return rest;
+}
+
+// The undo snapshot's `dueByDate` (every session handler that snapshots a
+// chunk's ladder state before a session): written only for a piece on review
+// model 2, or where the chunk's entry already carries the key, so a piece on
+// today's plan keeps its snapshots exactly as they were.
+export function dueBySnapshot(prevEntry, onModelTwo) {
+  return onModelTwo || (prevEntry && "dueByDate" in prevEntry) ? { dueByDate: (prevEntry && prevEntry.dueByDate) ?? null } : {};
+}
+
+// Undo: put the snapshot's `dueByDate` back (or remove the key if the chunk had
+// none). A snapshot taken before this pass has no such key and leaves the entry
+// as it is.
+export function restoreDueByFromSnapshot(entry, snapshot) {
+  return snapshot && "dueByDate" in snapshot ? withDueByDate(entry, snapshot.dueByDate || null) : entry;
 }
 
 // The plan length a piece's table row follows, in words for the Settings
@@ -491,6 +590,18 @@ export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
   };
 }
 
+// Pass 140: the dates of a chunk's next review after a session logged on
+// `asOfDate`. With no review window in the context (a piece on today's plan, or
+// a transition, a combo, a section run-through) this is the old single date,
+// `asOfDate` plus the stage's interval, and the result carries no `dueByDate`
+// key. With a window (review model 2, base chunks) the earliest day goes in
+// `nextDueDate` and the latest in `dueByDate` (null when the window is one day).
+function nextReviewDates(asOfDate, windowCtx, newStage, holdingVisits, oldIntervalDays) {
+  if (!windowCtx) return { nextDueDate: addDaysISO(asOfDate, oldIntervalDays) };
+  const w = reviewWindowDays({ stage: newStage, planDays: windowCtx.planDays, holdingVisits, holdingMaxDays: windowCtx.holdingMaxDays });
+  return { nextDueDate: addDaysISO(asOfDate, w.earliest), dueByDate: w.latest > w.earliest ? addDaysISO(asOfDate, w.latest) : null };
+}
+
 // Advances one chunk's ladder card by exactly one already-classified
 // session outcome. Pure — no clock reads, no storage access; `asOfDate`
 // (the calendar date this outcome was logged on) is supplied by the
@@ -555,6 +666,10 @@ export function applyRunThroughFlag(chunkLadderState, flag, asOfDate) {
 //                  on its own turn. Passes are still counted.
 //   maxCredit    — the most one pass may count for (1 for the touch, so a
 //                  fast touch is still one pass); null means no cap
+//   reviewWindow — (Pass 140) `{ planDays, holdingMaxDays }`: when present the
+//                  next review gets a window (reviewWindowDays) instead of one
+//                  date, and the result carries `dueByDate`. Absent (a context
+//                  built before this pass, or null) means the old intervals.
 // A pass at or above STRONG_PASS_FRACTION of the target tempo counts as two
 // whenever a context is given. The three outcome rules otherwise stand: a
 // Partial pass starts the count over, Needs rework steps back one stage.
@@ -564,6 +679,8 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig, la
   const consecutiveStabilizingFails = chunkLadderState.consecutiveStabilizingFails || 0;
   const wasFlagged = !!chunkLadderState.needsRelearning;
   const { practiceBPM, targetBPM, tier1Done, suggestedStartingBPM } = chunkLadderState;
+  // Pass 140: the review window's settings, or null for the old single date.
+  const windowCtx = ladderContext && ladderContext.reviewWindow ? ladderContext.reviewWindow : null;
   // Pass 59 — this chunk's own current tempo-ratchet rate, defensively
   // defaulted the same way targetBPM/entryBPM fields are elsewhere in this
   // function (a fresh chunk, or one migrated in before this field existed,
@@ -651,9 +768,9 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig, la
       // functionally moot once the flag is on (computeTimeline/
       // computeDueReviews skip it regardless), but keeps the persisted
       // date consistent with what a manual clear would resume against.
-      nextDueDate: becomesFlagged
-        ? outcome.asOfDate
-        : addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, 0, outcome.effectiveness)),
+      ...(becomesFlagged
+        ? { nextDueDate: outcome.asOfDate, ...(windowCtx ? { dueByDate: null } : {}) }
+        : nextReviewDates(outcome.asOfDate, windowCtx, newStage, 0, intervalForStage(newStage, ladderConfig, 0, outcome.effectiveness))),
       tier1Done,
       stabilizingEntryBPM: newEntryBPM.stabilizing,
       settlingEntryBPM: newEntryBPM.settling,
@@ -700,7 +817,7 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig, la
       // Pass 61 — stage never changes on a soft-miss, so this only ever
       // increments (if already in Holding) or stays put.
       holdingReviewCount: nextHoldingReviewCount(stage, stage, holdingReviewCount),
-      nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(stage, ladderConfig, consecutivePasses, outcome.effectiveness)),
+      ...nextReviewDates(outcome.asOfDate, windowCtx, stage, 0, intervalForStage(stage, ladderConfig, consecutivePasses, outcome.effectiveness)),
       tier1Done,
       stabilizingEntryBPM: entryBPM.stabilizing,
       settlingEntryBPM: entryBPM.settling,
@@ -801,7 +918,7 @@ export function computeLadderAdvance(chunkLadderState, outcome, ladderConfig, la
     // ceiling to graduate out of), incremented on every other pass logged
     // while already in Holding, unchanged for a pass anywhere else.
     holdingReviewCount: nextHoldingReviewCount(stage, newStage, holdingReviewCount),
-    nextDueDate: addDaysISO(outcome.asOfDate, intervalForStage(newStage, ladderConfig, passesAfter, outcome.effectiveness)),
+    ...nextReviewDates(outcome.asOfDate, windowCtx, newStage, passesAfter, intervalForStage(newStage, ladderConfig, passesAfter, outcome.effectiveness)),
     tier1Done,
     stabilizingEntryBPM: newEntryBPM.stabilizing,
     settlingEntryBPM: newEntryBPM.settling,
@@ -885,7 +1002,14 @@ export const TEMPO_CONVERGENCE_WARNING_DAYS = 90;
 // lib/scheduling.js, returns), so the projection promotes the chunk after the
 // passes the new plan asks for instead of the old graduationPasses. Omitted
 // (or null) for a piece on today's plan, and then nothing here differs.
-export function simulateTempoConvergence(chunkLadderState, ladderConfig, startDate, passesNeededByStage = null) {
+//
+// reviewWindow (Pass 140, optional) — `{ planDays, holdingMaxDays }` for a base
+// chunk of a piece on review model 2 (reviewWindowContextFor, lib/scheduling.js),
+// so each simulated review gets its window and the next one is taken at the
+// middle of it (the app puts a review on the lightest day inside its window, so
+// neither its earliest nor its latest day is the usual one). Omitted, and the
+// projection uses the stage intervals as it always did.
+export function simulateTempoConvergence(chunkLadderState, ladderConfig, startDate, passesNeededByStage = null, reviewWindow = null) {
   const { targetBPM, practiceBPM } = chunkLadderState;
   if (targetBPM == null || practiceBPM == null) {
     return { applicable: false, converged: false, days: null, iterations: 0 };
@@ -901,11 +1025,19 @@ export function simulateTempoConvergence(chunkLadderState, ladderConfig, startDa
 
   for (let i = 1; i <= MAX_SIMULATION_STEPS; i++) {
     const stepContext = passesNeededByStage
-      ? { passesNeeded: passesNeededByStage[STAGES.includes(state.stage) ? state.stage : "stabilizing"] ?? null, canPromote: true, maxCredit: null }
+      ? {
+          passesNeeded: passesNeededByStage[STAGES.includes(state.stage) ? state.stage : "stabilizing"] ?? null,
+          canPromote: true,
+          maxCredit: null,
+          ...(reviewWindow ? { reviewWindow } : {}),
+        }
       : null;
     const advance = computeLadderAdvance(state, { result: "pass", effectiveness: "good", asOfDate }, ladderConfig, stepContext);
-    totalDays += daysBetweenInclusive(asOfDate, advance.nextDueDate) - 1;
-    asOfDate = advance.nextDueDate;
+    const nextAsOf = advance.dueByDate
+      ? addDaysISO(advance.nextDueDate, Math.floor((daysBetweenInclusive(advance.nextDueDate, advance.dueByDate) - 1) / 2))
+      : advance.nextDueDate;
+    totalDays += daysBetweenInclusive(asOfDate, nextAsOf) - 1;
+    asOfDate = nextAsOf;
     state = { ...state, ...advance };
 
     if (state.practiceBPM != null && state.practiceBPM >= goalBPM) {

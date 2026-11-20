@@ -102,9 +102,12 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
     );
   }
 
+  // Pass 140: on the new review plan a review is "ready" from its earliest day
+  // and "due" from its latest, so a list of only ready ones is not "due today".
+  const allDue = dueItems.every((i) => i.status !== "available");
   return (
     <div className="panel">
-      <h3>Due today: {formatMinutes(totalDueMinutes(dueItems))} planned</h3>
+      <h3>{allDue ? "Due today" : "Ready to review"}: {formatMinutes(totalDueMinutes(dueItems))} planned</h3>
       <div className="checklist">
         {dueItems.map(({ chunkId, chunk }) => (
           <ChecklistItem
@@ -127,7 +130,9 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
       <p className="wizard-hint" style={{ marginTop: 12, marginBottom: 0 }}>
         {dueItems.filter((i) => i.daysOverdue > 0).length > 0
           ? "Some of these have been waiting a few days. That's fine, take them in order."
-          : "All of these came due today."}
+          : allDue
+            ? "All of these came due today."
+            : "These are ready now. The ones that need the most care come first."}
       </p>
     </div>
   );

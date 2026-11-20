@@ -4,9 +4,9 @@ import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
 import { clamp, formatRange, formatDuration, todayISODate } from "../../../lib/utils";
 import { DIFFICULTY_META, CONFIDENCE_PRESETS, ROLE_LABEL } from "../../../lib/constants";
-import { computeConfidence, isManualConfidence, getDefaultTargetBPM, formatLadderStatus, hasClimbingTempo } from "../../../lib/confidence";
+import { computeConfidence, isManualConfidence, getDefaultTargetBPM, hasClimbingTempo } from "../../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../../lib/ladder";
-import { passesNeededForChunk, passesNeededByStageFor } from "../../../lib/scheduling";
+import { passesNeededByStageFor, reviewWindowContextFor, ladderStatusFor } from "../../../lib/scheduling";
 import { ReassessPanel } from "../today/ReassessPanel";
 
 const DIFFICULTY_SIGNAL_ICON = {
@@ -51,7 +51,7 @@ export function ReassessSequencePanel({
   const selectedIsManual = selectedChunk ? isManualConfidence(selectedChunk, piece.progress) : false;
   const selectedIdx = selectedChunk ? chunks.findIndex((c) => c.id === selected) : -1;
   const ladderStatus = selectedChunk
-    ? formatLadderStatus(selectedEntry, piece.ladderConfig, todayISODate(), passesNeededForChunk(piece, selectedChunk, selectedEntry))
+    ? ladderStatusFor(piece, selectedChunk, selectedEntry, todayISODate())
     : null;
   const selectedClimbing = selectedChunk ? hasClimbingTempo(selectedEntry) : false;
   const resolvedTargetBPM = selectedChunk ? selectedEntry.targetBPM || getDefaultTargetBPM(piece, selectedChunk) || null : null;
@@ -73,7 +73,8 @@ export function ReassessSequencePanel({
         },
         piece.ladderConfig,
         todayISODate(),
-        passesNeededByStageFor(piece, selectedChunk)
+        passesNeededByStageFor(piece, selectedChunk),
+        reviewWindowContextFor(piece, selectedChunk)
       )
     : null;
   const tempoWarning = tempoConvergenceExceedsWarning(tempoSimulation);
@@ -183,7 +184,7 @@ export function ReassessSequencePanel({
         </span>
       </div>
       {ladderStatus && ladderStatus.dueLabel && (
-        <div><span className="lbl">Next review</span><span className="val">{ladderStatus.dueLabel}</span></div>
+        <div><span className="lbl">Next review</span><span className="val" title={ladderStatus.dueTitle}>{ladderStatus.dueLabel}</span></div>
       )}
       {tempoWarning && (
         <div>

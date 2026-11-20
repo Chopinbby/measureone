@@ -101,7 +101,9 @@ export function LadderConfigEditor({ draft, set }) {
             </button>
           </div>
           <p className="wizard-hint">
-            Review and Focus block cards (the ones that join two chunks) still use the "Passes to graduate" numbers
+            When a chunk comes back is worked out from your plan's length, as a window: it can be reviewed from its
+            earliest day, and the app puts it on the lightest day inside that window. Review and Focus block cards (the
+            ones that join two chunks) still use the "Review every (days)", "Passes to graduate" and interval numbers
             below, until they are reworked.
           </p>
         </>
@@ -118,7 +120,7 @@ export function LadderConfigEditor({ draft, set }) {
       <p className="wizard-hint">The first stage after a chunk is introduced: frequent, short-interval review.</p>
       <div className="field-row">
         <label className="field">
-          <span>Review every (days)</span>
+          <span>{newPlan ? "Review every (days) (Review and Focus block cards)" : "Review every (days)"}</span>
           <NumberInput value={config.stabilizing.intervalDays} min={1} onCommit={(n) => updateStage("stabilizing", { intervalDays: n })} />
         </label>
         <label className="field">
@@ -157,7 +159,7 @@ export function LadderConfigEditor({ draft, set }) {
       <p className="wizard-hint">The middle stage: longer intervals, and a real tempo floor kicks in.</p>
       <div className="field-row">
         <label className="field">
-          <span>Review every (days)</span>
+          <span>{newPlan ? "Review every (days) (Review and Focus block cards)" : "Review every (days)"}</span>
           <NumberInput value={config.settling.intervalDays} min={1} onCommit={(n) => updateStage("settling", { intervalDays: n })} />
         </label>
         <label className="field">
@@ -187,7 +189,7 @@ export function LadderConfigEditor({ draft, set }) {
       </p>
       <div className="field-row">
         <label className="field">
-          <span>Starting interval (days)</span>
+          <span>{newPlan ? "Starting interval (days) (Review and Focus block cards)" : "Starting interval (days)"}</span>
           <NumberInput
             value={config.holding.startIntervalDays}
             min={1}
@@ -195,7 +197,7 @@ export function LadderConfigEditor({ draft, set }) {
           />
         </label>
         <label className="field">
-          <span>Maximum interval (days)</span>
+          <span>{newPlan ? "Maximum interval (days) (Review and Focus block cards)" : "Maximum interval (days)"}</span>
           <NumberInput
             value={config.holding.maxIntervalDays}
             min={1}
@@ -225,8 +227,8 @@ export function LadderConfigEditor({ draft, set }) {
       </div>
       {newPlan && (
         <p className="wizard-hint">
-          The new maximum is saved for the new review timing, which is not switched on yet. Until then reviews still
-          use the maximum interval above.
+          This is the longest a chunk's own review may wait in Holding, and its window never reaches past it. The
+          maximum interval above is now used only by Review and Focus block cards.
         </p>
       )}
     </div>

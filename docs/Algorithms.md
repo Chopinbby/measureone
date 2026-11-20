@@ -2321,9 +2321,11 @@ finished loses it, as the practice cards' always have.
 ## Review model v2 (planned)
 
 > **Status: decided 2026-11-16. Built so far: Pass 138** (the switch `piece.reviewModel`, rule 3's
-> real next-day touch, rule 9's timer alert and the "in a row" wording) **and Pass 139** (rules 1 and 2:
-> the pass table, strong passes, the half-credit function and the per-piece override); **every other rule is
-> not built, and nothing else in `src/` reads any of this.** This is
+> real next-day touch, rule 9's timer alert and the "in a row" wording), **Pass 139** (rules 1 and 2:
+> the pass table, strong passes, the half-credit function and the per-piece override) **and Pass 140**
+> (rules 6 to 8: review windows, placement on the lightest day, the protected third, the slip and worst-first
+> order); **rules 4 and 5 (joins as forms, early run-throughs) are not built, and nothing else in `src/` reads
+> any of this.** This is
 > the one place the rules are written out. The reasons, what was rejected and the simulation
 > that checked them are in
 > [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16); the hand-picked
@@ -2378,8 +2380,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    a recorded set of 160 cases from before the pass checks (`test/ladder-table.test.mjs`).
    - **A strong pass** (a Full pass whose logged tempo is at least `STRONG_PASS_FRACTION`, 0.85, of
      the chunk's target tempo; no target tempo, no strong pass) counts as two, in Stabilizing and
-     Settling only. In Holding the count drives how far the next gap grows, so doubling it there
-     would stretch the gaps; Pass 140 rebuilds those. A pass below the stage's tempo floor still
+     Settling only. In Holding the count drives how far the next gap grows (rule 6, Pass 140), so doubling it
+     there would stretch the gaps. A pass below the stage's tempo floor still
      counts for nothing. The count is no longer always whole: `consecutivePasses` can read
      `2.5` (after half credit), and `formatLadderStatus` shows it as "2.5/4 to Building" and never
      above what is needed.
@@ -2412,8 +2414,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
      and absent again after "Reset to automatic". Settings' ladder editor shows the table, the plan
      length it follows and "set by you" on a changed cell; the two "Passes to graduate" boxes stay
      for the Review and Focus block cards (transitions and combos), which keep `graduationPasses`
-     until Pass 141. `holdingMaxDays` (`effectiveHoldingMaxDaysV2`, 30 by default) is saved and read
-     by nothing yet; Pass 140 uses it.
+     until Pass 141. `holdingMaxDays` (`effectiveHoldingMaxDaysV2`, 30 by default) is the longest a Holding
+     window may reach (rule 6, Pass 140).
    - **Shown on:** Piece Map's chunk detail, Daily Practice cards, Interleaved cards and the revival
      reassessment (`passesNeededForChunk`), and the tempo projection
      (`simulateTempoConvergence`'s optional fourth argument, `passesNeededByStageFor`).
@@ -2478,6 +2480,29 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    | 45 days | 2 to 7 | 4 to 12 | about 7 |
    | 60 or 75 days | 3 to 7 | 4 to 12 | about 10 |
    | 90 days or more, and minutes plans | 3 to 7 | 4 to 12 | about 10 |
+
+   **Built in Pass 140, for base practice chunks of a piece on `reviewModel` 2.** `reviewWindowDays`
+   (`lib/ladder.js`; the shares are `WINDOW_SHARES`, `HOLDING_FIRST_GAP_*`, `HOLDING_GAP_GROWTH` 1.3 and
+   `HOLDING_WINDOW_SPREAD` 0.4) gives the window in whole days for the stage a chunk ENDS a session in; the
+   plan length is `reviewPlanDays` (`daysToLearn`, or 90 for a plan set by minutes per day or one whose length
+   cannot be read). `computeLadderAdvance` writes it through a new field of the context
+   `ladderContextFor` builds, `reviewWindow: { planDays, holdingMaxDays }`: **`nextDueDate` is the window's earliest
+   day and the new per-chunk field `dueByDate` its latest** (`null` on the function's result for a window of one day).
+   - **`dueByDate` is stored only when there is a window**: the key is absent otherwise (`withDueByDate`
+     removes it, never writes `null`), so a piece on today's plan, a chunk saved before this pass and a chunk
+     whose window is one day are byte-for-byte what they were. Read through `effectiveDueByDate`: absent, equal
+     to or earlier than `nextDueDate` all mean "the same day", so a writer that moves `nextDueDate` and forgets
+     the latest day (as `handleSetFlag` would have) cannot leave a stale window behind.
+   - **The Holding gap grows with the passes in a row**, `consecutivePasses` after the session: 0 on the pass that
+     promotes the chunk into Holding (the first gap), one more for each Full pass after it; a Partial pass
+     starts the count over and so returns the gap to its first window, and Needs rework steps the chunk back a
+     stage and uses that stage's window. The gap is capped at the Holding maximum and so is the window's upper
+     end (`effectiveHoldingMaxDaysV2`, 30 unless the owner changed it).
+   - **`effectiveness` ("low", "good", "high") no longer stretches or shrinks a gap** for these chunks (the
+     old Holding interval multiplied it in). Transitions, combos and section run-throughs get no window and keep
+     the old single date, the old interval and the old effectiveness multiplier until Pass 141.
+   - **The flag for re-learning** (a second Needs rework in a row in Stabilizing) pins `nextDueDate` to the same
+     day with no window, as before; a rough or lost flag set from Piece Map also clears `dueByDate`.
 7. **Placement.** Each day takes the day's fixed work first (new material, next-day touches,
    run-throughs), then the reviews that have reached the end of their window, then pulls
    reviews forward from inside their window, most overdue first, until the day reaches the
@@ -2487,10 +2512,73 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    extra intervals (twice the stage's normal gap). **A late review is slack, never a failure:**
    only the logged outcome touches the ladder
    ([Repertoire-Lifecycle.md](Repertoire-Lifecycle.md#introduction-window-review-scheduling-tier-1--tier-2)).
+
+   **Built in Pass 140, as a placement worked out in one pass over what is already known, not day by day.**
+   The app places a chunk's NEXT review ahead of time (the ladder only ever knows the next one, and
+   `computeTimeline` is rerun after every change), where the design simulation worked a day at a time. So
+   `computeTimeline(piece, chunkSet, { asOfDay })` places each windowed review with `placeWindowedReviews`
+   (`lib/scheduling.js`) after everything else is placed (introductions, touches, transitions, combos and the
+   reviews that have no window), so each review sees the real load of the days in its window:
+   - **It needs today.** A review inside its window goes on the lightest day from today on, so the
+     timeline of a piece on model 2 takes `options.asOfDay` (today's plan day) and, left out, reads the clock
+     (`elapsedDay`); a piece on today's plan never looks at it (a test pins that). `getEffectiveTimeline` passes it
+     through and re-numbers it for a rescheduled remainder. `App.jsx` reruns the plan when the date changes.
+   - **Order and choice.** A window whose latest day has passed ("closed") is placed on today first; then the
+     nearest latest day first, ties worst first (rule 8). Each goes on the lightest day in its window (the load
+     already placed there), never before its earliest day, **and a near tie goes to the earlier day**: the
+     earliest day whose load is no more than `PLACEMENT_NEAR_TIE_SHARE` (2) average days' worth of minutes above
+     the lightest day's. That is a widening of the card's "ties to the earlier day", made on the measurement
+     (see below and [Decisions.md](Decisions.md#review-model-pass-140-build-2026-11-19)): 0 restores the rule
+     exactly as worded. Rest days hold nothing; a
+     window with no practice day inside it goes to the first one after it; a review with no day left in the
+     plan is not placed (the live due list covers it, as for any review past the plan's end).
+   - **The target** is the plan's average daily minutes over the practice days still ahead, counting these
+     reviews at their earliest day (the app's own reading of "the plan's average load": the same average the
+     introduction smoothing uses). It is not the average of the full run, which the design simulation used,
+     because a plan only knows each chunk's next review.
+   - **The protected third.** A chunk with at least four logged sessions (its learning session and three
+     reviews: `ESTABLISHED_AFTER_SESSIONS`) is "established". On a day where protected work is still waiting
+     (new material, a touch, a join, or a chunk that has not had its third review, on or after that day), an
+     established review may use only what the target leaves after the larger of a third of the target and the
+     protected work already there; past the last such day it may use what the target leaves after the work
+     already there (the held-back third goes back to reviews). A review that is not established is never held
+     back. A day with no room is skipped; one with no room anywhere in the window is forced onto its latest day.
+   - **The slip.** An established review that finds no room in its window may go past its latest day, by up to
+     two of its stage's windows (`REVIEW_SLIP_INTERVALS`, in days: twice the window's latest gap), to the
+     lightest day there with room; with none it is forced onto its latest day. A window already past is never
+     slipped further: it goes on today.
+   - **What it measured**, on the real code, 48 plans (4 piece lengths of 60 to 400 measures, 3 difficulty mixes, plan
+     lengths of 30, 45, 75 and 120 days; 7 practice days a week; every task done and every pass a Full pass; reviews
+     at the app's own price), against the same plans on today's rules: the variation of the daily load (the spread
+     of the days' minutes over their mean) **0.41 against 0.47**; chunks in Holding at the plan's end **98% against
+     51%**; the busiest week 1.51 times the average against 1.58; total time 1% more. By plan length, variation
+     0.36, 0.38, 0.43, 0.47 against 0.43, 0.43, 0.48, 0.53 (30, 45, 75, 120 days), Holding 100%, 99%, 91%, 100%
+     against 0%, 12%, 92%, 100%. `test/review-windows.test.mjs` runs it and holds the figures to the owner's bar
+     (an average variation of 0.45 at most). The design simulation's figures (0.41 against 0.61) are NOT comparable:
+     it left out the transitions and combos that still ride their own fixed gaps here, and the run-throughs and joins
+     of Passes 141 and 142.
+   - **Reviews of chunks learned before a reschedule** are not in the remainder's chunk set, so they reach the
+     plan only through the live due list as before (and only from their latest day, "due"); see
+     [Decisions.md](Decisions.md#review-model-pass-140-build-2026-11-19).
 8. **Worst first.** Reviews on a day are ordered by last outcome (Needs rework, then Partial
    pass), then how far below target tempo, then earlier stage, then most overdue. Pass 149
    adds "ran long last time". A review that runs past its timer alert still counts toward
    moving up, for now.
+
+   **Built in Pass 140** as `reviewPriorityParts` and `compareReviewPriority` (`lib/scheduling.js`): the last JUDGED
+   session's outcome (a skipped or unconfirmed attempt is not read), then how far practice tempo is below the
+   target (a share of it; nothing when either is unknown), then the earlier stage, then days past the earliest
+   day, then measure order. They order the day's reviews in `computeTimeline` and the due list
+   (`computeDueReviews`, for a piece on model 2; today's plan keeps "most overdue first").
+
+   **The due list and the card.** `computeDueReviews` gives each windowed review `status`: **"available"** from its
+   earliest day and **"due"** from its latest (`latestDate`; `daysOverdue` counts from the latest day). It lists
+   both, because the maintenance view after the plan shows both, and `mergeLiveDueReviews` forces only the "due"
+   ones onto today (an "available" one is left to the plan's placement, which may have put it on a later day in its
+   window). On a card the line reads **"Ready to review"** inside the window, with "Due by Nov 24" only in a
+   tooltip, and from the latest day reads as due ("due today", "was due 2 days ago"), counted from that day:
+   never "overdue" or "late" in words (`ladderStatusFor`, `formatLadderStatus`'s `reviewWindow` argument).
+   Daily Practice's past-plan list and Master Agenda say "ready to review" when nothing in them is due yet.
 9. **The timer alert** on a card: it fires when the running timer reaches **the minutes the card
    was planned for, never sooner than 5 minutes** (the owner changed this on 2026-11-16, after
    Pass 138 was first built with fixed limits of 20 minutes on a chunk's first session, 15 on the
@@ -2550,7 +2638,7 @@ reassessment walk. Pass 141 lists each decision it makes.
 `reviewModel` 2 unless it says so): 137 shows a time estimate and a timer on every card
 (display only); 138 (built) adds the switch, the real next-day touch, "in a row" wording and the
 alert (rules 3 and 9, and rule 10's switch); 139 (built) the pass table, strong pass, half credit and
-per-piece override (rules 1 and 2); 140 the windows, placement, protected third and worst-first
+per-piece override (rules 1 and 2); 140 (built) the windows, placement, protected third, slip and worst-first
 order (rules 6 to 8); 141 joins as forms (rule 4); 142 early run-throughs (rule 5), with a
 "typical run time at target tempo" piece field; 143 the minutes-mode day count (which today
 assumes two reviews of each chunk at full price: [above](#deriving-daystolearn-from-minutesperday-schedulemode-minutes));
@@ -2565,19 +2653,24 @@ the simulation in Decisions.md is then re-run with the answer):
 - *How is a combo return credited*, as the chunk's own turn or as half credit? The rules do not
   say. The simulation treated it as a full turn. Settle in Pass 141.
 - *The Holding maximum:* this section applies it to the window (never past 30 days), the
-  stricter reading, matching Pass 140's wording. Pass 136's own text applied it to the gap.
+  stricter reading, matching Pass 140's wording. Pass 136's own text applied it to the gap. **Settled in Pass 140**
+  (built that way).
 - *Whether the protected third and the 2-extra-intervals slip hold up* in the real
-  placement: the simulation did not model either (Decisions.md lists what it did not model).
+  placement: **measured in Pass 140** on the real code (Decisions.md, "Review model, Pass 140 build"): the
+  protected third costs about 0.03 of evenness (0.407 with it, 0.380 without) and the slip rarely acts. Pass 144
+  re-runs the 48-scenario grid once joins and run-throughs exist.
 - *A light second half.* All introductions finish by the plan's midpoint, so the back of a plan
   is light. Spreading introductions later is untested and undecided (Pass 143, only if the owner
   decides).
 
 ## What's due — the live maintenance query
 
-> **Planned change (decided 2026-11-16, not built):** for a piece on
+> **Changed in Pass 140 (built):** for a piece on
 > [Review model v2](#review-model-v2-planned) a review has a window, not one due date: available
-> from its earliest day, due by its latest, ordered worst first rather than most-overdue-first
-> (Pass 140). Today's query is described below.
+> from its earliest day, due by its latest, ordered worst first rather than most-overdue-first.
+> The items carry `status` ("available" or "due") and `latestDate`, and `mergeLiveDueReviews` forces only
+> the due ones onto today (rule 8 above). The query below is described as it works for a piece on today's
+> plan, which is unchanged.
 
 `computeDueReviews(piece, chunkSet, asOfDate)` (`lib/maintenance.js`,
 Pass 8) is the query that finally *reads* the `nextDueDate` the ladder has

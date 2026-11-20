@@ -1,9 +1,19 @@
 import { clamp, daysBetweenInclusive, addDaysISO, todayISODate, elapsedDay, getCurrentDay, loggedSessions, isoDateFromEpoch } from "./utils";
 import { EFFORT_TO_MIN, LIBERAL_FACTOR, REVIEW_OFFSETS, MIN_PRACTICE_DAYS_PER_WEEK, MAX_PRACTICE_DAYS_PER_WEEK } from "./constants";
 import { generateAllChunks } from "./chunking";
-import { sessionOutcome } from "./confidence";
+import { sessionOutcome, formatLadderStatus } from "./confidence";
 import { isInRevival } from "./revival";
-import { isPieceLearned, STAGES, PASS_TABLE_STAGES, resolvePassesNeeded } from "./ladder";
+import {
+  isPieceLearned,
+  STAGES,
+  PASS_TABLE_STAGES,
+  resolvePassesNeeded,
+  reviewPlanDays,
+  reviewWindowDays,
+  effectiveDueByDate,
+  effectiveHoldingMaxDaysV2,
+  REVIEW_SLIP_INTERVALS,
+} from "./ladder";
 import { plannedMinutesFor } from "./plannedMinutes";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
@@ -439,6 +449,16 @@ export function passesNeededForChunk(piece, chunk, entry) {
   return passesNeededOnModelTwo(piece, chunk, stage);
 }
 
+// The ladder line a card shows ("Building, 2/3 to Steady, next review ..."):
+// formatLadderStatus with the pass table's count for this chunk and, on the new
+// review plan, where `asOfDate` sits in the review's window. One function so the
+// four screens that show it (a Daily Practice card, Interleaved, Piece Map and
+// the revival reassessment) cannot disagree.
+export function ladderStatusFor(piece, chunk, entry, asOfDate) {
+  const window = chunk && chunk.kind === "section" ? reviewWindowStatus(piece, entry, asOfDate) : null;
+  return formatLadderStatus(entry, piece.ladderConfig, asOfDate, passesNeededForChunk(piece, chunk, entry), window);
+}
+
 // `{ stabilizing: n, settling: n }` for the tempo projection
 // (simulateTempoConvergence), or null for a piece or chunk that doesn't use
 // the table.
@@ -492,7 +512,144 @@ export function ladderContextFor(piece, chunk, prevEntry, sessionDate) {
       maxCredit = 1;
     }
   }
-  return { passesNeeded, canPromote, maxCredit };
+  // Pass 140: the next review gets a window (rule 6), not one date.
+  return { passesNeeded, canPromote, maxCredit, reviewWindow: reviewWindowContextFor(piece, chunk) };
+}
+
+// The settings a review window is worked out from (computeLadderAdvance's
+// `reviewWindow`, simulateTempoConvergence's fifth argument): the plan's length
+// (90 days for a plan set by minutes per day) and the Holding maximum. null for a
+// piece on today's plan and for anything but a base practice chunk, which keep
+// their single due date.
+export function reviewWindowContextFor(piece, chunk) {
+  if (!isReviewModelV2(piece) || !chunk || chunk.kind !== "section") return null;
+  return { planDays: reviewPlanDays(piece.daysToLearn, piece.scheduleMode), holdingMaxDays: effectiveHoldingMaxDaysV2(piece.ladderConfig) };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Review model v2: windows, placement, worst first (Pass 140)         */
+/*  docs/Algorithms.md#review-model-v2-planned, rules 6 to 8.           */
+/* ------------------------------------------------------------------ */
+
+// A chunk that has had its third review (its learning session plus three
+// reviews) is "established": rule 7 protects a third of each day for new
+// material and for chunks that have not had their third review yet.
+export const ESTABLISHED_AFTER_SESSIONS = 4;
+
+// Where a plan day sits in a review's window, for the card's label: null when
+// the piece is not on the new review plan, the chunk has no window (a single
+// day, or saved before the windows) or the day is before the window opens;
+// otherwise `{ status: "available", latestDate }` from the earliest day
+// (`nextDueDate`) and `{ status: "due", latestDate }` from the latest
+// (`dueByDate`). `date` is a calendar date. Never "late" or "overdue" in words:
+// a review past its latest day is slack, not a failure.
+export function reviewWindowStatus(piece, entry, date) {
+  if (!isReviewModelV2(piece) || !entry || !entry.nextDueDate || !date) return null;
+  const latest = effectiveDueByDate(entry);
+  if (!latest || latest <= entry.nextDueDate) return null;
+  if (date >= latest) return { status: "due", latestDate: latest };
+  if (date >= entry.nextDueDate) return { status: "available", latestDate: latest };
+  return null;
+}
+
+// Rule 8, worst first: the order reviews are done in on a day. A review whose
+// last logged session was Needs rework comes first, then a Partial pass; then
+// the chunk furthest below its target tempo; then the earlier stage; then the
+// one that has waited longest past its earliest day. Ties fall back to measure
+// order so the list reads front to back through the piece. (Pass 149 will add
+// "ran long last time" between the tempo gap and the stage.) Returns a number
+// to sort ascending.
+const OUTCOME_RANK = { fail: 0, "soft-miss": 1 };
+export function reviewPriorityParts(piece, chunk, entry, asOfDate) {
+  const e = entry || {};
+  const logged = loggedSessions(e.sessions);
+  const last = logged.length ? sessionOutcome(logged[logged.length - 1]) : null;
+  const target = e.targetBPM != null ? e.targetBPM : piece && piece.targetBPM != null ? piece.targetBPM : null;
+  const tempoGap = target != null && e.practiceBPM != null && target > 0 ? Math.max(0, (target - e.practiceBPM) / target) : 0;
+  const stageRank = Math.max(0, STAGES.indexOf(e.stage));
+  const overdue = e.nextDueDate && asOfDate ? Math.max(0, daysBetweenInclusive(e.nextDueDate, asOfDate) - 1) : 0;
+  return { outcomeRank: last in OUTCOME_RANK ? OUTCOME_RANK[last] : 2, tempoGap, stageRank, overdue, start: chunk ? chunk.start : 0 };
+}
+export function compareReviewPriority(a, b) {
+  return a.outcomeRank - b.outcomeRank || b.tempoGap - a.tempoGap || a.stageRank - b.stageRank || b.overdue - a.overdue || a.start - b.start;
+}
+
+// How far above the lightest day in its window a day may be and still count as
+// tied with it, in average days' worth of minutes (the placement's `target`), so
+// that "ties go to the earlier day" reaches near ties too. 0 is the rule as the
+// card for Pass 140 words it (strictly the lightest day, exact ties earlier).
+// Measured on the real code in 48 plans (Decisions.md, "Review model, Pass 140
+// build"): the literal rule leaves 91% of chunks in Holding at the plan's end,
+// 2 gives 98% at the same evenness (0.41 against 0.41) and 1% more total time,
+// and always taking the earliest day gives 100% but is less even (0.44) and 12%
+// more time. A hand-picked number: Research.md.
+export const PLACEMENT_NEAR_TIE_SHARE = 2;
+
+// Rule 7, placement. Each item is one review with a window [earliestDay,
+// latestDay] (plan day numbers). Each goes on the lightest day inside its window
+// (ties, and near ties, to the earlier day), never before its earliest day, and is forced onto
+// its latest day when no day has room. Closed windows (latest day before
+// `asOfDay`) are placed on the first practice day on or after `asOfDay`.
+//
+// `established` items are limited by the protected third: on a day, they may use
+// only what the target leaves after max(a third of the target, the protected
+// work already there) while protected work is still waiting (day <=
+// `protectedUntil`), and what the target leaves after the protected work there
+// once none is waiting (the held-back third goes back to reviews); a day with no
+// room is skipped, and an item that finds none
+// in its window may slip past its latest day by up to `slipDays` (two of its
+// stage's gaps) to a day that has room, else it is forced onto its latest day.
+// Other items go to the lightest day in the window with no cap.
+//
+// `practiceDays` are the plan's days that can hold a review, ascending; `loadOf`
+// and `protectedOf` give each day's minutes already placed (all work, and the
+// protected share of it). Returns a Map from item id to day number; an item with
+// no day left in the plan is absent (the live due list covers it, as it does
+// for any review that falls past the plan's end).
+export function placeWindowedReviews({ items, practiceDays, loadOf, protectedOf, target, asOfDay = 1, protectedUntil = 0, nearTie = 0 }) {
+  const load = new Map(practiceDays.map((d) => [d, loadOf(d)]));
+  const prot = new Map(practiceDays.map((d) => [d, protectedOf(d)]));
+  const est = new Map(practiceDays.map((d) => [d, 0]));
+  const firstOnOrAfter = (day) => practiceDays.find((d) => d >= day);
+  const planned = items.map((it) => {
+    const closed = it.latestDay < asOfDay;
+    const lo = firstOnOrAfter(Math.max(it.earliestDay, asOfDay));
+    let hi = null;
+    for (const d of practiceDays) if (d >= (lo == null ? Infinity : lo) && d <= it.latestDay) hi = d;
+    return { it, closed, lo, hi: closed ? lo : hi != null ? hi : lo };
+  });
+  // Forced (closed) windows first, then the nearest latest day, then worst first.
+  planned.sort((a, b) => (a.closed === b.closed ? 0 : a.closed ? -1 : 1) || (a.hi == null ? Infinity : a.hi) - (b.hi == null ? Infinity : b.hi) || compareReviewPriority(a.it.priority, b.it.priority));
+  const capacity = (d) => Math.max(0, target - (d <= protectedUntil ? Math.max(target / 3, prot.get(d)) : prot.get(d)));
+  const placements = new Map();
+  for (const { it, closed, lo, hi } of planned) {
+    if (lo == null) continue;
+    const inWindow = practiceDays.filter((d) => d >= lo && d <= hi);
+    const days = inWindow.length ? inWindow : [lo];
+    const lightest0 = (list) => list.reduce((best, d) => (best == null || load.get(d) < load.get(best) ? d : best), null);
+    // The earliest day no more than `nearTie` average days' worth of minutes above the lightest one.
+    const lightest = (list) => {
+      const floor = load.get(lightest0(list));
+      return list.find((d) => load.get(d) <= floor + nearTie * target + 1e-9);
+    };
+    let chosen;
+    if (closed || !it.established) {
+      chosen = lightest(days);
+    } else {
+      const fits = days.filter((d) => est.get(d) + it.size <= capacity(d));
+      if (fits.length) chosen = lightest(fits);
+      else {
+        const slipTo = hi + Math.max(0, it.slipDays || 0);
+        const slipFits = practiceDays.filter((d) => d > hi && d <= slipTo && est.get(d) + it.size <= capacity(d));
+        chosen = slipFits.length ? lightest(slipFits) : hi;
+      }
+    }
+    placements.set(it.id, chosen);
+    load.set(chosen, load.get(chosen) + it.size);
+    if (it.established) est.set(chosen, est.get(chosen) + it.size);
+    else prot.set(chosen, prot.get(chosen) + it.size);
+  }
+  return placements;
 }
 
 // Rule: the whole piece gets introduced within the first half of the
@@ -500,8 +657,15 @@ export function ladderContextFor(piece, chunk, prevEntry, sessionDate) {
 // hard-section focus blocks (entered from a different point than the
 // original chunk boundary) instead of sitting empty until a final
 // run-through.
-export function computeTimeline(piece, chunkSet) {
+export function computeTimeline(piece, chunkSet, options = {}) {
   const { practiceChunks, transitions, combos, all } = chunkSet;
+  // Pass 140: for a piece on review model 2 a review has a window, and where it
+  // goes inside the window depends on which days are still ahead, so the plan
+  // needs to know today. `options.asOfDay` is today's plan day; left out, a
+  // piece on model 2 reads the clock (elapsedDay) and a piece on today's plan
+  // never looks at it, so its timeline stays a pure function of the piece.
+  const reviewModelV2 = isReviewModelV2(piece);
+  const asOfDay = options.asOfDay != null ? options.asOfDay : reviewModelV2 ? elapsedDay(piece) : 1;
 
   // Pass 91 (experimental v1) — a chunk with a trouble spot flagged at setup
   // (focusSpotGate's fromSetup rule, above) is held out of introduction
@@ -876,6 +1040,7 @@ export function computeTimeline(piece, chunkSet) {
   // computeScheduleStatus below, which only ever judges a chunk's
   // *introduction*, never a review's timing).
   const tier2Items = [];
+  const windowedReviews = [];
   all.forEach((chunk) => {
     const start = introducedDay[chunk.id];
     if (!start) return;
@@ -888,6 +1053,20 @@ export function computeTimeline(piece, chunkSet) {
     if (entry.needsRelearning) return;
     const rawDay = daysBetweenInclusive(piece.startDate, entry.nextDueDate);
     if (rawDay == null) return;
+    // Pass 140 (review model 2, base chunks with a window): not placed here.
+    // `nextDueDate` is the window's earliest day and `dueByDate` its latest; the
+    // review goes on the lightest day between them once everything else is
+    // placed (placeWindowedReviews, below). A chunk with no window (saved before
+    // the windows, or a window of one day) keeps the rule above.
+    if (reviewModelV2 && chunk.kind === "section") {
+      const dueBy = effectiveDueByDate(entry);
+      const latestRaw = dueBy && dueBy > entry.nextDueDate ? daysBetweenInclusive(piece.startDate, dueBy) : null;
+      if (latestRaw != null) {
+        const earliestDay = Math.max(rawDay, start + 1);
+        windowedReviews.push({ chunk, entry, earliestDay, latestDay: Math.max(latestRaw, earliestDay) });
+        return;
+      }
+    }
     const day = snapOrDrop(Math.max(rawDay, start + 1));
     if (day != null) tier2Items.push({ chunkId: chunk.id, minDay: start + 1, day });
   });
@@ -939,6 +1118,55 @@ export function computeTimeline(piece, chunkSet) {
     },
   });
 
+  // Pass 140 — review model 2: place each windowed review (rule 7). Everything
+  // else is already where it goes, so each review sees the real load of the days
+  // in its window. The target is the plan's average daily minutes over the days
+  // still ahead, counting these reviews at their earliest day; the protected
+  // third is measured against it.
+  if (windowedReviews.length) {
+    const practiceAhead = learningDaysCalendar.filter((d) => d >= asOfDay);
+    const sizeFor = (chunk) => chunk.effort * EFFORT_TO_MIN;
+    const baseLoad = (d) => minutesFor(days[d - 1]);
+    const protectedMinutes = (d) => {
+      const day = days[d - 1];
+      return [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds].reduce((sum, id) => sum + chunkById[id].effort * EFFORT_TO_MIN, 0);
+    };
+    const totalAhead = practiceAhead.reduce((sum, d) => sum + baseLoad(d), 0) + windowedReviews.reduce((sum, w) => sum + sizeFor(w.chunk), 0);
+    const target = practiceAhead.length ? totalAhead / practiceAhead.length : 0;
+    const items = windowedReviews.map((w) => {
+      const established = loggedSessions(w.entry.sessions).length >= ESTABLISHED_AFTER_SESSIONS;
+      const gap = reviewWindowDays({
+        stage: w.entry.stage,
+        planDays: reviewPlanDays(piece.daysToLearn, piece.scheduleMode),
+        holdingVisits: w.entry.consecutivePasses || 0,
+        holdingMaxDays: effectiveHoldingMaxDaysV2(piece.ladderConfig),
+      }).latest;
+      return {
+        id: w.chunk.id,
+        earliestDay: w.earliestDay,
+        latestDay: w.latestDay,
+        size: sizeFor(w.chunk),
+        established,
+        slipDays: REVIEW_SLIP_INTERVALS * gap,
+        priority: reviewPriorityParts(piece, w.chunk, w.entry, addDaysISO(piece.startDate, asOfDay - 1)),
+      };
+    });
+    let protectedUntil = 0;
+    learningDaysCalendar.forEach((d) => {
+      const day = days[d - 1];
+      if (day.newChunkIds.length || day.specialChunkIds.length || day.reviewChunkIds.length) protectedUntil = Math.max(protectedUntil, d);
+    });
+    items.filter((it) => !it.established).forEach((it) => (protectedUntil = Math.max(protectedUntil, it.latestDay)));
+    const placements = placeWindowedReviews({ items, practiceDays: practiceAhead, loadOf: baseLoad, protectedOf: protectedMinutes, target, asOfDay, protectedUntil, nearTie: PLACEMENT_NEAR_TIE_SHARE });
+    placements.forEach((day, id) => days[day - 1].reviewChunkIds.push(id));
+    // Worst first (rule 8): the order the reviews of a day are done in.
+    const prioById = Object.fromEntries(items.map((it) => [it.id, it.priority]));
+    days.forEach((d) => {
+      if (d.type === "consolidation" || d.reviewChunkIds.length < 2) return;
+      d.reviewChunkIds.sort((a, b) => (prioById[a] && prioById[b] ? compareReviewPriority(prioById[a], prioById[b]) : prioById[a] ? -1 : prioById[b] ? 1 : 0));
+    });
+  }
+
   if (consolidationDays) {
     // Pass 91 (experimental v1) — a gated chunk was never actually
     // introduced, so it has nothing to "play through" yet; leaving it out
@@ -978,10 +1206,10 @@ export function computeTimeline(piece, chunkSet) {
 // change for the single-reschedule case this was already tested against,
 // and an old saved piece with no `previous` field at all behaves the same
 // way (`marker.previous` reads as `undefined`, same falsy base case).
-function computeEffectiveTimeline(piece, chunkSet, marker) {
-  if (!marker) return computeTimeline(piece, chunkSet);
+function computeEffectiveTimeline(piece, chunkSet, marker, options = {}) {
+  if (!marker) return computeTimeline(piece, chunkSet, options);
 
-  const original = computeEffectiveTimeline(piece, chunkSet, marker.previous || null);
+  const original = computeEffectiveTimeline(piece, chunkSet, marker.previous || null, options);
   const { practiceChunks, transitions, combos } = chunkSet;
   const chunkById = Object.fromEntries(practiceChunks.map((c) => [c.id, c]));
   const remainingChunks = marker.remainingChunkOrder.map((id) => chunkById[id]).filter(Boolean);
@@ -1030,7 +1258,9 @@ function computeEffectiveTimeline(piece, chunkSet, marker) {
     combos: remainingCombos,
     all: [...remainingChunks, ...remainingTransitions, ...remainingCombos],
   };
-  const sub = computeTimeline(subPiece, subChunkSet);
+  // Today's plan day in the remainder's own numbering (its day 1 is asOfDay).
+  const subOptions = options.asOfDay != null ? { asOfDay: options.asOfDay - asOfDay + 1 } : {};
+  const sub = computeTimeline(subPiece, subChunkSet, subOptions);
 
   const mergedDays = [
     ...original.days.slice(0, asOfDay - 1),
@@ -1073,8 +1303,8 @@ function computeEffectiveTimeline(piece, chunkSet, marker) {
   };
 }
 
-export function getEffectiveTimeline(piece, chunkSet) {
-  return computeEffectiveTimeline(piece, chunkSet, piece.rescheduleMarker);
+export function getEffectiveTimeline(piece, chunkSet, options = {}) {
+  return computeEffectiveTimeline(piece, chunkSet, piece.rescheduleMarker, options);
 }
 
 // A review whose due date has passed sits on its original bounded-timeline

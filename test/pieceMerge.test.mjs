@@ -13,12 +13,13 @@ import {
   computeRemainingConnectorIds,
   computeRescheduleRemainder,
   getEffectiveTimeline,
+  ladderContextFor,
   computeScheduleStatus,
   countBehindDays,
   classifyDayCompletion,
   movedIdsForDay,
 } from "../src/lib/scheduling.js";
-import { computeLadderAdvance } from "../src/lib/ladder.js";
+import { computeLadderAdvance, withDueByDate, dueBySnapshot, restoreDueByFromSnapshot } from "../src/lib/ladder.js";
 import { addDaysISO, todayISODate, elapsedDay } from "../src/lib/utils.js";
 import {
   fingerprint as pieceMergeFingerprint,
@@ -141,7 +142,11 @@ function logSession(piece, chunkId, { day, loggedAt, bpm = 80, cleanReps = 3, ou
     tier1Done: prev.tier1Done ?? false,
     needsRelearning: prev.needsRelearning ?? false,
     currentBPM: prev.currentBPM ?? null,
+    // Pass 140: a piece on the new review plan snapshots the review window's latest day too.
+    ...dueBySnapshot(prev, piece.reviewModel === 2),
   };
+  // Pass 140: a base chunk of a piece on the new review plan gets a window (and the Pass 139 rules).
+  const ctx = piece.reviewModel === 2 ? ladderContextFor(piece, generateAllChunks(piece).practiceChunks.find((c) => c.id === chunkId), prev, loggedDate) : null;
   const advance = computeLadderAdvance(
     {
       stage: prev.stage,
@@ -158,9 +163,10 @@ function logSession(piece, chunkId, { day, loggedAt, bpm = 80, cleanReps = 3, ou
       holdingReviewCount: prev.holdingReviewCount,
     },
     { result: outcome, effectiveness: outcome === "fail" ? "low" : outcome === "pass" ? "high" : "good", asOfDate: loggedDate, cleanReps, bpm },
-    piece.ladderConfig
+    piece.ladderConfig,
+    ctx
   );
-  const entry = {
+  const entry = withDueByDate({
     ...prev,
     doneDays: (prev.doneDays || []).includes(day) ? prev.doneDays : [...(prev.doneDays || []), day],
     sessions: [...(prev.sessions || []), { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds: 120, ladderSnapshot }],
@@ -177,7 +183,7 @@ function logSession(piece, chunkId, { day, loggedAt, bpm = 80, cleanReps = 3, ou
     holdingEntryBPM: advance.holdingEntryBPM,
     tempoRatchetK: advance.tempoRatchetK,
     holdingReviewCount: advance.holdingReviewCount,
-  };
+  }, advance.dueByDate || null);
   return { ...piece, progress: { ...piece.progress, [chunkId]: entry }, lastLoggedAt: loggedDate };
 }
 
@@ -195,7 +201,11 @@ function unlogSession(piece, chunkId, day) {
   sessions.splice(idx, 1);
   const doneDays = sessions.some((s) => s.day === day) ? prev.doneDays : (prev.doneDays || []).filter((d) => d !== day);
   let entry = { ...prev, doneDays, sessions };
-  if (isLatest && snapshot) entry = { ...entry, ...snapshot };
+  if (isLatest && snapshot) {
+    // Pass 140: the review window's latest day goes back (or is removed) with the rest of the ladder.
+    const { dueByDate: _dueBy, ...ladder } = snapshot;
+    entry = restoreDueByFromSnapshot({ ...entry, ...ladder }, snapshot);
+  }
   return { ...piece, progress: { ...piece.progress, [chunkId]: entry } };
 }
 
@@ -816,6 +826,10 @@ describe("two simulated devices (Pass 117)", () => {
     let clock = 1000;
     const ctx = { next: () => ++clock, weights };
     let start = startingPiece(rng);
+    // Pass 140: every other run is a piece on the new review plan, so the review window's latest day
+    // (`dueByDate`) is logged, undone, merged and reloaded like every other ladder field. Chosen by the
+    // seed's parity, not from the generator, so every other draw stays where it was.
+    if (seed % 2 === 0) start = { ...start, reviewModel: 2 };
     for (let i = 0, n = intIn(rng, 0, 6); i < n; i++) start = edit(start, rng, ctx);
     const account = { piece: start };
     const devices = ["A", "B"].map((name) => ({ name, piece: start, basePiece: start, base: piecePartFingerprints(start) }));
@@ -951,6 +965,15 @@ describe("two simulated devices (Pass 117)", () => {
               // without a base copy the engine brings it back, as documented)
               assert.ok(had.has(x), `(8) ${k}: session ${x} is in the combined record (${where})`);
             });
+            // Pass 140: the date the chunk is next due comes with its window's latest day, both from the side
+            // that practiced last (a tie: this device), never one side's earliest day with the other's latest.
+            const lastAt = (e) => Math.max(-1, ...((e && e.sessions) || []).filter((s) => !s.skipped && !s.provisional).map((s) => s.loggedAt));
+            // (Only where some judged session exists: with none on either side nobody "practiced last".)
+            if (lastAt(lt[k]) > -1 || lastAt(rt[k]) > -1) {
+              const lead = lastAt(rt[k]) > lastAt(lt[k]) ? rt[k] : lt[k];
+              ["nextDueDate", "dueByDate"].forEach((f) => assert.equal(mt[k][f], lead[f], `(8) ${k}.${f} comes from the side that practiced last (${where})`));
+              if (lead.dueByDate) tally.windowsCombined = (tally.windowsCombined || 0) + 1;
+            }
           } else if (RECENCY_FIELDS.includes(k) && !(DATE_LINKED_FIELDS.includes(k) && mt.scheduleMode === "days" && changed(lt, "targetDate") && changed(rt, "targetDate") && !same(lt.targetDate, rt.targetDate))) {
             // (9) Pass 126: a single-value setting both devices changed differently goes to the one
             // that changed it more recently, judged here from the two copies' own dated notes (or
@@ -1065,6 +1088,7 @@ describe("two simulated devices (Pass 117)", () => {
     assert.ok(tally.partConflicts > 0, "and single-part conflicts (what recency cannot settle is still asked)");
     assert.equal(tally.chunkConflicts, 0, "but never a practice record: that is combined");
     assert.ok((tally.combinedChecked || 0) > 0, "a chunk logged on both sides was combined");
+    assert.ok((tally.windowsCombined || 0) > 0, "and some of those chunks had a review window (a piece on the new review plan), whose latest day came along");
     assert.ok((tally.recencyChecked || 0) > 0, "a setting changed on both sides was settled by the more recent change");
     assert.ok((tally.followers || 0) > 0, "and the numbers worked out from the target date followed the date");
     assert.ok((tally.followersOneSide || 0) > 0, "and minutes per day went with the one side that changed the date");
@@ -1505,7 +1529,7 @@ describe("150 seeded pairs of copies, every conflict settled a random valid way 
           assert.deepEqual([...have].sort(), [...wanted].sort(), `${c.part}: every session from both sides (${where})`);
           assert.equal(got.sessions.length, wanted.size, `${c.part}: none twice (${where})`);
           const later = latestJudged(c.remote) > latestJudged(c.local) ? c.remote : c.local;
-          ["stage", "practiceBPM", "nextDueDate", "currentBPM", "consecutivePasses"].forEach((k) => assert.equal(got[k], later[k], `${c.part}.${k} follows the later session (${where})`));
+          ["stage", "practiceBPM", "nextDueDate", "dueByDate", "currentBPM", "consecutivePasses"].forEach((k) => assert.equal(got[k], later[k], `${c.part}.${k} follows the later session (${where})`));
         }
       });
       // only the answered parts differ from the engine's own merge

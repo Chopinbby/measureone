@@ -8,7 +8,6 @@ import {
   sessionOutcome,
   getDefaultTargetBPM,
   getSuggestedStartingBPM,
-  formatLadderStatus,
   resolveRequiredReps,
   requirementLine,
   repsShortfallMessage,
@@ -16,7 +15,7 @@ import {
   cleanRepsInARow,
 } from "../../../lib/confidence";
 import { timerAlertMessage } from "../../../lib/ladder";
-import { focusSpotGate, timerAlertMinutes, passesNeededForChunk } from "../../../lib/scheduling";
+import { focusSpotGate, timerAlertMinutes, ladderStatusFor } from "../../../lib/scheduling";
 import { plannedMinutesFor, plannedAboutText, plannedSpentText, secondsSpentIn } from "../../../lib/plannedMinutes";
 import { NumberInput } from "../../NumberInput";
 import { MemoryAnchorField } from "../../MemoryAnchorField";
@@ -253,7 +252,8 @@ export function ChecklistItem({
   // persisted on every logged session (lib/ladder.js) but never shown
   // anywhere before now. null for a chunk with no session history yet.
   // Pass 139: the new review plan reads its pass table here (null otherwise).
-  const ladderStatus = formatLadderStatus(entry, piece.ladderConfig, todayISODate(), passesNeededForChunk(piece, chunk, entry));
+  // Pass 140: on the new review plan the review line says "Ready to review" inside the window, with the latest day in a tooltip.
+  const ladderStatus = ladderStatusFor(piece, chunk, entry, todayISODate());
 
   const submitLog = () => {
     if (!canLog) return;
@@ -541,11 +541,19 @@ export function ChecklistItem({
         {!historical && !isPaused && (
           <p className="tip-line">
             Spaced Repetition:{" "}
-            {ladderStatus
-              ? `${ladderStatus.stageLabel}, ${ladderStatus.progressLabel}${
-                  ladderStatus.dueLabel ? ` · Next review ${ladderStatus.dueLabel}` : ""
-                }`
-              : "not started yet"}
+            {ladderStatus ? (
+              <>
+                {ladderStatus.stageLabel}, {ladderStatus.progressLabel}
+                {ladderStatus.dueLabel ? (
+                  <>
+                    {" · "}
+                    <span title={ladderStatus.dueTitle}>{ladderStatus.dueSentence || `Next review ${ladderStatus.dueLabel}`}</span>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              "not started yet"
+            )}
           </p>
         )}
         {!isFirstEncounter && practiceBPM == null && targetBPM ? (

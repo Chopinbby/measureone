@@ -1,6 +1,7 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
 import { todayISODate, addDaysISO, parseMeasurePosition } from "./utils";
 import { reconcileMinutesPerDaySchedule } from "./scheduling";
+import { withDueByDate } from "./ladder";
 import { isInRevival } from "./revival";
 import { generatePracticeChunks, reassociateTroubleSpots, validSplitPoints } from "./chunking";
 import { normalizePieceKey, normalizeOtherKeys, sameSpelledKey } from "./technique";
@@ -1217,6 +1218,10 @@ const LADDER_STATE_FIELDS = [
   "tempoRatchetK",
   // Pass 61 (lib/ladder.js) — same flat-scalar treatment.
   "holdingReviewCount",
+  // Pass 140 (lib/ladder.js) — the latest day of a review window. Absent means
+  // "the same day as nextDueDate" and is never stored as null, so a missing key
+  // and a null read the same here.
+  "dueByDate",
 ];
 
 // True when the existing piece and a freshly-imported candidate actually
@@ -1293,7 +1298,7 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
     if (!e) { merged[chunkId] = i; return; }
     if (!i) { merged[chunkId] = e; return; }
     const ladderSource = ladderChoice === "imported" ? i : e;
-    merged[chunkId] = {
+    const mergedEntry = {
       ...e,
       ...i,
       doneDays: [...new Set([...(e.doneDays || []), ...(i.doneDays || [])])].sort((a, b) => a - b),
@@ -1320,6 +1325,9 @@ function mergeProgress(existingProgress, importedProgress, importIsStale, ladder
       // part of "ladder state" a user would consciously choose between.
       flagSnapshot: e.flagSnapshot,
     };
+    // Pass 140: the review window's latest day travels with nextDueDate (the
+    // earliest), from the same side; the key is removed when that side has none.
+    merged[chunkId] = withDueByDate(mergedEntry, ladderSource.dueByDate || null);
   });
   return merged;
 }

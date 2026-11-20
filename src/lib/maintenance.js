@@ -1,6 +1,7 @@
 import { EFFORT_TO_MIN } from "./constants";
 import { daysBetweenInclusive } from "./utils";
 import { isInRevival } from "./revival";
+import { isReviewModelV2, reviewWindowStatus, reviewPriorityParts, compareReviewPriority } from "./scheduling";
 
 /* ------------------------------------------------------------------ */
 /*  "What's due" — the live maintenance query.                         */
@@ -58,7 +59,7 @@ export function computeDueReviews(piece, chunkSet, asOfDate) {
     // relies on for loggedDate.
     if (entry.nextDueDate > asOfDate) return;
 
-    items.push({
+    const item = {
       chunkId: chunk.id,
       chunk,
       dueDate: entry.nextDueDate,
@@ -69,13 +70,33 @@ export function computeDueReviews(piece, chunkSet, asOfDate) {
       // 0 on the day it comes due, 1 the next day, and so on.
       daysOverdue: daysBetweenInclusive(entry.nextDueDate, asOfDate) - 1,
       minutes: Math.round((chunk.effort || 1) * EFFORT_TO_MIN),
-    });
+    };
+    // Pass 140 (review model 2, a base chunk with a window): `dueDate` is the
+    // earliest day and `status` says where today sits in the window, "available"
+    // from the earliest day, "due" from the latest (`latestDate`). Only these
+    // carry the keys, so every other item is exactly what it was.
+    const windowStatus = chunk.kind === "section" ? reviewWindowStatus(piece, entry, asOfDate) : null;
+    if (windowStatus) {
+      item.status = windowStatus.status;
+      item.latestDate = windowStatus.latestDate;
+      if (windowStatus.status === "due") item.daysOverdue = daysBetweenInclusive(windowStatus.latestDate, asOfDate) - 1;
+      else item.daysOverdue = 0;
+    }
+    items.push(item);
   });
 
   // Most overdue first — the thing that's been waiting longest is the
   // thing most at risk. Ties fall back to measure order so the list reads
   // front-to-back through the piece.
-  items.sort((a, b) => b.daysOverdue - a.daysOverdue || a.chunk.start - b.chunk.start);
+  if (isReviewModelV2(piece)) {
+    // Pass 140, rule 8: worst first. Last outcome (Needs rework, then Partial
+    // pass), then furthest below target tempo, then earlier stage, then the
+    // one that has waited longest.
+    const prio = new Map(items.map((it) => [it.chunkId, reviewPriorityParts(piece, it.chunk, progress[it.chunkId], asOfDate)]));
+    items.sort((a, b) => compareReviewPriority(prio.get(a.chunkId), prio.get(b.chunkId)));
+  } else {
+    items.sort((a, b) => b.daysOverdue - a.daysOverdue || a.chunk.start - b.chunk.start);
+  }
   return items;
 }
 
@@ -107,13 +128,21 @@ export function computeDueOnDate(piece, chunkSet, date) {
     if (entry.needsRelearning) return;
     if (entry.nextDueDate !== date) return;
 
-    items.push({
+    const item = {
       chunkId: chunk.id,
       chunk,
       dueDate: entry.nextDueDate,
       stage: entry.stage || "stabilizing",
       minutes: Math.round((chunk.effort || 1) * EFFORT_TO_MIN),
-    });
+    };
+    // Pass 140: on the new review plan this is the day the review's window
+    // OPENS (`dueDate` is its earliest day), so it is "available", not due.
+    const windowStatus = chunk.kind === "section" ? reviewWindowStatus(piece, entry, date) : null;
+    if (windowStatus) {
+      item.status = "available";
+      item.latestDate = windowStatus.latestDate;
+    }
+    items.push(item);
   });
 
   items.sort((a, b) => a.chunk.start - b.chunk.start);
@@ -167,7 +196,11 @@ export function totalDueMinutes(dueItems) {
 // that was never going to itemize it.
 export function mergeLiveDueReviews(day, dueItems) {
   if (day.type === "consolidation") return day;
-  const extra = dueItems.filter((item) => !day.reviewChunkIds.includes(item.chunkId));
+  // Pass 140: a review whose window is open ("available") is not forced onto
+  // today. The plan puts it on the lightest day in its window; only one past
+  // its latest day ("due") is merged in here. Items from before the windows have
+  // no `status` and are merged as they always were.
+  const extra = dueItems.filter((item) => item.status !== "available" && !day.reviewChunkIds.includes(item.chunkId));
   if (extra.length === 0) return day;
   return {
     ...day,

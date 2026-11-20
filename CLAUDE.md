@@ -463,7 +463,7 @@ chunking, scheduling, and confidence are actually computed, see
   means "the first session on a later day than the learning session is logged"
   (`tier1DoneAfterSession`); a new session handler must pass it through, as the three in `App.jsx` do.
 - **The new review plan reaches the ladder only through `computeLadderAdvance`'s fourth argument, and `ladderConfig.overrides` is never
-  given a default (Pass 139).** `ladderContextFor` (`lib/scheduling.js`) builds the context (`{ passesNeeded, canPromote, maxCredit }`) and
+  given a default (Pass 139).** `ladderContextFor` (`lib/scheduling.js`) builds the context (`{ passesNeeded, canPromote, maxCredit, reviewWindow }`, the last added in Pass 140) and
   returns `null` for a piece on today's plan and for anything but a base practice chunk; `null` leaves the function exactly as it was
   (160 recorded cases in `test/fixtures/ladder-before-pass-139.json` prove it). **A new code path that logs a session must build and pass
   the context**, as `handleLogSession` and `handleConfirmProvisionalSession` do, or a piece on the new plan silently reads the old counts
@@ -471,6 +471,21 @@ chunking, scheduling, and confidence are actually computed, see
   value below the requirement. `mergeLadderConfig` builds its result from a named key list, so `overrides` is carried only when the piece
   already has it; writing `overrides: null` as a default would change every piece's fingerprint and upload every piece again. A new
   field under `ladderConfig` needs the same two checks (named in `mergeLadderConfig`, and no materialized default).
+- **A review on the new plan has a window: `nextDueDate` is its earliest day and `dueByDate` its latest, and `dueByDate` is ABSENT, never
+  `null`, when there is none (Pass 140).** Write it only through `withDueByDate` (`lib/ladder.js`) and read it only through
+  `effectiveDueByDate`: a stored `null` on every entry would change every piece's fingerprint and upload every piece again, and a writer that
+  moves `nextDueDate` and forgets it leaves a window that is wrong. **Every writer of a chunk's `nextDueDate` must carry it**: the three
+  session handlers, their undo snapshot (`dueBySnapshot` / `restoreDueByFromSnapshot`) and `handleSetFlag` (a flag pins the review to today
+  and clears it). The import merge and the practice union take it from the same side as `nextDueDate`; the two-device simulation in
+  `test/pieceMerge.test.mjs` checks it (a re-break that drops it fails two runs).
+- **A piece on the new plan reads today's date when its plan is worked out (Pass 140).** `computeTimeline(piece, chunkSet, { asOfDay })` places
+  a windowed review on the lightest day from today on (`placeWindowedReviews`, `lib/scheduling.js`); left out, `asOfDay` is `elapsedDay`, but
+  only for a piece on model 2: **a piece on today's plan must never read the clock there** (a timeline that depends on the date breaks every
+  memo and test that compares two). `getEffectiveTimeline` passes it through; `App.jsx`'s timeline memo has the date as an input. A review
+  whose window is open is "available" in `computeDueReviews` and is NOT forced onto today by `mergeLiveDueReviews`; only a "due" one is.
+  Card wording comes from `ladderStatusFor` ("Ready to review", the latest day only in a tooltip, never "overdue" or "late").
+  `PLACEMENT_NEAR_TIE_SHARE` (2) is a measured tuning number: 0 restores strictly-the-lightest-day.
+  `test/review-sim-helper.mjs` mirrors `handleLogSession` for the whole-plan tests; change both together.
 
 ## Revival
 
@@ -1743,5 +1758,13 @@ silently.
   counting as two (Stabilizing and Settling only), a chunk moving up only on its own turn (never on its first session, and only on or after
   the day its next review is due; the next-day touch counts one pass), `addHalfPass` for Pass 141 to use, and a per-piece override (`ladderConfig.overrides`, shown in
   Settings as a table with "set by you" and "Reset to automatic"). Base practice chunks of a piece on `reviewModel` 2 only; a piece on today's
-  plan is checked byte-for-byte unchanged. Built 2026-11-17, not yet merged. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
+  plan is checked byte-for-byte unchanged. Built 2026-11-17, **merged 2026-11-17 (PR #107, merge commit `4082e91`)**. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
   [`Decisions.md`](docs/Decisions.md#review-model-pass-139-build-2026-11-17)
+- **Pass 140** — review windows and placement for the new review plan: a review is "ready" from its earliest day (`nextDueDate`) and "due" from its latest
+  (`dueByDate`, a new per-chunk field, absent when there is no window), the windows are shares of the plan's length (Stabilizing 2 to 5 days up to 3 to 7,
+  Settling 3 to 8 up to 4 to 12, Holding from a first gap of 7 to 10 days growing 30% a visit to 30 days), `computeTimeline` puts each on the lightest day inside
+  its window from today on (a near tie goes to the earlier day), a third of each day is protected for new material and chunks not yet at their third review, a
+  review the day keeps deferring may slip up to two gaps, and reviews are ordered worst first; the due list says "available" or "due", the card says "Ready to
+  review" with the latest day in a tooltip. **Measured on the real code, 48 plans: variation of the daily load 0.41 against 0.47 for today's rules, chunks in
+  Holding at the end 98% against 51%.** Built 2026-11-19, not yet merged. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
+  [`Decisions.md`](docs/Decisions.md#review-model-pass-140-build-2026-11-19)

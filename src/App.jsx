@@ -47,9 +47,9 @@ import {
   splitPracticeChunk,
   splitPointsAfterStructureEdit,
 } from "./lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain, tier1DoneAfterSession, ladderContextFor } from "./lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain, tier1DoneAfterSession, ladderContextFor, isReviewModelV2 } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
-import { computeLadderAdvance, applyRunThroughFlag } from "./lib/ladder";
+import { computeLadderAdvance, applyRunThroughFlag, withDueByDate, dueBySnapshot, restoreDueByFromSnapshot } from "./lib/ladder";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { createDragAutoScroller } from "./lib/dragScroll";
@@ -1663,7 +1663,11 @@ export default function App() {
   // realCurrentDay off this raw value first and the corrected `timeline`
   // second (using that same realCurrentDay) avoids a circular dependency
   // between the two.
-  const rawTimeline = useMemo(() => (piece ? getEffectiveTimeline(piece, chunkSet) : null), [piece, chunkSet]);
+  // Pass 140: a piece on the new review plan places each review inside its
+  // window by the days still ahead, so the plan reads today's date (and is
+  // worked out again when the date changes); a piece on today's plan never does.
+  const timelineDate = todayISODate();
+  const rawTimeline = useMemo(() => (piece ? getEffectiveTimeline(piece, chunkSet) : null), [piece, chunkSet, timelineDate]);
   const realCurrentDay = useMemo(
     () => (piece && rawTimeline ? getCurrentDay(piece, rawTimeline.days.length) : 1),
     [piece, rawTimeline]
@@ -3184,6 +3188,10 @@ export default function App() {
         // materialized `0` here would resurface the same bug via undo
         // instead of via migration.
         holdingReviewCount: prevEntry.holdingReviewCount ?? null,
+        // Pass 140: the latest day of the review window (lib/ladder.js). Only
+        // written for a piece on the new review plan or a chunk that already has
+        // one, so a piece on today's plan keeps its snapshots as they were.
+        ...dueBySnapshot(prevEntry, isReviewModelV2(p)),
       };
       const sessions = [
         ...(prevEntry.sessions || []),
@@ -3244,7 +3252,11 @@ export default function App() {
         ladderContext
       );
 
-      progress[chunkId] = {
+      // Pass 140: `advance.dueByDate` is the latest day of the next review's
+      // window (review model 2, base chunks); absent or null means "the same
+      // day as nextDueDate", stored as NO key (withDueByDate), so an entry with
+      // no window is exactly what it was before.
+      const loggedEntry = {
         ...prevEntry,
         doneDays,
         sessions,
@@ -3271,6 +3283,7 @@ export default function App() {
         // progress by reverting to the state from before the flag.
         flagSnapshot: undefined,
       };
+      progress[chunkId] = withDueByDate(loggedEntry, advance.dueByDate || null);
       return { ...p, progress, lastLoggedAt: loggedDate };
     });
   };
@@ -3369,6 +3382,8 @@ export default function App() {
             // constant to invent in its place.
             ...("holdingReviewCount" in snapshot ? { holdingReviewCount: snapshot.holdingReviewCount } : {}),
           };
+          // Pass 140: the review window's latest day goes back with its earliest.
+          entry = restoreDueByFromSnapshot(entry, snapshot);
           // A rough/lost flag still carrying its flagSnapshot can only have
           // been applied AFTER this session, with nothing logged since —
           // handleLogSession unconditionally clears flagSnapshot on every
@@ -3606,6 +3621,8 @@ export default function App() {
         tempoRatchetK: prevEntry.tempoRatchetK ?? null,
         // Same `?? null` fix as handleLogSession's snapshot above — not `?? 0`.
         holdingReviewCount: prevEntry.holdingReviewCount ?? null,
+        // Pass 140: same as handleLogSession's snapshot.
+        ...dueBySnapshot(prevEntry, isReviewModelV2(p)),
       };
 
       const seededPracticeBPM = prevEntry.practiceBPM != null ? prevEntry.practiceBPM : target.bpm;
@@ -3644,7 +3661,7 @@ export default function App() {
       sessions[idx] = { ...target, provisional: false, ladderSnapshot };
       const doneDays = prevEntry.doneDays.includes(target.day) ? prevEntry.doneDays : [...prevEntry.doneDays, target.day];
 
-      progress[chunkId] = {
+      const confirmedEntry = {
         ...prevEntry,
         doneDays,
         sessions,
@@ -3665,6 +3682,8 @@ export default function App() {
         holdingReviewCount: advance.holdingReviewCount,
         flagSnapshot: undefined,
       };
+      // Pass 140: same as handleLogSession (the review window's latest day).
+      progress[chunkId] = withDueByDate(confirmedEntry, advance.dueByDate || null);
       return { ...p, progress, lastLoggedAt: loggedDate };
     });
   };
@@ -3855,6 +3874,8 @@ export default function App() {
             stage: prevEntry.stage ?? null,
             consecutivePasses: prevEntry.consecutivePasses ?? 0,
             nextDueDate: prevEntry.nextDueDate ?? null,
+            // Pass 140: the review window's latest day, only when the chunk has one.
+            ...("dueByDate" in prevEntry ? { dueByDate: prevEntry.dueByDate } : {}),
           };
         }
         const advance = applyRunThroughFlag(
@@ -3865,6 +3886,9 @@ export default function App() {
         entry.stage = advance.stage;
         entry.consecutivePasses = advance.consecutivePasses;
         entry.nextDueDate = advance.nextDueDate;
+        // Pass 140: a flag pins the review to today ("imminent"), so any
+        // window it had is gone: today is its earliest and its latest day.
+        delete entry.dueByDate;
       } else if (prevEntry.flagSnapshot) {
         const snap = prevEntry.flagSnapshot;
         const isValidSnapshot = snap && "stage" in snap && "consecutivePasses" in snap && "nextDueDate" in snap;
@@ -3872,6 +3896,9 @@ export default function App() {
           entry.stage = snap.stage;
           entry.consecutivePasses = snap.consecutivePasses;
           entry.nextDueDate = snap.nextDueDate;
+          // Pass 140: the window's latest day goes back with its earliest.
+          if (snap.dueByDate) entry.dueByDate = snap.dueByDate;
+          else delete entry.dueByDate;
         } else {
           console.warn(`handleSetFlag: malformed flagSnapshot for chunk ${chunkId}, skipping restore (leaving current ladder state as-is)`, snap);
         }

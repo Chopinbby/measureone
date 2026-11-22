@@ -34,6 +34,7 @@ export const RECENCY_FIELDS = [
   "status",
   "markedLearnedElsewhere",
   "targetBPM",
+  "typicalRunSeconds",
   "homeKey",
   "manualOverallConfidence",
   "lastPlayedDate",

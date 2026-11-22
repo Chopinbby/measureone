@@ -748,7 +748,14 @@ doesn't distinguish which):
   fully reverses a regular chunk's ladder state — see
   [Algorithms.md](Algorithms.md#session-outcomes--the-maintenance-ladder).
   Visible on Progress's "Recent practice history" as "Full run-through
-  (stopped Nx)".
+  (stopped Nx)". **Pass 142 (a piece on the new review plan):** the same card
+  also appears on early run-through days (every 3 practice days from the day
+  after the last chunk is introduced; the final day's is the existing one),
+  shows its price, and asks "How did that feel?" (1 to 10, optional) with the
+  previous run-through's number beside it. **A run-through is not a review for
+  any chunk** (the owner, 2026-11-22): the flag mode below is unchanged and
+  unrelated, and nothing about a chunk's ladder moves when one is logged or
+  undone. See [Algorithms.md](Algorithms.md#review-model-v2-planned), rule 5.
 - **Flag mode on the Piece Map** — a 3-state cycle per chunk on the
   existing grid: `untouched` (default, shown as no icon) → **rough**
   (demotes one stage, pins the next review to today regardless of what the
@@ -1367,7 +1374,7 @@ one check.
 
 ### Review model v2 (planned)
 
-**Status: decided 2026-11-16. Pass 138 has built the switch, the next-day touch, the timer alert and the "in a row" wording; Pass 139 the pass table, strong passes, half credit and the per-piece override; Pass 140 the review windows, placement on the lightest day, the protected third, the slip and worst-first order; joins as forms and early run-throughs are not built.** The rules are written once, in
+**Status: decided 2026-11-16. Pass 138 has built the switch, the next-day touch, the timer alert and the "in a row" wording; Pass 139 the pass table, strong passes, half credit and the per-piece override; Pass 140 the review windows, placement on the lightest day, the protected third, the slip and worst-first order; Pass 141 transitions and combos as forms; Pass 142 early whole-piece run-throughs (practice, not reviews: the owner took the credit out on 2026-11-22).** The rules are written once, in
 [Algorithms.md](Algorithms.md#review-model-v2-planned); the reasons, what was rejected and the
 simulation behind them are in
 [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16). This section says where

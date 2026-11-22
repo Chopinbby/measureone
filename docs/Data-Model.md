@@ -169,6 +169,16 @@ piece = {
                          // Algorithms.md#splitting-a-chunk-pass-97 and
                          // Decisions.md#splitting-a-chunk-pass-97.
   targetBPM,             // number | null — whole-piece default tempo target
+  typicalRunSeconds,     // number | null | absent — Pass 142, "Typical run time at target
+                         // tempo": how long one whole-piece run-through takes at the target
+                         // tempo, in whole seconds (BasicsFields takes minutes and seconds).
+                         // Used only to PRICE a run-through on a piece on review model 2
+                         // (lib/runThrough.js runThroughPrice); null or absent means "a
+                         // guess of 8 min per 100 measures", and two or more timed
+                         // run-throughs replace it with their median. A new piece starts
+                         // with null (defaultPiece); a LOAD never adds it (an old piece has
+                         // no such key, so no fingerprint moves). In EDIT_FORM_FIELDS and
+                         // RECENCY_FIELDS (the most recent change settles it, like targetBPM).
   homeKey,               // { tonic, quality } | null — Pass 103, "Key of the piece".
                          // Same shape as a technique item's key (tonic spelled
                          // "F♯"/"G♭"/…, quality "major"|"minor"). Matched AS
@@ -910,7 +920,14 @@ reasons:
 
 - **`__consolidation__`** — a synthetic key for whole-piece run-throughs
   (`handleLogRunThrough`), never a chunk at all. Long-established; most code
-  that walks `piece.progress` already special-cases it explicitly.
+  that walks `piece.progress` already special-cases it explicitly. Its
+  `sessions[]` hold `{ day, stopCount, loggedAt, loggedDate }` plus, only when
+  they exist, `durationSeconds` (Pass 137) and **`feel`** (Pass 142: the "how did
+  that feel?" number, a whole number 1 to 10, saved only when one was picked;
+  **nothing may read it to decide anything**, see
+  [Algorithms.md](Algorithms.md#review-model-v2-planned) rule 5). An early
+  run-through (Pass 142) logs under the plan day it sits on, in the same list; a
+  run-through is not a review, so it writes nothing to any chunk's entry.
 - **`__cold_start__`** — a synthetic key for the Cold-Start check (Pass 56,
   `handleLogColdStart`/`applyColdStartLog`, `lib/coldStart.js`): a
   whole-piece cold play-through logged after every section has been

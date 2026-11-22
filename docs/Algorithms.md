@@ -2294,7 +2294,8 @@ chosen over decimals, knowingly.
 are built by `computeSectionRunThroughs` with no `effort`, and `computeTimeline` never places them, so they
 have no price today. `plannedMinutesFor` returns `null` for them and their cards show no estimate (they keep
 their old "in m:ss" on the logged line). The whole-piece run-through card (the consolidation day) shows none
-either: the schedule bills that day at the whole daily budget, a placeholder, not a price; Pass 142 prices it.
+on a piece on today's plan: the schedule bills that day at the whole daily budget, a placeholder, not a price.
+**Pass 142 prices it on the new review plan** ([rule 5](#review-model-v2-planned)); a piece on today's plan is unchanged.
 Interleaved mode's, a focus spot's and the revival reassessment's cards have their own timers and are unchanged.
 
 **The words.** Beside a practice card's timer: "planned about N min". After logging, one line: "N min planned,
@@ -2328,8 +2329,8 @@ finished loses it, as the practice cards' always have.
 > real next-day touch, rule 9's timer alert and the "in a row" wording), **Pass 139** (rules 1 and 2:
 > the pass table, strong passes, the half-credit function and the per-piece override), **Pass 140**
 > (rules 6 to 8: review windows, placement on the lightest day, the protected third, the slip and worst-first
-> order) **and Pass 141** (rule 4: transitions and combos as review forms); **rule 5 (early run-throughs) is not
-> built, and nothing else in `src/` reads any of this.** This is
+> order), **Pass 141** (rule 4: transitions and combos as review forms) **and Pass 142** (rule 5: early
+> whole-piece run-throughs, **without the credit this rule first described**: see rule 5). This is
 > the one place the rules are written out. The reasons, what was rejected and the simulation
 > that checked them are in
 > [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16); the hand-picked
@@ -2505,10 +2506,64 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
      still lists a join's old history, and a join's time is logged under the visiting chunk against that chunk's estimate
      (Pass 145 learns time by form).
 5. **Whole-piece run-throughs start as soon as the last chunk is introduced** and repeat every
-   3 practice days, with the plan's final-day run-through kept. A clean one counts as one pass
-   for every chunk past Stabilizing whose last visit was at least that stage's earliest gap
-   ago, and restarts that chunk's window. A chunk flagged rough or lost in the run-through is
-   not credited (and demotes as today).
+   3 practice days, with the plan's final-day run-through kept. **A run-through is NOT a review for
+   any chunk** (the owner's decision, 2026-11-22, which overturns what this rule first said: "a clean
+   one counts as one pass for every chunk past Stabilizing whose last visit was at least that stage's
+   earliest gap ago, and restarts that chunk's window"). It gives no pass, restarts no window and
+   changes no chunk's ladder, clean or not, and the rough and lost flags on the Piece Map work exactly
+   as they always have. It is practice time on the schedule, a stop count, a time, and a number for how
+   it felt.
+
+   **Built in Pass 142, for a piece on `reviewModel` 2 only** (a piece on today's plan is checked
+   byte-for-byte unchanged: the 14 recorded timelines of `test/review-windows.test.mjs`, and no day of
+   it carries any new key). `lib/runThrough.js` is the one home:
+   - **Which days.** `runThroughPlanDays`: the practice day AFTER the last chunk is introduced (the day
+     after the last day any chunk is introduced, counting only practice days), then every
+     `RUN_THROUGH_EVERY_PRACTICE_DAYS` (3) practice days; rest days do not count; one that would fall on
+     the last practice day is dropped, because the final day's run-through comes right after it. Needs the
+     plan to have a final day (five or more practice days, the existing rule). **It is not a new day type.**
+     `computeTimeline` puts `runThroughMinutes` on an ordinary `learning` day, after every introduction and
+     every other task and BEFORE the smoothing and the placement of windowed reviews, so both see its minutes
+     as load. The run-through sits on top of that day's other reviews and does not replace them, and every
+     reader that tells a learning day from a rest day or the final day keeps working; the final day is still
+     the only `consolidation` day and still replaces the whole day.
+   - **Not owed, never behind.** A run-through is not a task a chunk waits for: `classifyDayCompletion`,
+     `classifyDayEmptyState` and the behind count read only `newChunkIds`, `specialChunkIds` and
+     `reviewChunkIds`, so a day holding nothing but a run-through is "empty" and a skipped run-through is
+     never behind (no punishment mechanics, ever).
+   - **Price (`runThroughPrice`)**, in this order: two or more logged run-throughs with a time
+     (`durationSeconds`, Pass 137): their **median**, as it is (each time was already played at its day's
+     tempo; `medianLoggedRunSeconds`); else the piece's **"Typical run time at target tempo"**
+     (`piece.typicalRunSeconds`, whole seconds) times target tempo over the tempo played now
+     (`currentTempoFor`: the chunks' tempos, last logged tempo else the ladder's, weighted by measures, chunks
+     with none left out; never faster than the target, so never less than the run time itself; with no
+     target tempo or no chunk tempo yet, the run time as it is); else a **guess**,
+     `RUN_THROUGH_GUESS_MIN_PER_100_MEASURES` (8) per 100 measures. The plan uses a whole number of minutes, at
+     least 1, so a figure that moved by seconds with every logged session cannot move the day's other work.
+     The card says "Planned: about N min at your current tempo", "about N min (a guess: set a typical run time
+     in Settings)" or "about N min (the middle of your logged run-throughs)" (`runThroughPriceText`).
+   - **The final day is priced the same way** (it used to bill the whole daily budget, `minutesPerDay`, a
+     placeholder): its `minutes` is the run-through's price, on a piece on this model only.
+   - **The field.** `piece.typicalRunSeconds` (number or `null`): minutes and seconds in `BasicsFields`
+     beside the target tempo (so the wizard and Settings both have it), saved as one number of seconds, `null`
+     when both boxes are 0. It is in `defaultPiece` (`null`) and `EDIT_FORM_FIELDS`, **never added by a load**
+     (an old piece has no such key, so no fingerprint moves and nothing uploads again), and it is on the
+     most-recent-change-wins list (`RECENCY_FIELDS`, the owner's pick, 2026-11-22: it is a single number, like
+     the target tempo), with a label for Review's wording in `accountSync.js`.
+   - **"How did that feel?"** A number from 1 to 10 (`isValidFeel`, whole numbers only), optional, on the
+     run-through card of a piece on the new plan, picked before pressing Log and saved on the logged session
+     as `feel` only when one was picked (`buildRunThroughSession`; a session without one has exactly the shape
+     it always had). The card shows the number from the **previous run-through that has one**
+     (`previousFeel`: the latest earlier plan day, the latest attempt on it; an unrated run-through is skipped).
+     **It is inconsequential and must stay so: nothing may read `feel` to decide anything** (the schedule,
+     confidence, the ladder, reviews, revival, a price). `test/run-through.test.mjs` fails if it does. Undo
+     removes it with the run-through, and there is nothing else to undo (no chunk was touched).
+   - **Not done, on purpose.** A run time per section and any tempo scaling beyond the simple ratio; pricing a
+     section run-through (`sr_<id>`; left to Pass 145's learned estimates); the minutes-per-day day count
+     (`computeDaysNeededForMinutesPerDay`, which does not know run-throughs yet: Pass 143); `WeekView`,
+     `TimelineTab` and `OverviewTab` day cards include the run-through's minutes in a day's total but give it no
+     line of its own (Daily Practice and Master Agenda do); the "how did that feel?" number is not shown in
+     Progress's history.
 6. **Review timing is a window**: an earliest day and a latest day, each a percentage of the
    plan's length held between day limits (rounded to whole days). Plans set by minutes per day
    use the 90-day figures.
@@ -2649,7 +2704,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    times, whether the card is a new chunk or a review of it, and a chunk planned at 3 minutes
    alerts at 5. A card the plan puts no price on (a
    section run-through carries no `effort`, and `plannedMinutesFor` returns `null` for it) never
-   alerts; what a run-through should cost is left to Passes 142 and 145.
+   alerts. **Pass 142 priced the whole-piece run-through** (rule 5) and left a section run-through's price to
+   Pass 145's learned estimates.
    The alert shows when the running timer reaches that time, stays until dismissed or the
    session is logged, and does not return within that session. Typing minutes by hand does not
    trigger it, only the running timer. It is on Daily Practice cards only, not in Interleaved mode (one timer for the

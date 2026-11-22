@@ -16,6 +16,7 @@ import {
 } from "./ladder";
 import { plannedMinutesFor } from "./plannedMinutes";
 import { nextReturnEffort } from "./reviewForms";
+import { runThroughPlanDays, runThroughPrice } from "./runThrough";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -745,7 +746,10 @@ export function computeTimeline(piece, chunkSet, options = {}) {
     const newMin = d.newChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
     const specialMin = d.specialChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
     const reviewMin = d.reviewChunkIds.reduce((s, id) => s + reviewEffortOf(id) * EFFORT_TO_MIN, 0);
-    return newMin + specialMin + reviewMin;
+    // Pass 142: an early whole-piece run-through is time on the day, so the day's
+    // total and every load check (smoothing, the placement of windowed reviews)
+    // count it. Only a day of a review model 2 piece ever carries the field.
+    return newMin + specialMin + reviewMin + (d.runThroughMinutes || 0);
   };
   // Both close over `introductionTierById`, assigned a few lines below by
   // sortPracticeChunksForIntroduction — safe, since neither is actually
@@ -1092,6 +1096,30 @@ export function computeTimeline(piece, chunkSet, options = {}) {
   });
   tier2Items.forEach((item) => days[item.day - 1].reviewChunkIds.push(item.chunkId));
 
+  // Pass 142 (review model 2 only): early whole-piece run-throughs. One every 3
+  // practice days from the day after the last chunk is introduced (the final day's
+  // run-through is the existing consolidation day and stays). It is NOT a new day
+  // type: the day stays a "learning" day with its own reviews and gets
+  // `runThroughMinutes`, because the run-through sits on top of that day's other
+  // work, and every reader that tells a learning day from a rest or final day
+  // keeps working. It is not a review for any chunk (the owner's decision,
+  // 2026-11-22), so no ladder or completion check reads it: a day with only a
+  // run-through owes nothing and is never "behind". It is placed here, after every
+  // introduction and every other task and BEFORE the smoothing and the placement
+  // of windowed reviews below, so both see its minutes as load.
+  if (reviewModelV2 && consolidationDays) {
+    const introDays = introducibleChunks.map((c) => introducedDay[c.id]).filter((d) => d > 0);
+    const runThroughDays = runThroughPlanDays({
+      learningDaysCalendar,
+      lastIntroDay: introDays.length ? Math.max(...introDays) : 0,
+      learningDays,
+    });
+    if (runThroughDays.length) {
+      const price = runThroughPrice(piece, practiceChunks);
+      runThroughDays.forEach((d) => (days[d - 1].runThroughMinutes = price.minutes));
+    }
+  }
+
   const learningDayList = days.filter((d) => d.type === "learning");
 
   // Pass 90, Phase D — the unified daily-workload smoothing pass, replacing
@@ -1199,8 +1227,18 @@ export function computeTimeline(piece, chunkSet, options = {}) {
     days[consolidationDay - 1].reviewChunkIds = introducibleChunks.map((c) => c.id);
   }
 
+  // Pass 142: on review model 2 the final day's run-through is priced like the early
+  // ones. It used to bill the whole daily budget, a placeholder and not a price.
+  const finalRunThroughMinutes = reviewModelV2 && consolidationDays ? runThroughPrice(piece, practiceChunks).minutes : null;
   days.forEach((d) => {
-    d.minutes = d.type === "consolidation" ? Number(piece.minutesPerDay || 30) : d.type === "rest" ? 0 : Math.round(minutesFor(d));
+    d.minutes =
+      d.type === "consolidation"
+        ? finalRunThroughMinutes != null
+          ? finalRunThroughMinutes
+          : Number(piece.minutesPerDay || 30)
+        : d.type === "rest"
+          ? 0
+          : Math.round(minutesFor(d));
   });
 
   return { days, learningDays, consolidationDays, halfPoint, introducedDay, introductionTierById };

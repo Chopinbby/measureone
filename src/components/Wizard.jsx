@@ -57,6 +57,9 @@ export function defaultPiece() {
     customChunkSize: 4,
     chunkSplitPoints: [],
     targetBPM: null,
+    // Pass 142 — "Typical run time at target tempo", in seconds; null until set.
+    // Never filled in on load (an old piece has no such key).
+    typicalRunSeconds: null,
     // Pass 103 — key of the piece / other keys it passes through, both
     // optional ({ tonic, quality } like technique items). Drives the
     // "Repertoire in this key" tag and pace on the Technique page.

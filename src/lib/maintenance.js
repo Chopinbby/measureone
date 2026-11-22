@@ -2,6 +2,7 @@ import { EFFORT_TO_MIN } from "./constants";
 import { daysBetweenInclusive } from "./utils";
 import { isInRevival } from "./revival";
 import { isReviewModelV2, reviewWindowStatus, reviewPriorityParts, compareReviewPriority } from "./scheduling";
+import { nextReviewForm, completeChunkSet } from "./reviewForms";
 
 /* ------------------------------------------------------------------ */
 /*  "What's due" — the live maintenance query.                         */
@@ -23,6 +24,23 @@ import { isReviewModelV2, reviewWindowStatus, reviewPriorityParts, compareReview
 /*  just renders less of the same result.                              */
 /* ------------------------------------------------------------------ */
 
+const reviewModelTwo = (piece) => isReviewModelV2(piece);
+
+// Pass 141 (review model 2, a base chunk): which form the chunk's return takes
+// (the chunk, a join with a neighbour, or a combo) and what that costs. The item
+// gets `form` ("chunk", "join" or "combo"), `partnerIds` and `formChunk` (the
+// transition or combo whose measures are played), and its `minutes` become the
+// form's own price: a join's first appearance is a review, not new material.
+// Every other piece's items are left exactly as they were.
+function addReturnForm(item, piece, chunkSet, chunk) {
+  if (!reviewModelTwo(piece) || chunk.kind !== "section") return;
+  const f = nextReviewForm(chunk, chunkSet, piece.progress || {});
+  item.form = f.form;
+  item.partnerIds = f.partnerIds;
+  item.formChunk = f.formChunk;
+  item.minutes = Math.round((f.formChunk.effort || chunk.effort || 1) * EFFORT_TO_MIN);
+}
+
 // Strictly "due as of asOfDate" — a chunk due tomorrow is not due here;
 // that's what the forward-looking sibling computeDueOnDate (below) is for
 // (the once-scoped-out due-in-N-days query, built later — see
@@ -43,11 +61,17 @@ export function computeDueReviews(piece, chunkSet, asOfDate) {
   if (!piece || !chunkSet || !asOfDate) return [];
   if ((piece.status || "active") !== "active") return [];
   if (isInRevival(piece)) return [];
+  // Pass 141: a caller may hand over only `{ all }`; a piece on the new plan reads the
+  // base chunks, so the set is completed first (see completeChunkSet).
+  chunkSet = completeChunkSet(chunkSet);
 
   const progress = piece.progress || {};
   const items = [];
 
-  (chunkSet.all || []).forEach((chunk) => {
+  // Pass 141: on review model 2 only the base practice chunks are tasks. A
+  // transition or combo that still holds progress from before the switch is kept
+  // as history and never listed here; a chunk's return takes its form instead.
+  (reviewModelTwo(piece) ? chunkSet.practiceChunks || [] : chunkSet.all || []).forEach((chunk) => {
     const entry = progress[chunk.id];
     if (!entry || !entry.nextDueDate) return;
     // Rule 1 (Decisions.md#spaced-repetition--maintenance): a chunk
@@ -71,6 +95,7 @@ export function computeDueReviews(piece, chunkSet, asOfDate) {
       daysOverdue: daysBetweenInclusive(entry.nextDueDate, asOfDate) - 1,
       minutes: Math.round((chunk.effort || 1) * EFFORT_TO_MIN),
     };
+    addReturnForm(item, piece, chunkSet, chunk);
     // Pass 140 (review model 2, a base chunk with a window): `dueDate` is the
     // earliest day and `status` says where today sits in the window, "available"
     // from the earliest day, "due" from the latest (`latestDate`). Only these
@@ -118,11 +143,12 @@ export function computeDueOnDate(piece, chunkSet, date) {
   if (!piece || !chunkSet || !date) return [];
   if ((piece.status || "active") !== "active") return [];
   if (isInRevival(piece)) return [];
+  chunkSet = completeChunkSet(chunkSet);
 
   const progress = piece.progress || {};
   const items = [];
 
-  (chunkSet.all || []).forEach((chunk) => {
+  (reviewModelTwo(piece) ? chunkSet.practiceChunks || [] : chunkSet.all || []).forEach((chunk) => {
     const entry = progress[chunk.id];
     if (!entry || !entry.nextDueDate) return;
     if (entry.needsRelearning) return;
@@ -135,6 +161,7 @@ export function computeDueOnDate(piece, chunkSet, date) {
       stage: entry.stage || "stabilizing",
       minutes: Math.round((chunk.effort || 1) * EFFORT_TO_MIN),
     };
+    addReturnForm(item, piece, chunkSet, chunk);
     // Pass 140: on the new review plan this is the day the review's window
     // OPENS (`dueDate` is its earliest day), so it is "available", not due.
     const windowStatus = chunk.kind === "section" ? reviewWindowStatus(piece, entry, date) : null;

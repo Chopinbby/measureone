@@ -371,7 +371,11 @@ mirroring `handleLogRunThrough`/`handleUnlogRunThrough`'s shape.
 > "consolidation" run-through (which gains earlier ones) all change. Introduction placement (rule 1 and Pass 90's smoothing)
 > does not. Everything below describes the model a piece is on today. **Pass 138 has built the Tier 1
 > part** for a piece on `reviewModel` 2 (rule 3 of [Review model v2](#review-model-v2-planned)); a piece
-> on today's plan places its first touch as described in rule 4 below.
+> on today's plan places its first touch as described in rule 4 below. **Pass 141 has built the treatment of
+> transitions and combos** (rule 4 of Review model v2): on a piece on `reviewModel` 2 `computeTimeline` places
+> neither (no introduction day, so no first touch and no review either), and a return is priced at its form's own
+> measures; every description below of a transition or combo being placed, spread, smoothed or reviewed is the
+> model a piece is on today.
 
 `computeTimeline(piece, chunkSet)` is the scheduler. It runs on every
 `piece` change (see [Architecture.md](Architecture.md#state-management)),
@@ -2322,10 +2326,10 @@ finished loses it, as the practice cards' always have.
 
 > **Status: decided 2026-11-16. Built so far: Pass 138** (the switch `piece.reviewModel`, rule 3's
 > real next-day touch, rule 9's timer alert and the "in a row" wording), **Pass 139** (rules 1 and 2:
-> the pass table, strong passes, the half-credit function and the per-piece override) **and Pass 140**
+> the pass table, strong passes, the half-credit function and the per-piece override), **Pass 140**
 > (rules 6 to 8: review windows, placement on the lightest day, the protected third, the slip and worst-first
-> order); **rules 4 and 5 (joins as forms, early run-throughs) are not built, and nothing else in `src/` reads
-> any of this.** This is
+> order) **and Pass 141** (rule 4: transitions and combos as review forms); **rule 5 (early run-throughs) is not
+> built, and nothing else in `src/` reads any of this.** This is
 > the one place the rules are written out. The reasons, what was rejected and the simulation
 > that checked them are in
 > [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16); the hand-picked
@@ -2404,8 +2408,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    - **A Partial pass** starts the count over (fractions too) and **Needs rework** steps back one
      stage, both unchanged.
    - **Half credit** is `addHalfPass` (`lib/ladder.js`): adds `HALF_PASS_CREDIT` (0.5) to a
-     Stabilizing or Settling chunk's count and changes nothing else, never the stage. Nothing calls
-     it yet; Pass 141 does.
+     Stabilizing or Settling chunk's count and changes nothing else, never the stage. Pass 141's
+     joins and combos call it (rule 4).
    - **A reschedule that changes the plan's length** rewrites nothing: the chunk keeps its count and
      reads the new row from its next pass.
    - **The owner's override** is `ladderConfig.overrides` (see
@@ -2413,8 +2417,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
      (`passesNeeded[stage][difficulty]`) plus `holdingMaxDays`, absent until she changes something
      and absent again after "Reset to automatic". Settings' ladder editor shows the table, the plan
      length it follows and "set by you" on a changed cell; the two "Passes to graduate" boxes stay
-     for the Review and Focus block cards (transitions and combos), which keep `graduationPasses`
-     until Pass 141. `holdingMaxDays` (`effectiveHoldingMaxDaysV2`, 30 by default) is the longest a Holding
+     for the Review and Focus block cards (transitions and combos) of a piece on today's plan, which keep
+     `graduationPasses`; on this model they are no longer tasks (rule 4, Pass 141). `holdingMaxDays` (`effectiveHoldingMaxDaysV2`, 30 by default) is the longest a Holding
      window may reach (rule 6, Pass 140).
    - **Shown on:** Piece Map's chunk detail, Daily Practice cards, Interleaved cards and the revival
      reassessment (`passesNeededForChunk`), and the tempo projection
@@ -2439,8 +2443,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    learner logged it. **A touch the learner skips is dropped quietly:** by then the chunk has a
    `nextDueDate`, so `withLiveReviewStatus` treats a past-day touch as a stale review, never as
    work owed, and the ordinary return takes over (a late review is slack). Where the ordinary return
-   lands on the same day, one card covers both. Transitions and combos keep today's Tier 1 rule
-   until Pass 141. **Two limits to know:** the touch is an ordinary logged session as far as
+   lands on the same day, one card covers both. Transitions and combos had today's Tier 1 rule
+   until Pass 141; on a piece on this model they now have no task at all (rule 4). **Two limits to know:** the touch is an ordinary logged session as far as
    today's ladder goes (it advances `consecutivePasses` like any pass and cannot move a chunk up
    alone only because a stage needs more than two passes; **closed in Pass 139**: the touch is capped
    at one pass and cannot promote, see rule 2), and a touch that falls after a reschedule's `asOfDay` is
@@ -2455,6 +2459,51 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
    **half a pass for each chunk it covers**; a Partial pass or a failed join gives no credit
    and demotes nothing, because one session cannot tell which chunk it was. Half credit never
    moves a chunk up (rule 2).
+
+   **Built in Pass 141, for a piece on `reviewModel` 2 and base practice chunks only** (the owner's answers of
+   2026-11-21 settled the two open credit questions below). `lib/reviewForms.js` is the one home:
+   - **No task of their own.** `computeTimeline` gives a transition or combo no introduction day, so neither review
+     loop places one; `computeRemainingConnectorIds` returns `[]`; `computeDueReviews` and `computeDueOnDate` list
+     base chunks only; `isPlanActuallyComplete` reads base chunks only; Interleaved offers base chunks only; Piece
+     Map's "Related chunks" lists base chunks only. **Progress a transition or combo already holds is kept as history**
+     (nothing is deleted, and the Progress tab still lists it). A piece on today's plan is unchanged: the 14 recorded
+     timelines of `test/review-windows.test.mjs` still match.
+   - **The form is derived, never stored.** `nextReviewForm(chunk, chunkSet, progress)` replays the chunk's logged
+     RETURNS (judged sessions carrying a `form`) through `rotationState`: the rotation is chunk, join, combo for a
+     Difficult chunk and chunk, join, chunk for the others, and moves only with a Full pass. **A return that was not a
+     Full pass is repeated as the plain chunk, and that repeat is a make-up, not a step** (a failed join still leaves the
+     join to come). The sides of a join alternate, starting with the next chunk; a side with no neighbour, or whose
+     neighbour has not been learned (anything logged, or a ladder stage), gives way to the other, and with neither the
+     return is the chunk. A combo needs every neighbour it covers learned and the combo to exist. Neighbours are found by
+     measure boundary, never by array position (Pass 89's lesson).
+   - **A return is on or after the window's earliest day** (`isReturnDue`); the next-day touch sits before it and is
+     always the plain chunk, with no form. The session a return logs carries `form` ("chunk", "join" or "combo"), and for
+     a join or combo `partnerIds` and `partnerCredits` (what each neighbour was given). A session without a `form`
+     (every session before this pass, learning sessions, touches, Interleaved) is never read as a return.
+   - **Credit (`formCreditPlan`, answers of 2026-11-21: credit follows how much of a chunk was played).**
+     *Join, Full pass:* the visiting chunk and its neighbour get half a pass each; the visiting chunk's clock restarts like
+     any return, but a join is **never a chunk's own turn** (`canPromote` false, credit capped at 0.5), so nobody moves
+     up; the neighbour's dates are untouched and it gets no session. *Join, Partial pass or Needs rework:* no ladder runs
+     at all (nothing credited, nothing demoted, no date moved); the session is recorded. *Combo:* the whole chunk is
+     played, so for the visiting chunk it is an ordinary session (it can move up, a Partial pass starts its count over,
+     Needs rework steps it back); each neighbour, half played, gets half a pass on a Full pass and nothing otherwise.
+     Half credit goes through `addHalfPass` and only reaches a neighbour in Stabilizing or Settling.
+   - **Price.** A return is priced at its form's own measures (`nextReturnEffort`): the timeline's day totals and the
+     placement's load, `computeDueReviews`' minutes, and the card's "planned about N min" and timer alert. A join's first
+     appearance is a review, not new material (decided 2026-11-16).
+   - **Undo** (`handleUnlogSession`) takes back what a join or combo gave its neighbours in the same action
+     (`reversePartnerCredits`), and only for a neighbour that has logged nothing since: its count may since have been
+     spent on a move up or reset, and rewinding it would undo work that is not this session's. **In the app a logged
+     review's card turns into a read-only historical card once its next date moves on (Pass 90, unchanged), so the Undo
+     box is not on it**; the function-level behavior is tested, the click is not reachable for any review today.
+   - **Screens.** `ChecklistItem` takes a `returnForm` prop (from `DayChecklist`, or from the due list's items) and shows
+     one line: "Today's review is a join: play mm. 23–26 ..." or "Today's review is a Focus block: ..."; Piece Map's chunk
+     detail says "Next review: a join, mm. 23–26", "a Focus block" or "this chunk". Wording proposed, to be confirmed.
+   - **Not done, on purpose.** Revival keeps its own plan (`computeRevivalPlan` still lists transitions for practice;
+     it has no ladder); the wizard and Settings day estimate (`ScheduleFields`, `computeDaysNeededForMinutesPerDay`) still
+     counts transitions and combos (Pass 143 owns the minutes-mode day count); the Progress "Estimated vs. actual" panel
+     still lists a join's old history, and a join's time is logged under the visiting chunk against that chunk's estimate
+     (Pass 145 learns time by form).
 5. **Whole-piece run-throughs start as soon as the last chunk is introduced** and repeat every
    3 practice days, with the plan's final-day run-through kept. A clean one counts as one pass
    for every chunk past Stabilizing whose last visit was at least that stage's earliest gap
@@ -2500,7 +2549,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
      end (`effectiveHoldingMaxDaysV2`, 30 unless the owner changed it).
    - **`effectiveness` ("low", "good", "high") no longer stretches or shrinks a gap** for these chunks (the
      old Holding interval multiplied it in). Transitions, combos and section run-throughs get no window and keep
-     the old single date, the old interval and the old effectiveness multiplier until Pass 141.
+     the old single date, the old interval and the old effectiveness multiplier (a transition or combo on this
+     model has no schedule at all since Pass 141; a section run-through keeps the old rules).
    - **The flag for re-learning** (a second Needs rework in a row in Stabilizing) pins `nextDueDate` to the same
      day with no window, as before; a rough or lost flag set from Piece Map also clears `dueByDate`.
 7. **Placement.** Each day takes the day's fixed work first (new material, next-day touches,
@@ -2628,30 +2678,37 @@ Pass 138), the tempo ratchet, and Needs rework stepping a chunk back a stage. Th
 says nothing about the other ladder mechanics (Holding's periodic harder check, the
 Cold-Start rules), so each keeps working as documented above until a build pass says
 otherwise. **One consequence:** transitions and combos lose their own progress (rule 4), so
-every reader of them has to be checked and changed for a piece on model 2: `isPlanActuallyComplete`
-(practice chunks only), `estimateRescheduleFit`, `computeRemainingConnectorIds` and the
-reschedule marker's connector lists, `classifyDayCompletion`, Master Agenda, Piece Map's "Related
-chunks", the Progress estimated-versus-actual panel, Interleaved eligibility and the revival
-reassessment walk. Pass 141 lists each decision it makes.
+every reader of them had to be checked and changed for a piece on model 2. **Pass 141 made these decisions**
+(each reader of `chunkSet.all`, `transitions`, `combos`, `kind` and the connector ids was grepped):
+`isPlanActuallyComplete` reads base chunks only; `computeRemainingConnectorIds` returns `[]`, so `estimateRescheduleFit`
+and the reschedule marker's connector lists are empty for a model 2 piece (the connector list passed to
+`estimateRescheduleFit` is unused with no remaining ids); `classifyDayCompletion`, `isDayFullySwept`,
+`countBehindDays`, Master Agenda, Week view and the Timeline need no change (a day simply has no special tasks);
+Piece Map's "Related chunks" drops joins and its chunk detail says what the next return will be; the Progress
+"Estimated vs. actual" panel is left as it is (history is kept; a join's time counts under the visiting chunk);
+Interleaved eligibility is base chunks only (`TodayTab`); the revival reassessment walk was already base chunks only
+and revival's own plan is untouched; `history.js` keeps joins' old sessions as history; `maintenance.js` lists base
+chunks only and prices by form; `ScheduleFields`' day estimate is left for Pass 143.
 
 **What builds each rule** (the backlog's pass numbers; each pass applies only to a piece on
 `reviewModel` 2 unless it says so): 137 shows a time estimate and a timer on every card
 (display only); 138 (built) adds the switch, the real next-day touch, "in a row" wording and the
 alert (rules 3 and 9, and rule 10's switch); 139 (built) the pass table, strong pass, half credit and
 per-piece override (rules 1 and 2); 140 (built) the windows, placement, protected third, slip and worst-first
-order (rules 6 to 8); 141 joins as forms (rule 4); 142 early run-throughs (rule 5), with a
+order (rules 6 to 8); 141 (built) joins as forms (rule 4); 142 early run-throughs (rule 5), with a
 "typical run time at target tempo" piece field; 143 the minutes-mode day count (which today
 assumes two reviews of each chunk at full price: [above](#deriving-daystolearn-from-minutesperday-schedulemode-minutes));
 144 checks the whole model and decides, with the owner, the default for new pieces.
 
 **Questions the decided rules leave open** (a build pass must settle each with the owner, and
 the simulation in Decisions.md is then re-run with the answer):
-- *Who gets credit on a join?* Rule 4 says half a pass for each chunk it covers, which includes
-  the chunk whose turn it is. The simulation gave that chunk a full pass and only the
-  neighbour half. The two read very differently for a Difficult chunk, where one return in
-  three is a join. Settle in Pass 141 (Pass 139 built the half-credit function, `addHalfPass`).
-- *How is a combo return credited*, as the chunk's own turn or as half credit? The rules do not
-  say. The simulation treated it as a full turn. Settle in Pass 141.
+- *Who gets credit on a join?* **Settled 2026-11-21 (the owner, "go with your picks"):** half a pass each, as the rule
+  is written, and a join is never the visiting chunk's own turn. Re-measured in Pass 141 (Decisions.md, "Review model,
+  Pass 141 build"): this costs Holding share (0.90 against 0.98 before the pass, 0.72 in the worst of the 48 plans); the
+  alternative the simulation used (the visiting chunk gets a full pass) gives 0.965 and 0.80, and is one line in
+  `formCreditPlan` if she changes her mind.
+- *How is a combo return credited?* **Settled 2026-11-21:** an ordinary session for the visiting chunk (it can move up),
+  half a pass for each neighbour on a Full pass.
 - *The Holding maximum:* this section applies it to the window (never past 30 days), the
   stricter reading, matching Pass 140's wording. Pass 136's own text applied it to the gap. **Settled in Pass 140**
   (built that way).

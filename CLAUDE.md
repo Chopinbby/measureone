@@ -471,6 +471,21 @@ chunking, scheduling, and confidence are actually computed, see
   value below the requirement. `mergeLadderConfig` builds its result from a named key list, so `overrides` is carried only when the piece
   already has it; writing `overrides: null` as a default would change every piece's fingerprint and upload every piece again. A new
   field under `ladderConfig` needs the same two checks (named in `mergeLadderConfig`, and no materialized default).
+- **On the new review plan a transition or combo is not a task, and a chunk's return takes its form (Pass 141).** The form is DERIVED
+  (`nextReviewForm`, `lib/reviewForms.js`), never stored: it is read from the chunk's logged returns, which are the sessions carrying
+  a `form` ("chunk", "join" or "combo"). **A review card on a model 2 piece must pass `returnForm` to `ChecklistItem` and the log must
+  send `form` and `partnerIds`, or the session is untagged and the rotation never advances** (nothing errors; the chunk just stays on
+  "chunk" forever). `DayChecklist` and `TodayTab`'s due list pass it; a new place that logs a review must too. **Some callers hand
+  `computeDueReviews`/`computeDueOnDate` only `{ all }`** (Daily Practice, Week view): `completeChunkSet` cuts the other lists out, and a new function that reads
+  `practiceChunks`, `transitions` or `combos` from a chunk set it was given must do the same (the first version of Pass 141 listed no review due on Daily Practice). A join credits half a pass
+  to each of its two chunks and is **never the visiting chunk's own turn**; a combo is the visiting chunk's own turn and credits each
+  neighbour half; a join that was not a Full pass runs no ladder at all (`formCreditPlan`, `prepareReturn`: the app and
+  `test/review-sim-helper.mjs` share it, so a change goes in one place). **Every reader of `chunkSet.all`, `transitions` or `combos`
+  must skip them for `isReviewModelV2(piece)`** (timeline, due lists, `isPlanActuallyComplete`, `computeRemainingConnectorIds`,
+  Interleaved, Piece Map's related chunks are done; a new reader is a new decision), and what a transition or combo already holds is
+  kept as history, never deleted. Neighbours are found by measure boundary, not array position. Undo takes a neighbour's half pass back only if
+  that neighbour has logged nothing since (`reversePartnerCredits`). A piece on today's plan must stay byte-identical (recorded timelines in
+  `test/review-windows.test.mjs`).
 - **A review on the new plan has a window: `nextDueDate` is its earliest day and `dueByDate` its latest, and `dueByDate` is ABSENT, never
   `null`, when there is none (Pass 140).** Write it only through `withDueByDate` (`lib/ladder.js`) and read it only through
   `effectiveDueByDate`: a stored `null` on every entry would change every piece's fingerprint and upload every piece again, and a writer that
@@ -1756,7 +1771,7 @@ silently.
 - **Pass 139** — the ladder engine for the new review plan: a pass table by difficulty and plan length (1, 2, 3 up to 30 days; 2, 3, 3 to 60;
   3, 4, 4 to 90; 3, 4, 5 beyond and for minutes plans; `PASS_TABLE_ROWS`, `lib/ladder.js`), a Full pass at 85% or more of target tempo
   counting as two (Stabilizing and Settling only), a chunk moving up only on its own turn (never on its first session, and only on or after
-  the day its next review is due; the next-day touch counts one pass), `addHalfPass` for Pass 141 to use, and a per-piece override (`ladderConfig.overrides`, shown in
+  the day its next review is due; the next-day touch counts one pass), `addHalfPass` (Pass 141 calls it), and a per-piece override (`ladderConfig.overrides`, shown in
   Settings as a table with "set by you" and "Reset to automatic"). Base practice chunks of a piece on `reviewModel` 2 only; a piece on today's
   plan is checked byte-for-byte unchanged. Built 2026-11-17, **merged 2026-11-17 (PR #107, merge commit `4082e91`)**. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
   [`Decisions.md`](docs/Decisions.md#review-model-pass-139-build-2026-11-17)
@@ -1766,5 +1781,14 @@ silently.
   its window from today on (a near tie goes to the earlier day), a third of each day is protected for new material and chunks not yet at their third review, a
   review the day keeps deferring may slip up to two gaps, and reviews are ordered worst first; the due list says "available" or "due", the card says "Ready to
   review" with the latest day in a tooltip. **Measured on the real code, 48 plans: variation of the daily load 0.41 against 0.47 for today's rules, chunks in
-  Holding at the end 98% against 51%.** Built 2026-11-19, not yet merged. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
+  Holding at the end 98% against 51% (with joins still tasks; 90% once Pass 141 made them returns).** Built 2026-11-19, **merged 2026-11-20 (PR #108, merge commit `8353643`)**. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
   [`Decisions.md`](docs/Decisions.md#review-model-pass-140-build-2026-11-19)
+- **Pass 141** — transitions and combos become review forms on the new review plan: they stop being tasks (no introduction day, no schedule, no
+  progress key; what they hold is kept as history), and a base chunk's return takes a form in rotation (the chunk, a join with a neighbour, a combo
+  for a Difficult chunk; the rotation moves only with Full passes and a return that was not a Full pass is repeated as the chunk). Credit follows how
+  much of a chunk was played (the owner's picks, 2026-11-21): a join is half a pass for each of its two chunks and never a chunk's own turn; a combo
+  is the chunk's own turn plus half a pass for each neighbour. `lib/reviewForms.js`; sessions carry `form`, `partnerIds`, `partnerCredits`; a card says
+  "Today's review is a join: play mm. 23 to 26"; Piece Map says what the next review is. Re-measured on the real code: even load 0.385 (today's 0.466),
+  Holding 0.90 on average and 0.72 in the worst of 48 plans, hours 0.44 of today's. Built 2026-11-21, not yet merged.
+  [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
+  [`Decisions.md`](docs/Decisions.md#review-model-pass-141-build-2026-11-21)

@@ -40,6 +40,12 @@ export function ChecklistItem({
   // takes over the card body), and it's never offered on a transition/combo
   // card (chunk.kind !== "section") — see the render below.
   onAddFocusSpot,
+  // Pass 141 (review model 2) — which form this RETURN takes: `{ form, partnerIds,
+  // formChunk }` from nextReviewForm (lib/reviewForms.js), or undefined for every
+  // other card (a new chunk, the next-day touch, a piece on today's plan, a
+  // historical card). A join or combo is played over `formChunk`'s measures and
+  // logged against THIS chunk, tagged with its form and the neighbours it covers.
+  returnForm,
   // Historical mode (DayChecklist's record-of-what-was-done cards, added
   // when this item's own live schedule slot has since moved elsewhere —
   // see findHistoricalItemsForDay, lib/history.js): read-only, no
@@ -105,7 +111,9 @@ export function ChecklistItem({
   // today's attempts on this card, since the price is for the whole task).
   // null for a task the schedule never priced (a section run-through): no
   // estimate is shown rather than an invented one.
-  const plannedMinutes = plannedMinutesFor(chunk);
+  // Pass 141: a join or combo is priced and timed at its own measures.
+  const formChunk = returnForm && returnForm.form !== "chunk" && returnForm.formChunk ? returnForm.formChunk : chunk;
+  const plannedMinutes = plannedMinutesFor(formChunk);
   const spentTodaySeconds = secondsSpentIn(sessionsToday);
   // Honest undo copy (docs/Decisions.md's "session undo should fully
   // reverse the ladder" entry): undo only fully reverses stage/tempo/
@@ -207,7 +215,7 @@ export function ChecklistItem({
   // itself, so canLog, its tooltip text, and submitLog's own guard all stay
   // correct together automatically.
   const canLog = hasRepsDraft && hasBpmDraft && !isPaused;
-  const alertMinutes = timerAlertMinutes(chunk);
+  const alertMinutes = timerAlertMinutes(formChunk);
   useEffect(() => {
     if (alertMinutes != null && timerAlert === "idle" && timerRunning && durationSeconds >= alertMinutes * 60) setTimerAlert("shown");
   }, [timerAlert, timerRunning, durationSeconds, alertMinutes]);
@@ -309,6 +317,8 @@ export function ChecklistItem({
       durationSeconds: finalDurationSeconds,
       targetBPM,
       suggestedStartingBPM,
+      // Pass 141: only a return on a piece using the new review plan carries one.
+      ...(returnForm ? { form: returnForm.form, partnerIds: returnForm.partnerIds || [] } : {}),
     });
     setReps("");
     setBpm("");
@@ -368,6 +378,15 @@ export function ChecklistItem({
           <span className="tag subtle">{DIFFICULTY_META[chunk.difficultyLabel].label}</span>
           <span className="conf-pill mono">{conf}%</span>
         </div>
+        {/* Pass 141: when this return is a join or a combo, say which measures to
+            play and what it counts for. Wording proposed, to be confirmed. */}
+        {!historical && returnForm && returnForm.form !== "chunk" && (
+          <p className="tip-line" data-testid="return-form-note">
+            {returnForm.form === "join"
+              ? `Today's review is a join: play ${formatRange(formChunk.start, formChunk.end)}, where this chunk meets its neighbour. A Full pass counts as half a pass for each of the two chunks.`
+              : `Today's review is a Focus block: play ${formatRange(formChunk.start, formChunk.end)}, this chunk with the edges of its neighbours. A Full pass counts for this chunk and as half a pass for each neighbour.`}
+          </p>
+        )}
 
         {/* Pass 91 (experimental v1) — a chunk with an unresolved focus spot
             pauses here: the rest of this card's regular practice UI

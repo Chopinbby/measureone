@@ -236,15 +236,23 @@ describe("[Pass 138] computeTimeline — the touch on a piece using the new plan
     assert.ok(dayHas(withLiveReviewStatus(t, piece, intro + 1), intro + 1, "c1"));
   });
 
-  test("transitions keep today's first-touch rule on a piece using the new plan", () => {
+  test("[Pass 141] transitions and combos are not tasks on a piece using the new plan, and still are on today's plan", () => {
+    // Pass 138 kept today's first-touch rule for them; Pass 141 removed them from the
+    // plan altogether (a chunk's return takes their form instead).
     const piece = basePiece({ reviewModel: 2 });
     const chunkSet = generateAllChunks(piece);
     const t = computeTimeline(piece, chunkSet);
     const transition = chunkSet.transitions[0];
     assert.ok(transition, "setup: the piece has a transition");
-    const day = t.introducedDay[transition.id];
-    assert.ok(day, "setup: the transition is placed");
-    assert.ok(dayHas(t, day + 1, transition.id));
+    assert.equal(t.introducedDay[transition.id], undefined, "no introduction day");
+    t.days.forEach((d) => {
+      assert.ok(!d.specialChunkIds.length, "no special task on any day");
+      [...chunkSet.transitions, ...chunkSet.combos].forEach((x) => assert.ok(!d.reviewChunkIds.includes(x.id), `${x.id} is not a review`));
+    });
+    const old = basePiece({ reviewModel: null });
+    const tOld = computeTimeline(old, generateAllChunks(old));
+    assert.ok(tOld.introducedDay[transition.id], "today's plan still places it");
+    assert.ok(dayHas(tOld, tOld.introducedDay[transition.id] + 1, transition.id), "and gives it a first touch");
   });
 
   test("[regression, Pass 138] a piece on today's plan places no touch for a logged Difficult chunk", () => {

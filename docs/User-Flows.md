@@ -1373,6 +1373,13 @@ updated plan") and puts the piece back on the earlier plan. Nothing you logged i
 
 **What changes on the updated plan, so far:** a Difficult chunk, and any chunk whose first session wasn't a Full pass, gets a
 next-day review. It sits on the day after you actually learned the chunk and stays when you log the introduction; a touch you skip
-just drops off (it never counts as behind). More of the updated plan arrives in later passes. A new piece starts on the earlier plan
-until a later pass decides otherwise (Pass 144). Design:
-[Algorithms.md](Algorithms.md#review-model-v2-planned); decisions: [Decisions.md](Decisions.md#review-model-pass-138-build-2026-11-16).
+just drops off (it never counts as behind). **Since Pass 141, the Review and Focus block tasks stop being tasks of their own:** the
+days no longer list them. When a chunk comes back for review, the card says what to play. Most returns are the chunk itself. Every
+second or third one is "a join" (the end of this chunk into its neighbour, for example "Today's review is a join: play mm. 23 to 26"),
+and a Difficult chunk gets "a Focus block" (the chunk with the edges of its neighbours) instead of the third. A Full pass on a join
+counts as half a pass for each of its two chunks and never moves a chunk up by itself; a join that wasn't a Full pass changes nothing
+(the chunk just comes back as itself). A Focus block counts as the chunk's own turn and as half a pass for each neighbour. Piece Map's
+chunk detail says what the next review will be ("Next review: a join, mm. 23 to 26"), and no longer lists joins under "Related chunks".
+What you logged on those tasks before the switch is kept. More of the updated plan arrives in later passes. A new piece starts on the
+earlier plan until a later pass decides otherwise (Pass 144). Design:
+[Algorithms.md](Algorithms.md#review-model-v2-planned); decisions: [Decisions.md](Decisions.md#review-model-pass-138-build-2026-11-16) and [Decisions.md](Decisions.md#review-model-pass-141-build-2026-11-21).

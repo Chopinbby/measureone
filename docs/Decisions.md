@@ -4218,7 +4218,8 @@ full pass and only the neighbour half. See the open questions below.
 - *Credit on a join, and on a combo.* As above: the rule gives each chunk a join covers half a
   pass; the simulation gave the visiting chunk a full pass and only the neighbour half. How a
   combo return is credited is not stated. Both change how fast a Difficult chunk climbs.
-  **Owner: Pass 141**, with the owner, before it builds; re-run the simulation with the answer.
+  **Settled 2026-11-21 in Pass 141** (see [Pass 141 build](#review-model-pass-141-build-2026-11-21)): a join is half a pass each, never the visiting chunk's own turn; a combo is the
+  chunk's own turn plus half a pass for each neighbour; re-measured.
 - *The "second half is light" outcome.* All introductions finish by the plan's midpoint, so the
   back of a plan is light (the second half at 0.65 of the first half's load in the re-run). The
   owner has not decided whether to spread introductions later (about 65% of a minutes plan was
@@ -4471,6 +4472,92 @@ next scheduled practice" pointing at Day 13, the window's earliest day), and bot
 Safari, Interleaved mode and the revival reassessment (whose card lines were changed and only built), Piece Map's "Next review" tooltip, a rough or lost flag on a chunk
 with a window (`handleSetFlag`'s two new lines have no test; `App.jsx`'s handlers cannot be tested), a rescheduled piece on the new plan, a piece switched over from
 today's plan with history, and a real day-by-day run in use.
+
+### Review model, Pass 141 build (2026-11-21)
+
+**Built:** rule 4 of [Algorithms.md](Algorithms.md#review-model-v2-planned): for a piece on `reviewModel` 2, transitions and combos are no longer
+tasks, and a base chunk's return takes a form (the chunk, a join with a neighbour, a combo for a Difficult chunk). The rules, the files and the
+readers decided are in the "Built in Pass 141" paragraph under rule 4 and the "One consequence" paragraph there. A piece on today's plan is unchanged
+(the 14 recorded timelines of `test/review-windows.test.mjs` still match; no ladder code path for it changed).
+**Her answers (2026-11-21):** "go with your picks" to the two credit questions the design left open, and "yes touch extra readers".
+**The picks, and the principle behind them** (credit follows how much of a chunk was played): a join is half a pass for each of its two chunks, including the
+chunk whose return it is, and is never that chunk's own turn (so it cannot move it up); a combo is the visiting chunk's own session (it can move up) and half a
+pass for each neighbour. She also asked where the other half of a pass comes from: nothing supplies it; half passes bank in the neighbour's running
+`consecutivePasses` (it can read 2.5) and the move up still needs a Full pass on the neighbour's own return.
+
+**What was measured (the card's check, on the real code), the same 48 plans as Pass 140** (the learner does everything on the plan and every pass is a Full pass;
+the harness `test/review-sim-helper.mjs` now logs a return in its form, through the same `prepareReturn` the app uses):
+
+| | today's rules | Pass 140 build (joins still tasks) | **Pass 141, her picks** | variant: a join gives the visiting chunk a full pass |
+|---|---|---|---|---|
+| mean variation of the daily load (lower is more even) | 0.466 | 0.410 | **0.385** | 0.378 |
+| chunks in Holding at the plan's end, mean | 51% | 98% | **90%** | 97% |
+| chunks in Holding, the worst plan | 0% | 84% | **72%** | 80% |
+| busiest week against the average | 1.58 | 1.51 | **1.49** | 1.48 |
+| total hours against today's | 1.00 | 1.01 | **0.44** | 0.43 |
+
+By plan length (30, 45, 75, 120 days), variation 0.286, 0.342, 0.403, 0.510 (today 0.426, 0.429, 0.475, 0.534) and Holding 100%, 81%, 80%, 98% (today 0%, 12%,
+92%, 100%). More even than today's in 44 of 48 plans. **Her stop rule from Pass 140 (an average evenness worse than 0.45 is bad) holds: 0.385.** The hours fall to
+0.44 of today's because a transition and a combo no longer have an introduction and a ladder of their own (a 100-measure piece had about 25 chunks and 55 ladder
+items). **What her pick costs, said plainly:** Holding at the plan's end drops from 98% to 90% (72% in the worst plan, a 45-day or 75-day plan of 400 measures),
+because one return in three is a join that cannot move its chunk up and gives it only half a pass. The variant in the last column (the simulation's version: a join
+is a full pass for the visiting chunk and half for its neighbour) keeps 97%; it is a one-line change in `formCreditPlan` (`visitorMaxCredit` and
+`visitorCanPromote`), and the harness measures it the same way. She has not been asked to choose again; this is information for her.
+
+**Decisions made while building, none in the plan she approved** (each is easy to change; she should say if she disagrees):
+- **A repeat is a make-up, not a step.** A return that was not a Full pass is repeated as the plain chunk (as I said in the plan), and `rotationState` does not let
+  that repeat move the rotation either way, so a failed join still leaves the join to come after the chunk is played again. (The first version counted the repeat
+  as a step and skipped the join.)
+- **A Full pass on a join also steps the visiting chunk's tempo and restarts its window** like any return (it runs `computeLadderAdvance` with its credit capped at
+  0.5 and promotion off), so `practiceBPM` moves on a join pass. A join that is not a Full pass runs no ladder at all: no date moves, no tempo moves, the chunk stays owed.
+- **A neighbour is "introduced" when it has anything logged or a ladder stage**, read from progress alone, so the form needs no timeline. Credit only reaches a neighbour
+  in Stabilizing or Settling (`addHalfPass`); a neighbour in Holding or with no ladder is given nothing and nothing is recorded for it.
+- **No new ladder field.** The form is derived from the sessions, so none of the three session handlers' hand-maintained field lists, the storage backfill or
+  `LADDER_STATE_FIELDS` needed a change (checked). What is new is on the SESSION: `form`, `partnerIds`, `partnerCredits`, all optional and absent elsewhere
+  ([Data-Model.md](Data-Model.md)).
+- **Pricing by form** reaches the timeline (a review's minutes and the placement's load), `computeDueReviews`/`computeDueOnDate` and the card. The next-day touch is priced as the
+  chunk (the first return is the chunk form). In a rescheduled remainder the chunk set is a filtered one, so a join whose neighbour is missing from it is priced as the chunk
+  while the card (built from the full set) can show the join: a small mismatch in minutes, never in credit.
+- **Revival and the day estimate were left alone on purpose** (see "Not done" under rule 4).
+- **Three existing tests changed, each for a stated reason:** Pass 138's "transitions keep today's first-touch rule on a piece using the new plan" now asserts they have no
+  task (and that today's plan still places them); Pass 140's "a chunk with no window is placed on its day as before" allows the existing smoothing pass to nudge a review up to
+  two days (it now does, because there are no connectors to share the load); Pass 140's Holding-and-hours test now reads 0.85 mean, 0.65 worst and hours between 0.3 and 0.7
+  of today's, with the old figures in its comment.
+
+**Found by the independent review (Quincy Jones, 2026-11-21) and fixed before commit.** *P1:* Daily Practice listed no due review at all for a piece on the new plan. `TodayTab` calls
+`computeDueReviews(piece, { all: chunks }, today)` and Week view `computeDueOnDate(piece, { all: chunks }, ...)`, a set with only `all`, and the first version read `chunkSet.practiceChunks` for a
+piece on the new plan and found nothing (the message read "Nothing due today", a finished-plan piece with three overdue reviews). Every test passed a full chunk set, so none could see it. **Fixed
+in `lib/reviewForms.js`'s `completeChunkSet`** (a missing `practiceChunks`, `transitions` or `combos` is cut out of `all` by kind), called at the top of `computeDueReviews`, `computeDueOnDate` and
+`nextReviewForm`; five new tests call them exactly as the two screens do, and two of them fail if the call is dropped (checked). Seen again in the browser on a finished-plan test piece on the new plan:
+Daily Practice read "Due today: 3h 5m planned" with ten cards (nine joins and one Focus block, each saying which measures to play), a Focus block logged as a combo (the chunk moved up to Settling,
+each neighbour got half a pass and no session, the Difficult chunk's own count 2.5 to a move up), and Week view listed today's reviews and the next one as "Ready". *P2s, now stated:* **the fall to 44% of today's hours and
+to 90% of chunks in Holding is the owner's credit rules at work** (a join is half a pass each and never a chunk's own turn), and a real learner may do less joining than the simulation, which does
+every task listed; the three limits of Pass 140's whole-plan test were loosened for it (Holding mean 0.95 to 0.85, worst plan 0.80 to 0.65, hours 0.85 to 1.15 of today's replaced by 0.3 to 0.7).
+**Pass 140's own "98% against 51%" is the figure with joins still tasks**; with joins as returns it is 90%, and the review reports that Pass 139's smaller pass counts alone gave about 89% there (not
+re-measured here). The two-device loss of a half pass and the proposed "join" wording are logged below.
+
+**Open, found while building** (none blocks a later pass):
+- **A half pass can be lost when two devices both changed the neighbour.** It lives in the neighbour's `consecutivePasses`, not in a session, so `unionProgressEntries` takes the
+  ladder state from the side whose latest judged session is later; the other side's half pass can drop. It never invents credit (the loss is conservative). The seeded merge
+  simulations do not produce forms; one unit test checks that tagged sessions survive a union. Owner: none yet.
+- **A Partial pass or failed join changes no ladder, but it is still the visiting chunk's latest session**, so confidence and Rule 8's "last outcome" ordering read it. That may
+  put a chunk first in the worst-first list for a join that went badly. Left as is.
+- **Undo of a review is not reachable from the card** (a logged review's card turns read-only once its next date moves on, Pass 90, for every review and every plan). The
+  function-level reversal is tested and the handler's code was read, but a click on it was never seen. If that is ever fixed, the handler already reverses both chunks.
+- **Wording is proposed:** "Today's review is a join: play mm. 23 to 26, where this chunk meets its neighbour. A Full pass counts as half a pass for each of the two chunks.",
+  the Focus block sentence, and Piece Map's "Next review: a join, mm. ...". She has not seen it on a real device.
+- **Pass 144** re-runs the grid with run-throughs; the harness is ready to take a variant for the join credit.
+
+**Checks:** 2,075 tests pass (29 new in `test/review-forms.test.mjs`, 3 existing ones changed as listed above); the merge simulations stay green at seeds 1 to 3,000 and 1 to 3,000
+(`SIM_RUNS=3000`, 229 tests, piece and technique). **Seven deliberate breakages, each caught by a named test** (a join that can promote, a join that gives its neighbour nothing,
+Undo ignoring that the neighbour moved on, a join that is not a Full pass still running the ladder, `isPlanActuallyComplete` counting connectors again, the timeline placing
+transitions again, the due list listing connectors again); the source was verified byte for byte after each. `npm run build` succeeds (it needed `npm ci` in this worktree).
+**Seen in a browser on a fresh test piece on the new plan (the dev server, not her data):** Daily Practice showed "Today's review is a join: play mm. 23 to 26" on a review
+card with the form's own price (25 min planned); logging it with 4 reps at 75 BPM saved a session tagged `form: join` with `partnerIds` and `partnerCredits`, the visiting chunk went from
+2 to 2.5 and its window moved, the neighbour went from 2 to 2.5 with no new session and its dates untouched, and a reload read the same from storage; Piece Map's chunk detail said
+"Next review: this chunk" after the join and no longer listed joins under "Related chunks"; no console errors. **Not seen:** a Focus block card and a Partial pass on a join in the
+app (both unit-tested), Undo by a click (not reachable, above), Safari, a phone, a piece rescheduled on the new plan, a revival of a piece on the new plan, and her own pieces
+(none is on the new plan).
 
 ## UX
 
@@ -11011,8 +11098,8 @@ oversight to silently fix; surface it instead.
 - **Review model v2 (decided 2026-11-16, not built): four questions the decided rules leave open (Pass 136).** Nothing here blocks Pass
   137; each has an owner pass and the full wording is in [the decision's entry](#review-model-overhaul-decided-2026-11-16).
   1. **Credit on a join and on a combo.** The rule gives each chunk a join covers half a pass, including the chunk whose turn it is; the
-     simulation gave that chunk a full pass and the neighbour half, and nothing says how a combo return counts. Pass 141, with the owner,
-     before it builds; re-run the simulation with her answer.
+     simulation gave that chunk a full pass and the neighbour half, and nothing says how a combo return counts. **Settled 2026-11-21 in Pass 141**
+     ([Pass 141 build](#review-model-pass-141-build-2026-11-21)): half each and never the visiting chunk's own turn; a combo is the chunk's own turn plus half for each neighbour.
   2. **A light second half.** Introductions end at the midpoint, so the back of a plan is light (0.65 of the first half's load). Spreading
      introductions later is untested and undecided. Pass 143, only if she decides.
   3. **The Holding maximum is read as applying to the window** (Pass 140's wording), not to the gap (Pass 136's card). **Settled: built that way in Pass 140.**

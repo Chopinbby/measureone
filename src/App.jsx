@@ -50,6 +50,7 @@ import {
 import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain, tier1DoneAfterSession, ladderContextFor, isReviewModelV2 } from "./lib/scheduling";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag, withDueByDate, dueBySnapshot, restoreDueByFromSnapshot } from "./lib/ladder";
+import { prepareReturn, contextForForm, reversePartnerCredits } from "./lib/reviewForms";
 import { applyColdStartLog, applyColdStartUnlog } from "./lib/coldStart";
 import { ensureWorkId, partsOfWork, groupPiecesByWork } from "./lib/works";
 import { createDragAutoScroller } from "./lib/dragScroll";
@@ -3079,7 +3080,7 @@ export default function App() {
   // eventually wants — that needs Tier 1/Tier 2 scheduling, a later,
   // explicitly deferred pass.
   const handleLogSession = (chunkId, day, sessionInput) => {
-    const { cleanReps, bpm, outcome, durationSeconds, targetBPM, suggestedStartingBPM, skipped, provisional } = sessionInput;
+    const { cleanReps, bpm, outcome, durationSeconds, targetBPM, suggestedStartingBPM, skipped, provisional, form: sentForm, partnerIds: sentPartnerIds } = sessionInput;
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress[chunkId] || { doneDays: [] };
@@ -3135,6 +3136,23 @@ export default function App() {
       }
 
       const doneDays = prevEntry.doneDays.includes(day) ? prevEntry.doneDays : [...prevEntry.doneDays, day];
+
+      // Pass 141 (review model 2, rule 4): a return logged from a review card
+      // carries its form (the chunk, a join with a neighbour, a combo). The form
+      // decides what the ladders do (lib/reviewForms.js's formCreditPlan): a Full
+      // pass on a join gives the visiting chunk and its neighbour half a pass each
+      // and moves nobody up; a join that was not a Full pass changes no ladder at
+      // all; a combo is the visiting chunk's own session and gives each neighbour
+      // half a pass. A form sent for a piece on today's plan is ignored.
+      const ret = prepareReturn({ onModelTwo: isReviewModelV2(p), chunkId, progress, outcome, sentForm, sentPartnerIds });
+      const formPlan = ret.plan;
+      const formFields = ret.formFields;
+      // The neighbours' half passes are already in ret.progress, worked out from
+      // their entries as they stand, and the session carries what each was given
+      // (Undo takes it back).
+      Object.keys(ret.progress).forEach((id) => {
+        if (ret.progress[id] !== progress[id]) progress[id] = ret.progress[id];
+      });
 
       // Snapshot the ladder state as it stood *before* this session, onto
       // the session record itself — not the chunk entry — so same-day
@@ -3195,8 +3213,16 @@ export default function App() {
       };
       const sessions = [
         ...(prevEntry.sessions || []),
-        { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds, ladderSnapshot },
+        { day, loggedAt, loggedDate, cleanReps, bpm, outcome, durationSeconds, ladderSnapshot, ...formFields },
       ];
+
+      // A join that was not a Full pass: recorded (time and outcome are real), but
+      // no ladder runs, so nothing is credited and nothing is demoted. The chunk's
+      // review is still owed and its next return is the plain chunk.
+      if (!formPlan.runLadder) {
+        progress[chunkId] = { ...prevEntry, doneDays, sessions, flagSnapshot: undefined };
+        return { ...p, progress, lastLoggedAt: loggedDate };
+      }
 
       // practiceBPM is seeded from whatever the learner actually logs the
       // first time they touch a chunk — the USER-SELECTED starting tempo,
@@ -3225,11 +3251,14 @@ export default function App() {
       // passes it needs, and whether this session may move it up (not its
       // first session, the learning day or its next-day touch). null for a
       // piece on today's plan, and then the ladder is exactly as before.
-      const ladderContext = ladderContextFor(
-        p,
-        chunkSet && chunkSet.practiceChunks.find((c) => c.id === chunkId),
-        prevEntry,
-        loggedDate
+      const ladderContext = contextForForm(
+        ladderContextFor(
+          p,
+          chunkSet && chunkSet.practiceChunks.find((c) => c.id === chunkId),
+          prevEntry,
+          loggedDate
+        ),
+        formPlan
       );
       const advance = computeLadderAdvance(
         {
@@ -3321,6 +3350,7 @@ export default function App() {
 
       const isLatestSession = lastIdx === sessions.length - 1;
       const snapshot = sessions[lastIdx].ladderSnapshot;
+      const undoneSession = sessions[lastIdx];
 
       sessions.splice(lastIdx, 1);
       const stillHasDay = sessions.some((s) => s.day === day);
@@ -3402,6 +3432,16 @@ export default function App() {
         }
       }
       progress[chunkId] = entry;
+      // Pass 141: a join or combo also gave its neighbours half a pass; Undo takes
+      // that back in the same action, but only for a neighbour that has logged
+      // nothing since (its count may since have been spent or reset). Only on a
+      // full reversal: the record-only fallback leaves the ladders as they are.
+      if (isLatestSession && snapshot && undoneSession.partnerCredits && undoneSession.partnerCredits.length) {
+        const reversed = reversePartnerCredits(progress, undoneSession);
+        undoneSession.partnerCredits.forEach(({ id }) => {
+          if (!reversed.kept.includes(id) && reversed.progress[id]) progress[id] = reversed.progress[id];
+        });
+      }
       return { ...p, progress };
     });
   };

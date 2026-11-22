@@ -15,6 +15,7 @@ import { computeDueReviews, mergeLiveDueReviews } from "../src/lib/maintenance.j
 import { mergeLadderConfig } from "../src/lib/storage.js";
 import { EFFORT_TO_MIN } from "../src/lib/constants.js";
 import { addDaysISO } from "../src/lib/utils.js";
+import { nextReviewForm, prepareReturn, contextForForm, isReturnDue } from "../src/lib/reviewForms.js";
 
 export const START = "2026-01-01";
 export const dateOfDay = (n) => addDaysISO(START, n - 1);
@@ -52,8 +53,13 @@ export function makePiece({ N, mix, D, scheduleMode = "days", reviewModel = null
 
 // One logged session, as handleLogSession records it for a judged (not skipped,
 // not provisional) attempt.
-export function logSession(p, chunkSet, chunkId, day, date, { result = "pass", bpm = 60, cleanReps = 5, targetBPM = null } = {}) {
+export function logSession(p, chunkSet, chunkId, day, date, { result = "pass", bpm = 60, cleanReps = 5, targetBPM = null, form = null, partnerIds = null } = {}) {
   const progress = { ...p.progress };
+  // Pass 141: the form a return was logged in (lib/reviewForms.js, shared with App.jsx).
+  const ret = prepareReturn({ onModelTwo: isReviewModelV2(p), chunkId, progress, outcome: result, sentForm: form, sentPartnerIds: partnerIds });
+  Object.keys(ret.progress).forEach((id) => {
+    if (ret.progress[id] !== progress[id]) progress[id] = ret.progress[id];
+  });
   const prev = progress[chunkId] || { doneDays: [] };
   const doneDays = prev.doneDays.includes(day) ? prev.doneDays : [...prev.doneDays, day];
   const effectiveness = result === "fail" ? "low" : result === "pass" ? "high" : "good";
@@ -75,9 +81,13 @@ export function logSession(p, chunkSet, chunkId, day, date, { result = "pass", b
   };
   const sessions = [
     ...(prev.sessions || []),
-    { day, loggedAt: Date.parse(`${date}T10:00:00`) + (prev.sessions || []).length, loggedDate: date, cleanReps, bpm, outcome: result, durationSeconds: 0, ladderSnapshot },
+    { day, loggedAt: Date.parse(`${date}T10:00:00`) + (prev.sessions || []).length, loggedDate: date, cleanReps, bpm, outcome: result, durationSeconds: 0, ladderSnapshot, ...ret.formFields },
   ];
-  const ctx = ladderContextFor(p, chunkSet.practiceChunks.find((c) => c.id === chunkId), prev, date);
+  if (!ret.plan.runLadder) {
+    progress[chunkId] = { ...prev, doneDays, sessions, flagSnapshot: undefined };
+    return { ...p, progress, lastLoggedAt: date };
+  }
+  const ctx = contextForForm(ladderContextFor(p, chunkSet.practiceChunks.find((c) => c.id === chunkId), prev, date), ret.plan);
   const advance = computeLadderAdvance(
     {
       stage: prev.stage,
@@ -155,8 +165,19 @@ export function runPlan(piece, { throughDay, price = 1, afterDay = null } = {}) 
     const reviewIds = new Set(merged.reviewChunkIds);
     let minutes = 0;
     const date = dateOfDay(d);
+    const modelTwo = isReviewModelV2(p);
     for (const id of ids) {
-      minutes += byId[id].effort * EFFORT_TO_MIN * (reviewIds.has(id) && !merged.newChunkIds.includes(id) && !merged.specialChunkIds.includes(id) ? price : 1);
+      const isReview = reviewIds.has(id) && !merged.newChunkIds.includes(id) && !merged.specialChunkIds.includes(id);
+      // Pass 141: on review model 2 a RETURN (on or after the window's earliest
+      // day; the next-day touch is before it) takes a form, priced at its own
+      // measures. Every other task is the plain chunk.
+      if (modelTwo && isReview && isReturnDue(p.progress[id], date)) {
+        const f = nextReviewForm(byId[id], chunkSet, p.progress);
+        minutes += f.formChunk.effort * EFFORT_TO_MIN * price;
+        p = logSession(p, generateAllChunks(p), id, d, date, { form: f.form, partnerIds: f.partnerIds });
+        continue;
+      }
+      minutes += byId[id].effort * EFFORT_TO_MIN * (isReview ? price : 1);
       p = logSession(p, generateAllChunks(p), id, d, date);
     }
     rows.push({ day: d, type: "learning", minutes, tasks: ids });

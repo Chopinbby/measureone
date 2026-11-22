@@ -381,6 +381,17 @@ ChunkProgress = {
     skipped, provisional,  // both optional booleans, Pass 29/29-follow-up, Interleaved mode only —
                             // see below and Repertoire-Lifecycle.md#interleaved-practice-mode-built-pass-29.
                             // Never both true on the same record.
+    form, partnerIds,       // Pass 141, review model 2 only (a piece with `reviewModel: 2`); all three
+    partnerCredits,         // are optional and ABSENT on every other session. `form` is "chunk", "join" or
+                            // "combo": the form this RETURN took (Algorithms.md#review-model-v2-planned,
+                            // rule 4). Only a session logged from a review card on or after its window's
+                            // earliest day carries it; the learning session, the next-day touch and every
+                            // Interleaved session do not, and a session without `form` is never read as a
+                            // return. `partnerIds` (join, combo) lists the neighbour chunks the form covers;
+                            // `partnerCredits` is `[{ id, credit }]`, what each neighbour was actually given
+                            // (0.5, only to a neighbour in Stabilizing or Settling), so Undo can take it back.
+                            // The credit itself is the neighbour's `consecutivePasses` (it can be x.5); the
+                            // neighbour gets no session. Never written as null and never defaulted on load.
   }],                       // durationSeconds comes from the ChecklistItem timer, or from
                             // the manual minutes field when the user typed one instead. Since
                             // Pass 137 the card also shows it: "N min planned, M min spent", M the

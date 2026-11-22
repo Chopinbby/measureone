@@ -19,7 +19,7 @@ import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../l
 import { isInterleaveEligible } from "../../lib/ladder";
 import { isInRevival, getRevivalTargetBPM, computeTempoLadder, computeComboEscalations } from "../../lib/revival";
 import { isManualConfidence } from "../../lib/confidence";
-import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, focusSpotGate } from "../../lib/scheduling";
+import { isPlanActuallyComplete, computeScheduleStatus, classifyDayCompletion, focusSpotGate, isReviewModelV2 } from "../../lib/scheduling";
 import { elapsedDay as computeElapsedDay, todayISODate, formatMinutes, formatRange, hasPendingProvisionalSession } from "../../lib/utils";
 
 // Pass 91 (experimental v1) — every practice chunk's unresolved focus spots,
@@ -109,11 +109,12 @@ function DueReviewPanel({ piece, dueItems, day, onLogSession, onUnlogSession, on
     <div className="panel">
       <h3>{allDue ? "Due today" : "Ready to review"}: {formatMinutes(totalDueMinutes(dueItems))} planned</h3>
       <div className="checklist">
-        {dueItems.map(({ chunkId, chunk }) => (
+        {dueItems.map(({ chunkId, chunk, form, partnerIds, formChunk }) => (
           <ChecklistItem
             key={chunkId}
             chunk={chunk}
             role="review"
+            returnForm={form ? { form, partnerIds, formChunk } : undefined}
             piece={piece}
             day={day}
             onLogSession={onLogSession}
@@ -341,8 +342,11 @@ export function TodayTab({
   // already exactly chunkSet.all (practice chunks, transitions, combos),
   // with no duplicate ids, so no de-duping is needed the way todaysIds
   // required below.
+  // Pass 141: on review model 2 only a base chunk is interleaved. A transition or
+  // combo that still holds a ladder stage from before the switch is history, not a
+  // task (it has no schedule and no ladder any more).
   const interleaveItems = chunks
-    .filter((c) => isInterleaveEligible(piece.progress[c.id]))
+    .filter((c) => (!isReviewModelV2(piece) || c.kind === "section") && isInterleaveEligible(piece.progress[c.id]))
     .map((c) => ({ id: c.id, chunk: c }));
 
   // User-directed follow-up: while actively in Interleaved mode, an

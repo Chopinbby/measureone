@@ -15,6 +15,7 @@ import {
   REVIEW_SLIP_INTERVALS,
 } from "./ladder";
 import { plannedMinutesFor } from "./plannedMinutes";
+import { nextReturnEffort } from "./reviewForms";
 
 // Spreads (7 - practiceDaysPerWeek) rest days evenly across every rolling
 // 7-day window of the plan, using the same running-accumulator technique
@@ -726,10 +727,24 @@ export function computeTimeline(piece, chunkSet, options = {}) {
   // make a minutes-mode plan's day count come out too optimistic once
   // review load was folded in (see computeDaysNeededForMinutesPerDay below,
   // which had the same flat-rate assumption baked into its day-count math).
+  // Pass 141: on review model 2 a return takes a form (the chunk, a join with a
+  // neighbour, a combo), and a form is priced at its own measures: a join's first
+  // appearance is a review, not new material, and a combo covers more than the
+  // chunk. The form of a chunk's NEXT return is read from its logged sessions
+  // (lib/reviewForms.js), once per chunk per recompute. A touch (before the first
+  // return) is a plain chunk return, which is what the rotation starts with.
+  // Every other piece prices a review at the chunk's effort, as before.
+  const reviewEffortCache = {};
+  const reviewEffortOf = (id) => {
+    const c = chunkById[id];
+    if (!reviewModelV2 || !c || c.kind !== "section") return c.effort;
+    if (!(id in reviewEffortCache)) reviewEffortCache[id] = nextReturnEffort(c, chunkSet, piece.progress);
+    return reviewEffortCache[id];
+  };
   const minutesFor = (d) => {
     const newMin = d.newChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
     const specialMin = d.specialChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
-    const reviewMin = d.reviewChunkIds.reduce((s, id) => s + chunkById[id].effort * EFFORT_TO_MIN, 0);
+    const reviewMin = d.reviewChunkIds.reduce((s, id) => s + reviewEffortOf(id) * EFFORT_TO_MIN, 0);
     return newMin + specialMin + reviewMin;
   };
   // Both close over `introductionTierById`, assigned a few lines below by
@@ -895,7 +910,12 @@ export function computeTimeline(piece, chunkSet, options = {}) {
   let orphanedTransitionIdx = 0;
 
   const transitionItems = [];
-  transitions.forEach((t) => {
+  // Pass 141: on review model 2 a transition and a combo are not tasks of their
+  // own. They get no introduction day, so the review loops below (which skip a
+  // chunk with no introducedDay) never place them either; a chunk's return takes
+  // their form instead (lib/reviewForms.js). Whatever progress they already hold
+  // is kept as history.
+  (reviewModelV2 ? [] : transitions).forEach((t) => {
     // Pass 91 (experimental v1) — a transition seams two flanking chunks
     // together, so it can't honestly be placed while either one is gated by
     // a focus spot — checked via troubleSpotGatedIds specifically, NOT via
@@ -928,7 +948,7 @@ export function computeTimeline(piece, chunkSet, options = {}) {
   });
 
   const comboItems = [];
-  combos.forEach((c, i) => {
+  (reviewModelV2 ? [] : combos).forEach((c, i) => {
     // Pass 91 (experimental v1) — same reasoning, and same troubleSpotGatedIds-
     // not-introducedDay guard, as the transitions loop just above. A combo
     // is anchored to a single hard chunk (linkedIds[0]), and that's exactly
@@ -1095,7 +1115,7 @@ export function computeTimeline(piece, chunkSet, options = {}) {
   const smoothableItems = [
     ...transitionItems.map((it) => ({ ...it, bucket: "special", priority: priorityOf(it.id), size: sizeOf(it.id) })),
     ...comboItems.map((it) => ({ ...it, bucket: "special", priority: priorityOf(it.id), size: sizeOf(it.id) })),
-    ...tier2Items.map((it) => ({ id: it.chunkId, day: it.day, minDay: it.minDay, bucket: "review", priority: priorityOf(it.chunkId), size: sizeOf(it.chunkId) })),
+    ...tier2Items.map((it) => ({ id: it.chunkId, day: it.day, minDay: it.minDay, bucket: "review", priority: priorityOf(it.chunkId), size: reviewEffortOf(it.chunkId) * EFFORT_TO_MIN })),
   ];
   smoothOverloadedDays({
     dayNumbers: learningDaysCalendar,
@@ -1125,11 +1145,14 @@ export function computeTimeline(piece, chunkSet, options = {}) {
   // third is measured against it.
   if (windowedReviews.length) {
     const practiceAhead = learningDaysCalendar.filter((d) => d >= asOfDay);
-    const sizeFor = (chunk) => chunk.effort * EFFORT_TO_MIN;
+    const sizeFor = (chunk) => reviewEffortOf(chunk.id) * EFFORT_TO_MIN;
     const baseLoad = (d) => minutesFor(days[d - 1]);
     const protectedMinutes = (d) => {
       const day = days[d - 1];
-      return [...day.newChunkIds, ...day.specialChunkIds, ...day.reviewChunkIds].reduce((sum, id) => sum + chunkById[id].effort * EFFORT_TO_MIN, 0);
+      return (
+        [...day.newChunkIds, ...day.specialChunkIds].reduce((sum, id) => sum + chunkById[id].effort * EFFORT_TO_MIN, 0) +
+        day.reviewChunkIds.reduce((sum, id) => sum + reviewEffortOf(id) * EFFORT_TO_MIN, 0)
+      );
     };
     const totalAhead = practiceAhead.reduce((sum, d) => sum + baseLoad(d), 0) + windowedReviews.reduce((sum, w) => sum + sizeFor(w.chunk), 0);
     const target = practiceAhead.length ? totalAhead / practiceAhead.length : 0;
@@ -1426,6 +1449,9 @@ export function computeScheduleStatus(piece, practiceChunks, timeline, currentDa
 // planRescheduleForPieces, which additionally check timeline.introducedDay
 // for that specific decision).
 export function computeRemainingConnectorIds(piece, chunkSet) {
+  // Pass 141: on review model 2 a transition or combo is not a task, so none
+  // is ever "remaining" (and no reschedule marker carries one).
+  if (isReviewModelV2(piece)) return [];
   const untouched = (x) => ((piece.progress[x.id] || {}).doneDays || []).length === 0;
   return [...chunkSet.transitions, ...chunkSet.combos].filter(untouched).map((x) => x.id);
 }
@@ -2106,6 +2132,10 @@ export function isPlanActuallyComplete(piece, chunkSet, timeline) {
   if (piece.markedLearnedElsewhere) return true;
   if (elapsedDay(piece) <= timeline.days.length) return false;
   if (piece.scheduleMode === "minutes") return isPieceLearned(piece, chunkSet);
+  // Pass 141: on review model 2 only the base practice chunks are tasks, so a
+  // transition or combo (no schedule, no progress of its own) cannot hold the
+  // plan open. Every other piece still counts them.
+  if (isReviewModelV2(piece)) return (chunkSet.practiceChunks || []).every((c) => (((piece.progress[c.id] || {}).doneDays) || []).length > 0);
   return (chunkSet.all || []).every((c) => (((piece.progress[c.id] || {}).doneDays) || []).length > 0);
 }
 

@@ -702,7 +702,12 @@ describe("[Pass 140] computeTimeline places a windowed review inside its window"
     const e = { ...p.progress[id] };
     delete e.dueByDate;
     const noWindow = { ...p, progress: { ...p.progress, [id]: e } };
-    assert.deepEqual(whereIs(computeTimeline(noWindow, generateAllChunks(noWindow), { asOfDay: 1 }), id), [3]);
+    // Placed by nextDueDate (plan day 3), not by a window. The existing smoothing pass
+    // may nudge a review up to two days later (Pass 90), and since Pass 141 there are no
+    // transitions or combos to share the load, so it can: day 3 to day 5 here.
+    const placed = whereIs(computeTimeline(noWindow, generateAllChunks(noWindow), { asOfDay: 1 }), id);
+    assert.equal(placed.length, 1);
+    assert.ok(placed[0] >= 3 && placed[0] <= 5, `placed on day ${placed[0]}`);
   });
 
   test("a rescheduled piece passes today's day into its remainder", () => {
@@ -889,15 +894,20 @@ describe("[Pass 140] whole plans, day by day through the real timeline", () => {
     assert.ok(cvNew < cvOld, `new ${cvNew.toFixed(3)} against today's ${cvOld.toFixed(3)}`);
   });
 
-  test("more chunks end the plan in Holding than on today's plan, and the total hours are about the same", () => {
+  test("more chunks end the plan in Holding than on today's plan, with far less total work (Pass 141: joins are returns, not tasks)", () => {
+    // Measured on the real code with the owner's join rule (2026-11-21: a join gives the
+    // visiting chunk and its neighbour half a pass each and moves nobody up; a combo is the
+    // chunk's own turn and gives its neighbours half): Holding 0.90 on average and 0.72 in
+    // the worst plan, against today's 0.51; hours 0.44 of today's, because a transition and
+    // a combo no longer have their own introduction and their own ladder. Before Pass 141
+    // (joins still tasks) these read 0.98, 0.84 and 1.01.
     const holdNew = mean(results.map((r) => r.next.holdingShare));
     const holdOld = mean(results.map((r) => r.old.holdingShare));
     assert.ok(holdNew > holdOld, `Holding share ${holdNew.toFixed(2)} against ${holdOld.toFixed(2)}`);
-    assert.ok(holdNew >= 0.95, `Holding share ${holdNew.toFixed(2)}`);
-    // The worst plan of the 48 still gets most chunks there.
-    assert.ok(Math.min(...results.map((r) => r.next.holdingShare)) >= 0.8);
+    assert.ok(holdNew >= 0.85, `Holding share ${holdNew.toFixed(2)}`);
+    assert.ok(Math.min(...results.map((r) => r.next.holdingShare)) >= 0.65);
     const hours = mean(results.map((r) => r.next.hours)) / mean(results.map((r) => r.old.hours));
-    assert.ok(hours > 0.85 && hours < 1.15, `hours ratio ${hours.toFixed(2)}`);
+    assert.ok(hours > 0.3 && hours < 0.7, `hours ratio ${hours.toFixed(2)}`);
   });
 
   test("the plan never asks for more than one session of a chunk on one day", () => {

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { ChecklistItem } from "./ChecklistItem";
 import { NumberInput } from "../../NumberInput";
-import { formatMinutes, formatDuration } from "../../../lib/utils";
+import { formatMinutes, formatDuration, addDaysISO } from "../../../lib/utils";
 import { elapsedSeconds } from "../../../lib/plannedMinutes";
-import { classifyDayEmptyState, movedIdsForDay } from "../../../lib/scheduling";
+import { classifyDayEmptyState, movedIdsForDay, isReviewModelV2 } from "../../../lib/scheduling";
+import { nextReviewForm, isReturnDue } from "../../../lib/reviewForms";
 import { findHistoricalItemsForDay } from "../../../lib/history";
 
 // Consolidation-day logging: stop count replaces the old bare "mark
@@ -223,6 +224,23 @@ export function DayChecklist({
   const movedIds = movedIdsForDay(day, piece, chunkById);
   const visibleItems = items.filter(({ id }) => !movedIds.has(id));
 
+  // Pass 141 (review model 2): a review that is a RETURN (on or after its window's
+  // earliest day; the next-day touch sits before it) takes a form: the chunk, a
+  // join with a neighbour, or a combo. The form is read from what was logged
+  // (lib/reviewForms.js), never stored. Every other card gets none.
+  const formSet = isReviewModelV2(piece)
+    ? {
+        practiceChunks: chunks.filter((c) => c.kind === "section"),
+        transitions: chunks.filter((c) => c.kind === "transition"),
+        combos: chunks.filter((c) => c.kind === "combo"),
+      }
+    : null;
+  const cardDate = piece.startDate ? addDaysISO(piece.startDate, day.dayNumber - 1) : null;
+  const returnFormFor = (id, role) =>
+    formSet && role === "review" && chunkById[id].kind === "section" && isReturnDue(piece.progress[id], cardDate)
+      ? nextReviewForm(chunkById[id], formSet, piece.progress)
+      : undefined;
+
   return (
     <div className="panel">
       <h3>Day {day.dayNumber}: {formatMinutes(day.minutes)} planned</h3>
@@ -240,6 +258,7 @@ export function DayChecklist({
             onDiscardProvisionalSession={onDiscardProvisionalSession}
             onSetMemoryAnchor={onSetMemoryAnchor}
             onAddFocusSpot={onAddFocusSpot}
+            returnForm={returnFormFor(id, role)}
           />
         ))}
         {historicalItems.map(({ chunk, nextOccurrenceDay }) => (

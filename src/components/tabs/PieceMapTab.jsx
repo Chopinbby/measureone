@@ -14,7 +14,8 @@ import {
   hasClimbingTempo,
 } from "../../lib/confidence";
 import { simulateTempoConvergence, tempoConvergenceExceedsWarning, TEMPO_CONVERGENCE_WARNING_DAYS } from "../../lib/ladder";
-import { passesNeededByStageFor, reviewWindowContextFor, ladderStatusFor } from "../../lib/scheduling";
+import { passesNeededByStageFor, reviewWindowContextFor, ladderStatusFor, isReviewModelV2 } from "../../lib/scheduling";
+import { nextReviewForm } from "../../lib/reviewForms";
 import { isInRevival } from "../../lib/revival";
 
 // Run-through flag cycle (Repertoire-Lifecycle.md's "Post-run-through
@@ -159,7 +160,36 @@ export function PieceMapTab({
   // one — so following a related-chunk link to a transition's or combo's
   // own detail view shows its related chunks in turn (including the base
   // chunk(s) it touches), rather than a one-way dead end.
-  const relatedChunks = selectedChunk ? findRelatedChunks(selectedChunk, chunks) : [];
+  // Pass 141: on review model 2 a transition or combo is not a task (a chunk's
+  // return takes its form), so it is not offered as a place to go: only the base
+  // chunks it touches are. Progress it still holds from before the switch is kept
+  // as history and is no longer reachable from here.
+  const modelTwo = isReviewModelV2(piece);
+  const relatedChunks = selectedChunk
+    ? findRelatedChunks(selectedChunk, chunks).filter((c) => !modelTwo || c.kind === "section")
+    : [];
+  // Pass 141: what this chunk's next return will be (the chunk, a join with a
+  // neighbour, or a Focus block), once it has a ladder to return on.
+  const nextForm =
+    modelTwo && selectedChunk && selectedChunk.kind === "section" && selectedEntry.stage != null
+      ? nextReviewForm(
+          selectedChunk,
+          {
+            practiceChunks: chunks.filter((c) => c.kind === "section"),
+            transitions: chunks.filter((c) => c.kind === "transition"),
+            combos: chunks.filter((c) => c.kind === "combo"),
+          },
+          piece.progress
+        )
+      : null;
+  const nextFormLine =
+    nextForm && nextForm.form === "join"
+      ? `Next review: a join, ${formatRange(nextForm.formChunk.start, nextForm.formChunk.end)}`
+      : nextForm && nextForm.form === "combo"
+        ? `Next review: a Focus block, ${formatRange(nextForm.formChunk.start, nextForm.formChunk.end)}`
+        : nextForm
+          ? "Next review: this chunk"
+          : null;
   const relatedChunkLabel = (c) => (c.kind === "section" ? "Chunk" : ROLE_LABEL[c.kind] || c.kind);
 
   // Pass 96 — only a base practice chunk can carry focus spots (transitions
@@ -268,6 +298,8 @@ export function PieceMapTab({
             </div>
             <div className="modal-body">
               {detailStats}
+
+              {nextFormLine && <p className="tip-line" data-testid="next-review-form">{nextFormLine}</p>}
 
               {(relatedChunks.length > 0 || focusSpots.length > 0) && (
                 <div className="related-focus-row">

@@ -1411,10 +1411,11 @@ What the model changes, by the section it replaces:
   Stabilizing that are due for a visit. The rough and lost flags demote as today, and a flagged
   chunk is not credited.
 - **Not touched by the decided rules themselves:** the Cold-Start check, the tempo ratchet and
-  how Revival judges a chunk. **One consequence to know about:** Interleaved mode's eligibility and
-  Revival's reassessment walk read transitions and combos, which stop having their own progress, so
-  Pass 141 has to check and change those readers (it lists them, with `isPlanActuallyComplete`,
-  the reschedule estimates and Master Agenda).
+  how Revival judges a chunk. **One consequence, handled in Pass 141 (built 2026-11-21):** transitions and
+  combos stop having their own schedule and progress on a piece on this model, so every reader of them
+  was checked; the decisions are listed in
+  [Algorithms.md](Algorithms.md#review-model-v2-planned), under "One consequence". Revival's own plan still
+  lists transitions for practice (it has no ladder), on purpose.
 
 Questions the decided rules leave open are listed in
 [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16) and at the end of its

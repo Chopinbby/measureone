@@ -1290,6 +1290,14 @@ and the owner's computer and phone checks passed; it was found only when the cha
 Before writing "X works even if Y breaks", list what has to run for X to exist at all; if Y is on that list, the claim is false.
 If the failure case matters, the fix is something outside Y (here a plain link in `index.html`, logged as open, not built).
 
+## A new filter on a shared function breaks every caller that hands it a thinner argument than the one you tested
+
+Pass 141 made `computeDueReviews` read `chunkSet.practiceChunks` for a piece on the new review plan. Every test, and the whole-plan simulation, passed the full set
+`generateAllChunks` returns, so everything was green. Daily Practice builds its own `{ all: chunks }` and Week view a `chunkSetShim` of the same shape, so on a real new-plan piece
+the screen said "Nothing due today" with three reviews overdue. An independent review found it by driving a finished-plan piece in the browser, not by reading the diff. When you change what a
+function reads from an argument, `grep` every caller and look at what each one actually builds and passes (not what a test passes); fix it in the callee when several callers are involved
+(`completeChunkSet`), and add a test that calls it exactly the way each caller does, then break the fix on purpose. See [Decisions.md](Decisions.md#review-model-pass-141-build-2026-11-21).
+
 ## When you're not sure
 
 If a request seems to conflict with something documented here (a principle,

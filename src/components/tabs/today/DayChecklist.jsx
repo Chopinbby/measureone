@@ -19,7 +19,7 @@ const shortDate = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString
 // price and asks "How did that feel?" (1 to 10, optional), with the number from the
 // previous run-through beside it. A run-through is not a review for any chunk, and
 // nothing reads the number to decide anything (lib/runThrough.js).
-function RunThroughLogger({ piece, chunks, day, onLogRunThrough, onUnlogRunThrough }) {
+function RunThroughLogger({ piece, chunks, day, early = false, onLogRunThrough, onUnlogRunThrough }) {
   const entry = piece.progress["__consolidation__"] || {};
   const done = (entry.doneDays || []).includes(day);
   const sessionsToday = (entry.sessions || []).filter((s) => s.day === day);
@@ -54,7 +54,7 @@ function RunThroughLogger({ piece, chunks, day, onLogRunThrough, onUnlogRunThrou
     if (stopCount === "") return;
     // Read from the clock at the moment of the click, not from the last tick.
     const finalSeconds = timerRunning && timerStartRef.current ? elapsedSeconds(timerStartRef.current, Date.now(), Math.floor) : durationSeconds;
-    onLogRunThrough(day, Number(stopCount), finalSeconds, feel);
+    onLogRunThrough(day, Number(stopCount), finalSeconds, feel, early);
     setStopCount("");
     setFeel(null);
     setTimerRunning(false);
@@ -212,7 +212,7 @@ export function DayChecklist({
       <div style={{ borderBottom: "1px solid var(--line)", paddingBottom: 12, marginBottom: 12 }}>
         <h4 style={{ margin: "0 0 4px" }}>Whole-piece run-through</h4>
         <p className="wizard-hint">Play through the whole piece. It is practice, not a review: it does not change when any chunk comes back.</p>
-        <RunThroughLogger key={day.dayNumber} piece={piece} chunks={chunks} day={day.dayNumber} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
+        <RunThroughLogger key={day.dayNumber} early piece={piece} chunks={chunks} day={day.dayNumber} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
       </div>
     ) : null;
 

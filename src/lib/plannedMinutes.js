@@ -82,7 +82,12 @@ export function elapsedSeconds(timer, now, round = Math.round) {
 // ONLY when the person picked one (a whole number in range), so a run-through logged
 // without it has exactly the shape it always had. Nothing reads it to decide anything
 // (lib/runThrough.js says why); it is shown back as the previous run-through's number.
-export function buildRunThroughSession({ day, stopCount, loggedAt, loggedDate, durationSeconds, feel }) {
+//
+// Pass 142 follow-up: `early: true` marks a run-through logged on an early run-through day (not the
+// final day's), only when it is one, so every other session keeps its old shape. Revival's
+// stop-count trigger skips them (lib/revival.js): an early run-through with many stops is normal
+// for a piece that is not learned yet and says nothing about needing revival.
+export function buildRunThroughSession({ day, stopCount, loggedAt, loggedDate, durationSeconds, feel, early }) {
   const seconds = Math.round(Number(durationSeconds));
   return {
     day,
@@ -91,5 +96,6 @@ export function buildRunThroughSession({ day, stopCount, loggedAt, loggedDate, d
     loggedDate,
     ...(Number.isFinite(seconds) && seconds > 0 ? { durationSeconds: seconds } : {}),
     ...(isValidFeel(feel) ? { feel } : {}),
+    ...(early === true ? { early: true } : {}),
   };
 }

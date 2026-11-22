@@ -922,7 +922,8 @@ reasons:
   (`handleLogRunThrough`), never a chunk at all. Long-established; most code
   that walks `piece.progress` already special-cases it explicitly. Its
   `sessions[]` hold `{ day, stopCount, loggedAt, loggedDate }` plus, only when
-  they exist, `durationSeconds` (Pass 137) and **`feel`** (Pass 142: the "how did
+  they exist, `durationSeconds` (Pass 137) and **`feel`** and **`early`** (Pass 142; `early: true` only on a run-through logged on an
+  early run-through day, which revival's stop-count trigger skips) (`feel` is: the "how did
   that feel?" number, a whole number 1 to 10, saved only when one was picked;
   **nothing may read it to decide anything**, see
   [Algorithms.md](Algorithms.md#review-model-v2-planned) rule 5). An early

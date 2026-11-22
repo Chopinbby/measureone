@@ -217,7 +217,10 @@ export function computeRevivalTriggers(piece, chunkSet, planComplete) {
   const progress = piece.progress || {};
 
   const runThroughSessions = (progress["__consolidation__"] || {}).sessions || [];
-  if (runThroughSessions.some((s) => (s.stopCount || 0) > 5)) {
+  // Pass 142: an early run-through (`early: true`, logged mid-plan on the new review plan) is
+  // not counted: many stops is normal for a piece that is not learned yet. The final day's
+  // run-through, and any logged after the plan, count as they always did.
+  if (runThroughSessions.some((s) => !s.early && (s.stopCount || 0) > 5)) {
     reasons.push({ key: "stopCount", label: "A recent run-through needed more than 5 stops" });
   }
 

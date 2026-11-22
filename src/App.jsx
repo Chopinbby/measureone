@@ -3003,7 +3003,7 @@ export default function App() {
   // (doneDays append-if-missing, sessions appended and keyed by loggedAt,
   // multiple same-day attempts allowed) against the synthetic
   // "__consolidation__" progress key rather than a real chunk id.
-  const handleLogRunThrough = (day, stopCount, durationSeconds, feel) => {
+  const handleLogRunThrough = (day, stopCount, durationSeconds, feel, early) => {
     updatePiece((p) => {
       const progress = { ...p.progress };
       const prevEntry = progress["__consolidation__"] || { doneDays: [] };
@@ -3014,7 +3014,7 @@ export default function App() {
       // "how did that feel?" number, likewise only when one was picked. A run-through
       // is not a review for any chunk, so nothing else is written: no chunk's ladder
       // is touched here, and Undo (handleUnlogRunThrough) has nothing else to reverse.
-      const sessions = [...(prevEntry.sessions || []), buildRunThroughSession({ day, stopCount, loggedAt: Date.now(), loggedDate, durationSeconds, feel })];
+      const sessions = [...(prevEntry.sessions || []), buildRunThroughSession({ day, stopCount, loggedAt: Date.now(), loggedDate, durationSeconds, feel, early })];
       progress["__consolidation__"] = { ...prevEntry, doneDays, sessions };
       return { ...p, progress, lastLoggedAt: loggedDate };
     });

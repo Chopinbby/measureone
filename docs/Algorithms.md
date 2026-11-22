@@ -2560,10 +2560,15 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
      removes it with the run-through, and there is nothing else to undo (no chunk was touched).
    - **Not done, on purpose.** A run time per section and any tempo scaling beyond the simple ratio; pricing a
      section run-through (`sr_<id>`; left to Pass 145's learned estimates); the minutes-per-day day count
-     (`computeDaysNeededForMinutesPerDay`, which does not know run-throughs yet: Pass 143); `WeekView`,
-     `TimelineTab` and `OverviewTab` day cards include the run-through's minutes in a day's total but give it no
-     line of its own (Daily Practice and Master Agenda do); the "how did that feel?" number is not shown in
-     Progress's history.
+     (`computeDaysNeededForMinutesPerDay`, which does not know run-throughs yet: Pass 143); the "how did that feel?"
+     number is not shown in Progress's history. **Every day list names the run-through** (a "Run-through, whole
+     piece" chip on Daily Practice's card, Master Agenda, Week view and Timeline; "whole-piece run-through" in
+     Overview's week list), and a day with only a run-through is never described as "Nothing scheduled".
+   - **Revival's stop-count trigger skips early run-throughs.** An early run-through's session carries
+     `early: true` (only when it is one, set by the card, `buildRunThroughSession`); `computeRevivalTriggers` ignores
+     it. Many stops are normal for a piece that is not learned yet, and a run-through mid-plan says nothing about
+     needing revival. The final day's run-through and any logged after the plan count as before, and a session saved
+     before this has no mark and counts as before.
 6. **Review timing is a window**: an earliest day and a latest day, each a percentage of the
    plan's length held between day limits (rounded to whole days). Plans set by minutes per day
    use the 90-day figures.

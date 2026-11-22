@@ -4612,13 +4612,15 @@ no longer applies, and the run-throughs only add. **Owner: Pass 144's whole-mode
 that a run-through gives nothing back (`RUN_THROUGH_EVERY_PRACTICE_DAYS`, a guess, Research.md); a longer rhythm is a one-line change.
 
 **Open, found while building** (none blocks a later pass):
-- **`WeekView`, `TimelineTab` and `OverviewTab` day cards include a run-through's minutes in the day's total and show no line for it.** The pass card's Touches list
-  did not name them, so they were left alone; Daily Practice and Master Agenda have the line. Proposed: a one-line "Run-through" chip in each (the same
-  trap `mergeLiveDueReviews`' comment names: a total the person cannot account for). **Owner: none yet.**
+- **FIXED after review (Quincy Jones, 2026-11-22), on the owner's word: `WeekView`, `TimelineTab` and `OverviewTab` day cards showed a run-through's minutes with no line for it**
+  (Overview read "Nothing scheduled" next to 10m). Each now names it (a "Run-through, whole piece" chip; "whole-piece run-through" in Overview's week list), and a day with only a
+  run-through is no longer described as empty. These three files were outside the pass card's Touches list; she approved adding them.
 - **A past day that a reschedule swept shows "Tasks rescheduled" and not its run-through card** (`classifyDayEmptyState` says "rescheduled" when every task moved,
   and a run-through is not a task). A run-through logged on such a day stays in `__consolidation__` and in Progress's history.
-- **Revival's stop-count trigger reads every `__consolidation__` session**, early ones included. It is gated on the plan being complete (Pass 83), so an early
-  run-through cannot fire it mid-plan; once the plan is complete, a run-through with more than 5 stops counts as it always did.
+- **FIXED after review (Quincy Jones, 2026-11-22), on the owner's word: revival's stop-count trigger read every `__consolidation__` session**, so once a plan was complete an early
+  run-through with more than 5 stops (normal for a piece not yet learned) fired "A recent run-through needed more than 5 stops". An early run-through's session now carries
+  `early: true` and `computeRevivalTriggers` skips it; the final day's run-through and sessions saved before this (no mark) count as before. Chosen over "recent only" because
+  a mid-plan run-through is never a sign a piece needs revival. `lib/revival.js` was outside the pass card's Touches list; she approved it.
 - **A device on the previous version** drops `typicalRunSeconds` and the `feel` number when it saves a piece (an unknown key may or may not survive an older build's
   whitelisted writes); not tried here.
 - **The minutes-per-day day count (`computeDaysNeededForMinutesPerDay`) does not know about run-throughs** (Pass 143 owns it), so a minutes-mode plan on the new

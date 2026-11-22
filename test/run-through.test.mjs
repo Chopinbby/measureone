@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { generateAllChunks } from "../src/lib/chunking.js";
 import { computeTimeline, classifyDayCompletion, classifyDayEmptyState } from "../src/lib/scheduling.js";
 import { computeDueReviews } from "../src/lib/maintenance.js";
+import { computeRevivalTriggers } from "../src/lib/revival.js";
 import { buildRunThroughSession } from "../src/lib/plannedMinutes.js";
 import { mergeEditedPiece } from "../src/lib/pieceEdit.js";
 import { validateAndMigratePiece } from "../src/lib/storage.js";
@@ -298,5 +299,27 @@ describe("[Pass 142] the typical run time field is an ordinary piece setting", (
     assert.ok(r.recencySettled.some((x) => x.part === "typicalRunSeconds" && x.side === "remote"));
     const back = planPieceMerge({ local: { ...local, settingTimes: { typicalRunSeconds: 4000 } }, remote, base: piecePartFingerprints(base) });
     assert.equal(back.merged.typicalRunSeconds, 600, "and the other way round");
+  });
+});
+
+describe("[Pass 142 follow-up] an early run-through never fires revival's stop-count trigger", () => {
+  const triggerKeys = (piece) => computeRevivalTriggers(piece, generateAllChunks(piece), true).reasons.map((r) => r.key);
+
+  test("the session is marked early only when it is one", () => {
+    const args = { day: 20, stopCount: 8, loggedAt: 5, loggedDate: "2026-02-01" };
+    assert.deepEqual(buildRunThroughSession({ ...args, early: true }), { ...args, early: true });
+    assert.deepEqual(buildRunThroughSession({ ...args, early: false }), { ...args });
+    assert.deepEqual(buildRunThroughSession(args), { ...args }, "the final day's run-through keeps its old shape");
+  });
+
+  test("more than 5 stops on an early run-through does not fire it; on the final day's it still does", () => {
+    const piece = modelTwo();
+    assert.deepEqual(triggerKeys(withRunThroughs(piece, [sess(20, { stopCount: 9, early: true })])), []);
+    assert.deepEqual(triggerKeys(withRunThroughs(piece, [sess(20, { stopCount: 9, early: true }), sess(59, { stopCount: 9 })])), ["stopCount"]);
+    assert.deepEqual(triggerKeys(withRunThroughs(piece, [sess(59, { stopCount: 5 })])), [], "5 stops is still fine");
+  });
+
+  test("sessions saved before this (no mark) count as they always did", () => {
+    assert.deepEqual(triggerKeys(withRunThroughs(makePiece({ N: 100, mix: BALANCED, D: 60 }), [sess(20, { stopCount: 9 })])), ["stopCount"]);
   });
 });

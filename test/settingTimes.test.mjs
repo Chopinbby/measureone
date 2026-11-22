@@ -29,6 +29,8 @@ describe("which settings get a dated note (the list the owner approved, 2026-10-
     const expected = [
       "name", "composer", "workName", "notes", "status", "markedLearnedElsewhere", "targetBPM", "homeKey", "manualOverallConfidence",
       "lastPlayedDate", "startDate", "scheduleMode", "targetDate", "minutesPerDay", "practiceDaysPerWeek", "troubleSpotsEnabled", "troubleSpotDefaultMinutes",
+      // Pass 142 (the owner's go-ahead, 2026-11-22, on the "most recent change wins" pick): one number, like targetBPM.
+      "typicalRunSeconds",
     ];
     assert.deepEqual([...RECENCY_FIELDS].sort(), [...expected].sort());
     // still asked in Review: collections and whole shapes

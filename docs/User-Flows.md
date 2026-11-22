@@ -52,7 +52,9 @@ total measures blocks saving there too, not just at setup time; see
 
 **Since Pass 24, step 1 also carries four optional extras that don't gate
 advancing past it:** target tempo (BPM) is now a `BasicsFields` field, so it
-moved here from the Timeline step; below it, three collapsible-by-scrolling
+moved here from the Timeline step (**since Pass 142 "Typical run time at target
+tempo", minutes and seconds, sits beside it: optional, used to plan the
+whole-piece run-throughs of a piece on the new review plan, and in Settings too**); below it, three collapsible-by-scrolling
 panels offer Tempo zones (`BpmZonesEditor`), Recordings (`RecordingsEditor`),
 and Documents (`DocumentsEditor`) — the same components Settings uses,
 rendered directly in `Wizard.jsx` rather than folded into `BasicsFields`
@@ -167,7 +169,16 @@ header, before the piece's own tasks — in the revival view too.
    quick-tap options, or Skip) that feeds Progress's new "Overall
    confidence" stat — see flow 3 below.
 8. `ReassessPanel` is available for re-rating difficulty on today's measure
-   ranges after practicing them — see flow 5.
+   ranges after practicing them — see flow 5. **Since Pass 142, on a piece on
+   the new review plan,** some practice days (every 3 practice days once the last
+   chunk has been learned) carry a "Whole-piece run-through" card at the top of the
+   day, above that day's other work: a planned time ("about 8 min at your current
+   tempo", or "a guess" until the piece has a typical run time or two timed
+   run-throughs), a timer, "Times stopped", and "How did that feel?" with the
+   numbers 1 to 10 (optional; "Last run-through: 7 (Nov 18)" shows the previous
+   one's number). It is practice, not a review: logging it changes when no chunk
+   comes back, and skipping it is never "behind". The final day's run-through is
+   the same card on a day of its own.
 9. **Since Pass 97**, right below it, a "Split a chunk" panel appears when at
    least one chunk practiced today is 2+ measures — see flow 5a. It's absent
    otherwise (no empty message), and never shown in Interleaved mode.

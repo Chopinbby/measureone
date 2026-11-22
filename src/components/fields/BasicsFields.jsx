@@ -116,6 +116,36 @@ export function BasicsFields({ draft, set, lockWork = false, afterWorkMode = nul
         <span>Target tempo (BPM, optional)</span>
         <NumberInput value={draft.targetBPM || ""} min={20} max={400} onCommit={(n) => set({ targetBPM: n })} />
       </label>
+      {/* Pass 142 — how long one whole-piece run-through takes at the target tempo.
+          The app cannot work it out (it has no time signature), so it is entered
+          once, here. Optional: without it a run-through is priced at a guess, and
+          after two timed run-throughs their median replaces it. Stored as seconds
+          in one field (`typicalRunSeconds`), null when both boxes are 0. Shared by
+          the Wizard and Settings like the rest of this component. */}
+      <div className="field">
+        <span>Typical run time at target tempo (optional)</span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <NumberInput
+            value={Math.floor((Number(draft.typicalRunSeconds) || 0) / 60)}
+            min={0}
+            max={600}
+            style={{ width: 80 }}
+            onCommit={(m) => set({ typicalRunSeconds: m * 60 + ((Number(draft.typicalRunSeconds) || 0) % 60) || null })}
+          />
+          <span>min</span>
+          <NumberInput
+            value={(Number(draft.typicalRunSeconds) || 0) % 60}
+            min={0}
+            max={59}
+            style={{ width: 80 }}
+            onCommit={(s) => set({ typicalRunSeconds: Math.floor((Number(draft.typicalRunSeconds) || 0) / 60) * 60 + s || null })}
+          />
+          <span>sec</span>
+        </div>
+        <p className="wizard-hint" style={{ margin: "4px 0 0" }}>
+          Used to plan the whole-piece run-throughs on the new review plan. Leave it at 0 and the app guesses.
+        </p>
+      </div>
       {/* Pass 103 — the piece's keys. Links the piece to Technique practice
           by KEY, never by specific scale (docs/Technique-Practice.md,
           Decided 1), and by the key as written: a G♭ major piece tags G♭

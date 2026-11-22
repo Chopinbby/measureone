@@ -2941,6 +2941,10 @@ const FIELD_INFO = {
   customChunkSize: { label: "Chunk size", format: unitField("measure", "measures") },
   chunkSplitPoints: { label: "Split chunks", format: countField("split", "splits") },
   targetBPM: { label: "Target tempo", format: (v) => (Number.isFinite(v) ? `${v} bpm` : null) },
+  typicalRunSeconds: {
+    label: "Typical run time",
+    format: (v) => (Number.isFinite(v) && v > 0 ? `${Math.floor(v / 60)} min ${v % 60} sec` : null),
+  },
   homeKey: { label: "Home key", format: describeKey },
   otherKeys: { label: "Other keys", format: (v) => (Array.isArray(v) ? (v.length ? v.map(describeKey).filter(Boolean).join(", ") : "none") : null) },
   bpmZones: { label: "Tempo zones", format: countField("zone", "zones") },

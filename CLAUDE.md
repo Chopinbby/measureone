@@ -501,6 +501,15 @@ chunking, scheduling, and confidence are actually computed, see
   Card wording comes from `ladderStatusFor` ("Ready to review", the latest day only in a tooltip, never "overdue" or "late").
   `PLACEMENT_NEAR_TIE_SHARE` (2) is a measured tuning number: 0 restores strictly-the-lightest-day.
   `test/review-sim-helper.mjs` mirrors `handleLogSession` for the whole-plan tests; change both together.
+- **A whole-piece run-through is not a review for any chunk, and its "how did that feel?" number is read by nothing (Pass 142, the owner's
+  word, 2026-11-22).** `handleLogRunThrough` writes only to `progress["__consolidation__"]` (the day, the stops, the clock times, `durationSeconds`,
+  `feel`): never a chunk's ladder, window or sessions, and Undo has nothing else to reverse. Do not add credit back, and do not read `feel` in any
+  schedule, price, ladder, confidence or revival path (`test/run-through.test.mjs` fails if the plan changes with it). `feel` is saved only when picked
+  (`buildRunThroughSession`), so a run-through logged without one has the shape it always had. **An early run-through is `runThroughMinutes` on an
+  ordinary `learning` day, not a new day type** (`computeTimeline`, review model 2 only): it sits on top of the day's other work, is never owed
+  (so never "behind"), and a day's load must keep going through `minutesFor`. `piece.typicalRunSeconds` is never added by a load (an old piece has no
+  such key; adding a default would upload every piece again) and is on `RECENCY_FIELDS` and `EDIT_FORM_FIELDS`. The price is `runThroughPrice`
+  (`lib/runThrough.js`): median of two or more timed run-throughs, else the typical run time scaled by target over current tempo, else 8 minutes per 100 measures.
 
 ## Revival
 
@@ -1792,3 +1801,9 @@ silently.
   Holding 0.90 on average and 0.72 in the worst of 48 plans, hours 0.44 of today's. Built 2026-11-21, not yet merged.
   [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
   [`Decisions.md`](docs/Decisions.md#review-model-pass-141-build-2026-11-21)
+- **Pass 142** — early whole-piece run-throughs for a piece on the new review plan, practice and not reviews (the owner took the credit out, 2026-11-22): one every 3
+  practice days from the day after the last chunk is introduced (`runThroughMinutes` on a learning day, never owed), the final day's run-through priced instead of billing
+  the daily budget, an optional "Typical run time at target tempo" piece field (`typicalRunSeconds`, in the wizard and Settings, settled by the most recent change), a price
+  (median of two or more timed run-throughs, else the field scaled by tempo, else a guess of 8 minutes per 100 measures), and an optional "How did that feel?" number from 1 to 10
+  with the previous run-through's number beside it (read by nothing). **Measured: about 2.5 minutes per practice day, 6% to 23% of a plan's time by plan length.** Built 2026-11-22,
+  not yet merged. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned), [`Decisions.md`](docs/Decisions.md#review-model-pass-142-build-2026-11-22)

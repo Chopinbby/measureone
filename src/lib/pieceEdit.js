@@ -37,6 +37,7 @@ export const EDIT_FORM_FIELDS = [
   "notes",
   "totalMeasures",
   "targetBPM",
+  "typicalRunSeconds",
   "homeKey",
   "otherKeys",
   // SectionsEditor / DifficultyEditor / RecurringEditor

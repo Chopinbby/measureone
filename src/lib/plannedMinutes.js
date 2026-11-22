@@ -1,4 +1,5 @@
 import { EFFORT_TO_MIN } from "./constants";
+import { isValidFeel } from "./runThrough";
 
 // Pass 137 — what a practice card says about time.
 //
@@ -76,7 +77,25 @@ export function elapsedSeconds(timer, now, round = Math.round) {
 // list). Time practiced totals (lib/utils.js sumPracticeSeconds) add every entry's
 // durationSeconds, so a run-through's time now joins them. Cold-Start sessions are a
 // separate key and are not touched.
-export function buildRunThroughSession({ day, stopCount, loggedAt, loggedDate, durationSeconds }) {
+//
+// Pass 142: `feel`, the "how did that feel?" number from 1 to 10, is saved the same way:
+// ONLY when the person picked one (a whole number in range), so a run-through logged
+// without it has exactly the shape it always had. Nothing reads it to decide anything
+// (lib/runThrough.js says why); it is shown back as the previous run-through's number.
+//
+// Pass 142 follow-up: `early: true` marks a run-through logged on an early run-through day (not the
+// final day's), only when it is one, so every other session keeps its old shape. Revival's
+// stop-count trigger skips them (lib/revival.js): an early run-through with many stops is normal
+// for a piece that is not learned yet and says nothing about needing revival.
+export function buildRunThroughSession({ day, stopCount, loggedAt, loggedDate, durationSeconds, feel, early }) {
   const seconds = Math.round(Number(durationSeconds));
-  return { day, stopCount, loggedAt, loggedDate, ...(Number.isFinite(seconds) && seconds > 0 ? { durationSeconds: seconds } : {}) };
+  return {
+    day,
+    stopCount,
+    loggedAt,
+    loggedDate,
+    ...(Number.isFinite(seconds) && seconds > 0 ? { durationSeconds: seconds } : {}),
+    ...(isValidFeel(feel) ? { feel } : {}),
+    ...(early === true ? { early: true } : {}),
+  };
 }

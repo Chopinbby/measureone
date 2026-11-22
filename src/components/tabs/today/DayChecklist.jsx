@@ -6,26 +6,39 @@ import { elapsedSeconds } from "../../../lib/plannedMinutes";
 import { classifyDayEmptyState, movedIdsForDay, isReviewModelV2 } from "../../../lib/scheduling";
 import { nextReviewForm, isReturnDue } from "../../../lib/reviewForms";
 import { findHistoricalItemsForDay } from "../../../lib/history";
+import { runThroughPrice, runThroughPriceText, previousFeel, FEEL_MIN, FEEL_MAX } from "../../../lib/runThrough";
 
-// Consolidation-day logging: stop count replaces the old bare "mark
-// complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through
-// logging"). Chunk-level rough/lost flagging for what caught during this
-// run-through happens separately, on the Piece Map.
-function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) {
+const FEEL_NUMBERS = Array.from({ length: FEEL_MAX - FEEL_MIN + 1 }, (_, i) => FEEL_MIN + i);
+const shortDate = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
+
+// Whole-piece run-through logging, shared by the final day's panel and, on the new review
+// plan, the early run-through on a practice day. Stop count replaces the old bare "mark
+// complete" checkbox (Repertoire-Lifecycle.md's "Post-run-through logging"). Chunk-level
+// rough/lost flagging for what caught during this run-through happens separately, on the
+// Piece Map. Pass 142: on the new review plan (and only there) the card also shows its
+// price and asks "How did that feel?" (1 to 10, optional), with the number from the
+// previous run-through beside it. A run-through is not a review for any chunk, and
+// nothing reads the number to decide anything (lib/runThrough.js).
+function RunThroughLogger({ piece, chunks, day, early = false, onLogRunThrough, onUnlogRunThrough }) {
   const entry = piece.progress["__consolidation__"] || {};
   const done = (entry.doneDays || []).includes(day);
   const sessionsToday = (entry.sessions || []).filter((s) => s.day === day);
   const lastSession = sessionsToday[sessionsToday.length - 1];
   const [stopCount, setStopCount] = useState("");
+  const [feel, setFeel] = useState(null);
+  const onNewPlan = isReviewModelV2(piece);
+  const price = onNewPlan ? runThroughPrice(piece, chunks) : null;
+  const previous = onNewPlan ? previousFeel(entry.sessions, day) : null;
 
   // Pass 137 — a timer for the whole-piece run-through, same shape as the
   // practice cards' (ChecklistItem.jsx, Pass 72): the running stretch remembers
   // the wall-clock moment it began and the seconds it already held, and every
   // reading is recomputed from the clock (lib/plannedMinutes.js elapsedSeconds),
   // so a backgrounded tab that skips ticks is still right when it comes back.
-  // The seconds are saved on the logged session beside the stop count. There is
-  // deliberately no "planned" figure on this card: today the schedule bills this
-  // day at the whole daily budget, a placeholder, not a price (Pass 142).
+  // The seconds are saved on the logged session beside the stop count. Pass 142:
+  // a piece on the new review plan shows what the run-through is priced at; a
+  // piece on today's plan still shows no figure (its final day bills the daily
+  // budget, a placeholder, not a price).
   const [timerRunning, setTimerRunning] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const timerStartRef = useRef(null);
@@ -41,23 +54,24 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
     if (stopCount === "") return;
     // Read from the clock at the moment of the click, not from the last tick.
     const finalSeconds = timerRunning && timerStartRef.current ? elapsedSeconds(timerStartRef.current, Date.now(), Math.floor) : durationSeconds;
-    onLogRunThrough(day, Number(stopCount), finalSeconds);
+    onLogRunThrough(day, Number(stopCount), finalSeconds, feel, early);
     setStopCount("");
+    setFeel(null);
     setTimerRunning(false);
     setDurationSeconds(0);
   };
 
   return (
-    <div className="panel">
-      <h3>Day {day}: Full run-through</h3>
-      <p className="wizard-hint">No new material today. Play through the whole piece and note where it still catches.</p>
+    <>
       {lastSession && (
         <p className="tip-line">
           Logged: stopped {lastSession.stopCount} time{lastSession.stopCount === 1 ? "" : "s"}
           {lastSession.durationSeconds ? ` in ${formatDuration(lastSession.durationSeconds)}` : ""}
+          {lastSession.feel ? `, felt ${lastSession.feel}/${FEEL_MAX}` : ""}
           {sessionsToday.length > 1 ? ` (attempt ${sessionsToday.length} today)` : ""}
         </p>
       )}
+      {price && <p className="tip-line">Planned: {runThroughPriceText(price)}</p>}
       <div className="timer-row">
         <button type="button" className={`timer-btn ${timerRunning ? "running" : ""}`} onClick={() => setTimerRunning((r) => !r)}>
           {timerRunning ? "Stop" : "Start"} timer
@@ -82,6 +96,29 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
           <NumberInput value={stopCount} min={0} onCommit={(n) => setStopCount(n)} placeholder="0" />
         </label>
       </div>
+      {onNewPlan && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, color: "var(--ink-soft)", fontWeight: 600, marginBottom: 4 }}>How did that feel? (optional)</div>
+          <div className="segmented" role="group" aria-label="How did that feel, from 1 to 10">
+            {FEEL_NUMBERS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={feel === n ? "active" : ""}
+                aria-pressed={feel === n}
+                style={{ padding: "6px 10px" }}
+                onClick={() => setFeel((f) => (f === n ? null : n))}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <p className="tip-line" style={{ marginTop: 4 }}>
+            1 is rough, 10 is great.
+            {previous ? ` Last run-through: ${previous.feel}${previous.loggedDate ? ` (${shortDate(previous.loggedDate)})` : ""}.` : ""}
+          </p>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
         <button className="primary-btn sm" disabled={stopCount === ""} onClick={submit}>
           {done ? "Log another run-through" : "Log run-through"}
@@ -95,6 +132,17 @@ function ConsolidationPanel({ piece, day, onLogRunThrough, onUnlogRunThrough }) 
       <p className="wizard-hint" style={{ marginTop: 10, marginBottom: 0 }}>
         Flag any chunk that caught on the <strong>Piece Map</strong> as rough or lost.
       </p>
+    </>
+  );
+}
+
+// The final day: a whole day given to one full run-through.
+function ConsolidationPanel({ piece, chunks, day, onLogRunThrough, onUnlogRunThrough }) {
+  return (
+    <div className="panel">
+      <h3>Day {day}: Full run-through</h3>
+      <p className="wizard-hint">No new material today. Play through the whole piece and note where it still catches.</p>
+      <RunThroughLogger key={day} piece={piece} chunks={chunks} day={day} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
     </div>
   );
 }
@@ -129,6 +177,7 @@ export function DayChecklist({
     return (
       <ConsolidationPanel
         piece={piece}
+        chunks={chunks}
         day={day.dayNumber}
         onLogRunThrough={onLogRunThrough}
         onUnlogRunThrough={onUnlogRunThrough}
@@ -154,6 +203,19 @@ export function DayChecklist({
   // by review staleness)" cases this component used to check separately.
   const emptyState = classifyDayEmptyState(day, piece, chunkById);
 
+  // Pass 142 (review model 2): an early whole-piece run-through sits on top of this
+  // day's other work. The day stays a learning day; `runThroughMinutes` marks it
+  // (lib/scheduling.js). It is practice, not a review: it never changes when any
+  // chunk comes back, and a day that holds only a run-through owes nothing else.
+  const runThroughBlock =
+    isReviewModelV2(piece) && day.runThroughMinutes ? (
+      <div style={{ borderBottom: "1px solid var(--line)", paddingBottom: 12, marginBottom: 12 }}>
+        <h4 style={{ margin: "0 0 4px" }}>Whole-piece run-through</h4>
+        <p className="wizard-hint">Play through the whole piece. It is practice, not a review: it does not change when any chunk comes back.</p>
+        <RunThroughLogger key={day.dayNumber} early piece={piece} chunks={chunks} day={day.dayNumber} onLogRunThrough={onLogRunThrough} onUnlogRunThrough={onUnlogRunThrough} />
+      </div>
+    ) : null;
+
   // A historical entry's role for tag/label purposes: a plain chunk
   // (kind "section") only ever shows up here for a completed REVIEW
   // occurrence that's since moved — its own introduction day never
@@ -165,8 +227,9 @@ export function DayChecklist({
     return (
       <div className="panel">
         <h3>Day {day.dayNumber}</h3>
+        {runThroughBlock}
         {historicalItems.length === 0 ? (
-          <p className="wizard-hint" style={{ margin: 0 }}>Nothing scheduled.</p>
+          runThroughBlock ? null : <p className="wizard-hint" style={{ margin: 0 }}>Nothing scheduled.</p>
         ) : (
           <div className="checklist">
             {historicalItems.map(({ chunk, nextOccurrenceDay }) => (
@@ -244,6 +307,7 @@ export function DayChecklist({
   return (
     <div className="panel">
       <h3>Day {day.dayNumber}: {formatMinutes(day.minutes)} planned</h3>
+      {runThroughBlock}
       <div className="checklist">
         {visibleItems.map(({ id, role }) => (
           <ChecklistItem

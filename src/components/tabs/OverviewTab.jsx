@@ -14,6 +14,7 @@ import {
   classifyDayCompletion,
   classifyDayEmptyState,
   movedIdsForDay,
+  isReviewModelV2,
   countBehindDays,
   computeAbandonedPlanReminder,
 } from "../../lib/scheduling";
@@ -273,6 +274,8 @@ export function OverviewTab({
               const parts = [];
               if (newMeasures > 0) parts.push(revivalActive ? `Revive ${newMeasures} measures` : `Learn ${newMeasures} new measures`);
               if (reviewMeasures > 0) parts.push(revivalActive ? `reconsolidate ${reviewMeasures} measures` : `review ${reviewMeasures} measures`);
+              // Pass 142: an early whole-piece run-through is time on the day, so it is named.
+              if (isReviewModelV2(piece) && d.runThroughMinutes > 0) parts.push("whole-piece run-through");
               if (parts.length) {
                 desc = parts.join(", ");
                 desc = desc[0].toUpperCase() + desc.slice(1);

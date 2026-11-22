@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDaysISO, todayISODate, formatRange, mergeRanges, formatMinutes, clamp } from "../../../lib/utils";
 import { totalDueMinutes, computeDueOnDate } from "../../../lib/maintenance";
-import { classifyDayEmptyState, movedIdsForDay } from "../../../lib/scheduling";
+import { classifyDayEmptyState, movedIdsForDay, isReviewModelV2 } from "../../../lib/scheduling";
 
 /* ------------------------------------------------------------------ */
 /*  Week view — 7 days at a glance, current day highlighted.           */
@@ -241,7 +241,14 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
               ) : emptyState === "rescheduled" ? (
                 <p className="day-card-note"><em>Tasks rescheduled</em></p>
               ) : emptyState === "empty" ? (
-                <p className="day-card-note">Nothing scheduled.</p>
+                isReviewModelV2(piece) && d.runThroughMinutes > 0 ? (
+                  <div className="day-card-group">
+                    <span className="day-card-tag special">Run-through</span>
+                    <span className="chip subtle">whole piece</span>
+                  </div>
+                ) : (
+                  <p className="day-card-note">Nothing scheduled.</p>
+                )
               ) : (
                 <>
                   {visibleNewIds.length > 0 && (
@@ -266,6 +273,12 @@ export function WeekView({ piece, chunks, timeline, currentDay, isRealToday, pas
                       {mergedRangesFor(visibleReviewIds).map((r) => (
                         <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
                       ))}
+                    </div>
+                  )}
+                  {isReviewModelV2(piece) && d.runThroughMinutes > 0 && (
+                    <div className="day-card-group">
+                      <span className="day-card-tag special">Run-through</span>
+                      <span className="chip subtle">whole piece</span>
                     </div>
                   )}
                 </>

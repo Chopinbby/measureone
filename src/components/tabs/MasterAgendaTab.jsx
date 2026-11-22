@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { RandomStartPanel, chunkEntry } from "./revival/RandomStartPanel";
 import { generateAllChunks } from "../../lib/chunking";
-import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, classifyDayEmptyState, movedIdsForDay } from "../../lib/scheduling";
+import { getEffectiveTimeline, withLiveReviewStatus, isPlanActuallyComplete, computeMinutesModeAutoExtend, countBehindDays, classifyDayEmptyState, movedIdsForDay, isReviewModelV2 } from "../../lib/scheduling";
 import { computeDueReviews, totalDueMinutes, mergeLiveDueReviews } from "../../lib/maintenance";
 import { todayISODate, addDaysISO, elapsedDay as computeElapsedDay, getCurrentDay, formatRange, mergeRanges, formatMinutes } from "../../lib/utils";
 import { isInRevival, computeRevivalPlan } from "../../lib/revival";
@@ -417,7 +417,15 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
       ) : emptyState === "rescheduled" ? (
         <p className="day-card-note"><em>Tasks rescheduled</em></p>
       ) : emptyState === "empty" ? (
-        <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>Nothing scheduled.</div>
+        // Pass 142: a day that holds only an early whole-piece run-through is not empty.
+        isReviewModelV2(piece) && day.runThroughMinutes > 0 ? (
+          <div className="day-card-group">
+            <span className="day-card-tag special">Run-through</span>
+            <span className="chip subtle">whole piece</span>
+          </div>
+        ) : (
+          <div style={{ fontSize: "13px", color: "var(--ink-soft)" }}>Nothing scheduled.</div>
+        )
       ) : (
         <>
           {newRanges.length > 0 && (
@@ -442,6 +450,13 @@ export function MasterAgendaTab({ pieces, onSelectPiece, onSelectPieceToday, onS
               {reviewRanges.map((r) => (
                 <span key={`review-${r.start}-${r.end}`} className="chip subtle">{formatRange(r.start, r.end)}</span>
               ))}
+            </div>
+          )}
+          {/* Pass 142: its minutes are in the day's total, so it gets a line here. */}
+          {isReviewModelV2(piece) && day.runThroughMinutes > 0 && (
+            <div className="day-card-group">
+              <span className="day-card-tag special">Run-through</span>
+              <span className="chip subtle">whole piece</span>
             </div>
           )}
         </>

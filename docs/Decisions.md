@@ -4104,7 +4104,8 @@ new pieces get the new one only when she says so.
   design conversation's arithmetic, not re-run): a 200-measure piece is 50 chunks, so
   chunk-by-chunk reviews at 30-day gaps are about 1.7 a day, about 10 minutes a day at a third of
   the app's price and 29 at full price. That is why a clean whole-piece run-through counting for
-  the chunks inside it matters (rule 5).
+  the chunks inside it matters (rule 5). **[Overturned 2026-11-22: a run-through counts for no chunk, so it
+  does not reduce this load. See "Review model, Pass 142 build".]**
 - **Why a window and not a day.** A fixed gap cannot give way to a heavy day. A window lets the
   placement put a review on a lighter day inside it and be forced only at its latest day.
   Ranges without that placement rule were worse than fixed gaps in the design conversation's
@@ -4125,7 +4126,9 @@ new pieces get the new one only when she says so.
 - **Why run-throughs start early.** A single final-day run-through was unintuitive to the owner;
   starting them when the last chunk is introduced (about halfway) and repeating every 3 practice
   days also gave the lowest load in the simulation and left the last week light. A clean one
-  moves the stable chunks inside it, at any time of day.
+  moves the stable chunks inside it, at any time of day. **[The last sentence was overturned 2026-11-22:
+  a run-through is not a review for any chunk. The early schedule stands. See "Review model, Pass 142
+  build".]**
 - **Why a third of each day is protected.** The problem it answers is the one the owner met:
   reviews of old material eating the time meant for new and newly learned material. At least a
   third of each day stays for new material and chunks that have not yet had their third review;
@@ -4284,7 +4287,8 @@ answer the four questions one by one, so any of them can be reversed):
 - *A non-latest session undone leaves `tier1Done` as it was* (the existing fallback removes only the record), so a touch whose
   session is undone that way still reads as touched. Same limit as every other ladder field.
 - *The alert inherits the plan's own estimate* (`EFFORT_TO_MIN`, hand-picked: Research.md), so it is only as good as the planned time.
-  **Owner: Pass 142** (a price for a section run-through, which `plannedMinutesFor` leaves `null`) and **Pass 145** (learned estimates).
+  **Owner: Pass 145** (learned estimates, and a price for a section run-through, which `plannedMinutesFor` leaves `null`; Pass 142 priced only the
+  whole-piece run-through and left this one).
 
 ### Review model, Pass 139 build (2026-11-17)
 
@@ -4328,7 +4332,7 @@ any can be reversed):
   it does have a rep requirement, a flat 2 clean reps in a row (Pass 27, `RUN_THROUGH_REQUIRED_REPS`). Its own `sr_` entry still runs
   today's ladder (a Full pass or Partial pass is recorded against it) and that state is read by nothing but the Cold-Start gate's "has a
   session". The whole-piece "Full run-through" has no reps at all (it logs a stop count and never reaches the ladder). Rule 5's "a clean
-  one counts as one pass" for those, built in Pass 142, will need a meaning for "clean" (no stops is the obvious one).
+  one counts as one pass" for those was never built: the owner took the credit out on 2026-11-22, so "clean" needs no meaning.
 - **A strong pass counts double only in Stabilizing and Settling.** In Holding the count drives how far the next gap grows
   (`intervalForStage`); doubling it would stretch the gaps before Pass 140 rebuilds them. A pass below the stage's tempo floor
   (Settling's 70%) still counts for nothing, strong or not.
@@ -4558,6 +4562,71 @@ card with the form's own price (25 min planned); logging it with 4 reps at 75 BP
 "Next review: this chunk" after the join and no longer listed joins under "Related chunks"; no console errors. **Not seen:** a Focus block card and a Partial pass on a join in the
 app (both unit-tested), Undo by a click (not reachable, above), Safari, a phone, a piece rescheduled on the new plan, a revival of a piece on the new plan, and her own pieces
 (none is on the new plan).
+
+### Review model, Pass 142 build (2026-11-22)
+
+**Built:** rule 5 of [Algorithms.md](Algorithms.md#review-model-v2-planned), for a piece on `reviewModel` 2 only: early whole-piece run-throughs, a
+"Typical run time at target tempo" field, a price for a run-through, and a "how did that feel?" number from 1 to 10. The rules and the files are in the
+"Built in Pass 142" paragraph under rule 5. A piece on today's plan is unchanged (the 14 recorded timelines of `test/review-windows.test.mjs` still match,
+and no day of such a piece carries a new key).
+
+**The owner's decision that changed the pass (2026-11-22, before the build): a run-through is not a review for any chunk.** The design had a clean run-through
+give one pass to every chunk past Stabilizing whose last visit was at least its stage's earliest gap ago, and restart that chunk's window; the pass card carried
+it and the plan summary of the same day repeated it. She said: "Don't have full piece runthroughs count towards reviews." It was replaced by a number she asked
+for ("add an inconsequential 'how did that feel?' with numbers 1-10, and if there was a previous runthrough, that runthrough's number"). **What this removed:**
+the credit step, the flag handler's clawback, the ladder and `maintenance.js` changes, and the two decisions about what "clean" means and whether a run-through can
+move a chunk up (both moot). **What it did not remove:** the early schedule, the typical run time field and the price.
+
+**Her go-ahead and picks (2026-11-22):** "go", on a plan that stated these defaults, which she did not change: the new field settles by the most recent change
+(`RECENCY_FIELDS`; she had said a new piece field is asked until she says otherwise, and this pick is her saying it for one field, like `targetBPM`); a section
+run-through's price is left to Pass 145; the first run-through is the practice day after the last introduction; one that would fall on the last practice day is
+dropped; it sits on top of that day's other work; "your current tempo" is the measure-weighted average of the chunks' tempos; the median of logged run-throughs is used
+as it is; the number is one per run-through, 1 to 10, with a "1 is rough, 10 is great" hint; Progress's history line is unchanged; a piece on today's plan gets no
+rating and no price on its final-day card.
+
+**Decisions made while building, none in the plan she approved** (each is easy to change; she should say if she disagrees):
+- **Not a new day type.** The pass card said "a new day type in `computeTimeline` (the consolidation day is the model)". It is a `runThroughMinutes` field on an
+  ordinary `learning` day instead, because the run-through sits on top of the day's other reviews, and a new type would have hidden every other task on the day
+  from every place that reads `type === "consolidation"` (seven files) and the many that read "learning". The final day is still the only `consolidation` day.
+- **Never owed, never behind.** `classifyDayCompletion` and the behind count read only the three id lists, so a skipped run-through can never make a day or a
+  piece "behind". Nothing was written for this: it is the shape, and a test pins it.
+- **Rounded to whole minutes, at least 1, in the plan.** A price that moved by seconds with every logged session would move the day's other work (the placement of
+  windowed reviews reads each day's load) for no reason.
+- **The price is read from progress, so the plan moves a little as tempos rise** (a typical run time is scaled by target tempo over current tempo, never below the
+  run time). Early on, before the chunks have tempos, it is the run time as it is.
+- **"Previous run-through" means the latest earlier plan day with a number**, and an unrated one is skipped (it says nothing about how it felt). A second attempt on
+  the same earlier day wins over the first.
+- **The rating is on the new plan only**, as the plan she approved said. Showing it on a piece on today's plan too is a one-line change (`onNewPlan` in
+  `RunThroughLogger`, `DayChecklist.jsx`).
+- **An existing test changed, for a stated reason:** `test/settingTimes.test.mjs` pins the exact list of settings the most recent change settles (her approved list);
+  `typicalRunSeconds` was added to it.
+
+**What it costs in time, measured on the real code (not a simulation of a learner: the plan as designed, every task listed, the guess price of 8 minutes per 100
+measures):** 16 plans (60, 100, 200 and 400 measures; 30, 45, 75 and 120 days; balanced difficulty; 7 practice days a week). Run-throughs per plan 5, 7 to 8, 12 to 13
+and 20 to 21 by plan length. **Time added: about 2.5 minutes per practice day on average, and it grows with the piece (0.8 to 0.9 for 60 measures, 1.3 to 1.4 for 100,
+2.5 to 2.7 for 200, 5.0 to 5.3 for 400), because the price is per measure. As a share of the plan's planned minutes: 6% to 7% at 30 days, 8% to 10% at 45, 13% to 16% at
+75 and 21% to 23% at 120, mean 12.7%.** Longer plans carry more of them because the back half of a new-plan piece is light and the run-throughs keep coming every 3
+practice days all the way to the end. The price is the guess; a real run time will change it. **This is the cost of taking the credit out**: the design's argument that a
+clean run-through would reduce the review load (the Holding maintenance estimate of about 10 minutes a day at a third of the app's price, 29 at full price, for a 200-measure piece)
+no longer applies, and the run-throughs only add. **Owner: Pass 144's whole-model check**, which should also look at whether every 3 practice days is the right rhythm now
+that a run-through gives nothing back (`RUN_THROUGH_EVERY_PRACTICE_DAYS`, a guess, Research.md); a longer rhythm is a one-line change.
+
+**Open, found while building** (none blocks a later pass):
+- **FIXED after review (Quincy Jones, 2026-11-22), on the owner's word: `WeekView`, `TimelineTab` and `OverviewTab` day cards showed a run-through's minutes with no line for it**
+  (Overview read "Nothing scheduled" next to 10m). Each now names it (a "Run-through, whole piece" chip; "whole-piece run-through" in Overview's week list), and a day with only a
+  run-through is no longer described as empty. These three files were outside the pass card's Touches list; she approved adding them.
+- **A past day that a reschedule swept shows "Tasks rescheduled" and not its run-through card** (`classifyDayEmptyState` says "rescheduled" when every task moved,
+  and a run-through is not a task). A run-through logged on such a day stays in `__consolidation__` and in Progress's history.
+- **FIXED after review (Quincy Jones, 2026-11-22), on the owner's word: revival's stop-count trigger read every `__consolidation__` session**, so once a plan was complete an early
+  run-through with more than 5 stops (normal for a piece not yet learned) fired "A recent run-through needed more than 5 stops". An early run-through's session now carries
+  `early: true` and `computeRevivalTriggers` skips it; the final day's run-through and sessions saved before this (no mark) count as before. Chosen over "recent only" because
+  a mid-plan run-through is never a sign a piece needs revival. `lib/revival.js` was outside the pass card's Touches list; she approved it.
+- **A device on the previous version** drops `typicalRunSeconds` and the `feel` number when it saves a piece (an unknown key may or may not survive an older build's
+  whitelisted writes); not tried here.
+- **The minutes-per-day day count (`computeDaysNeededForMinutesPerDay`) does not know about run-throughs** (Pass 143 owns it), so a minutes-mode plan on the new
+  plan can run a little over its daily budget on a run-through day.
+- **Wording is proposed:** "Whole-piece run-through", "Play through the whole piece. It is practice, not a review: it does not change when any chunk comes back.",
+  "How did that feel? (optional)", "1 is rough, 10 is great. Last run-through: 7 (Nov 18).", "Planned: about N min at your current tempo". She has not seen it on a real device.
 
 ## UX
 

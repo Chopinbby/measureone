@@ -14,6 +14,7 @@ import {
   MIN_MINUTES_PLAN_DAYS,
   modelTwoMinutesPlan,
   reconcileMinutesPlan,
+  pieceWithReviewModel,
   playMinutesPlan,
   planStructureOf,
   searchMinutesPlan,
@@ -307,5 +308,62 @@ describe("[Pass 143] where it is wired", () => {
     } finally {
       console.warn = warn;
     }
+  });
+});
+
+describe("[regression, Pass 143 review] switching the review plan re-derives a minutes piece's length", () => {
+  test("switching to the new plan gives the length a reload would give", () => {
+    const old = makePiece({ N: 60, mix: BAL, D: 30, scheduleMode: "minutes", minutesPerDay: 30 });
+    const settled = validateAndMigratePiece(clone(old));
+    assert.equal(settled.daysToLearn, computeDaysNeededForMinutesPerDay(generateAllChunks(settled), 30, 7), "today's plan: the earlier rule's count");
+    const switched = pieceWithReviewModel(settled, 2);
+    assert.equal(switched.reviewModel, 2);
+    assert.notEqual(switched.daysToLearn, settled.daysToLearn, "the length moves with the plan");
+    assert.equal(switched.daysToLearn, planOf(switched).days);
+    assert.equal(validateAndMigratePiece(clone(switched)).daysToLearn, switched.daysToLearn, "a reload agrees: nothing moves later");
+  });
+
+  test("and back again", () => {
+    const onNew = validateAndMigratePiece(clone(mk({ N: 60, mix: BAL, minutesPerDay: 30 })));
+    const back = pieceWithReviewModel(onNew, null);
+    assert.equal(back.reviewModel, null);
+    assert.equal(back.daysToLearn, computeDaysNeededForMinutesPerDay(generateAllChunks(back), 30, 7));
+    assert.equal(validateAndMigratePiece(clone(back)).daysToLearn, back.daysToLearn);
+  });
+
+  test("a piece planned by days gets the switch and nothing else", () => {
+    const piece = makePiece({ N: 60, mix: BAL, D: 40, scheduleMode: "days" });
+    const switched = pieceWithReviewModel(piece, 2);
+    assert.deepEqual(switched, { ...piece, reviewModel: 2 });
+    assert.deepEqual(pieceWithReviewModel(switched, null), { ...piece, reviewModel: null });
+  });
+
+  test("the reschedule floor still holds across a switch", () => {
+    const piece = mk({ N: 60, mix: BAL, minutesPerDay: 30 });
+    const base = planOf(piece).days;
+    const marked = { ...piece, daysToLearn: base + 20, rescheduleMarker: { asOfDay: 5, previous: null, movedIds: [] } };
+    assert.ok(pieceWithReviewModel(marked, 2).daysToLearn >= base + 20, "an extension is not shrunk by switching");
+  });
+
+  test("a failing simulation falls back and still switches the plan", () => {
+    const piece = makePiece({ N: 60, mix: BAL, D: 30, scheduleMode: "minutes", minutesPerDay: 30 });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const out = pieceWithReviewModel(piece, 2, () => {
+        throw new Error("boom");
+      });
+      assert.equal(out.reviewModel, 2);
+      assert.equal(out.daysToLearn, computeDaysNeededForMinutesPerDay(generateAllChunks(piece), 30, 7));
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("App.jsx's switch goes through pieceWithReviewModel, not a bare reviewModel write", () => {
+    const src = read("../src/App.jsx").replace(/\/\/.*$/gm, "");
+    const handler = src.slice(src.indexOf("const handleSetReviewModel"), src.indexOf("const handleUpdateRevival"));
+    assert.ok(/pieceWithReviewModel\(p, model\)/.test(handler));
+    assert.ok(!/reviewModel:/.test(handler), "no bare reviewModel write left in the handler");
   });
 });

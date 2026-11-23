@@ -154,7 +154,8 @@ chunking, scheduling, and confidence are actually computed, see
     (`lib/minutesPlan.js`), which hands a piece on today's plan (or planned by days) to
     this function untouched and, for a piece on review model 2, hands it a plan-forward
     day count as its second argument, so the floor still exists once. A new caller uses
-    `reconcileMinutesPlan`; a test fails if `storage.js` or `pieceMerge.js` calls this directly.
+    `reconcileMinutesPlan`; a test fails if `storage.js` or `pieceMerge.js` calls this directly. Switching a piece's review plan in
+    Settings goes through `pieceWithReviewModel` (same file), which re-derives a minutes piece's length at once.
   - **"The calendar ran out" is not the same question as "the plan is
     actually finished" (Pass 39).** Every surface that decides whether a
     piece has run past its plan — `TodayTab`'s `pastPlan`, `MasterAgendaTab`'s

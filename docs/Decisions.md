@@ -4661,11 +4661,19 @@ figure is left for Pass 144. The new file `src/lib/minutesPlan.js` was accepted 
 - **The learner is perfect and the tempo is constant** (no strong passes): the SHORTEST plan. Stated in the code and the docs.
 - **Strict average, no leeway.** The three seeded pieces (of nine) that did not fit were 2% to 44% over; a 10% leeway (the band the scheduler uses for
   a minutes plan) would turn the nearest into fits (100 measures at 30 minutes a day averaged 33 at six months). Hers to decide; see below.
-- **The cost:** 0.1 to 1.3 seconds the first time a model-2 minutes piece loads (60 to 400 measures), remembered per structure after.
+- **The cost:** 0.1 to 1.3 seconds the first time a model-2 minutes piece loads (60 to 400 measures), remembered per structure after. The pass's
+  review timed it again on a busy machine: 0.3 to 0.6 seconds at 48 to 100 measures and about 1 to 2 seconds at 400, once per structure and again
+  on each structure edit in Settings. It runs on the load path, so a first load of a big piece waits for it. **Not deferred** (keeping the stored
+  length until the search finishes would need an asynchronous load, which is a larger change); no model-2 minutes piece is real yet. Revisit if
+  one is slow on a real device.
 
 **Open, found while building** (none blocks a later pass):
-- **Switching a minutes piece to the new plan does not re-derive its length until the next load or Settings save** (`handleSetReviewModel`,
-  `App.jsx`, was outside the pass). One line: call `reconcileMinutesPlan` on the switched piece. The same applies in reverse.
+- **Fixed after the pass's review (2026-11-22): switching a minutes piece to the new plan, or back, now re-derives its length at once**
+  (`handleSetReviewModel` goes through `pieceWithReviewModel`, `lib/minutesPlan.js`; a piece planned by days gets the switch and nothing
+  else). It was a bare `reviewModel` write, so Settings showed the old length until the next load or save. This went into `App.jsx`, outside
+  the card's Touches, on the review's request; the logic is in `lib/` so six tests could pin it (the length after a switch equals what a reload
+  gives, both ways; the reschedule floor holds across a switch; the failing-simulation fallback; the handler must use the function), each
+  caught by a deliberate breakage.
 - **The days-mode "At least N min/day needed" figure still counts joins and is introduction only** (Pass 144). Real plans cost 2 to 4 times it.
 - **A longer typical run time shortens the plan** (60 measures at 60 minutes: 126 days, 105 with a 10-minute run, 80 with 30): the real
   placement fills toward the plan's average load, so heavier days bring reviews earlier. Real behavior of the placement, but odd to read.
@@ -4684,6 +4692,11 @@ figure is left for Pass 144. The new file `src/lib/minutesPlan.js` was accepted 
   current time estimates. The plan is set to 6 months, ending around May 23, and some days will run longer than 15m. If you want to have it down
   sooner, increase your daily practice estimate.", "More than 6 months needed at this pace, so the plan is set to 183 days, around May 23". Seen in a
   browser on a test piece (a throwaway address, not hers); she has not seen it on a real device.
+- **Found in the pass's independent review (2026-11-22, no P1).** Jitter, measured: a 100-measure piece learns inside a 117-day plan, not a
+  126-day one, and again at 135; one minute of budget moves the length by up to 10 days (budget 33: 182 days, 34: 172, 35: 164). Kept for Pass 144
+  together with the strict-or-10%-leeway question. **For her: 100 measures at 30 minutes a day now reads "will not fit in 6 months" (the earlier
+  rule said 75 days), and 100 measures at 45 reads about 110 days.** Not seen in a browser by the review: Settings (changing minutes per day,
+  the 6-month banner) and the reload-after-reschedule floor.
 
 ## UX
 

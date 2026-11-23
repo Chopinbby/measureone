@@ -296,3 +296,15 @@ export function reconcileMinutesPlan(piece, plan = modelTwoMinutesPlan) {
   }
   return reconcileMinutesPerDaySchedule(piece, days);
 }
+
+// Settings' "Update this piece's review plan" button and its way back
+// (App.jsx's handleSetReviewModel) go through this. Switching the plan changes
+// what a minutes-per-day piece's length should be (the earlier rule's count and the
+// plan-forward count differ), and a load re-derives it anyway, so without this the
+// piece showed the OLD length until the next load or Settings save (found in Pass
+// 143's review). A piece planned by days gets the switch and nothing else, exactly
+// as before. Never reads the clock or the piece's progress, like everything here.
+export function pieceWithReviewModel(piece, model, plan = modelTwoMinutesPlan) {
+  const switched = { ...piece, reviewModel: model === 2 ? 2 : null };
+  return switched.scheduleMode === "minutes" ? reconcileMinutesPlan(switched, plan) : switched;
+}

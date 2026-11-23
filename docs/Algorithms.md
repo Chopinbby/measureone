@@ -854,9 +854,10 @@ the six-month limit: a reschedule may push a plan past it on purpose.
   priced a return at a third. That is the evidence for the "light second half" question below; it was measured with the simulation
   above (a perfect learner at the app's price).
 - **Left out, on purpose.** The wizard's draft is on today's plan until Pass 144 decides the default, so the new count reaches only
-  a piece switched in Settings. `handleSetReviewModel` (`App.jsx`) writes `reviewModel` and nothing else, so a minutes piece
-  switched on keeps its old length until the next load or its next Settings save (a one-line `reconcileMinutesPlan` there would
-  fix it; `App.jsx` was outside the pass). The days-mode "At least N min/day needed" figure still counts joins and prices
+  a piece switched in Settings. `handleSetReviewModel` (`App.jsx`) goes through `pieceWithReviewModel` (`lib/minutesPlan.js`), which writes
+  `reviewModel` and, for a piece planned by minutes, re-derives its length for the plan it is now on (both ways; a piece planned by days gets the
+  switch and nothing else). It was a bare write until the pass's own review found a minutes piece kept its old length until the next load or
+  Settings save; a test pins that the length after a switch is the length a reload gives. The days-mode "At least N min/day needed" figure still counts joins and prices
   introductions only (Pass 144). A bigger typical run time SHORTENS a plan (60 measures at 60 minutes: 126 days with none, 105 with
   a 10-minute run, 80 with a 30-minute run): the placement fills toward the plan's average load, so heavier days bring reviews
   earlier; it is the real placement's behavior, not a fault of the count.

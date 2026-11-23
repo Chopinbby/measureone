@@ -1,6 +1,6 @@
 import { PIECE_KEY_PREFIX, ACTIVE_KEY } from "./constants";
 import { todayISODate, addDaysISO, parseMeasurePosition } from "./utils";
-import { reconcileMinutesPerDaySchedule } from "./scheduling";
+import { reconcileMinutesPlan } from "./minutesPlan";
 import { withDueByDate } from "./ladder";
 import { isInRevival } from "./revival";
 import { generatePracticeChunks, reassociateTroubleSpots, validSplitPoints } from "./chunking";
@@ -493,7 +493,10 @@ export function validateAndMigratePiece(piece) {
   // this can't just live in the Wizard/Settings UI. Runs on every load, not
   // just once, since editing difficulty/measures/recurring material via
   // Settings legitimately changes how many days the same budget needs.
-  return reconcileMinutesPerDaySchedule(withReassociatedSpots);
+  // Pass 143: reconcileMinutesPlan, not reconcileMinutesPerDaySchedule directly. It
+  // hands a piece on today's plan (or planned by days) to that function untouched,
+  // and gives a piece on review model 2 its plan-forward day count (lib/minutesPlan.js).
+  return reconcileMinutesPlan(withReassociatedSpots);
 }
 
 /* ------------------------------------------------------------------ */

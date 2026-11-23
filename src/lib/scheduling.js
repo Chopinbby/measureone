@@ -111,10 +111,19 @@ export function computeDaysNeededForMinutesPerDay(chunkSet, minutesPerDay, pract
 // storage.js's load path and from the import merge in App.jsx closes that
 // gap without duplicating the derivation itself. "days" scheduleMode is
 // left untouched here — daysToLearn is the fixed input in that mode.
-export function reconcileMinutesPerDaySchedule(piece) {
+//
+// Pass 143: `neededOverride` is the day count a caller already worked out. The ONLY
+// caller that passes one is lib/minutesPlan.js, for a piece on review model 2 (its
+// plan-forward count replaces the rule below, which assumes two reviews of each
+// chunk and counts joins and focus blocks as tasks). Left out, this is exactly what
+// it always was, so a piece on today's plan is unchanged. The reschedule-marker
+// floor below applies to either, so it lives in this one place.
+export function reconcileMinutesPerDaySchedule(piece, neededOverride = null) {
   if (piece.scheduleMode !== "minutes") return piece;
-  const chunkSet = generateAllChunks(piece);
-  const needed = computeDaysNeededForMinutesPerDay(chunkSet, piece.minutesPerDay, piece.practiceDaysPerWeek);
+  const needed =
+    neededOverride != null
+      ? neededOverride
+      : computeDaysNeededForMinutesPerDay(generateAllChunks(piece), piece.minutesPerDay, piece.practiceDaysPerWeek);
   // `needed` is a pure function of total effort and pace, computed as if
   // starting fresh today with zero progress — it has no notion of days
   // that already elapsed without practice. That's fine for a piece that

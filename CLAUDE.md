@@ -149,7 +149,12 @@ chunking, scheduling, and confidence are actually computed, see
     silently reverted on the next reload — found as a real bug (extension
     worked in-session, vanished on reload) before the floor existed. If you
     touch this function, keep the floor or the reschedule-extend feature
-    silently breaks again.
+    silently breaks again. **Since Pass 143 no load path calls it directly:**
+    `validateAndMigratePiece` and `planPieceMerge` call `reconcileMinutesPlan`
+    (`lib/minutesPlan.js`), which hands a piece on today's plan (or planned by days) to
+    this function untouched and, for a piece on review model 2, hands it a plan-forward
+    day count as its second argument, so the floor still exists once. A new caller uses
+    `reconcileMinutesPlan`; a test fails if `storage.js` or `pieceMerge.js` calls this directly.
   - **"The calendar ran out" is not the same question as "the plan is
     actually finished" (Pass 39).** Every surface that decides whether a
     piece has run past its plan — `TodayTab`'s `pastPlan`, `MasterAgendaTab`'s
@@ -426,7 +431,10 @@ chunking, scheduling, and confidence are actually computed, see
   EFFORT_TO_MIN`, for reviews as for new chunks), `computeDaysNeededForMinutesPerDay`
   (review padding `c.effort * REVIEW_TOUCHES_PER_ITEM`, which is 2) and
   `computeDueReviews`. Underestimating a hard chunk's review in the estimator risks a
-  `scheduleMode: "minutes"` plan not fitting its own daily budget.
+  `scheduleMode: "minutes"` plan not fitting its own daily budget. **A fourth reader since
+  Pass 143:** the minutes plan's simulated learner (`lib/minutesPlan.js`) prices a task as
+  `effort * EFFORT_TO_MIN` too (a return at its form's measures, plus the early
+  run-through's minutes); a test compares it day by day with `test/review-sim-helper.mjs`.
 - **`mergeLiveDueReviews` (`lib/maintenance.js`) skips consolidation ("full
   run-through") days itself** (`if (day.type === "consolidation") return day;`):
   neither `ConsolidationPanel` nor Master Agenda's card renders `reviewChunkIds` or
@@ -510,6 +518,18 @@ chunking, scheduling, and confidence are actually computed, see
   (so never "behind"), and a day's load must keep going through `minutesFor`. `piece.typicalRunSeconds` is never added by a load (an old piece has no
   such key; adding a default would upload every piece again) and is on `RECENCY_FIELDS` and `EDIT_FORM_FIELDS`. The price is `runThroughPrice`
   (`lib/runThrough.js`): median of two or more timed run-throughs, else the typical run time scaled by target over current tempo, else 8 minutes per 100 measures.
+
+- **A minutes plan on review model 2 is PLAYED FORWARD, never a formula, and the count never reads the clock or the piece's progress (Pass 143).**
+  `lib/minutesPlan.js` runs a simulated learner (every task done, every attempt a Full pass, constant tempo) through the real timeline, ladder
+  and due list and searches for the shortest plan whose average practice day, until every chunk is in Holding, is within the minutes per day;
+  the length is capped at 183 days (the owner's six months) and Settings alerts when it cannot fit. **It is a pure function of the piece's
+  structure** (`planStructureOf`: a whitelist, so a field not on it cannot move a length): `daysToLearn` is re-derived on every load, so a value
+  that read today's date, the start date, the logged practice or a reschedule marker would move every time the app opened (a test stubs the
+  date and swaps each). **A change to `handleLogSession`'s ladder steps is made in three places** (`App.jsx`, `test/review-sim-helper.mjs`
+  and `logFullPass` in this file); the drift test compares the last two. **The lengths follow the schedule's price** (`effort * EFFORT_TO_MIN`,
+  `runThroughPrice`), nothing else: Pass 145 is display only and does not lower them. Fitting is jittery in the plan's length near the shortest, so
+  never promise "every longer plan fits" or "the shortest ever" (a test pins what is promised). Never throw into a load: it falls back to the
+  earlier rule. Seeded report and measurements: [`Algorithms.md`](docs/Algorithms.md#minutes-plans-on-review-model-2-pass-143).
 
 ## Revival
 
@@ -1798,7 +1818,7 @@ silently.
   much of a chunk was played (the owner's picks, 2026-11-21): a join is half a pass for each of its two chunks and never a chunk's own turn; a combo
   is the chunk's own turn plus half a pass for each neighbour. `lib/reviewForms.js`; sessions carry `form`, `partnerIds`, `partnerCredits`; a card says
   "Today's review is a join: play mm. 23 to 26"; Piece Map says what the next review is. Re-measured on the real code: even load 0.385 (today's 0.466),
-  Holding 0.90 on average and 0.72 in the worst of 48 plans, hours 0.44 of today's. Built 2026-11-21, not yet merged.
+  Holding 0.90 on average and 0.72 in the worst of 48 plans, hours 0.44 of today's. Built 2026-11-21, **merged 2026-11-21 (PR #109, merge commit `de4661e`)**.
   [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned),
   [`Decisions.md`](docs/Decisions.md#review-model-pass-141-build-2026-11-21)
 - **Pass 142** — early whole-piece run-throughs for a piece on the new review plan, practice and not reviews (the owner took the credit out, 2026-11-22): one every 3
@@ -1806,4 +1826,10 @@ silently.
   the daily budget, an optional "Typical run time at target tempo" piece field (`typicalRunSeconds`, in the wizard and Settings, settled by the most recent change), a price
   (median of two or more timed run-throughs, else the field scaled by tempo, else a guess of 8 minutes per 100 measures), and an optional "How did that feel?" number from 1 to 10
   with the previous run-through's number beside it (read by nothing). **Measured: about 2.5 minutes per practice day, 6% to 23% of a plan's time by plan length.** Built 2026-11-22,
-  not yet merged. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned), [`Decisions.md`](docs/Decisions.md#review-model-pass-142-build-2026-11-22)
+  **merged 2026-11-22 (PR #110, merge commit `b4bfd30`)**. [`Algorithms.md`](docs/Algorithms.md#review-model-v2-planned), [`Decisions.md`](docs/Decisions.md#review-model-pass-142-build-2026-11-22)
+- **Pass 143** — the day count of a plan set by minutes per day, for a piece on the new review plan: the plan is played forward with a simulated learner (`lib/minutesPlan.js`, through the
+  real timeline, ladder and due list) and the shortest length whose average practice day, until every chunk is learned, fits the minutes per day is used; capped at six months (183 days, the
+  owner's limit) with a plain alert in Settings. **Measured, against the card's assumption: the earlier rule was too SHORT, not too long** (the same length at 30 and 60 minutes a day, a plan
+  far over its budget), so lengths are now longer (100 measures at 30 minutes a day does not fit in six months), and **the second half of a minutes plan is not light** (1.05 to 1.20 times the
+  first). The lengths follow the schedule's price only: Pass 145 (display only) does not lower them. A piece on today's plan is unchanged (44, 75 and 152 days, recorded). Built 2026-11-22,
+  not yet merged. [`Algorithms.md`](docs/Algorithms.md#minutes-plans-on-review-model-2-pass-143), [`Decisions.md`](docs/Decisions.md#review-model-pass-143-build-2026-11-22)

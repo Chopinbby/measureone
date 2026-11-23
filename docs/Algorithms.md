@@ -681,10 +681,11 @@ missed what was actually being asked.
 
 ## Deriving daysToLearn from minutesPerDay (scheduleMode: "minutes")
 
-> **Planned change (decided 2026-11-16, not built):** the derivation below assumes two reviews of
-> each chunk at full price. For a piece on [Review model v2](#review-model-v2-planned) that
-> overestimates, so Pass 143 replaces it with a calculation that follows the new ladder, on the
-> "over 90 days" row of the pass table and the 90-day windows. The reschedule-marker floor stays.
+> **Changed in Pass 143 (built 2026-11-22) for a piece on [Review model v2](#review-model-v2-planned):** the
+> derivation below is replaced by playing the plan forward ([Minutes plans on review model
+> 2](#minutes-plans-on-review-model-2-pass-143)), on the "over 90 days" row of the pass table and the 90-day windows, with a
+> six-month limit. The card assumed this derivation overestimates; measured, it does not. It is described below as it still
+> works for a piece on today's plan, which is unchanged, and the reschedule-marker floor is shared.
 
 `computeTimeline` treats `piece.daysToLearn` purely as an input — it never
 asks "is this actually enough days for this piece's effort at this pace,"
@@ -780,6 +781,85 @@ no-op whenever there's no active marker, or the marker's present but
 ordinary, non-extending reschedule path) — it only ever matters for a
 piece mid-extension. It also stops mattering the moment the piece is next
 saved from Settings, since that already clears `rescheduleMarker`.
+
+### Minutes plans on review model 2 (Pass 143)
+
+**Built 2026-11-22** (decided 2026-11-16; her go-ahead and her six-month limit, 2026-11-22). For a piece on
+[Review model v2](#review-model-v2-planned) planned by minutes per day, `daysToLearn` is **no longer** what the
+derivation above says. `reconcileMinutesPlan` (`lib/minutesPlan.js`) is the one function every load path calls
+(`validateAndMigratePiece` and `planPieceMerge`): a piece on today's plan, or planned by days, goes straight to
+`reconcileMinutesPerDaySchedule` untouched (recorded before the pass: 44, 75 and 152 days for 60, 100 and 200 measures at
+30 minutes a day, 7 days a week), and a piece on model 2 gets a plan-forward day count handed to that same function as its
+second argument, so **the reschedule-marker floor stays in one place** and applies to either. The marker's floor is not held to
+the six-month limit: a reschedule may push a plan past it on purpose.
+
+- **Why the earlier rule was replaced, measured (it was NOT "too long", as the card assumed).** Played forward with the real code, it
+  gave the SAME length at 30 and at 60 minutes a day (44 days for 60 measures: it counts every join and focus block as an item,
+  each costing more than the budget, so the budget never mattered), and a plan far heavier than its budget (100 measures, 30
+  minutes a day: 75 days, and a simulated learner averaged 52 minutes a day on the new plan, 125 on today's).
+- **The count is the plan, played forward.** `playMinutesPlan` runs a simulated learner through the REAL timeline, ladder,
+  windows, forms and due list (`getEffectiveTimeline`, `withLiveReviewStatus`, `computeDueReviews`, `mergeLiveDueReviews`,
+  `computeLadderAdvance`, `prepareReturn`): each practice day the learner does every task the app lists and logs each as a Full
+  pass, until every base chunk is in Holding (`isPieceLearned`). The due-list merge cannot be left out (a quarter of the days
+  differed without it). A plan with nothing logged shows no reviews at all, so it cannot be used. **The learner is simplified on
+  purpose:** every attempt a Full pass at a constant tempo, and no target tempo, so no strong passes. A real learner is slower, so
+  this is the SHORTEST the plan could be; when a real plan runs out before the piece is learned, the 14-day auto-extension
+  (unchanged) carries on.
+- **What "fits" means** (`fitsAt`): the piece is in Holding inside the plan, and the AVERAGE practice day (day 1 to the day the last
+  chunk reached Holding; rest days and the final run-through day are not practice days) is no more than the minutes per day. The
+  day's minutes are each task at `effort * EFFORT_TO_MIN` (a return at its form's own measures) plus the early run-through's
+  minutes (`day.runThroughMinutes`, Pass 142). Strict, not "within 10%": the three seeded pieces that did not fit were 2% to 44% over.
+  Maintenance after the piece is learned is shown as due reviews and does not set the length. **It is NOT a per-day cap:** one
+  Difficult chunk's first session is 30 minutes, so single days run over (2% to 72% of days over 110% of the budget in the seeded
+  pieces; the busiest day 75 to 287 minutes), exactly as the derivation above says for today's plan.
+- **The search** (`searchMinutesPlan`): a bisection between a week and six months, after trying the last few days of the range (so one
+  unlucky day cannot read as "does not fit"). **Whether a plan fits is jittery in its length** near the shortest the ladder can
+  finish (a 60-measure piece fit at 96 days and not at 99, 100, 101, 104, 105 ...: the last chunk reaches Holding a day after the
+  plan's end, then a day before), so the answer is "a length that fits and the day before does not", not "the shortest that ever
+  fits", and a few lengths above it may not fit. A weekly walk down from six months was tried and was no steadier as the budget
+  changed (22 budgets), so it was not kept.
+- **Six months is the limit (the owner's, 2026-11-22): `MAX_MINUTES_PLAN_DAYS`, 183.** A budget that cannot be met inside it gets 183
+  days and `fits: false`, and Settings (`ScheduleFields.jsx`) shows "This plan will not fit in 6 months at this pace" with the
+  length it set. For a piece on model 2 the earlier "over 3 months" note is replaced by this one (its plans normally run past three
+  months); a piece on today's plan keeps the three-month note exactly.
+- **It is a pure function of the piece's structure** (`planStructureOf`: measures, difficulty, chunking, recurring material and
+  splits, sections, practice days a week, the minutes per day, the typical run time, the ladder settings). It never reads the clock,
+  the start date, the progress or the reschedule marker (`daysToLearn` is re-derived on every load, so a value that depended on
+  today's date would move every time the app opened; tests stub the date and swap each of those). Remembered per structure (64
+  entries), because a search is about nine simulated plans: 0.1 to 1.3 seconds for 60 to 400 measures the first time, free after.
+  It never throws into a page load: any failure falls back to the earlier rule with a console warning.
+- **The length follows the schedule's price, nothing else.** The simulation prices a task as the timeline does, so a change to
+  `EFFORT_TO_MIN`, or to how a return or a run-through is priced, moves every length at the next load. **Pass 145 (learned time) is
+  display only and changes no plan, and Pass 148 lets a person's own pace into a plan only when they create or reschedule one, opt-in**:
+  neither lowers these lengths by itself. How much the price matters (measured before run-throughs were counted): with a return
+  at half or a third of today's price, 100 measures at 30 minutes a day go from about 220 days to about 90, and 200 measures at
+  45 minutes from "does not fit" to about 140 and 100. For 60 measures at any budget from 30 to 90 the length stays at 126: that is how
+  fast the ladder can bring every chunk to Holding, not the budget.
+- **The seeded report** (the card's check; balanced and mostly-easy pieces, 7 practice days a week unless noted; "earlier rule" is the
+  rule above; the second half is the later half of the practice days up to the day learned):
+
+  | Piece | Budget | Earlier rule | Now | Average day | Second half / first half |
+  |---|---|---|---|---|---|
+  | 60 measures | 30 | 44 | 126 | 23 | 1.07 |
+  | 60 measures | 60 | 44 | 126 | 23 | 1.07 |
+  | 100 measures | 60 | 75 | 89 | 49 | 1.20 |
+  | 100 mostly easy | 30 | 70 | 121 | 30 | 1.08 |
+  | 100 measures | 30 | 75 | 183, does not fit | 33 | 1.08 |
+  | 100 measures, 5 days a week | 45 | 105 | 183, does not fit | 46 | 1.05 |
+  | 200 mostly easy | 90 | 144 | 126 | 67 | 1.20 |
+  | 200 measures | 45 | 152 | 183, does not fit | 65 | 1.16 |
+  | 400 mostly easy | 120 | 202 | 153 | 120 | 1.20 |
+
+  **The second half of a minutes plan is NOT light** (1.05 to 1.20 times the first half), unlike the design simulation's 0.65, which
+  priced a return at a third. That is the evidence for the "light second half" question below; it was measured with the simulation
+  above (a perfect learner at the app's price).
+- **Left out, on purpose.** The wizard's draft is on today's plan until Pass 144 decides the default, so the new count reaches only
+  a piece switched in Settings. `handleSetReviewModel` (`App.jsx`) writes `reviewModel` and nothing else, so a minutes piece
+  switched on keeps its old length until the next load or its next Settings save (a one-line `reconcileMinutesPlan` there would
+  fix it; `App.jsx` was outside the pass). The days-mode "At least N min/day needed" figure still counts joins and prices
+  introductions only (Pass 144). A bigger typical run time SHORTENS a plan (60 measures at 60 minutes: 126 days with none, 105 with
+  a 10-minute run, 80 with a 30-minute run): the placement fills toward the plan's average load, so heavier days bring reviews
+  earlier; it is the real placement's behavior, not a fault of the count.
 
 ## Import merge
 
@@ -2329,8 +2409,9 @@ finished loses it, as the practice cards' always have.
 > real next-day touch, rule 9's timer alert and the "in a row" wording), **Pass 139** (rules 1 and 2:
 > the pass table, strong passes, the half-credit function and the per-piece override), **Pass 140**
 > (rules 6 to 8: review windows, placement on the lightest day, the protected third, the slip and worst-first
-> order), **Pass 141** (rule 4: transitions and combos as review forms) **and Pass 142** (rule 5: early
-> whole-piece run-throughs, **without the credit this rule first described**: see rule 5). This is
+> order), **Pass 141** (rule 4: transitions and combos as review forms), **Pass 142** (rule 5: early
+> whole-piece run-throughs, **without the credit this rule first described**: see rule 5) **and Pass 143** (the day count of a
+> plan set by minutes per day: [Minutes plans on review model 2](#minutes-plans-on-review-model-2-pass-143)). This is
 > the one place the rules are written out. The reasons, what was rejected and the simulation
 > that checked them are in
 > [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16); the hand-picked
@@ -2501,8 +2582,8 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
      one line: "Today's review is a join: play mm. 23–26 ..." or "Today's review is a Focus block: ..."; Piece Map's chunk
      detail says "Next review: a join, mm. 23–26", "a Focus block" or "this chunk". Wording proposed, to be confirmed.
    - **Not done, on purpose.** Revival keeps its own plan (`computeRevivalPlan` still lists transitions for practice;
-     it has no ladder); the wizard and Settings day estimate (`ScheduleFields`, `computeDaysNeededForMinutesPerDay`) still
-     counts transitions and combos (Pass 143 owns the minutes-mode day count); the Progress "Estimated vs. actual" panel
+     it has no ladder); the days-mode "min/day needed" figure in `ScheduleFields` still counts transitions and combos (Pass 144;
+     the minutes-mode day count was Pass 143's and is built: [Minutes plans on review model 2](#minutes-plans-on-review-model-2-pass-143)); the Progress "Estimated vs. actual" panel
      still lists a join's old history, and a join's time is logged under the visiting chunk against that chunk's estimate
      (Pass 145 learns time by form).
 5. **Whole-piece run-throughs start as soon as the last chunk is introduced** and repeat every
@@ -2560,7 +2641,7 @@ are the outcomes the code calls `pass`, `soft-miss` and `fail` (`SESSION_OUTCOME
      removes it with the run-through, and there is nothing else to undo (no chunk was touched).
    - **Not done, on purpose.** A run time per section and any tempo scaling beyond the simple ratio; pricing a
      section run-through (`sr_<id>`; left to Pass 145's learned estimates); the minutes-per-day day count
-     (`computeDaysNeededForMinutesPerDay`, which does not know run-throughs yet: Pass 143); the "how did that feel?"
+     (built in Pass 143, which counts a run-through's minutes: [Minutes plans on review model 2](#minutes-plans-on-review-model-2-pass-143)); the "how did that feel?"
      number is not shown in Progress's history. **Every day list names the run-through** (a "Run-through, whole
      piece" chip on Daily Practice's card, Master Agenda, Week view and Timeline; "whole-piece run-through" in
      Overview's week list), and a day with only a run-through is never described as "Nothing scheduled".
@@ -2749,7 +2830,7 @@ Piece Map's "Related chunks" drops joins and its chunk detail says what the next
 "Estimated vs. actual" panel is left as it is (history is kept; a join's time counts under the visiting chunk);
 Interleaved eligibility is base chunks only (`TodayTab`); the revival reassessment walk was already base chunks only
 and revival's own plan is untouched; `history.js` keeps joins' old sessions as history; `maintenance.js` lists base
-chunks only and prices by form; `ScheduleFields`' day estimate is left for Pass 143.
+chunks only and prices by form; `ScheduleFields`' minutes-mode day count is Pass 143's (built), and its days-mode "min/day needed" figure is left for Pass 144.
 
 **What builds each rule** (the backlog's pass numbers; each pass applies only to a piece on
 `reviewModel` 2 unless it says so): 137 shows a time estimate and a timer on every card
@@ -2757,8 +2838,8 @@ chunks only and prices by form; `ScheduleFields`' day estimate is left for Pass 
 alert (rules 3 and 9, and rule 10's switch); 139 (built) the pass table, strong pass, half credit and
 per-piece override (rules 1 and 2); 140 (built) the windows, placement, protected third, slip and worst-first
 order (rules 6 to 8); 141 (built) joins as forms (rule 4); 142 early run-throughs (rule 5), with a
-"typical run time at target tempo" piece field; 143 the minutes-mode day count (which today
-assumes two reviews of each chunk at full price: [above](#deriving-daystolearn-from-minutesperday-schedulemode-minutes));
+"typical run time at target tempo" piece field; 143 (built) the minutes-mode day count, played forward
+([Minutes plans on review model 2](#minutes-plans-on-review-model-2-pass-143));
 144 checks the whole model and decides, with the owner, the default for new pieces.
 
 **Questions the decided rules leave open** (a build pass must settle each with the owner, and
@@ -2778,8 +2859,10 @@ the simulation in Decisions.md is then re-run with the answer):
   protected third costs about 0.03 of evenness (0.407 with it, 0.380 without) and the slip rarely acts. Pass 144
   re-runs the 48-scenario grid once joins and run-throughs exist.
 - *A light second half.* All introductions finish by the plan's midpoint, so the back of a plan
-  is light. Spreading introductions later is untested and undecided (Pass 143, only if the owner
-  decides).
+  is light in the design simulation (0.65 of the first half, with a return priced at a third). **Measured in Pass 143 on the real
+  code at the app's own price, for plans set by minutes per day: not light** (the second half is 1.05 to 1.20 times the first, nine
+  seeded pieces). Spreading introductions later was not built and the evidence for it is gone for those plans; whether it matters for
+  a plan set by days is for Pass 144's grid.
 
 ## What's due — the live maintenance query
 

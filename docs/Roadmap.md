@@ -529,11 +529,11 @@ item 5 and [Decisions.md](Decisions.md#open-questions), "When two copies disagre
    3 tasks a day bothers real use (Decided 5); technique time in
    Progress / "time practiced" / the consistency heatmap; offering to add
    a missing key's scales. See [Technique-Practice.md](Technique-Practice.md#not-in-v1).
-8. **Review model overhaul (v2)** — decided 2026-11-16, **Passes 138 to 140 built** (the per-piece switch, the real next-day touch, the timer alert and the "in a row" wording; the pass table; review windows and placement), the rest **not built**: chunks earn their way up by
+8. **Review model overhaul (v2)** — decided 2026-11-16, **Passes 138 to 143 built** (the per-piece switch, the real next-day touch, the timer alert and the "in a row" wording; the pass table; review windows and placement; transitions and combos as forms; early whole-piece run-throughs; the day count of a plan set by minutes per day), the rest (Pass 144's whole-model check and default for new pieces) **not built**: chunks earn their way up by
    passes that depend on difficulty and plan length, reviews get a window and are placed on lighter
    days, transitions and combos become forms a chunk's review takes, whole-piece run-throughs start
    early, and a piece in progress keeps today's model until its owner switches it. Design only apart
-   from Passes 138 to 140 (built): [Algorithms.md](Algorithms.md#review-model-v2-planned),
+   from Passes 138 to 143 (built): [Algorithms.md](Algorithms.md#review-model-v2-planned),
    [Decisions.md](Decisions.md#review-model-overhaul-decided-2026-11-16). **To revisit (her word, 2026-11-20):** whether the
    protected third of each day is worth the evenness it costs (about 0.03), when the 48-plan grid is re-run in Pass 144
    ([Decisions.md](Decisions.md#review-model-pass-140-build-2026-11-19)).

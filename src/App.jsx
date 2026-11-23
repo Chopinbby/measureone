@@ -48,6 +48,7 @@ import {
   splitPointsAfterStructureEdit,
 } from "./lib/chunking";
 import { getEffectiveTimeline, withLiveReviewStatus, computeRescheduleRemainder, planRescheduleForPieces, findStuckBehindPieces, estimateRescheduleFit, computeMinutesModeAutoExtend, isPlanActuallyComplete, computeReschedulePastPlanExtension, insertSplitHalfIntoMarkerChain, tier1DoneAfterSession, ladderContextFor, isReviewModelV2 } from "./lib/scheduling";
+import { pieceWithReviewModel } from "./lib/minutesPlan";
 import { computeRevivalPlan, isInRevival } from "./lib/revival";
 import { computeLadderAdvance, applyRunThroughFlag, withDueByDate, dueBySnapshot, restoreDueByFromSnapshot } from "./lib/ladder";
 import { prepareReturn, contextForForm, reversePartnerCredits } from "./lib/reviewForms";
@@ -3967,11 +3968,13 @@ export default function App() {
   };
 
   // Pass 138 — the review plan switch (Settings, "Update this piece's review
-  // plan" and its way back). Writes piece.reviewModel and nothing else:
-  // logged practice is untouched, and no other field is derived from it.
-  // 2 = the updated plan, null = the earlier one.
+  // plan" and its way back). Writes piece.reviewModel; logged practice is
+  // untouched. 2 = the updated plan, null = the earlier one. Pass 143: a piece
+  // planned by minutes per day also gets its length re-derived for the plan it is
+  // now on (lib/minutesPlan.js), so Settings does not show the old length until
+  // the next load; a piece planned by days gets the switch and nothing else.
   const handleSetReviewModel = (model) => {
-    updatePiece((p) => ({ ...p, reviewModel: model === 2 ? 2 : null }));
+    updatePiece((p) => pieceWithReviewModel(p, model));
   };
 
   const handleUpdateRevival = (patch) => {

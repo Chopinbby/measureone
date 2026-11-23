@@ -1,7 +1,8 @@
 import { useMemo, useEffect } from "react";
 import { NumberInput } from "../NumberInput";
 import { autoChunkSize, generateAllChunks } from "../../lib/chunking";
-import { computeDaysNeededForMinutesPerDay } from "../../lib/scheduling";
+import { computeDaysNeededForMinutesPerDay, isReviewModelV2 } from "../../lib/scheduling";
+import { modelTwoMinutesPlan } from "../../lib/minutesPlan";
 import {
   EFFORT_TO_MIN,
   LIBERAL_FACTOR,
@@ -39,6 +40,21 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
 
   const startDate = draft.startDate || todayISODate();
 
+  // Pass 143: a piece on the updated review plan, planned by minutes per day, gets its
+  // length from playing the plan forward (lib/minutesPlan.js), not from the rule below,
+  // which assumes two reviews of each chunk. Remembered per structure, so re-reading it
+  // on every edit of an unrelated field costs nothing. null for every other piece (the
+  // wizard's draft is on today's plan until Pass 144 decides), and null if it could not
+  // be worked out, which falls back to the earlier rule.
+  const modelTwoPlan = useMemo(() => {
+    if (draft.scheduleMode !== "minutes" || !isReviewModelV2(draft)) return null;
+    try {
+      return modelTwoMinutesPlan(draft);
+    } catch (err) {
+      return null;
+    }
+  }, [draft]);
+
   useEffect(() => {
     if (draft.scheduleMode === "days") {
       const calendarDays = Math.max(1, daysBetweenInclusive(startDate, draft.targetDate) || 1);
@@ -49,11 +65,13 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
       if (calendarDays !== draft.daysToLearn) set({ daysToLearn: calendarDays });
       if (needed !== draft.minutesPerDay) set({ minutesPerDay: needed });
     } else {
-      const calendarDaysNeeded = computeDaysNeededForMinutesPerDay(chunkSet, draft.minutesPerDay, practiceDaysPerWeek);
+      const calendarDaysNeeded = modelTwoPlan
+        ? modelTwoPlan.days
+        : computeDaysNeededForMinutesPerDay(chunkSet, draft.minutesPerDay, practiceDaysPerWeek);
       if (calendarDaysNeeded !== draft.daysToLearn) set({ daysToLearn: calendarDaysNeeded });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.scheduleMode, startDate, draft.targetDate, draft.daysToLearn, draft.minutesPerDay, practiceDaysPerWeek, totalMinutesNeeded, chunkSet.all.length]);
+  }, [draft.scheduleMode, startDate, draft.targetDate, draft.daysToLearn, draft.minutesPerDay, practiceDaysPerWeek, totalMinutesNeeded, chunkSet.all.length, modelTwoPlan]);
 
   // Same underlying condition in both modes — this piece has more material
   // than fits comfortably — surfaced differently per mode since "fits
@@ -66,7 +84,11 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
   // there's no pace to overshoot — an unusually long resulting plan is the
   // analogous signal instead.
   const overloaded = draft.scheduleMode === "days" && draft.minutesPerDay > MAX_RECOMMENDED_MINUTES_PER_DAY;
-  const longPlan = draft.scheduleMode === "minutes" && (draft.daysToLearn || 0) > LONG_PLAN_DAYS_MINUTES_MODE;
+  // A piece on the updated plan is alerted only when its budget cannot be met inside
+  // six months (the owner's limit, 2026-11-22: lib/minutesPlan.js); its plans normally run
+  // past three months, so the three-month note would be on for nearly every one of them.
+  const overSixMonths = !!modelTwoPlan && !modelTwoPlan.fits;
+  const longPlan = draft.scheduleMode === "minutes" && (modelTwoPlan ? overSixMonths : (draft.daysToLearn || 0) > LONG_PLAN_DAYS_MINUTES_MODE);
   const estFinishDate = addDaysISO(startDate, Math.max(0, (draft.daysToLearn || 1) - 1));
   const estFinishLabel = new Date(`${estFinishDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const targetDateLabel = draft.targetDate
@@ -113,6 +135,17 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
                 in 🕶️
               </p>
             </>
+          ) : overSixMonths ? (
+            <>
+              <p className="plan-fit-banner-title">This plan will not fit in 6 months at this pace</p>
+              <p className="plan-fit-banner-sub">
+                At <strong className="mono">{formatMinutes(draft.minutesPerDay)}</strong>/day, this piece needs
+                more than 6 months at the app's current time estimates. The plan is set to 6 months, ending
+                around <strong className="mono">{estFinishLabel}</strong>, and some days will run longer than{" "}
+                <strong className="mono">{formatMinutes(draft.minutesPerDay)}</strong>. If you want to have it
+                down sooner, increase your daily practice estimate.
+              </p>
+            </>
           ) : (
             <>
               <p className="plan-fit-banner-title">This plan will take over 3 months to complete</p>
@@ -157,8 +190,18 @@ export function ScheduleFields({ draft, set, isRevival = false }) {
             <NumberInput value={draft.minutesPerDay} min={5} max={600} onCommit={(n) => set({ minutesPerDay: n })} />
           </label>
           <p className="derived-stat">
-            At least <strong className="mono">{draft.daysToLearn}</strong> days needed at this pace,
-            around <strong className="mono">{estFinishLabel}</strong>
+            {overSixMonths ? (
+              <>
+                More than 6 months needed at this pace, so the plan is set to{" "}
+                <strong className="mono">{draft.daysToLearn}</strong> days, around{" "}
+                <strong className="mono">{estFinishLabel}</strong>
+              </>
+            ) : (
+              <>
+                At least <strong className="mono">{draft.daysToLearn}</strong> days needed at this pace,
+                around <strong className="mono">{estFinishLabel}</strong>
+              </>
+            )}
           </p>
         </>
       )}

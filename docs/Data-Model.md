@@ -114,7 +114,11 @@ piece = {
   scheduleMode,          // 'days' | 'minutes' — which constraint the user fixed
   daysToLearn,           // number — total *calendar* days the plan spans (see
                          // practiceDaysPerWeek below; not every one of these is
-                         // necessarily a practice day)
+                         // necessarily a practice day). In 'minutes' scheduleMode
+                         // it is DERIVED on every load, never trusted as stored
+                         // (reconcileMinutesPlan, lib/minutesPlan.js: today's rule,
+                         // or for a piece on reviewModel 2 the plan played forward,
+                         // capped at 183 days; see Algorithms.md#minutes-plans-on-review-model-2-pass-143)
   minutesPerDay,         // number
   startDate,             // string ("YYYY-MM-DD") — day 1 of the plan; the anchor
                          // getCurrentDay uses to compute "what day is it in the

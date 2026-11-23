@@ -4227,7 +4227,8 @@ full pass and only the neighbour half. See the open questions below.
   back of a plan is light (the second half at 0.65 of the first half's load in the re-run). The
   owner has not decided whether to spread introductions later (about 65% of a minutes plan was
   suggested and is untested) or give the freed time to polish. **Owner: Pass 143**, not in that
-  pass unless she decides.
+  pass unless she decides. **Measured in Pass 143** (real code, the app's own price, a plan set by minutes per day): the second half is
+  not light (1.05 to 1.20 times the first); not built ([Pass 143 build](#review-model-pass-143-build-2026-11-22)).
 - *The Holding maximum is applied to the window* (the stricter reading, Pass 140's wording);
   Pass 136's card applied it to the gap.
 - *Whether the protected third, the slip of up to 2 extra intervals and the plan's own average
@@ -4436,7 +4437,7 @@ within 10% or 25% of the lightest day) all landed within 0.401 to 0.412, so the 
 **What this means for later passes:**
 - **Pass 141** (joins as forms): transitions and combos still have single dates and old gaps, and they are the part of the load the placement cannot move. When they
   stop being tasks, re-run the measurement (`test/review-windows.test.mjs`): the 0.41 here will move.
-- **Pass 142/143**: the "second half is light" structure is still there (variation by plan length rises from 0.36 at 30 days to 0.47 at 120); nothing here spreads
+- **Pass 142/143** (143 built 2026-11-22, and it measured the opposite for minutes plans: see [Pass 143 build](#review-model-pass-143-build-2026-11-22)): the "second half is light" structure is still there (variation by plan length rises from 0.36 at 30 days to 0.47 at 120); nothing here spreads
   introductions later.
 - **Pass 144**: re-run the 48-plan grid with joins and run-throughs; the harness is `test/review-sim-helper.mjs` and takes minutes of work to extend.
 - **Pass 149** ("ran long last time") goes between the tempo gap and the stage in `compareReviewPriority`.
@@ -4623,10 +4624,79 @@ that a run-through gives nothing back (`RUN_THROUGH_EVERY_PRACTICE_DAYS`, a gues
   a mid-plan run-through is never a sign a piece needs revival. `lib/revival.js` was outside the pass card's Touches list; she approved it.
 - **A device on the previous version** drops `typicalRunSeconds` and the `feel` number when it saves a piece (an unknown key may or may not survive an older build's
   whitelisted writes); not tried here.
-- **The minutes-per-day day count (`computeDaysNeededForMinutesPerDay`) does not know about run-throughs** (Pass 143 owns it), so a minutes-mode plan on the new
+- **The minutes-per-day day count (`computeDaysNeededForMinutesPerDay`) does not know about run-throughs** (Pass 143 owns it; **built in Pass 143**, which counts them: [Pass 143 build](#review-model-pass-143-build-2026-11-22)), so a minutes-mode plan on the new
   plan can run a little over its daily budget on a run-through day.
 - **Wording is proposed:** "Whole-piece run-through", "Play through the whole piece. It is practice, not a review: it does not change when any chunk comes back.",
   "How did that feel? (optional)", "1 is rough, 10 is great. Last run-through: 7 (Nov 18).", "Planned: about N min at your current tempo". She has not seen it on a real device.
+
+### Review model, Pass 143 build (2026-11-22)
+
+**Built:** the day count of a plan set by minutes per day, for a piece on `reviewModel` 2: the plan is played forward with a simulated
+learner and the shortest length that fits the budget is used, with a six-month limit and an alert. Rules, files and the seeded report:
+[Algorithms.md](Algorithms.md#minutes-plans-on-review-model-2-pass-143). A piece on today's plan is unchanged (44, 75 and 152 days
+recorded before the pass; a test).
+
+**The card's starting assumption was wrong, and it changed the pass.** The card (and Pass 136's note) said the earlier rule
+overestimates for the new plan, so a plan came out too long with a nearly empty second half. Played forward with the real code it is the
+opposite: the rule gave the same length at 30 and 60 minutes a day (it counts joins and focus blocks as items, each costing more than the
+budget) and a plan averaging 52 minutes a day on a 30-minute budget. The honest length at the app's own price is much longer (100 measures at
+30 minutes a day does not fit in six months). Presented to the owner with the numbers before building.
+
+**Her answers (2026-11-22).** (1) "use recommended as long as the length will go down after 145": the condition is not met by the roadmap
+(Pass 145 is display only and changes no plan; Pass 148 is opt-in at create or reschedule), so she was told, with how the length would move
+if the price of a return fell, and said "build it anyway". (2) "make 6 months the upper limit before showing an alert": built as a plan
+capped at 183 days with the alert, and the earlier 3-month note replaced by it for a piece on model 2 (my reading; she can say if she
+meant otherwise). Her picks 3 to 5 were not answered one by one and were taken as recommended: introductions are not spread later (the
+measured second half is not light), the stated margin is on the average (a per-day cap cannot hold), and the days-mode "min/day needed"
+figure is left for Pass 144. The new file `src/lib/minutesPlan.js` was accepted in the same message.
+
+**Decisions made while building, none in the plan she approved:**
+- **Playing forward, not a second formula** (the card's preference), and **bisection, not a weekly walk.** A walk down from six months was
+  built first to answer the jitter in "fits" (below); on 22 budgets it was no steadier and cost more simulations, so it was dropped. The
+  test of "a longer plan always fits" was written first and failed on the walk too: it cannot be promised.
+- **A new module, and `reconcileMinutesPerDaySchedule` takes an optional second argument** (the count to use). The simulation needs
+  `maintenance.js`, which imports `scheduling.js`, so it cannot live in `scheduling.js` without a circular import; the one-argument call is
+  byte-identical, so the floor exists once. **Two files outside the card's Touches list changed by one import line each**
+  (`storage.js`, `pieceMerge.js`: they call the new function); a test fails if either calls the old one directly.
+- **The learner is perfect and the tempo is constant** (no strong passes): the SHORTEST plan. Stated in the code and the docs.
+- **Strict average, no leeway.** The three seeded pieces (of nine) that did not fit were 2% to 44% over; a 10% leeway (the band the scheduler uses for
+  a minutes plan) would turn the nearest into fits (100 measures at 30 minutes a day averaged 33 at six months). Hers to decide; see below.
+- **The cost:** 0.1 to 1.3 seconds the first time a model-2 minutes piece loads (60 to 400 measures), remembered per structure after. The pass's
+  review timed it again on a busy machine: 0.3 to 0.6 seconds at 48 to 100 measures and about 1 to 2 seconds at 400, once per structure and again
+  on each structure edit in Settings. It runs on the load path, so a first load of a big piece waits for it. **Not deferred** (keeping the stored
+  length until the search finishes would need an asynchronous load, which is a larger change); no model-2 minutes piece is real yet. Revisit if
+  one is slow on a real device.
+
+**Open, found while building** (none blocks a later pass):
+- **Fixed after the pass's review (2026-11-22): switching a minutes piece to the new plan, or back, now re-derives its length at once**
+  (`handleSetReviewModel` goes through `pieceWithReviewModel`, `lib/minutesPlan.js`; a piece planned by days gets the switch and nothing
+  else). It was a bare `reviewModel` write, so Settings showed the old length until the next load or save. This went into `App.jsx`, outside
+  the card's Touches, on the review's request; the logic is in `lib/` so six tests could pin it (the length after a switch equals what a reload
+  gives, both ways; the reschedule floor holds across a switch; the failing-simulation fallback; the handler must use the function), each
+  caught by a deliberate breakage.
+- **The days-mode "At least N min/day needed" figure still counts joins and is introduction only** (Pass 144). Real plans cost 2 to 4 times it.
+- **A longer typical run time shortens the plan** (60 measures at 60 minutes: 126 days, 105 with a 10-minute run, 80 with 30): the real
+  placement fills toward the plan's average load, so heavier days bring reviews earlier. Real behavior of the placement, but odd to read.
+- **Fitting is jittery in the plan's length near the shortest** (a length can fit where the next one does not), so a length is "one that
+  fits", not "the shortest ever"; a test pins what is promised and a search test pins the top-of-range guard.
+- **The lengths are all about the price of a return.** Nothing in 145 to 148 lowers them by itself; a change to `EFFORT_TO_MIN` or to how a
+  return is priced does, at the next load. Pass 146 (scoring against her backup) is what would say whether the price is too high.
+- **The 14-day auto-extension and `isPlanActuallyComplete`'s minutes rule are untouched** and still decide what happens when a real plan runs
+  out; a real learner is slower than the simulated one, so a plan at the edge will usually extend.
+- **A device on the previous version re-derives the OLD length for a piece on the new plan planned by minutes** (a phone or tab left open): on its next load or save it
+  writes the earlier rule's day count, and the newer device's merge-then-reconcile writes the new one back. Only a piece on `reviewModel` 2 in minutes mode is affected, and
+  none is real yet; it ends when both devices are on this version. Not tried.
+- **Changing the measures, the difficulty grid or the chunk size in Settings re-runs the search for a piece on the new plan planned by minutes:** about 0.1 to 0.5 seconds at 100 to
+  200 measures and about 1 second at 400, once per distinct change (remembered after), so rapid clicking on a big piece's difficulty grid can feel slow. Not measured in a browser.
+- **Wording is proposed:** "This plan will not fit in 6 months at this pace", "At 15m/day, this piece needs more than 6 months at the app's
+  current time estimates. The plan is set to 6 months, ending around May 23, and some days will run longer than 15m. If you want to have it down
+  sooner, increase your daily practice estimate.", "More than 6 months needed at this pace, so the plan is set to 183 days, around May 23". Seen in a
+  browser on a test piece (a throwaway address, not hers); she has not seen it on a real device.
+- **Found in the pass's independent review (2026-11-22, no P1).** Jitter, measured: a 100-measure piece learns inside a 117-day plan, not a
+  126-day one, and again at 135; one minute of budget moves the length by up to 10 days (budget 33: 182 days, 34: 172, 35: 164). Kept for Pass 144
+  together with the strict-or-10%-leeway question. **For her: 100 measures at 30 minutes a day now reads "will not fit in 6 months" (the earlier
+  rule said 75 days), and 100 measures at 45 reads about 110 days.** Not seen in a browser by the review: Settings (changing minutes per day,
+  the 6-month banner) and the reload-after-reschedule floor.
 
 ## UX
 
@@ -11170,7 +11240,8 @@ oversight to silently fix; surface it instead.
      simulation gave that chunk a full pass and the neighbour half, and nothing says how a combo return counts. **Settled 2026-11-21 in Pass 141**
      ([Pass 141 build](#review-model-pass-141-build-2026-11-21)): half each and never the visiting chunk's own turn; a combo is the chunk's own turn plus half for each neighbour.
   2. **A light second half.** Introductions end at the midpoint, so the back of a plan is light (0.65 of the first half's load). Spreading
-     introductions later is untested and undecided. Pass 143, only if she decides.
+     introductions later is untested and undecided. Pass 143, only if she decides. **Measured 2026-11-22 (Pass 143) on the real code for plans set by minutes per
+     day: not light, 1.05 to 1.20 times the first half; not built** ([Pass 143 build](#review-model-pass-143-build-2026-11-22)).
   3. **The Holding maximum is read as applying to the window** (Pass 140's wording), not to the gap (Pass 136's card). **Settled: built that way in Pass 140.**
   4. **The simulation did not model the protected third or the slip of up to 2 extra intervals,** and its fill target was today's average load.
      Pass 140's measurement on the real code is the check (done: [Pass 140 build](#review-model-pass-140-build-2026-11-19)); Pass 144 re-runs the 48-scenario grid.

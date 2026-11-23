@@ -42,7 +42,7 @@
 /* ------------------------------------------------------------------ */
 
 import { validateAndMigratePiece, mergeSessionArrays } from "./storage";
-import { reconcileMinutesPerDaySchedule } from "./scheduling";
+import { reconcileMinutesPlan } from "./minutesPlan";
 import { RECENCY_FIELDS, compareRecency, settingTime, hasSettingNote } from "./settingTimes";
 
 /* ------------------------------------------------------------------ */
@@ -899,7 +899,7 @@ export function planPieceMerge({ local, remote, base, choices = null, softWins =
   else delete merged.updatedAt;
   merged.lastLoggedAt = latestLoggedDate(progress);
 
-  const final = toJsonValue(modeAfter === "minutes" ? reconcileMinutesPerDaySchedule(merged) : merged);
+  const final = toJsonValue(modeAfter === "minutes" ? reconcileMinutesPlan(merged) : merged);
 
   const partOf = (piece, k) => (isProgressPart(k) ? (isObject(piece.progress) ? piece.progress[k.slice(PROGRESS_PART_PREFIX.length)] : undefined) : piece[k]);
   // Copies, so nothing a caller does to a result can reach the shared
